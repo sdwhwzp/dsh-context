@@ -33,6 +33,7 @@ import {
 } from './pricing'
 import type { ContentBlock, MessageSource } from './pricing'
 import { deriveEventMessage } from '@deepseek-ai/dsh-session'
+import * as llm from '@deepseek-ai/dsh-llm'
 import { opsOfCall, parseCallArgs } from '../shared/fileOps'
 
 /**
@@ -688,6 +689,19 @@ function bumpToolTotals(timing: TimingTotals, name: string, ms: number): void {
   timing.tools[name] = { calls: cur.calls + 1, ms: cur.ms + ms }
 }
 
+/** Read the first token timestamp from a current embedded stream; older SDKs use chunk events. */
+function embeddedFirstToken(stream: unknown): number | undefined {
+  const expand = (llm as {
+    expandAssistantStream?: (records: unknown[]) => readonly { chunk: unknown; time: number }[]
+  }).expandAssistantStream
+  if (!Array.isArray(stream) || typeof expand !== 'function') return undefined
+  try {
+    return expand(stream).find(item => isTokenDelta(item.chunk))?.time
+  } catch {
+    return undefined
+  }
+}
+
 export function applyTimeline(state: TimelineState, event: TimelineEvent, bounds: FoldBounds): TimelineState {
   let st: TimelineState | undefined
   const ensure = (): TimelineState => st ??= {
@@ -990,9 +1004,10 @@ export function applyTimeline(state: TimelineState, event: TimelineEvent, bounds
         const timing = ensureTiming(s)
         timing.calls += 1
         const stepStart = state.stepStart
-        if (stepStart !== undefined && stepStart.firstToken !== undefined) {
-          timing.ttftMs += durOf(stepStart.time, stepStart.firstToken)
-          timing.genMs += durOf(stepStart.firstToken, event.time)
+        const firstToken = stepStart?.firstToken ?? embeddedFirstToken(data?.stream)
+        if (stepStart !== undefined && firstToken !== undefined) {
+          timing.ttftMs += durOf(stepStart.time, firstToken)
+          timing.genMs += durOf(firstToken, event.time)
         }
         // `deriveEventMessage` returns `data.message` for assistant/message, or
         // null when the content array is empty (usage-only events project to no

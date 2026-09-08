@@ -294,3 +294,25 @@ describe('timing — served wire view', () => {
     for (const state of drive.states) c.stateSchema.parse(structuredClone(state)) // throws on drift
   })
 })
+
+
+describe('embedded stream timing', () => {
+  for (const stream of [
+    [{ type: 'text-chunks', index: 0, time0: 1300, dt: [], texts: ['hello'] }],
+    [{ type: 'chunk', time: 1300, chunk: { type: 'text-delta', index: 0, text: 'hello' } }],
+  ]) test('uses the embedded first token without a standalone chunk event', () => {
+    const events = step(0, 1000, 2000)
+    events[1] = { ...events[1], data: { ...events[1].data, stream } }
+    const { state } = driveTimeline(events)
+    assert.equal(state.timing?.ttftMs, 300)
+    assert.equal(state.timing?.genMs, 1700)
+    assertPlainJson(state)
+  })
+  for (const stream of [[], [{}], null, [{ type: 'chunk', time: 1300, chunk: { type: 'text-delta', index: 0, text: '' } }]]) test('keeps messages when an embedded stream has no usable timing', () => {
+    const events = step(0, 1000, 2000)
+    events[1] = { ...events[1], data: { ...events[1].data, stream } }
+    const { state } = driveTimeline(events)
+    assert.equal(state.timing?.ttftMs, 0)
+    assert.equal(state.timing?.calls, 1)
+  })
+})

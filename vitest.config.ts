@@ -9,6 +9,7 @@ import { defineConfig } from 'vitest/config'
 // real harness sources per baseline tag. Files are small, single-module,
 // and stateless — vitest forks them across workers in parallel.
 export default defineConfig({
+  resolve: { dedupe: ['react', 'react-dom'] },
   test: {
     projects: [
       {
@@ -21,6 +22,7 @@ export default defineConfig({
       {
         // The inlined primitives dist references a sourcemap it does not
         // ship; vite's warning is noise, so the client lane logs errors only.
+        resolve: { dedupe: ['react', 'react-dom'] },
         logLevel: 'error',
         test: {
           name: 'client',

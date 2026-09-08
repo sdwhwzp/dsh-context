@@ -16,10 +16,12 @@ import { driveTimeline } from './helpers/projection'
 
 const BOUNDS = resolveBounds({})
 
-type Handler = (endpoint: string, payload: unknown) => unknown
+type Handler = (endpoint: string, payload: unknown, signal?: AbortSignal, principal?: unknown) => unknown
 
 interface CtxSpec {
   connection?: unknown
+  principalAccess?: unknown
+  requestPrincipal?: unknown
   sessions?: unknown
   sessionQuery?: unknown
   stateOf?: (session: unknown, key: string) => unknown
@@ -34,6 +36,8 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: { channel?: string; han
   const captured: { channel?: string; handler?: Handler } = {}
   const disposers: (() => void)[] = []
   const services = new Map<string, unknown>()
+  if ('principalAccess' in spec) services.set('principalAccess', spec.principalAccess)
+  if ('requestPrincipal' in spec) services.set('requestPrincipal', spec.requestPrincipal)
   if ('connection' in spec) services.set('connection', spec.connection)
   if ('sessions' in spec) services.set('sessions', spec.sessions)
   if ('sessionQuery' in spec) services.set('sessionQuery', spec.sessionQuery)
@@ -313,5 +317,27 @@ describe('the detail endpoint', () => {
     const r4 = await stringThrow.captured.handler!('detail', { sessionId: 's1' }) as { ok: boolean; error: { message: string } }
     assert.equal(r4.ok, false)
     assert.equal(r4.error.message, 'string boom')
+  })
+})
+
+
+describe('detail session authorization', () => {
+  for (const scenario of [
+    { name: 'missing identity', provider: true, principal: undefined, allowed: true, ok: false },
+    { name: 'missing provider', provider: false, principal: { role: 'user' }, allowed: true, ok: false },
+    { name: 'different owner', provider: true, principal: { role: 'user' }, allowed: false, ok: false },
+    { name: 'authorized owner', provider: true, principal: { role: 'user' }, allowed: true, ok: true },
+  ]) test(scenario.name, async () => {
+    let reads = 0
+    const { ctx, captured } = ctxOf({
+      connection: { rpc: { handle: () => () => {} } },
+      sessions: { get: () => { reads++; return undefined } },
+      requestPrincipal: {},
+      ...(scenario.provider ? { principalAccess: { resolve: async () => ({ readableSessionIds: new Set(scenario.allowed ? ['s1'] : []) }) } } : {}),
+    })
+    watchDetailChannel(ctx, BOUNDS)
+    const result = await captured.handler?.('detail', { sessionId: 's1' }, new AbortController().signal, scenario.principal) as { ok: boolean }
+    assert.equal(result.ok, scenario.ok)
+    assert.equal(reads, scenario.ok ? 1 : 0)
   })
 })

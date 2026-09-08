@@ -150,3 +150,7 @@ If `dsh-context` helped you understand what your agent is carrying around, a ⭐
 ## License
 
 [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0)
+
+## Private Harness alpha deployment
+
+Version `0.46.0-dsh.20260908.1` supports the deployed Harness `0.1.3-alpha.1`. The Context tab and `/context` show context composition and request timing, including the embedded assistant stream format. On authenticated servers, detail requests require permission to read the selected session.

@@ -55,7 +55,7 @@ interface ConnectionHostFace {
     // awaits the observation read.
     handle?(
       channel: string,
-      handler: (endpoint: string, payload: unknown) => unknown,
+      handler: (endpoint: string, payload: unknown, signal?: AbortSignal, principal?: unknown) => unknown,
     ): () => void
   }
 }
@@ -100,7 +100,7 @@ export function watchDetailChannel(ctx: Context, bounds: FoldBounds): DetailChan
     if (handle === undefined || getSession === undefined) return
     const projections = ctx.sessionProjections
 
-    const handler = async (endpoint: string, payload: unknown): Promise<unknown> => {
+    const handler = async (endpoint: string, payload: unknown, signal?: AbortSignal, principal?: unknown): Promise<unknown> => {
       if (endpoint !== DETAIL_ENDPOINT) {
         return failure('dsh-context/unknown-endpoint', `unknown endpoint: ${endpoint}`)
       }
@@ -111,6 +111,17 @@ export function watchDetailChannel(ctx: Context, bounds: FoldBounds): DetailChan
         return failure('dsh-context/bad-request', 'missing sessionId')
       }
       try {
+        const access = c.get('principalAccess') as {
+          resolve(
+            principal: unknown, subjects: { sessionIds: string[] }, signal?: AbortSignal,
+          ): Promise<{ readableSessionIds: ReadonlySet<string> }>
+        } | undefined
+        if (access !== undefined || principal !== undefined || c.get('requestPrincipal') !== undefined) {
+          if (access === undefined || principal === undefined) return failure('gateway/forbidden', 'session access denied')
+          const allowed = await access.resolve(principal, { sessionIds: [sessionId] }, signal)
+          if (!allowed.readableSessionIds.has(sessionId)) return failure('gateway/forbidden', 'session access denied')
+        }
+        signal?.throwIfAborted()
         const session = getSession(sessionId)
         if (session !== undefined && session !== null) {
           // Live (attached) session: read the registry's CURRENT fold state —
