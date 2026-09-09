@@ -4,7 +4,7 @@
  *
  *   - V0 (dsh 0.1.2-rc.1): `request/header.header.system`, `assistant/chunk`
  *     stream events, `SurfaceOp { start, end }`, `tool/code-dispatch`.
- *   - V3 (dsh 0.1.5-alpha.1+): `system/message` surface nodes,
+ *   - V3 (dsh 0.1.5-alpha.x+): `system/message` surface nodes,
  *     `assistant/message.data.stream` / `assistant/attempt.data.stream`,
  *     `SurfaceOp { startSeq, endSeq }`, `tool/ptc-dispatch`.
  *
@@ -38,6 +38,55 @@ export function isTokenChunk(chunk: unknown): boolean {
     default:
       return false
   }
+}
+
+/**
+ * The decode bucket a stream's `block-start.blockType` names: the model's
+ * thinking, the answer text, or the tool-call arguments. Undefined for an
+ * unknown/hostile marker, whose interval then stays unattributed rather than
+ * poisoning a bucket.
+ */
+export type DecodeKind = 'reasoning' | 'text' | 'toolarg'
+
+/** Map one `blockType` to its timing bucket (see {@link DecodeKind}). */
+export function decodeKindOfBlock(blockType: unknown): DecodeKind | undefined {
+  if (blockType === 'reasoning') return 'reasoning'
+  if (blockType === 'text') return 'text'
+  if (blockType === 'tool-call') return 'toolarg'
+  return undefined
+}
+
+/** Per-kind decode spans (see {@link decodeSpansOfStream}). */
+export type DecodeSpans = Record<DecodeKind, number>
+
+/**
+ * Per-kind decode spans inside one embedded assistant stream, tiling
+ * [first block-start, endTime]: each `block-start` record owns the interval up
+ * to the next one, the last one up to `endTime`. This is the V2+ shape, whose
+ * timed stream rides the settlement (`assistant/message.data.stream`) instead
+ * of separate `assistant/chunk` events. Total over untrusted input — a
+ * malformed record is skipped, a non-finite boundary yields zero, and a stream
+ * with no marker (or not an array) yields all zeros.
+ */
+export function decodeSpansOfStream(stream: unknown, endTime: number): DecodeSpans {
+  const spans: DecodeSpans = { reasoning: 0, text: 0, toolarg: 0 }
+  if (!Array.isArray(stream) || !Number.isFinite(endTime)) return spans
+  let kind: DecodeKind | undefined
+  let since = 0
+  for (const record of stream) {
+    if (record === null || typeof record !== 'object') continue
+    const r = record as Record<string, unknown>
+    if (r.type !== 'chunk' || r.chunk === null || typeof r.chunk !== 'object') continue
+    const chunk = r.chunk as { type?: unknown; blockType?: unknown }
+    if (chunk.type !== 'block-start') continue
+    const time = r.time
+    if (typeof time !== 'number' || !Number.isFinite(time)) continue
+    if (kind !== undefined) spans[kind] += Math.max(0, time - since)
+    kind = decodeKindOfBlock(chunk.blockType)
+    since = time
+  }
+  if (kind !== undefined) spans[kind] += Math.max(0, endTime - since)
+  return spans
 }
 
 /**
