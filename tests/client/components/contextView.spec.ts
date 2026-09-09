@@ -181,6 +181,46 @@ describe('ContextView — projection guards', () => {
   })
 })
 
+describe('ContextView — the sidebar host', () => {
+  test('the panel drops the context-stats and plugin-info head cards, keeping the two donut cards', async () => {
+    const View = makeView(new TestClientCtx())
+    const projections = projectionsFor(richTimeline())
+
+    const tab = await mount(h(View, { useProjection: projections }))
+    assert.equal(queryAll(tab.container, '.lc-stats').length, 1, 'the tab keeps the context stats')
+    assert.equal(queryAll(tab.container, '.lc-pi-grid').length, 1, 'the tab keeps the plugin info')
+    await tab.unmount()
+
+    const panel = await mount(h(View, { host: 'sidebar', useProjection: projections }))
+    assert.equal(queryAll(panel.container, '.lc-stats').length, 0, 'the panel drops the context stats')
+    assert.equal(queryAll(panel.container, '.lc-pi-grid').length, 0, 'the panel drops the plugin info')
+    assert.equal(queryAll(panel.container, '.lc-head > .lc-card').length, 2, 'the head row keeps its two donut cards')
+    assert.equal(queryAll(panel.container, '.lc-head > .lc-col-donut').length, 2, 'token usage and timing')
+    await panel.unmount()
+  })
+
+  test('the panel orders the main row composition, browser, trend; the tab keeps composition+trend beside it', async () => {
+    const View = makeView(new TestClientCtx())
+    const projections = projectionsFor(richTimeline())
+
+    const tab = await mount(h(View, { useProjection: projections }))
+    const tabCols = queryAll(tab.container, '.lc-cols-main > .lc-col')
+    assert.equal(tabCols.length, 2, 'the tab keeps the two-column split')
+    assert.ok(tabCols[0].querySelector('.lc-overview-num') !== null, 'composition leads the left column')
+    assert.ok(tabCols[0].querySelector('.lc-trend-ctl') !== null, 'the trend follows in the same column')
+    assert.ok(tabCols[1].querySelector('.lc-br-dna-ctl') !== null, 'the browser owns the right column')
+    await tab.unmount()
+
+    const panel = await mount(h(View, { host: 'sidebar', useProjection: projections }))
+    const panelCols = queryAll(panel.container, '.lc-cols-main > .lc-col')
+    assert.equal(panelCols.length, 3, 'the panel stacks the three main cards')
+    assert.ok(panelCols[0].querySelector('.lc-overview-num') !== null, 'composition first')
+    assert.ok(panelCols[1].querySelector('.lc-br-dna-ctl') !== null, 'the browser second')
+    assert.ok(panelCols[2].querySelector('.lc-trend-ctl') !== null, 'the trend last')
+    await panel.unmount()
+  })
+})
+
 describe('ContextView — baseline gate', () => {
   test('a gated host renders the zeroed cards under the upgrade modal', async () => {
     const View = makeView(new TestClientCtx())
@@ -401,11 +441,36 @@ describe('ContextView — interactions', () => {
     assert.ok(text(m.container).includes(DICT_EN['trend.focus'].replace('{cat}', DICT_EN['cat.assistant'])),
       'the card subtitle names the focused category')
 
-    // Collapsing the category restores the whole composition and the usage hint.
+    // Collapsing the category restores the whole composition and drops the subtitle.
     await click(queryAll(m.container, '.lc-br-cat-row')[4])
     assert.equal(text(query(m.container, '.lc-axis-top')), '420')
     assert.equal(queryAll(m.container, '.lc-bar[data-seq="4"] .lc-bar-stack > .lc-cat-seg').length, 5)
-    assert.ok(text(m.container).includes(DICT_EN['trend.hint']))
+    const trendCard = queryAll(m.container, '.lc-card').find(c => text(c).includes(DICT_EN['trend.title']))
+    assert.ok(trendCard !== undefined && trendCard.querySelector('.lc-card-sub') === null, 'unfocused: no subtitle')
+    await m.unmount()
+  })
+
+  test('the adaptive switch rides the trend title and toggles mount-locally', async () => {
+    const m = await mountRich('sv-adaptive')
+    const card = queryAll(m.container, '.lc-card').find(c => text(c).includes(DICT_EN['trend.title']))
+    assert.ok(card !== undefined)
+    const titleText = query(card, '.lc-card-title-text')
+    assert.equal(text(titleText), DICT_EN['trend.title'])
+
+    // The switch is the title text's NEXT sibling — left of the card's right-hand control cluster.
+    const toggleOf = () => buttonByText(m.container, DICT_EN['trend.adaptive'])
+    assert.equal(toggleOf().parentElement?.previousElementSibling, titleText)
+    assert.equal(toggleOf().parentElement?.getAttribute('title'), DICT_EN['trend.adaptiveHint'])
+    assert.ok(!toggleOf().className.includes('lc-gran-on'), 'off at mount')
+
+    // Toggling is mount-local: the chart keeps rendering (jsdom has no layout, so the zero-width viewport falls
+    // back to the whole-log axis instead of flattening the bars) and nothing is written back to settings.
+    await click(toggleOf())
+    assert.ok(toggleOf().className.includes('lc-gran-on'))
+    assert.equal(text(query(m.container, '.lc-axis-top')), '420')
+    await click(toggleOf())
+    assert.ok(!toggleOf().className.includes('lc-gran-on'))
+    assert.equal(text(query(m.container, '.lc-axis-top')), '420')
     await m.unmount()
   })
 

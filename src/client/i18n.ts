@@ -7,6 +7,7 @@ export type Translate = (key: string, params?: Record<string, string | number>) 
 
 export const DICT_ZH: Record<string, string> = {
   'tab': '上下文',
+  'sidebar.guideDescription': '查看这个会话的上下文构成、每步变化与消息列表。',
   'cat.system': '系统提示词', 'cat.tools': '工具定义', 'cat.user': '用户消息',
   'cat.inject': '注入内容', 'cat.assistant': '助手消息', 'cat.tool': '工具结果',
   'overview.title': '当前上下文',
@@ -57,8 +58,9 @@ export const DICT_ZH: Record<string, string> = {
   'settings.readOnly': '当前环境的设置为只读',
   'gran.total': '全量', 'gran.delta': '增量',
   'gran.modeHint': '全量：累计构成；增量：相对上一条请求的变化量',
-  'trend.hint': '✂ 表示压缩/剪枝，步骤/轮次 切换粒度',
   'trend.focus': '仅展示 {cat}',
+  'trend.adaptive': '自适应',
+  'trend.adaptiveHint': '按当前可视范围内的柱子重新缩放高度，滚动时随之变化',
   'trend.empty': '发起一轮对话后，这里会展示每次模型请求的上下文构成',
   'detail.step': '第 {t} 轮 · 第 {s} 步',
   'detail.turn': '第 {t} 轮 · 共 {n} 步',
@@ -74,7 +76,6 @@ export const DICT_ZH: Record<string, string> = {
   'brief.noInputs': '（无新增）',
   'brief.locate': '在上下文浏览器中查看',
   'jump.title': '在上下文标签页中查看此轮',
-  'jump.statsLine': '在上下文标签页中查看上下文构成',
   'brief.turnTip': '这一轮开场时用户发送的消息；回合内的每一步都会回显同一条',
   'brief.inputTip': '上一步回复之后、本次请求发出前新进入上下文的内容——通常是上一步所调工具的结果；每轮的第一步无新增',
   'brief.replyTip': '这一步模型返回的内容（文本回复或工具调用）；此步发起的调用，其结果会出现在下一柱的「输入」行',
@@ -232,6 +233,7 @@ export const DICT_ZH: Record<string, string> = {
 
 export const DICT_EN: Record<string, string> = {
   'tab': 'Context',
+  'sidebar.guideDescription': 'Inspect this session\'s context composition, per-step history, and messages.',
   'cat.system': 'System Prompt', 'cat.tools': 'Tool Schemas', 'cat.user': 'User Messages',
   'cat.inject': 'Injected Context', 'cat.assistant': 'Assistant Messages', 'cat.tool': 'Tool Results',
   'overview.title': 'Current Context',
@@ -282,8 +284,9 @@ export const DICT_EN: Record<string, string> = {
   'settings.readOnly': 'Settings are read-only in this environment',
   'gran.total': 'Total', 'gran.delta': 'Delta',
   'gran.modeHint': 'Total: cumulative makeup; Delta: change vs the previous request',
-  'trend.hint': '✂ marks compaction/prune, Step/Turn switches granularity',
   'trend.focus': 'Showing {cat} only',
+  'trend.adaptive': 'Adaptive',
+  'trend.adaptiveHint': 'Rescale bar heights to the visible range, following the scroll',
   'trend.empty': 'Send a message and each model request’s context makeup shows up here',
   'detail.step': 'Turn {t} · Step {s}',
   'detail.turn': 'Turn {t} · {n} steps',
@@ -299,7 +302,6 @@ export const DICT_EN: Record<string, string> = {
   'brief.noInputs': '(nothing new)',
   'brief.locate': 'Reveal in Context Browser',
   'jump.title': 'View this turn in the Context tab',
-  'jump.statsLine': 'View the context composition in the Context tab',
   'brief.turnTip': 'The user message that opened this turn — every step of the turn recalls it',
   'brief.inputTip': 'What entered after the previous reply and before this request went out — usually the previous tool-call results; a turn opener has nothing new',
   'brief.replyTip': 'What the model returned on this step (a text reply or tool calls) — results of calls made here appear in the In row of the next bar',

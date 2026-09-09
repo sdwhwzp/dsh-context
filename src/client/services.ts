@@ -15,8 +15,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { ComponentType } from 'react'
 import { estimateSystemTokens } from '../shared/estimate'
-import type { ContextBreakdown, ContextHeaders, ContextPressure, ContextTimeline, HeaderEpochContent, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
+import type { ContextBreakdown, ContextHeaders, ContextPressure, ContextTimeline, HeaderEpochContent, SystemPromptNode, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
 
 export interface LocaleService {
   register(ns: string, dicts: Record<string, Record<string, string>>): () => void
@@ -44,6 +45,37 @@ export interface SlotsService {
     registration: SlotRegistration,
     component: (props: { sessionId?: string } & Record<string, unknown>) => unknown,
   ): unknown
+}
+
+/** One guide-page entry box a right-Sidebar tab type contributes (dsh 0.1.5+). */
+export interface SidebarGuideEntryLike {
+  /** Ascending position among every registered type's entries. */
+  order: number
+  title: () => string
+  description: () => string
+  icon?: ComponentType<{ size?: number }>
+}
+
+/** One right-Sidebar tab type registration (the fields this plugin uses). */
+export interface SidebarTabDefinitionLike {
+  /** This implementation's identity, unique across every registration. */
+  id: string
+  /** What `openTab` names; also the page address's discriminator. */
+  kind: string
+  /** The tab chip's text, captured when the tab opens. */
+  title: () => string
+  /** Entry boxes for the guide page (omitted = the type stays off it). */
+  guide?: readonly SidebarGuideEntryLike[]
+}
+
+/**
+ * The right Sidebar's tab-type registry (`ctx.sidebarRightTabs`), as far as
+ * this plugin consumes it. OPTIONAL by contract: the service exists only on
+ * dsh 0.1.5-alpha.1+, so the plugin reaches it through a deferred inject and
+ * stays fully functional (no pending fiber, no throw) without it.
+ */
+export interface SidebarTabsFace {
+  register(definition: SidebarTabDefinitionLike): () => void
 }
 
 /**
@@ -174,6 +206,16 @@ export interface SessionStandardProps {
 }
 
 /**
+ * The Context view's props: the framework standard kit plus this plugin's own
+ * host marker. The right Sidebar's panel registration sets `host`, so the SAME
+ * view drops the head cards a narrow column cannot serve.
+ */
+export interface ContextViewProps extends SessionStandardProps {
+  /** Set only by the right-Sidebar registration; absent in the conversation tab and the /context modal. */
+  host?: 'sidebar'
+}
+
+/**
  * Read one projection key through the standard seat, narrowed at the
  * boundary: null when the seat is absent (a harness without the projection
  * pipeline) or the delivered value fails the narrow. The seat is a real
@@ -268,6 +310,7 @@ export function timelineOf(value: unknown): ContextTimeline | null {
     && recordsOnly(data.events)
     && recordsOnly(data.nodes)
     && recordsOnly(data.archive)
+    && systemsFastOk(data.systems)
     && timingFastOk(data.timing)) {
     // Well-formed: pass the delivered value through untouched (cheap, and reference-stable so plain re-renders stay zero-copy).
     return data as unknown as ContextTimeline
@@ -310,12 +353,52 @@ export function timelineOf(value: unknown): ContextTimeline | null {
     ...(typeof data.detailRev === 'number' && Number.isFinite(data.detailRev) ? { detailRev: data.detailRev } : {}),
     ...(cost !== undefined ? { cost } : {}),
     ...(timing !== null ? { timing } : {}),
+    ...(data.systems !== undefined ? { systems: systemsOf(data.systems) } : {}),
     ...(typeof data.surfaceFloor === 'number' ? { surfaceFloor: data.surfaceFloor } : {}),
     ...(typeof data.archiveFloor === 'number' ? { archiveFloor: data.archiveFloor } : {}),
     ...(data.fileOps !== undefined ? { fileOps: objectsOf(data.fileOps) } : {}),
     ...(typeof data.fileOpsFloor === 'number' ? { fileOpsFloor: data.fileOpsFloor } : {}),
   }
   return safe
+}
+
+/**
+ * The live system-prompt nodes, re-proved per entry and sorted by seq: an
+ * entry missing a finite seq/time/tokens drops out (the browser then falls
+ * back to the header epoch), so a hostile collection can never produce a NaN
+ * prompt figure or an unfetchable seq. Absent or empty stays absent.
+ */
+function systemsOf(value: unknown): ContextTimeline['systems'] {
+  const list = objectsOf<Record<string, unknown>>(value)
+  const out: SystemPromptNode[] = []
+  for (const entry of list) {
+    const { seq, time, tokens } = entry
+    if (typeof seq !== 'number' || !Number.isFinite(seq)) continue
+    if (typeof time !== 'number' || !Number.isFinite(time)) continue
+    if (typeof tokens !== 'number' || !Number.isFinite(tokens)) continue
+    out.push({ seq, time, tokens })
+  }
+  return out.sort((a, b) => a.seq - b.seq)
+}
+
+/**
+ * The fast path's check for the live system-prompt nodes: every entry must
+ * carry the three finite numbers the browser reads — `seq` for the per-step
+ * resolution, `time` for the DNA band, `tokens` for its width. A primitive
+ * entry, or one whose fields are not numbers, sends the payload down the
+ * sanitizing slow path (`systemsOf` drops it) instead of leaking `undefined`
+ * into the bar math. An absent list is fine.
+ */
+function systemsFastOk(value: unknown): boolean {
+  if (value === undefined) return true
+  if (!Array.isArray(value)) return false
+  return value.every((entry) => {
+    if (entry === null || typeof entry !== 'object') return false
+    const { seq, time, tokens } = entry as Record<string, unknown>
+    return typeof seq === 'number' && Number.isFinite(seq)
+      && typeof time === 'number' && Number.isFinite(time)
+      && typeof tokens === 'number' && Number.isFinite(tokens)
+  })
 }
 
 /**

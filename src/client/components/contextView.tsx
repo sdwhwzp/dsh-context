@@ -9,7 +9,7 @@ import { createElement as h, useCallback, useEffect, useLayoutEffect, useMemo, u
 import type { ContextEventRecord, RequestRecord, SurfaceNode } from '../../shared/types'
 import { briefNodes, briefOf } from '../brief'
 import { headlineOf } from '../headline'
-import type { SessionStandardProps } from '../services'
+import type { ContextViewProps } from '../services'
 import { contextBreakdownOf, contextPressureOf, conversationNodesOf, headersOf, imageLoaderOf, numOf, projectionOf, tokenUsageOf, unsupportedOf } from '../services'
 import type { ClientCtx, ConversationNodeLike } from '../services'
 import { makeContentFetcher, makeHeaderFetcher, useHistoryFace } from '../historyPage'
@@ -49,7 +49,7 @@ export function makeContextView(
   ctx: ClientCtx,
   kit: ViewKit,
   settings: ContextSettings,
-): (props: SessionStandardProps) => ReactElement {
+): (props: ContextViewProps) => ReactElement {
   const { t } = kit
   const StackedBar = makeStackedBar(kit)
   const Legend = makeLegend(kit)
@@ -71,8 +71,11 @@ export function makeContextView(
 
   // The body renders under the error boundary: a corrupt projection value (past the timelineOf shape guard) degrades to a styled error
   // card, not a white screen; the boundary itself has NO hooks, so the body's hook order and loading/data flow stay unchanged.
-  function ContextViewBody(props: SessionStandardProps): ReactElement {
+  function ContextViewBody(props: ContextViewProps): ReactElement {
     const sessionId = props.sessionId
+    // The right Sidebar's panel is a narrow column: it drops the two head cards
+    // that only pay off on the full-width tab (context stats, plugin info).
+    const inSidebar = props.host === 'sidebar'
     // The timeline source (timelineSource.ts): the pushed value on the inline
     // generation, or the slim head merged with the on-demand detail on the
     // split generation. `detailState`/`retryDetail` drive the detail cards'
@@ -99,6 +102,9 @@ export function makeContextView(
     // 'total' plots each request's cumulative composition, 'delta' its incremental change vs the previous one;
     // like granularity, the default is read at mount and in-chart toggling never writes back.
     const [trendMode, setTrendMode] = useState<'total' | 'delta'>(() => settings.defaultTrendMode())
+    // Adaptive scale (the title-adjacent toggle): the trend bars rescale to the visible window; like the two
+    // toggles above, mount-local and never written back.
+    const [adaptive, setAdaptive] = useState(false)
     // Strip-clicked turn: chart switches to turn granularity and scroll-centers that turn's bar, then clears via onFocusTurnHandled.
     const [focusTurn, setFocusTurn] = useState<number | null>(null)
     // Chat → Context jump: the assistant-action relay's one-shot request, held until the projection data is in, then resolved into a
@@ -357,123 +363,155 @@ export function makeContextView(
     // urges the upgrade. Absent record = a supported harness, no gate.
     const gate = unsupportedOf(data.unsupported)
 
+    // The three main-row cards, built once and arranged per host below.
+    const compositionCard = (
+      <CurrentComposition
+        head={head}
+        subtitle={subtitle}
+        hoverKey={hoverCat}
+        onHoverKey={setHoverCat}
+      />
+    )
+    const trendCard = (
+      <div className="lc-card">
+        <div className="lc-card-title">
+          <span className="lc-card-title-text">{t('trend.title')}</span>
+          {/* The adaptive switch rides the title's right (the browser card's DNA toggle idiom): bars rescale
+              to the bars currently on screen instead of the whole retained log. */}
+          <span className="lc-gran lc-trend-adaptive" role="group" title={t('trend.adaptiveHint')}>
+            <button
+              type="button"
+              className={'lc-gran-btn' + (adaptive ? ' lc-gran-on' : '')}
+              onClick={() => { setAdaptive(on => !on) }}
+            >{t('trend.adaptive')}</button>
+          </span>
+          {focusCat !== null
+            ? <span className="lc-card-sub">{t('trend.focus', { cat: kit.catLabel(focusCat) })}</span>
+            : null}
+          <div className="lc-trend-ctl">
+            <div className="lc-gran">
+              <button
+                className={'lc-gran-btn' + (granularity === 'step' ? ' lc-gran-on' : '')}
+                onClick={() => { setGranularity('step') }}
+              >{t('gran.step')}</button>
+              <button
+                className={'lc-gran-btn' + (granularity === 'turn' ? ' lc-gran-on' : '')}
+                onClick={() => { setGranularity('turn') }}
+              >{t('gran.turn')}</button>
+            </div>
+            <div className="lc-gran" title={t('gran.modeHint')}>
+              <button
+                className={'lc-gran-btn' + (trendMode === 'total' ? ' lc-gran-on' : '')}
+                onClick={() => { setTrendMode('total') }}
+              >{t('gran.total')}</button>
+              <button
+                className={'lc-gran-btn' + (trendMode === 'delta' ? ' lc-gran-on' : '')}
+                onClick={() => { setTrendMode('delta') }}
+              >{t('gran.delta')}</button>
+            </div>
+          </div>
+        </div>
+        {displayRequests.length === 0
+          // Split generation, first detail read pending or failed: say
+          // so instead of claiming the session has no history.
+          ? (detailReady
+            ? <div className="lc-empty">{t('trend.empty')}</div>
+            : <DetailNote state={source.detailState === 'failed' ? 'failed' : 'loading'} onRetry={source.retryDetail} />)
+          : (
+            <div>
+              <TrendChart
+                // Remount per session: switching sessions re-anchors the chart at the newest bars instead of inheriting stale scroll
+                // state.
+                key={sessionId}
+                // Render ALL retained requests (bounded by the host's maxKeptTurns/maxRequestSteps config) so earlier turns/steps
+                // stay reachable via horizontal scroll.
+                requests={displayRequests}
+                markers={markers}
+                selectedSeq={pinnedReq ? pinnedReq.seq : null}
+                hoveredSeq={hoveredSeq}
+                activeTurn={activeTurn}
+                granularity={granularity}
+                mode={trendMode}
+                focusTurn={focusTurn}
+                hoverCat={trendHoverCat}
+                focusCat={focusCat}
+                adaptive={adaptive}
+                onSelect={setSelectedSeq}
+                onHover={setHoveredSeq}
+                onHoverTurn={setHoverTurn}
+                onPickTurn={(turn) => { setGranularity('turn'); setFocusTurn(turn) }}
+                onFocusTurnHandled={() => { setFocusTurn(null) }}
+              />
+              <RequestDetail
+                request={activeReq}
+                // Delta mode pairs the detail with the SAME previous record the chart diffs against (first bar: null).
+                prev={trendMode === 'delta' && activeIdx >= 0 ? (activeIdx > 0 ? displayRequests[activeIdx - 1] : null) : undefined}
+                /* v8 ignore next 1 -- RequestDetail renders only when
+                   displayRequests.length > 0, which forces activeReq
+                   non-null via the activeIdx fallback above. */
+                marker={activeReq !== null ? markerOf(activeReq) : undefined}
+                brief={brief}
+                convOf={convOf}
+                onLocate={locateNode}
+                hoverKey={trendHoverCat}
+              />
+            </div>
+          )}
+      </div>
+    )
+    const browserCard = (
+      <ContextBrowser
+        data={data}
+        headers={headers}
+        convNodes={convNodes}
+        fetchContent={fetchContent}
+        fetchHeader={fetchHeader}
+        previewSeq={hoveredSeq}
+        pinSeq={pinnedReq !== null ? pinnedReq.seq : null}
+        hoverKey={hoverCat}
+        onHoverKey={setHoverCat}
+        onOpenCat={setFocusCat}
+        nodeFocus={nodeFocus}
+        onNodeFocusHandled={clearNodeFocus}
+        loadImage={loadImage}
+        detailState={source.detailState}
+        onDetailRetry={source.retryDetail}
+      />
+    )
+
     return (
       <div className="lc-root" ref={rootRef}>
 
         <div className="lc-cols lc-head">
-          <StatsContext counts={data.counts ?? countsOfRecords(requests, events)} toolCalls={data.toolCalls} images={data.images}
-            cost={data.cost} locale={activeLocale} />
+          {inSidebar ? null : (
+            <StatsContext counts={data.counts ?? countsOfRecords(requests, events)} toolCalls={data.toolCalls} images={data.images}
+              cost={data.cost} locale={activeLocale} />
+          )}
           <StatsTokens usage={usage} />
           <StatsTiming timing={data.timing ?? null} locale={activeLocale} />
-          <PluginInfo />
+          {inSidebar ? null : <PluginInfo />}
         </div>
 
-        <div className="lc-cols">
-          <div className="lc-col">
-            <CurrentComposition
-              head={head}
-              subtitle={subtitle}
-              hoverKey={hoverCat}
-              onHoverKey={setHoverCat}
-            />
-
-            <div className="lc-card">
-              <div className="lc-card-title">
-                <span className="lc-card-title-text">{t('trend.title')}</span>
-                <span className="lc-card-sub">{focusCat !== null ? t('trend.focus', { cat: kit.catLabel(focusCat) }) : t('trend.hint')}</span>
-                <div className="lc-trend-ctl">
-                  <div className="lc-gran">
-                    <button
-                      className={'lc-gran-btn' + (granularity === 'step' ? ' lc-gran-on' : '')}
-                      onClick={() => { setGranularity('step') }}
-                    >{t('gran.step')}</button>
-                    <button
-                      className={'lc-gran-btn' + (granularity === 'turn' ? ' lc-gran-on' : '')}
-                      onClick={() => { setGranularity('turn') }}
-                    >{t('gran.turn')}</button>
-                  </div>
-                  <div className="lc-gran" title={t('gran.modeHint')}>
-                    <button
-                      className={'lc-gran-btn' + (trendMode === 'total' ? ' lc-gran-on' : '')}
-                      onClick={() => { setTrendMode('total') }}
-                    >{t('gran.total')}</button>
-                    <button
-                      className={'lc-gran-btn' + (trendMode === 'delta' ? ' lc-gran-on' : '')}
-                      onClick={() => { setTrendMode('delta') }}
-                    >{t('gran.delta')}</button>
-                  </div>
-                </div>
-              </div>
-              {displayRequests.length === 0
-                // Split generation, first detail read pending or failed: say
-                // so instead of claiming the session has no history.
-                ? (detailReady
-                  ? <div className="lc-empty">{t('trend.empty')}</div>
-                  : <DetailNote state={source.detailState === 'failed' ? 'failed' : 'loading'} onRetry={source.retryDetail} />)
-                : (
-                  <div>
-                    <TrendChart
-                      // Remount per session: switching sessions re-anchors the chart at the newest bars instead of inheriting stale scroll
-                      // state.
-                      key={sessionId}
-                      // Render ALL retained requests (bounded by the host's maxKeptTurns/maxRequestSteps config) so earlier turns/steps
-                      // stay reachable via horizontal scroll.
-                      requests={displayRequests}
-                      markers={markers}
-                      selectedSeq={pinnedReq ? pinnedReq.seq : null}
-                      hoveredSeq={hoveredSeq}
-                      activeTurn={activeTurn}
-                      granularity={granularity}
-                      mode={trendMode}
-                      focusTurn={focusTurn}
-                      hoverCat={trendHoverCat}
-                      focusCat={focusCat}
-                      onSelect={setSelectedSeq}
-                      onHover={setHoveredSeq}
-                      onHoverTurn={setHoverTurn}
-                      onPickTurn={(turn) => { setGranularity('turn'); setFocusTurn(turn) }}
-                      onFocusTurnHandled={() => { setFocusTurn(null) }}
-                    />
-                    <RequestDetail
-                      request={activeReq}
-                      // Delta mode pairs the detail with the SAME previous record the chart diffs against (first bar: null).
-                      prev={trendMode === 'delta' && activeIdx >= 0 ? (activeIdx > 0 ? displayRequests[activeIdx - 1] : null) : undefined}
-                      /* v8 ignore next 1 -- RequestDetail renders only when
-                         displayRequests.length > 0, which forces activeReq
-                         non-null via the activeIdx fallback above. */
-                      marker={activeReq !== null ? markerOf(activeReq) : undefined}
-                      brief={brief}
-                      convOf={convOf}
-                      onLocate={locateNode}
-                      hoverKey={trendHoverCat}
-                    />
-                  </div>
-                )}
-            </div>
-          </div>
-
-          {/* `lc-col-browser` stretches the browser card to the left column's height — Context tab only; the /context modal must stay
-              content-sized.
-              */}
-          <div className="lc-col lc-col-browser">
-            <ContextBrowser
-              data={data}
-              headers={headers}
-              convNodes={convNodes}
-              fetchContent={fetchContent}
-              fetchHeader={fetchHeader}
-              previewSeq={hoveredSeq}
-              pinSeq={pinnedReq !== null ? pinnedReq.seq : null}
-              hoverKey={hoverCat}
-              onHoverKey={setHoverCat}
-              onOpenCat={setFocusCat}
-              nodeFocus={nodeFocus}
-              onNodeFocusHandled={clearNodeFocus}
-              loadImage={loadImage}
-              detailState={source.detailState}
-              onDetailRetry={source.retryDetail}
-            />
-          </div>
+        {/* Arranged per host: the tab keeps the two-column split (composition
+            + trend beside the browser); the sidebar panel is a narrow column,
+            so it stacks the three and puts the browser right after the
+            composition card, before the trend. */}
+        <div className="lc-cols lc-cols-main">
+          {inSidebar ? (
+            <>
+              <div className="lc-col">{compositionCard}</div>
+              <div className="lc-col lc-col-browser">{browserCard}</div>
+              <div className="lc-col">{trendCard}</div>
+            </>
+          ) : (
+            <>
+              <div className="lc-col">{compositionCard}{trendCard}</div>
+              {/* `lc-col-browser` stretches the browser card to the left column's height — Context tab only; the /context modal must stay
+                  content-sized.
+                  */}
+              <div className="lc-col lc-col-browser">{browserCard}</div>
+            </>
+          )}
         </div>
 
         <div className="lc-cols">
@@ -515,7 +553,7 @@ export function makeContextView(
     )
   }
 
-  return function ContextView(props: SessionStandardProps): ReactElement {
+  return function ContextView(props: ContextViewProps): ReactElement {
     return h(ErrorBoundary, null, h(ContextViewBody, props))
   }
 }
