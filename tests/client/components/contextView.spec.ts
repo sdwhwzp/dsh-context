@@ -671,6 +671,9 @@ describe('ContextView — file activity card', () => {
             call: (_channel: string, endpoint: string, payload: unknown) => {
               if (endpoint === 'session/canOpenWorkspacePath') return Promise.resolve({ ok: true, value: true })
               calls.push(endpoint)
+              // Only the open remote carries a path; the card also prices the
+              // session through dsh-spend on this same channel.
+              if (endpoint !== 'session/openWorkspacePath') return Promise.resolve({ ok: true, value: null })
               opened.push((payload as { args: { request: { path: string } } }).args.request.path)
               return Promise.resolve({ ok: true, value: { opened: true } })
             },
@@ -701,17 +704,21 @@ describe('ContextView — file activity card', () => {
     assert.equal(name.getAttribute('title'), DICT_EN['files.open'])
     await click(name)
     assert.deepEqual(opened, ['/repo/src/a.ts'])
-    assert.deepEqual(calls, ['session/openWorkspacePath'])
+    // The card prices the session through dsh-spend on the same channel.
+    assert.deepEqual(calls, ['usageStats/sessionCost', 'session/openWorkspacePath'])
     await m.unmount()
   })
 
-  test('a capability probe that settles after unmount drops its answer', async () => {
-    let resolveProbe!: (value: unknown) => void
+  test('a probe that settles after unmount drops its answer', async () => {
+    // The view runs two independent probes on this channel — the open-path
+    // capability and dsh-spend's session cost. Each keeps its own resolver so
+    // the test can settle both on the dead view, not just whichever ran last.
+    const resolvers = new Map<string, (value: unknown) => void>()
     const ctx = new TestClientCtx({
       services: {
         connection: {
           isLoopback: true,
-          rpc: { call: () => new Promise(resolve => { resolveProbe = resolve }) },
+          rpc: { call: (_channel: string, endpoint: string) => new Promise(resolve => { resolvers.set(endpoint, resolve) }) },
         },
       },
     })
@@ -721,8 +728,9 @@ describe('ContextView — file activity card', () => {
       useProjection: projectionsFor(fileTimeline()),
     }))
     await m.unmount()
-    // The late "yes" arrives on a dead view: the stale answer is dropped whole.
-    resolveProbe({ ok: true, value: true })
+    // The late answers arrive on a dead view: both are dropped whole.
+    resolvers.get('session/canOpenWorkspacePath')?.({ ok: true, value: true })
+    resolvers.get('usageStats/sessionCost')?.({ ok: true, value: { cost: 1, byModel: [] } })
     await new Promise(resolve => setTimeout(resolve, 0))
   })
 

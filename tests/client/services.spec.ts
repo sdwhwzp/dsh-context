@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import {
   canOpenPathsOf,
+  sessionSpendOf,
   contextBreakdownOf,
   contextPressureOf,
   conversationNodesOf,
@@ -695,5 +696,58 @@ describe('canOpenPathsOf / openPathVia', () => {
     open!('/repo/a.ts')
     await new Promise(resolve => setTimeout(resolve, 0))
     assert.deepEqual(calls, [{ channel: '/api', endpoint: 'session/openWorkspacePath', payload: { args: { request: { path: '/repo/a.ts' } } } }])
+  })
+})
+
+describe('sessionSpendOf', () => {
+  const ctxWith = (services: Record<string, unknown>): ClientCtx => ({ get: (name: string) => services[name] }) as unknown as ClientCtx
+  const conn = (answer: () => unknown): Record<string, unknown> => ({
+    isLoopback: true,
+    rpc: { call: (_channel: string, _endpoint: string) => Promise.resolve(answer()) },
+  })
+
+  test('reads the ledger figure and re-proves every field', async () => {
+    const spend = await sessionSpendOf(ctxWith({ connection: conn(() => ({
+      ok: true,
+      value: {
+        sessionId: 's1', cost: 1.5, calls: 4, currency: 'CNY',
+        byModel: [
+          { model: 'deepseek-v4-flash', provider: 'deepseek-official', calls: 3, cost: 1 },
+          // A malformed row drops rather than poisoning the split.
+          null,
+          { model: 42, provider: undefined, calls: 'x', cost: 0.5 },
+        ],
+      },
+    })) }), 's1')
+    assert.deepEqual(spend, {
+      cost: 1.5,
+      currency: 'CNY',
+      calls: 4,
+      byModel: [
+        { model: 'deepseek-v4-flash', provider: 'deepseek-official', calls: 3, cost: 1 },
+        { model: null, provider: null, calls: 0, cost: 0.5 },
+      ],
+    })
+  })
+
+  test('an unpriced session reports a null cost rather than zero', async () => {
+    const spend = await sessionSpendOf(ctxWith({ connection: conn(() => ({ ok: true, value: { cost: null, byModel: [] } })) }), 's1')
+    assert.deepEqual(spend, { cost: null, currency: 'USD', calls: 0, byModel: [] })
+  })
+
+  test('every absence, refusal and failure reads as no answer', async () => {
+    // No connection service, so no RPC caller at all.
+    assert.equal(await sessionSpendOf(ctxWith({}), 's1'), null)
+    // No session to price.
+    assert.equal(await sessionSpendOf(ctxWith({ connection: conn(() => ({ ok: true, value: {} })) }), ''), null)
+    // The remote refused, answered a non-record, or is not installed.
+    assert.equal(await sessionSpendOf(ctxWith({ connection: conn(() => ({ ok: false })) }), 's1'), null)
+    assert.equal(await sessionSpendOf(ctxWith({ connection: conn(() => 'garbage') }), 's1'), null)
+    assert.equal(await sessionSpendOf(ctxWith({ connection: conn(() => ({ ok: true, value: 'garbage' })) }), 's1'), null)
+    // A throwing transport never rejects out of the helper.
+    assert.equal(await sessionSpendOf(ctxWith({ connection: { isLoopback: true, rpc: { call: () => { throw new Error('down') } } } }), 's1'), null)
+    // A non-array byModel still yields an empty split.
+    const odd = await sessionSpendOf(ctxWith({ connection: conn(() => ({ ok: true, value: { cost: 2, byModel: 'nope', currency: 7 } })) }), 's1')
+    assert.deepEqual(odd, { cost: 2, currency: 'USD', calls: 0, byModel: [] })
   })
 })

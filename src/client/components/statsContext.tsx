@@ -21,6 +21,7 @@ import { type ReactElement, type ReactNode } from 'react'
 import type { ContextEventRecord, RequestRecord, SessionCostUsage, TimelineCounts } from '../../shared/types'
 import { estimateSessionCost, formatCost, formatPriceRate, sessionPrices } from '../cost'
 import type { CostCurrency } from '../cost'
+import type { SessionSpend } from '../services'
 import type { ViewKit } from '../viewkit'
 
 /**
@@ -51,6 +52,8 @@ export function makeStatsContext(kit: ViewKit): (props: {
   /** Image blocks live in the current context (absent on older hosts). */
   images?: number
   cost?: SessionCostUsage
+  /** dsh-spend's priced figure for this session; absent when it is not installed. */
+  spend?: SessionSpend | null
   locale: string
 }) => ReactElement {
   const { t, fmt } = kit
@@ -59,25 +62,49 @@ export function makeStatsContext(kit: ViewKit): (props: {
     toolCalls?: number
     images?: number
     cost?: SessionCostUsage
+    spend?: SessionSpend | null
     locale: string
   }): ReactElement {
-    const currency: CostCurrency = props.locale === 'zh' ? 'cny' : 'usd'
-    const cost = estimateSessionCost(props.cost, currency)
+    // dsh-spend prices every provider its ledger knows, at the rates it would
+    // actually charge, so its figure wins whenever the plugin answered. The
+    // local estimate stays as the fallback for a profile without it, where it
+    // still prices the DeepSeek V4 families it knows.
+    const ledger = props.spend ?? null
+    const ledgerCurrency: CostCurrency = ledger?.currency === 'CNY' ? 'cny' : 'usd'
+    const priced = ledger !== null && ledger.cost !== null
+    const currency: CostCurrency = priced ? ledgerCurrency : (props.locale === 'zh' ? 'cny' : 'usd')
+    const cost = priced ? ledger.cost : estimateSessionCost(props.cost, currency)
     const fmtRate = (n: number): string => formatPriceRate(n, currency)
-    const costTip: ReactNode = [
-      t('stats.costTip'),
-      <span key="prices" className="lc-stat-tip-prices">
-        <span className="lc-stat-tip-head">{t('stats.costPriceHead')}</span>
-        {sessionPrices(currency).map(r => (
-          <span key={r.family} className="lc-stat-tip-row">
-            <b className="lc-stat-tip-model">{r.family}</b>
-            {' '}{t('stats.costHit')} {fmtRate(r.peak.hit)}/{fmtRate(r.off.hit)}
-            {' · '}{t('stats.costMiss')} {fmtRate(r.peak.miss)}/{fmtRate(r.off.miss)}
-            {' · '}{t('stats.costOut')} {fmtRate(r.peak.out)}/{fmtRate(r.off.out)}
-          </span>
-        ))}
-      </span>,
-    ]
+    // With the ledger answering, the local rate table no longer describes the
+    // figure — the per-model split it priced does.
+    const costTip: ReactNode = priced
+      ? [
+        t('stats.costTipLedger'),
+        <span key="models" className="lc-stat-tip-prices">
+          <span className="lc-stat-tip-head">{t('stats.costModelHead')}</span>
+          {ledger.byModel.map(r => (
+            <span key={`${r.provider ?? ''}/${r.model ?? ''}`} className="lc-stat-tip-row">
+              <b className="lc-stat-tip-model">{r.model ?? '—'}</b>
+              {' '}{formatCost(r.cost, currency)}
+              {' · '}{fmt(r.calls)}
+            </span>
+          ))}
+        </span>,
+      ]
+      : [
+        t('stats.costTip'),
+        <span key="prices" className="lc-stat-tip-prices">
+          <span className="lc-stat-tip-head">{t('stats.costPriceHead')}</span>
+          {sessionPrices(currency).map(r => (
+            <span key={r.family} className="lc-stat-tip-row">
+              <b className="lc-stat-tip-model">{r.family}</b>
+              {' '}{t('stats.costHit')} {fmtRate(r.peak.hit)}/{fmtRate(r.off.hit)}
+              {' · '}{t('stats.costMiss')} {fmtRate(r.peak.miss)}/{fmtRate(r.off.miss)}
+              {' · '}{t('stats.costOut')} {fmtRate(r.peak.out)}/{fmtRate(r.off.out)}
+            </span>
+          ))}
+        </span>,
+      ]
     const cell = (label: string, value: string | number, tip?: ReactNode): ReactElement => (
       <div className={'lc-stat' + (tip === undefined ? '' : ' lc-stat-tipped')}>
         <span className="lc-stat-label">

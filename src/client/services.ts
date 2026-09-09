@@ -709,6 +709,8 @@ export interface ConnectionFace {
 const OPEN_CHANNEL = '/api'
 const CAN_OPEN_ENDPOINT = 'session/canOpenWorkspacePath'
 const OPEN_ENDPOINT = 'session/openWorkspacePath'
+/** dsh-spend's per-session cost, on the same authenticated channel. */
+const SPEND_ENDPOINT = 'usageStats/sessionCost'
 
 /**
  * The connection's bound generic-RPC caller, or undefined when the service
@@ -802,3 +804,63 @@ export type ContentFetcher = (seq: number) => Promise<ConversationNodeLike | nul
  * distinguishes the three).
  */
 export type HeaderFetcher = (seq: number) => Promise<HeaderEpochContent | null>
+
+/** One model's share of a session's spend, as the ledger priced it. */
+export interface SessionSpendModel {
+  model: string | null
+  provider: string | null
+  calls: number
+  cost: number
+}
+
+/**
+ * A session's cost as dsh-spend's ledger priced it: every provider it knows,
+ * at the rates it would actually charge, in the deployment's own currency.
+ */
+export interface SessionSpend {
+  /** Null when nothing in the session priced. */
+  cost: number | null
+  currency: string
+  calls: number
+  byModel: SessionSpendModel[]
+}
+
+/**
+ * The ledger's cost for one session, or null when dsh-spend is not installed,
+ * the transport carries no RPC caller, or the caller may not read that
+ * session. Never rejects: the card falls back to its own estimate, so an
+ * absent accounting plugin degrades the figure rather than the view.
+ * @param ctx - the client context carrying the connection.
+ * @param sessionId - the session to price.
+ * @returns the priced session, or null when no answer is available.
+ */
+export async function sessionSpendOf(ctx: ClientCtx, sessionId: string): Promise<SessionSpend | null> {
+  const call = rpcCallOf(ctx)
+  if (call === undefined || sessionId === '') return null
+  try {
+    const result = await call(OPEN_CHANNEL, SPEND_ENDPOINT, { args: { request: { sessionId } } })
+    const envelope = asRecord(result)
+    if (envelope === null || envelope.ok !== true) return null
+    const value = asRecord(envelope.value)
+    if (value === null) return null
+    const cost = typeof value.cost === 'number' && Number.isFinite(value.cost) ? value.cost : null
+    const rows = Array.isArray(value.byModel) ? value.byModel : []
+    return {
+      cost,
+      currency: typeof value.currency === 'string' ? value.currency : 'USD',
+      calls: numOf(value.calls),
+      byModel: rows.flatMap((row): SessionSpendModel[] => {
+        const r = asRecord(row)
+        if (r === null) return []
+        return [{
+          model: typeof r.model === 'string' ? r.model : null,
+          provider: typeof r.provider === 'string' ? r.provider : null,
+          calls: numOf(r.calls),
+          cost: numOf(r.cost),
+        }]
+      }),
+    }
+  } catch {
+    return null
+  }
+}

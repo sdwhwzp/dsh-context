@@ -113,3 +113,48 @@ describe('StatsContext', () => {
     await m.unmount()
   })
 })
+
+describe('the ledger figure', () => {
+  const counts = { turns: 1, steps: 1, injects: 0, compactions: 0, prunes: 0 }
+  const spend = {
+    cost: 12.5,
+    currency: 'CNY',
+    calls: 7,
+    byModel: [
+      { model: 'deepseek-v4-flash', provider: 'deepseek-official', calls: 5, cost: 10 },
+      { model: 'GLM-5.3-Flash', provider: 'zai', calls: 2, cost: 2.5 },
+    ],
+  }
+
+  test('dsh-spend wins over the local estimate and brings its own currency', async () => {
+    // The local estimate would price this usage in USD for an English locale;
+    // the ledger answered in CNY, so the cell shows the ledger's money.
+    const m = await mount(h(StatsContext, { counts, cost: COST, spend, locale: 'en' }))
+    assert.ok(text(m.container).includes('¥12.50'))
+    // The tooltip lists what the ledger priced, not the local rate table.
+    const tip = text(query(m.container, '.lc-stat-tip-prices'))
+    assert.ok(tip.includes('deepseek-v4-flash'))
+    assert.ok(tip.includes('GLM-5.3-Flash'), 'a provider the local table cannot price still appears')
+    await m.unmount()
+  })
+
+  test('an absent or unpriced ledger falls back to the local estimate', async () => {
+    for (const value of [null, undefined, { ...spend, cost: null }]) {
+      const m = await mount(h(StatsContext, { counts, cost: COST, spend: value, locale: 'en' }))
+      // The local table prices the fixture's 1M peak uncached flash tokens.
+      assert.ok(text(m.container).includes('$0.44'))
+      await m.unmount()
+    }
+  })
+
+  test('a ledger row with no model name still renders', async () => {
+    const m = await mount(h(StatsContextZh, {
+      counts,
+      cost: COST,
+      spend: { cost: 1, currency: 'USD', calls: 1, byModel: [{ model: null, provider: null, calls: 1, cost: 1 }] },
+      locale: 'zh',
+    }))
+    assert.ok(text(query(m.container, '.lc-stat-tip-prices')).includes('—'))
+    await m.unmount()
+  })
+})

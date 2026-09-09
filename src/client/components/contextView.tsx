@@ -15,7 +15,8 @@ import type { ClientCtx, ConversationNodeLike } from '../services'
 import { makeContentFetcher, makeHeaderFetcher, useHistoryFace } from '../historyPage'
 import { useTimelineSource } from '../timelineSource'
 import { makeDetailNote } from './detailNote'
-import { canOpenPathsOf, openPathVia, workspaceOf } from '../services'
+import { canOpenPathsOf, openPathVia, sessionSpendOf, workspaceOf } from '../services'
+import type { SessionSpend } from '../services'
 import { activityOf, activityOfOps, locateStepOf } from '../fileActivity'
 import type { FileOp } from '../fileActivity'
 import type { ContextSettings } from '../settings'
@@ -295,6 +296,16 @@ export function makeContextView(
       void canOpenPathsOf(ctx).then((can) => { if (live) setCanOpenPaths(can) })
       return () => { live = false }
     }, [ctx])
+    // The ledger's figure for this session, refreshed as the fold advances so
+    // a running session's cost keeps up. Null while it is unknown, which is
+    // also the steady state on a profile without dsh-spend.
+    const [spend, setSpend] = useState<SessionSpend | null>(null)
+    useEffect(() => {
+      if (typeof sessionId !== 'string' || sessionId === '') { setSpend(null); return }
+      let live = true
+      void sessionSpendOf(ctx, sessionId).then((value) => { if (live) setSpend(value) })
+      return () => { live = false }
+    }, [ctx, sessionId, data?.cost])
     const fileOpener = useMemo(
       () => (canOpenPaths ? openPathVia(ctx) : undefined),
       [canOpenPaths, ctx],
@@ -485,7 +496,7 @@ export function makeContextView(
         <div className="lc-cols lc-head">
           {inSidebar ? null : (
             <StatsContext counts={data.counts ?? countsOfRecords(requests, events)} toolCalls={data.toolCalls} images={data.images}
-              cost={data.cost} locale={activeLocale} />
+              cost={data.cost} spend={spend} locale={activeLocale} />
           )}
           <StatsTokens usage={usage} />
           <StatsTiming timing={data.timing ?? null} locale={activeLocale} />
