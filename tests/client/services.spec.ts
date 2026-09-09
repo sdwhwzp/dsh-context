@@ -8,6 +8,7 @@ import { describe, test } from 'vitest'
 import {
   canOpenPathsOf,
   sessionSpendOf,
+  spendTokensOf,
   contextBreakdownOf,
   contextPressureOf,
   conversationNodesOf,
@@ -742,28 +743,39 @@ describe('sessionSpendOf', () => {
       ok: true,
       value: {
         sessionId: 's1', cost: 1.5, calls: 4, currency: 'CNY',
+        inputTokens: 300, outputTokens: 40, cacheReadTokens: 900, cacheWriteTokens: 60,
         byModel: [
-          { model: 'deepseek-v4-flash', provider: 'deepseek-official', calls: 3, cost: 1 },
+          {
+            model: 'deepseek-v4-flash', provider: 'deepseek-official', calls: 3, cost: 1,
+            inputTokens: 200, outputTokens: 30, cacheReadTokens: 900, cacheWriteTokens: 60,
+          },
           // A malformed row drops rather than poisoning the split.
           null,
-          { model: 42, provider: undefined, calls: 'x', cost: 0.5 },
+          { model: 42, provider: undefined, calls: 'x', cost: 0.5, inputTokens: 'x', outputTokens: 10 },
         ],
       },
     })) }), 's1')
     assert.deepEqual(spend, {
       cost: 1.5,
       currency: 'CNY',
-      calls: 4,
+      inputTokens: 300,
+      outputTokens: 40,
+      cacheReadTokens: 900,
+      cacheWriteTokens: 60,
       byModel: [
-        { model: 'deepseek-v4-flash', provider: 'deepseek-official', calls: 3, cost: 1 },
-        { model: null, provider: null, calls: 0, cost: 0.5 },
+        {
+          model: 'deepseek-v4-flash', provider: 'deepseek-official', cost: 1,
+          inputTokens: 200, outputTokens: 30, cacheReadTokens: 900, cacheWriteTokens: 60,
+        },
+        { model: null, provider: null, cost: 0.5, inputTokens: 0, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
       ],
     })
+    assert.equal(spendTokensOf(spend!), 1300)
   })
 
   test('an unpriced session reports a null cost rather than zero', async () => {
     const spend = await sessionSpendOf(ctxWith({ connection: conn(() => ({ ok: true, value: { cost: null, byModel: [] } })) }), 's1')
-    assert.deepEqual(spend, { cost: null, currency: 'USD', calls: 0, byModel: [] })
+    assert.deepEqual(spend, { cost: null, currency: 'USD', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, byModel: [] })
   })
 
   test('every absence, refusal and failure reads as no answer', async () => {
@@ -779,6 +791,6 @@ describe('sessionSpendOf', () => {
     assert.equal(await sessionSpendOf(ctxWith({ connection: { isLoopback: true, rpc: { call: () => { throw new Error('down') } } } }), 's1'), null)
     // A non-array byModel still yields an empty split.
     const odd = await sessionSpendOf(ctxWith({ connection: conn(() => ({ ok: true, value: { cost: 2, byModel: 'nope', currency: 7 } })) }), 's1')
-    assert.deepEqual(odd, { cost: 2, currency: 'USD', calls: 0, byModel: [] })
+    assert.deepEqual(odd, { cost: 2, currency: 'USD', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, byModel: [] })
   })
 })

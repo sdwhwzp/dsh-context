@@ -2,7 +2,9 @@
  * The Context card: what the session's context IS and how it evolved — an
  * eight-cell 2×4 grid pairing the session's shape (turns / steps / live tool
  * calls / images) with the context-event tally (injections / compactions /
- * prunes) and the whole-session cost estimate. Count figures only: nothing
+ * prunes) and the whole-session cost estimate. Cost is billed per token, so
+ * the ledger tooltip's per-model split reports each model's billed token
+ * usage rather than a call tally no rate applies to. Count figures only: nothing
  * here is part of a spendable whole, so no pie — proportions live in the
  * composition card. The cost cell prices the host-folded cumulative billed
  * totals (complete session log, never trimmed) at the hardcoded DeepSeek V4
@@ -21,6 +23,7 @@ import { type ReactElement, type ReactNode } from 'react'
 import type { ContextEventRecord, RequestRecord, SessionCostUsage, TimelineCounts } from '../../shared/types'
 import { estimateSessionCost, formatCost, formatPriceRate, sessionPrices } from '../cost'
 import type { CostCurrency } from '../cost'
+import { spendTokensOf } from '../services'
 import type { SessionSpend } from '../services'
 import type { ViewKit } from '../viewkit'
 
@@ -68,7 +71,9 @@ export function makeStatsContext(kit: ViewKit): (props: {
     // dsh-spend prices every provider its ledger knows, at the rates it would
     // actually charge, so its figure wins whenever the plugin answered. The
     // local estimate stays as the fallback for a profile without it, where it
-    // still prices the DeepSeek V4 families it knows.
+    // still prices the DeepSeek V4 families it knows. Both price BILLED TOKENS
+    // — the split below therefore reports each model's token usage, the
+    // quantity the money was charged on.
     const ledger = props.spend ?? null
     const ledgerCurrency: CostCurrency = ledger?.currency === 'CNY' ? 'cny' : 'usd'
     const priced = ledger !== null && ledger.cost !== null
@@ -86,7 +91,7 @@ export function makeStatsContext(kit: ViewKit): (props: {
             <span key={`${r.provider ?? ''}/${r.model ?? ''}`} className="lc-stat-tip-row">
               <b className="lc-stat-tip-model">{r.model ?? '—'}</b>
               {' '}{formatCost(r.cost, currency)}
-              {' · '}{fmt(r.calls)}
+              {' · '}{t('stats.costTokens', { n: fmt(spendTokensOf(r)) })}
             </span>
           ))}
         </span>,

@@ -116,13 +116,16 @@ describe('StatsContext', () => {
 
 describe('the ledger figure', () => {
   const counts = { turns: 1, steps: 1, injects: 0, compactions: 0, prunes: 0 }
+  const usage = (input: number, output: number, read: number, write: number) => ({
+    inputTokens: input, outputTokens: output, cacheReadTokens: read, cacheWriteTokens: write,
+  })
   const spend = {
     cost: 12.5,
     currency: 'CNY',
-    calls: 7,
+    ...usage(300_000, 40_000, 900_000, 60_000),
     byModel: [
-      { model: 'deepseek-v4-flash', provider: 'deepseek-official', calls: 5, cost: 10 },
-      { model: 'GLM-5.3-Flash', provider: 'zai', calls: 2, cost: 2.5 },
+      { model: 'deepseek-v4-flash', provider: 'deepseek-official', cost: 10, ...usage(200_000, 30_000, 900_000, 60_000) },
+      { model: 'GLM-5.3-Flash', provider: 'zai', cost: 2.5, ...usage(100_000, 10_000, 0, 0) },
     ],
   }
 
@@ -135,6 +138,10 @@ describe('the ledger figure', () => {
     const tip = text(query(m.container, '.lc-stat-tip-prices'))
     assert.ok(tip.includes('deepseek-v4-flash'))
     assert.ok(tip.includes('GLM-5.3-Flash'), 'a provider the local table cannot price still appears')
+    // The split reports what the money was charged on — billed tokens, all
+    // four streams summed — and never a call tally.
+    assert.ok(tip.includes('1.2M tokens'), tip)
+    assert.ok(tip.includes('110.0k tokens'), tip)
     await m.unmount()
   })
 
@@ -151,7 +158,7 @@ describe('the ledger figure', () => {
     const m = await mount(h(StatsContextZh, {
       counts,
       cost: COST,
-      spend: { cost: 1, currency: 'USD', calls: 1, byModel: [{ model: null, provider: null, calls: 1, cost: 1 }] },
+      spend: { cost: 1, currency: 'USD', ...usage(1, 0, 0, 0), byModel: [{ model: null, provider: null, cost: 1, ...usage(1, 0, 0, 0) }] },
       locale: 'zh',
     }))
     assert.ok(text(query(m.container, '.lc-stat-tip-prices')).includes('—'))
