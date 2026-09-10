@@ -860,18 +860,25 @@ export interface SessionSpendModel extends SessionSpendUsage {
  * at the rates it would actually charge, with the billed token usage the
  * money was computed from.
  *
+ * The figure covers the session's whole DELEGATION TREE. Workflow members,
+ * subagents and a resumed conversation each bill into their own session, so
+ * one task's spend is spread across many session rows and the row keyed by
+ * this id alone names only the models the session called itself.
+ *
  * `cost` is stated in `currency`, the deployment's server-side BASE currency.
  * The dashboard prints a different figure — its own display currency, reached
  * through `rates` — so a card that shows this money converts first
  * (spendMoney.ts).
  */
 export interface SessionSpend extends SessionSpendUsage {
-  /** Null when nothing in the session priced. */
+  /** Null when nothing in the tree priced. */
   cost: number | null
   /** The base currency `cost` is priced in, NOT the one to print. */
   currency: string
   /** The host's USD-CNY quote, for the conversion the dashboard applies. */
   rates: SpendRates
+  /** How many sessions of the tree the figure folded; 1 when nothing was delegated. */
+  sessions: number
   byModel: SessionSpendModel[]
 }
 
@@ -915,6 +922,7 @@ export async function sessionSpendOf(ctx: ClientCtx, sessionId: string): Promise
       cost,
       currency: typeof value.currency === 'string' ? value.currency : 'USD',
       rates: { USD: rates === null ? 1 : numOf(rates.USD), CNY: rates === null ? 0 : numOf(rates.CNY) },
+      sessions: numOf(value.sessions),
       ...spendUsageOf(value),
       byModel: rows.flatMap((row): SessionSpendModel[] => {
         const r = asRecord(row)

@@ -87,6 +87,7 @@ export function makeStatsContext(kit: ViewKit): (props: {
       ? {
         cost: ledger.cost,
         byModel: ledger.byModel,
+        sessions: ledger.sessions,
         money: (value: number): string => formatSpendCost(value, ledger.currency, display, ledger.rates),
       }
       : null
@@ -103,6 +104,7 @@ export function makeStatsContext(kit: ViewKit): (props: {
     const costTip: ReactNode = priced !== null
       ? [
         t('stats.costTipLedger'),
+        priced.sessions > 1 ? ' ' + t('stats.costTipTree', { n: priced.sessions }) : '',
         <span key="models" className="lc-stat-tip-prices">
           <span className="lc-stat-tip-head">{t('stats.costModelHead')}</span>
           {priced.byModel.map(r => (

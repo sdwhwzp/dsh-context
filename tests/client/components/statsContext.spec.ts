@@ -123,6 +123,7 @@ describe('the ledger figure', () => {
     cost: 12.5,
     currency: 'CNY',
     rates: { USD: 1, CNY: 7.13 },
+    sessions: 1,
     ...usage(300_000, 40_000, 900_000, 60_000),
     byModel: [
       { model: 'deepseek-v4-flash', provider: 'deepseek-official', cost: 10, ...usage(200_000, 30_000, 900_000, 60_000) },
@@ -162,6 +163,7 @@ describe('the ledger figure', () => {
       cost: 0.1992,
       currency: 'USD',
       rates: { USD: 1, CNY: 7.13 },
+      sessions: 1,
       ...usage(104_600, 77_600, 7_500_000, 0),
       byModel: [{ model: 'deepseek-v4.1-flash-expires-on-0910', provider: 'deepseek-official', cost: 0.1992, ...usage(104_600, 77_600, 7_500_000, 0) }],
     }
@@ -175,11 +177,44 @@ describe('the ledger figure', () => {
     await m.unmount()
   })
 
+  test('a delegating session shows every model of its family and says how many sessions', async () => {
+    // The task ran its OCR through workflow members, each billing into its own
+    // session; the card must not report only what the parent called itself.
+    const family = {
+      cost: 1.1992,
+      currency: 'USD',
+      rates: { USD: 1, CNY: 7.13 },
+      sessions: 29,
+      ...usage(829_100, 683_900, 52_737_700, 0),
+      byModel: [
+        { model: 'deepseek-v4-flash-vision-exp', provider: 'deepseek-official', cost: 0.711, ...usage(580_000, 526_000, 37_430_000, 0) },
+        { model: 'deepseek-v4.1-flash-expires-on-0910', provider: 'deepseek-official', cost: 0.376, ...usage(209_100, 155_100, 15_060_000, 0) },
+        { model: 'glm-5v-turbo', provider: 'zai', cost: 0.1122, ...usage(40_000, 2_800, 247_700, 0) },
+      ],
+    }
+    const m = await mount(h(StatsContextZh, { counts, cost: COST, spend: family, locale: 'zh' }))
+    assert.equal(cells(m.container).values[4], '¥8.55')
+    const tip = text(query(m.container, '.lc-stat-tip-prices'))
+    for (const model of ['deepseek-v4-flash-vision-exp', 'deepseek-v4.1-flash-expires-on-0910', 'glm-5v-turbo']) {
+      assert.ok(tip.includes(model), `${model} missing from ${tip}`)
+    }
+    assert.ok(tip.includes('38.5M tokens'), tip)
+    // The card says the figure is a family total rather than this session's own.
+    assert.ok(text(m.container).includes('29 个会话'), 'the folded session count is stated')
+    await m.unmount()
+  })
+
+  test('a session that delegated nothing keeps the note off', async () => {
+    const m = await mount(h(StatsContextZh, { counts, cost: COST, spend, locale: 'zh' }))
+    assert.ok(!text(m.container).includes('会话族'), 'a single-session figure claims no family')
+    await m.unmount()
+  })
+
   test('a ledger row with no model name still renders', async () => {
     const m = await mount(h(StatsContextZh, {
       counts,
       cost: COST,
-      spend: { cost: 1, currency: 'USD', rates: { USD: 1, CNY: 7.13 }, ...usage(1, 0, 0, 0), byModel: [{ model: null, provider: null, cost: 1, ...usage(1, 0, 0, 0) }] },
+      spend: { cost: 1, currency: 'USD', rates: { USD: 1, CNY: 7.13 }, sessions: 1, ...usage(1, 0, 0, 0), byModel: [{ model: null, provider: null, cost: 1, ...usage(1, 0, 0, 0) }] },
       locale: 'zh',
     }))
     assert.ok(text(query(m.container, '.lc-stat-tip-prices')).includes('—'))
