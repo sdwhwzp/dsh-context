@@ -7,6 +7,7 @@ export type Translate = (key: string, params?: Record<string, string | number>) 
 
 export const DICT_ZH: Record<string, string> = {
   'tab': '上下文',
+  'sidebar.guideDescription': '查看这个会话的上下文构成、每步变化与消息列表。',
   'cat.system': '系统提示词', 'cat.tools': '工具定义', 'cat.user': '用户消息',
   'cat.inject': '注入内容', 'cat.assistant': '助手消息', 'cat.tool': '工具结果',
   'overview.title': '当前上下文',
@@ -23,7 +24,7 @@ export const DICT_ZH: Record<string, string> = {
   'stats.toolCalls': '工具调用',
   'stats.images': '图片',
   'stats.cost': '预估费用',
-  'stats.costTip': '按 DeepSeek 官方刊例价估算整个会话的累计费用：输入区分缓存命中/未命中，输出含思考；按请求时间区分高峰（北京时间工作日 9:00–12:00、14:00–18:00）与空闲时段（半价，周末全天均为空闲时段）。适用于 deepseek-v4.1-flash / deepseek-v4-pro（不限 provider；V4.1 Pro 上线前，V4 Pro 请求将被路由并按 V4.1 Flash 单价计费），价格写死在代码中，仅供参考。',
+  'stats.costTip': '按 DeepSeek 官方刊例价估算整个会话的累计费用：输入区分缓存命中/未命中，输出含思考；按请求时间区分高峰（北京时间工作日 9:00–12:00、14:00–18:00）与空闲时段（半价，周末全天均为空闲时段）。适用于 deepseek-v4.1-flash / deepseek-flash / deepseek-v4-pro（不限 provider；V4.1 Pro 上线前，V4 Pro 请求将被路由并按 V4.1 Flash 单价计费），价格写死在代码中，仅供参考。',
   'stats.costPriceHead': '每百万 tokens 价格（高峰 | 空闲半价）：',
   'stats.costTipLedger': '整个会话的累计费用，由 dsh-spend 账本计价：覆盖它已知的全部供应商与模型，按已计费 token 用量、以每次调用自身时间所适用的已发布价目表结算；币种与汇率跟随 dsh-spend 面板的显示设置，与该面板上同一会话的金额一致。',
   'stats.costModelHead': '按模型（费用 · 用量）：',
@@ -213,6 +214,7 @@ export const DICT_ZH: Record<string, string> = {
   'rich.md': 'Markdown',
   'rich.toMd': '按 Markdown 渲染查看',
   'rich.toRaw': '查看原始文本',
+  'rich.copy': '复制原文', 'rich.copied': '已复制',
   'rich.md.copy': '复制', 'rich.md.copied': '已复制',
   'rich.md.footnotes': '脚注',
   'block.thinking': '思考',
@@ -239,6 +241,7 @@ export const DICT_ZH: Record<string, string> = {
 
 export const DICT_EN: Record<string, string> = {
   'tab': 'Context',
+  'sidebar.guideDescription': 'Inspect this session\'s context composition, per-step history, and messages.',
   'cat.system': 'System Prompt', 'cat.tools': 'Tool Schemas', 'cat.user': 'User Messages',
   'cat.inject': 'Injected Context', 'cat.assistant': 'Assistant Messages', 'cat.tool': 'Tool Results',
   'overview.title': 'Current Context',
@@ -255,7 +258,7 @@ export const DICT_EN: Record<string, string> = {
   'stats.toolCalls': 'Tool Calls',
   'stats.images': 'Images',
   'stats.cost': 'Cost',
-  'stats.costTip': 'Rough cumulative cost of the whole session at DeepSeek’s list prices: input split by cache hit/miss, output includes reasoning; each request is priced at the peak (Beijing Time weekdays 09:00–12:00, 14:00–18:00) or half-price off-peak rate by its time — weekends bill at off-peak all day. Applies to deepseek-v4.1-flash / deepseek-v4-pro on any provider (until V4.1 Pro ships, Pro requests are routed to and billed at V4.1 Flash rates); prices are hardcoded, for reference only.',
+  'stats.costTip': 'Rough cumulative cost of the whole session at DeepSeek’s list prices: input split by cache hit/miss, output includes reasoning; each request is priced at the peak (Beijing Time weekdays 09:00–12:00, 14:00–18:00) or half-price off-peak rate by its time — weekends bill at off-peak all day. Applies to deepseek-v4.1-flash / deepseek-flash / deepseek-v4-pro on any provider (until V4.1 Pro ships, Pro requests are routed to and billed at V4.1 Flash rates); prices are hardcoded, for reference only.',
   'stats.costPriceHead': 'Per-1M-token rates (peak | off-peak at half price):',
   'stats.costTipLedger': 'Cumulative cost of the whole session as the dsh-spend ledger priced it: every provider and model it knows, charged on billed token usage at the published table live at each call\u2019s own time. Currency and rate follow the dsh-spend dashboard\u2019s display setting, so the same session reads the same on both.',
   'stats.costModelHead': 'By model (cost \u00b7 usage):',
@@ -445,6 +448,7 @@ export const DICT_EN: Record<string, string> = {
   'rich.md': 'Markdown',
   'rich.toMd': 'View as Markdown',
   'rich.toRaw': 'View Raw Text',
+  'rich.copy': 'Copy Raw Text', 'rich.copied': 'Copied',
   'rich.md.copy': 'Copy', 'rich.md.copied': 'Copied',
   'rich.md.footnotes': 'Footnotes',
   'block.thinking': 'Reasoning',

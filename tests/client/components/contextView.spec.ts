@@ -1154,20 +1154,24 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
   })
 
   test('the jump relay survives the split: held while the detail reads, resolves when it lands', async () => {
-    const ctx = slimCtx(async () => ({ ok: true, value: slimDetail() }))
+    let resolveDetail!: (value: unknown) => void
+    const detail = new Promise<unknown>(resolve => { resolveDetail = resolve })
+    const ctx = slimCtx(() => detail)
     const View = makeView(ctx)
-    // The jump is armed BEFORE the view mounts (the chat action relay) — the
-    // detail read is still pending, so the pin must wait for it (not consume
-    // and clamp against an empty record list).
     requestContextFocus('sv-slim-jump', 4)
     const m = await mount(h(View, { sessionId: 'sv-slim-jump', useProjection: projectionsFor(slimHead()) }))
-    assert.equal(queryAll(m.container, '.lc-bar-selected').length, 0, 'nothing pins before the detail')
-    await until(
-      () => queryAll(m.container, '.lc-bar[data-seq="4"]')[0]?.className.includes('lc-bar-selected') === true,
-      'the jump never resolved',
-    )
-    assert.equal(takeContextFocus('sv-slim-jump'), null)
-    await m.unmount()
+    try {
+      assert.equal(queryAll(m.container, '.lc-bar-selected').length, 0, 'nothing pins before the detail')
+      await act(async () => { resolveDetail({ ok: true, value: slimDetail() }) })
+      await until(
+        () => queryAll(m.container, '.lc-bar[data-seq="4"]')[0]?.className.includes('lc-bar-selected') === true,
+        'the jump never resolved',
+      )
+      assert.equal(takeContextFocus('sv-slim-jump'), null)
+    } finally {
+      await m.unmount()
+      takeContextFocus('sv-slim-jump')
+    }
   })
 })
 
