@@ -743,6 +743,7 @@ describe('sessionSpendOf', () => {
       ok: true,
       value: {
         sessionId: 's1', cost: 1.5, calls: 4, currency: 'CNY',
+        rates: { USD: 1, CNY: 7.13, source: 'live' },
         inputTokens: 300, outputTokens: 40, cacheReadTokens: 900, cacheWriteTokens: 60,
         byModel: [
           {
@@ -758,6 +759,7 @@ describe('sessionSpendOf', () => {
     assert.deepEqual(spend, {
       cost: 1.5,
       currency: 'CNY',
+      rates: { USD: 1, CNY: 7.13 },
       inputTokens: 300,
       outputTokens: 40,
       cacheReadTokens: 900,
@@ -775,7 +777,9 @@ describe('sessionSpendOf', () => {
 
   test('an unpriced session reports a null cost rather than zero', async () => {
     const spend = await sessionSpendOf(ctxWith({ connection: conn(() => ({ ok: true, value: { cost: null, byModel: [] } })) }), 's1')
-    assert.deepEqual(spend, { cost: null, currency: 'USD', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, byModel: [] })
+    // An answer with no quote reads as no quote; the money formatter then
+    // falls back to dsh-spend's own fixed rate.
+    assert.deepEqual(spend, { cost: null, currency: 'USD', rates: { USD: 1, CNY: 0 }, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, byModel: [] })
   })
 
   test('every absence, refusal and failure reads as no answer', async () => {
@@ -791,6 +795,6 @@ describe('sessionSpendOf', () => {
     assert.equal(await sessionSpendOf(ctxWith({ connection: { isLoopback: true, rpc: { call: () => { throw new Error('down') } } } }), 's1'), null)
     // A non-array byModel still yields an empty split.
     const odd = await sessionSpendOf(ctxWith({ connection: conn(() => ({ ok: true, value: { cost: 2, byModel: 'nope', currency: 7 } })) }), 's1')
-    assert.deepEqual(odd, { cost: 2, currency: 'USD', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, byModel: [] })
+    assert.deepEqual(odd, { cost: 2, currency: 'USD', rates: { USD: 1, CNY: 0 }, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, byModel: [] })
   })
 })

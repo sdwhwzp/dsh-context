@@ -17,6 +17,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ComponentType } from 'react'
 import { estimateSystemTokens } from '../shared/estimate'
+import type { SpendRates } from './spendMoney'
 import type { ContextBreakdown, ContextHeaders, ContextPressure, ContextTimeline, HeaderEpochContent, SystemPromptNode, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
 
 export interface LocaleService {
@@ -856,13 +857,21 @@ export interface SessionSpendModel extends SessionSpendUsage {
 
 /**
  * A session's cost as dsh-spend's ledger priced it: every provider it knows,
- * at the rates it would actually charge, in the deployment's own currency —
- * with the billed token usage the money was computed from.
+ * at the rates it would actually charge, with the billed token usage the
+ * money was computed from.
+ *
+ * `cost` is stated in `currency`, the deployment's server-side BASE currency.
+ * The dashboard prints a different figure — its own display currency, reached
+ * through `rates` — so a card that shows this money converts first
+ * (spendMoney.ts).
  */
 export interface SessionSpend extends SessionSpendUsage {
   /** Null when nothing in the session priced. */
   cost: number | null
+  /** The base currency `cost` is priced in, NOT the one to print. */
   currency: string
+  /** The host's USD-CNY quote, for the conversion the dashboard applies. */
+  rates: SpendRates
   byModel: SessionSpendModel[]
 }
 
@@ -901,9 +910,11 @@ export async function sessionSpendOf(ctx: ClientCtx, sessionId: string): Promise
     if (value === null) return null
     const cost = typeof value.cost === 'number' && Number.isFinite(value.cost) ? value.cost : null
     const rows = Array.isArray(value.byModel) ? value.byModel : []
+    const rates = asRecord(value.rates)
     return {
       cost,
       currency: typeof value.currency === 'string' ? value.currency : 'USD',
+      rates: { USD: rates === null ? 1 : numOf(rates.USD), CNY: rates === null ? 0 : numOf(rates.CNY) },
       ...spendUsageOf(value),
       byModel: rows.flatMap((row): SessionSpendModel[] => {
         const r = asRecord(row)

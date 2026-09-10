@@ -4,7 +4,10 @@
  * calls / images) with the context-event tally (injections / compactions /
  * prunes) and the whole-session cost estimate. Cost is billed per token, so
  * the ledger tooltip's per-model split reports each model's billed token
- * usage rather than a call tally no rate applies to. Count figures only: nothing
+ * usage rather than a call tally no rate applies to. A ledger figure is
+ * printed the way dsh-spend's dashboard prints it -- its display currency, at
+ * the host's quote (spendMoney.ts) -- rather than in the base currency the
+ * wire states, which is a different number under a different symbol. Count figures only: nothing
  * here is part of a spendable whole, so no pie — proportions live in the
  * composition card. The cost cell prices the host-folded cumulative billed
  * totals (complete session log, never trimmed) at the hardcoded DeepSeek V4
@@ -25,6 +28,7 @@ import { estimateSessionCost, formatCost, formatPriceRate, sessionPrices } from 
 import type { CostCurrency } from '../cost'
 import { spendTokensOf } from '../services'
 import type { SessionSpend } from '../services'
+import { formatSpendCost, spendDisplayCurrency } from '../spendMoney'
 import type { ViewKit } from '../viewkit'
 
 /**
@@ -75,22 +79,36 @@ export function makeStatsContext(kit: ViewKit): (props: {
     // — the split below therefore reports each model's token usage, the
     // quantity the money was charged on.
     const ledger = props.spend ?? null
-    const ledgerCurrency: CostCurrency = ledger?.currency === 'CNY' ? 'cny' : 'usd'
+    // The ledger prices in the deployment's BASE currency; dsh-spend's
+    // dashboard prints its own display currency at the host's quote. Read both
+    // from there so the two surfaces never disagree on the same session.
+    const display = spendDisplayCurrency()
     const priced = ledger !== null && ledger.cost !== null
-    const currency: CostCurrency = priced ? ledgerCurrency : (props.locale === 'zh' ? 'cny' : 'usd')
-    const cost = priced ? ledger.cost : estimateSessionCost(props.cost, currency)
+      ? {
+        cost: ledger.cost,
+        byModel: ledger.byModel,
+        money: (value: number): string => formatSpendCost(value, ledger.currency, display, ledger.rates),
+      }
+      : null
+    // The local fallback keeps its own table and its own currency: it prices
+    // nothing dsh-spend priced, so it has no base currency to convert from.
+    const currency: CostCurrency = props.locale === 'zh' ? 'cny' : 'usd'
     const fmtRate = (n: number): string => formatPriceRate(n, currency)
+    const estimate = priced === null ? estimateSessionCost(props.cost, currency) : null
+    const costText = priced !== null
+      ? priced.money(priced.cost)
+      : estimate === null ? '—' : formatCost(estimate, currency)
     // With the ledger answering, the local rate table no longer describes the
     // figure — the per-model split it priced does.
-    const costTip: ReactNode = priced
+    const costTip: ReactNode = priced !== null
       ? [
         t('stats.costTipLedger'),
         <span key="models" className="lc-stat-tip-prices">
           <span className="lc-stat-tip-head">{t('stats.costModelHead')}</span>
-          {ledger.byModel.map(r => (
+          {priced.byModel.map(r => (
             <span key={`${r.provider ?? ''}/${r.model ?? ''}`} className="lc-stat-tip-row">
               <b className="lc-stat-tip-model">{r.model ?? '—'}</b>
-              {' '}{formatCost(r.cost, currency)}
+              {' '}{priced.money(r.cost)}
               {' · '}{t('stats.costTokens', { n: fmt(spendTokensOf(r)) })}
             </span>
           ))}
@@ -130,7 +148,7 @@ export function makeStatsContext(kit: ViewKit): (props: {
           {cell(t('stats.steps'), props.counts.steps)}
           {cell(t('stats.toolCalls'), props.toolCalls ?? 0)}
           {cell(t('stats.images'), props.images ?? 0)}
-          {cell(t('stats.cost'), cost === null ? '—' : formatCost(cost, currency), costTip)}
+          {cell(t('stats.cost'), costText, costTip)}
           {cell(t('stats.injects'), props.counts.injects)}
           {cell(t('stats.compactions'), props.counts.compactions)}
           {cell(t('stats.prunes'), props.counts.prunes)}

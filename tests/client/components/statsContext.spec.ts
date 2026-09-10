@@ -122,6 +122,7 @@ describe('the ledger figure', () => {
   const spend = {
     cost: 12.5,
     currency: 'CNY',
+    rates: { USD: 1, CNY: 7.13 },
     ...usage(300_000, 40_000, 900_000, 60_000),
     byModel: [
       { model: 'deepseek-v4-flash', provider: 'deepseek-official', cost: 10, ...usage(200_000, 30_000, 900_000, 60_000) },
@@ -154,11 +155,31 @@ describe('the ledger figure', () => {
     }
   })
 
+  test('the money reads as dsh-spend prints it: its display currency, at the host quote', async () => {
+    // The deployment prices in USD and the dashboard shows CNY, so the card
+    // must not print the base amount under the base symbol.
+    const usd = {
+      cost: 0.1992,
+      currency: 'USD',
+      rates: { USD: 1, CNY: 7.13 },
+      ...usage(104_600, 77_600, 7_500_000, 0),
+      byModel: [{ model: 'deepseek-v4.1-flash-expires-on-0910', provider: 'deepseek-official', cost: 0.1992, ...usage(104_600, 77_600, 7_500_000, 0) }],
+    }
+    const m = await mount(h(StatsContextZh, { counts, cost: COST, spend: usd, locale: 'zh' }))
+    const shown = cells(m.container).values[4]
+    assert.equal(shown, '¥1.42')
+    const tip = text(query(m.container, '.lc-stat-tip-prices'))
+    assert.ok(tip.includes('¥1.42'), tip)
+    assert.ok(!tip.includes('$0.1992'), 'the base-currency amount never reaches the split')
+    assert.ok(tip.includes('7.7M tokens'), tip)
+    await m.unmount()
+  })
+
   test('a ledger row with no model name still renders', async () => {
     const m = await mount(h(StatsContextZh, {
       counts,
       cost: COST,
-      spend: { cost: 1, currency: 'USD', ...usage(1, 0, 0, 0), byModel: [{ model: null, provider: null, cost: 1, ...usage(1, 0, 0, 0) }] },
+      spend: { cost: 1, currency: 'USD', rates: { USD: 1, CNY: 7.13 }, ...usage(1, 0, 0, 0), byModel: [{ model: null, provider: null, cost: 1, ...usage(1, 0, 0, 0) }] },
       locale: 'zh',
     }))
     assert.ok(text(query(m.container, '.lc-stat-tip-prices')).includes('—'))
