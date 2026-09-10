@@ -7,7 +7,7 @@ export type Translate = (key: string, params?: Record<string, string | number>) 
 
 export const DICT_ZH: Record<string, string> = {
   'tab': '上下文',
-  'sidebar.guideDescription': '查看这个会话的上下文构成、每步变化与消息列表。',
+  'sidebar.guideDescription': '查看上下文的构成、统计、演变。',
   'cat.system': '系统提示词', 'cat.tools': '工具定义', 'cat.user': '用户消息',
   'cat.inject': '注入内容', 'cat.assistant': '助手消息', 'cat.tool': '工具结果',
   'overview.title': '当前上下文',
@@ -73,7 +73,7 @@ export const DICT_ZH: Record<string, string> = {
   'detail.turn': '第 {t} 轮 · 共 {n} 步',
   'detail.lastStep': '末步',
   'detail.estTotal': '估算合计 ≈ {n}',
-  'detail.actual': '实际 prompt {n}',
+  'detail.actual': '实际 {n}',
   'detail.output': '输出 {n}',
   'detail.cache': '缓存 {n}%',
   'brief.turn': '本轮',
@@ -197,7 +197,6 @@ export const DICT_ZH: Record<string, string> = {
   'browser.loading': '正在从更早的会话历史加载完整内容…',
   'browser.notInLog': '会话日志中未找到该条目的完整内容（可能已被压缩或清理）',
   'browser.loadFailed': '内容加载失败，点击重试',
-  'browser.preview': '预览',
   'tool.desc': '描述',
   'tool.params': '参数',
   'tool.paramsEmpty': '（无参数）',
@@ -241,7 +240,7 @@ export const DICT_ZH: Record<string, string> = {
 
 export const DICT_EN: Record<string, string> = {
   'tab': 'Context',
-  'sidebar.guideDescription': 'Inspect this session\'s context composition, per-step history, and messages.',
+  'sidebar.guideDescription': 'Inspect context composition, stats, and evolution.',
   'cat.system': 'System Prompt', 'cat.tools': 'Tool Schemas', 'cat.user': 'User Messages',
   'cat.inject': 'Injected Context', 'cat.assistant': 'Assistant Messages', 'cat.tool': 'Tool Results',
   'overview.title': 'Current Context',
@@ -307,7 +306,7 @@ export const DICT_EN: Record<string, string> = {
   'detail.turn': 'Turn {t} · {n} steps',
   'detail.lastStep': 'Last Step',
   'detail.estTotal': 'Estimated ≈ {n}',
-  'detail.actual': 'Actual Prompt {n}',
+  'detail.actual': 'Actual {n}',
   'detail.output': 'Output {n}',
   'detail.cache': 'Cache {n}%',
   'brief.turn': 'User',
@@ -431,7 +430,6 @@ export const DICT_EN: Record<string, string> = {
   'browser.loading': 'Loading full content from older session history…',
   'browser.notInLog': 'This item is not in the session log anymore (it may have been compacted away or cleared)',
   'browser.loadFailed': 'Load failed — click to retry',
-  'browser.preview': 'Preview',
   'tool.desc': 'Description',
   'tool.params': 'Parameters',
   'tool.paramsEmpty': '(no parameters)',
