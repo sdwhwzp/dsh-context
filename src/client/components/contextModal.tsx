@@ -9,6 +9,7 @@ import { measureDock } from '../dockMeasure'
 import { headlineOf } from '../headline'
 import { modalStoreOf, takePendingConsume } from '../modalStore'
 import type { ClientCtx, SessionStandardProps, SessionsFace } from '../services'
+import type { ContextSettings } from '../settings'
 import { contextBreakdownOf, contextPressureOf, conversationNodesOf, headersOf, imageLoaderOf, projectionOf } from '../services'
 import { makeContentFetcher, makeHeaderFetcher, useHistoryFace } from '../historyPage'
 import { useTimelineSource } from '../timelineSource'
@@ -24,12 +25,16 @@ export interface ContextModalProps extends SessionStandardProps {
   useContextModal?: (sel: (open: boolean) => boolean) => boolean
 }
 
-export function makeContextModal(ctx: ClientCtx, kit: ViewKit): (props: ContextModalProps) => ReactElement | null {
+export function makeContextModal(
+  ctx: ClientCtx,
+  kit: ViewKit,
+  settings: ContextSettings,
+): (props: ContextModalProps) => ReactElement | null {
   const { t } = kit
   const StackedBar = makeStackedBar(kit)
   const Legend = makeLegend(kit)
   const CurrentComposition = makeCurrentComposition(kit, StackedBar, Legend)
-  const ContextBrowser = makeContextBrowser(kit, StackedBar)
+  const ContextBrowser = makeContextBrowser(kit, StackedBar, settings)
   const ErrorBoundary = makeErrorBoundary(t)
 
   function ContextModalBody(props: ContextModalProps): ReactElement | null {

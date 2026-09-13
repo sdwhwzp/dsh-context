@@ -103,6 +103,9 @@ export type DefaultTrendMode = 'total' | 'delta'
 /** File Activity row order: most operations first, most-recently-touched first, or path ascending. */
 export type DefaultFileSort = 'count' | 'latest' | 'path'
 
+/** Tool-definition row order: largest schema first, most call hits first, or name ascending. */
+export type DefaultToolSort = 'size' | 'count' | 'name'
+
 /** Where the Context view is offered: the conversation tab, the right Sidebar, or both. */
 export type DefaultPlacement = 'all' | 'tab' | 'sidebar'
 
@@ -110,6 +113,7 @@ export interface PluginSettings {
   defaultPlacement: DefaultPlacement
   defaultGranularity: DefaultGranularity
   defaultTrendMode: DefaultTrendMode
+  defaultToolSort: DefaultToolSort
   defaultFileSort: DefaultFileSort
 }
 

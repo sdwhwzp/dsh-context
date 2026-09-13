@@ -115,7 +115,7 @@ function apply(ctx: ClientCtx): void {
   // the trigger source). The modal itself renders from the input overlay
   // slot, opened per session through the hooks-compartment store.
   registerContextCommand(ctx, kit)
-  const ContextModal = makeContextModal(ctx, kit)
+  const ContextModal = makeContextModal(ctx, kit, settings)
   ctx.slots.inject('conversation.input.overlay', () => {
     return ctx.slots.register(
       { name: 'conversation.input.overlay', id: 'context-modal', order: 10, locale: NS,

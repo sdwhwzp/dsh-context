@@ -66,7 +66,7 @@ export function makeContextView(
   const PluginInfo = makePluginInfo(kit)
   const UpgradeGate = makeUpgradeGate(kit)
   const DetailNote = makeDetailNote(kit)
-  const ContextBrowser = makeContextBrowser(kit, StackedBar)
+  const ContextBrowser = makeContextBrowser(kit, StackedBar, settings)
   const AgentGraph = makeAgentGraph(ctx, kit)
   const ErrorBoundary = makeErrorBoundary(t)
 

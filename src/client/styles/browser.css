@@ -58,5 +58,8 @@
 .lc-br-tool-plugin { font-size: 12px; border-radius: 6px; color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); border-color: transparent; }
 .lc-br-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lc-br-time { flex: none; color: var(--dsw-alias-label-secondary); font-size: 11px; }
+/* Call-hit tally on a tool-definition row (×N): the count sort's magnitude,
+   shown in the time slot's muted face. */
+.lc-br-hits { flex: none; color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .lc-br-content { padding: 2px 6px 8px 26px; display: flex; flex-direction: column; gap: 6px; }
 .lc-br-dim { color: var(--dsw-alias-label-secondary); }
