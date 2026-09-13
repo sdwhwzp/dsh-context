@@ -15,10 +15,10 @@ import type { ClientCtx, ConversationNodeLike } from '../services'
 import { makeContentFetcher, makeHeaderFetcher, useHistoryFace } from '../historyPage'
 import { useTimelineSource } from '../timelineSource'
 import { makeDetailNote } from './detailNote'
-import { canOpenPathsOf, openPathVia, sessionSpendOf, workspaceOf } from '../services'
+import { canOpenPathsOf, openPathVia, openResourceVia, sessionSpendOf, workspaceOf } from '../services'
 import type { SessionSpend } from '../services'
-import { activityOf, activityOfOps, locateStepOf } from '../fileActivity'
-import type { FileOp } from '../fileActivity'
+import { activityOf, activityOfOps, locateStepOf, previewAddressOf } from '../fileActivity'
+import type { FileEntry, FileOp } from '../fileActivity'
 import type { ContextSettings } from '../settings'
 import type { ViewKit } from '../viewkit'
 import { makeContextBrowser } from './browser'
@@ -197,6 +197,13 @@ export function makeContextView(
     // below the last hook.
     const requests = data ? data.requests : []
     const events = data ? data.events : []
+    // The stats board's count figures — the split head's precomputed tallies, or
+    // the collections' own derivation on the inline generation. Shared by the
+    // stats card's shape cells and the events card's kind-filter counts.
+    const counts = data?.counts ?? countsOfRecords(requests, events)
+    // The per-kind tallies that ride the filter buttons: only the three priced
+    // kinds the host counts (model/mode switches carry no tally, hence undefined).
+    const kindCounts: Record<string, number | undefined> = { inject: counts.injects, compaction: counts.compactions, prune: counts.prunes }
     const shownEvents = pickedKinds.length === EVENT_KINDS.length ? events : events.filter(e => pickedKinds.includes(e.kind))
     // Per-step bars, or one per turn (each turn's LAST step's record); memoized so hover-driven re-renders keep bar props identity-stable —
     // the chart's memoized bars then skip reconciliation (turn-mode aggregation allocates).
@@ -309,6 +316,22 @@ export function makeContextView(
     const fileOpener = useMemo(
       () => (canOpenPaths ? openPathVia(ctx) : undefined),
       [canOpenPaths, ctx],
+    )
+    // The right-Sidebar preview opener (the same optional column the Context
+    // tab itself registers into): resolved off `ctx` at mount, the face
+    // re-proved per call, so an HMR reload's revocation never leaves a stale
+    // opener. Absent face = no `onPreview` at all, and the card keeps its
+    // system-open affordance untouched.
+    const previewOpener = useMemo(() => openResourceVia(ctx), [ctx])
+    const sessionKey = typeof sessionId === 'string' ? sessionId : undefined
+    const previewFile = useMemo(
+      () => previewOpener === undefined
+        ? undefined
+        : (entry: FileEntry): boolean => {
+          const address = previewAddressOf(entry.path, entry.form, entry.pattern, sessionKey, workspace)
+          return address !== undefined && previewOpener(address)
+        },
+      [previewOpener, sessionKey, workspace],
     )
     const locateFileOp = useCallback((op: FileOp): void => {
       // A nested Code-Mode op has no surface row of its own — it reveals on
@@ -494,45 +517,61 @@ export function makeContextView(
     return (
       <div className="lc-root" ref={rootRef}>
 
-        <div className="lc-cols lc-head">
-          {inSidebar ? null : (
-            <StatsContext counts={data.counts ?? countsOfRecords(requests, events)} toolCalls={data.toolCalls} images={data.images}
+        {/* The head band splits into two rows: the session's shape beside the
+            plugin card, then the two donut cards together. The sidebar panel
+            drops the first row (context stats / plugin info pay off only on
+            the full-width tab); the rows' own flex-wrap stacks the pair in a
+            narrow pane at the shared 360px card floor. */}
+        {inSidebar ? null : (
+          <div className="lc-cols lc-head">
+            <StatsContext counts={counts} humanInputs={data.humanInputs} toolCalls={data.toolCalls} usage={usage}
               cost={data.cost} spend={spend} locale={activeLocale} />
-          )}
-          <StatsTokens usage={usage} />
+            <PluginInfo />
+          </div>
+        )}
+        <div className="lc-cols lc-head">
+          <StatsTokens usage={usage} current={data.current} breakdown={breakdown} />
           <StatsTiming timing={data.timing ?? null} />
-          {inSidebar ? null : <PluginInfo />}
         </div>
 
         {/* One arrangement for every host: composition over trend in the left
             column, the browser beside them and stretched to the pair's height.
-            The sidebar panel's column simply folds to one at the shared 360px
-            floor instead of splitting the three cards across two ragged rows. */}
+            All columns share the 360px floor (`min-w-[min(360px,100%)]`): the
+            rows wrap at it, and a sub-360px pane narrows the column instead
+            of overflowing. */}
         <div className="lc-cols lc-cols-main">
-          <div className="lc-col">{compositionCard}{trendCard}</div>
+          <div className="lc-col flex-1 min-w-[min(360px,100%)]">{compositionCard}{trendCard}</div>
           {/* `lc-col-browser` stretches the browser card to the left column's
               height; the /context modal, which draws its own stack, must stay
               content-sized. */}
-          <div className="lc-col lc-col-browser">{browserCard}</div>
+          <div className="lc-col lc-col-browser flex-1 min-w-[min(360px,100%)]">{browserCard}</div>
         </div>
 
         <div className="lc-cols">
-          <div className="lc-card lc-col">
+          <div className="lc-card lc-col flex-1 min-w-[min(360px,100%)]">
             <div className="lc-card-title">
               <span className="lc-card-title-text">{t('events.title')}</span>
               <div className="lc-kinds">
-                {EVENT_KINDS.map(k => (
-                  <button
-                    key={k}
-                    className={'lc-gran-btn' + (pickedKinds.includes(k) ? ' lc-gran-on lc-kind-' + k : '')}
-                    onClick={() => { toggleKind(k) }}
-                  >{t('kind.' + k)}</button>
-                ))}
+                {EVENT_KINDS.map((k) => {
+                  const n = kindCounts[k]
+                  return (
+                    <button
+                      key={k}
+                      data-kind={k}
+                      className={'lc-gran-btn' + (pickedKinds.includes(k) ? ' lc-gran-on lc-kind-' + k : '')}
+                      onClick={() => { toggleKind(k) }}
+                    >
+                      {t('kind.' + k)}
+                      {n !== undefined ? <span className="lc-kind-n">{kit.fmt(n)}</span> : null}
+                    </button>
+                  )
+                })}
               </div>
             </div>
             <EventList events={shownEvents} state={source.detailState} onRetry={source.retryDetail} />
           </div>
-          <FileCard activity={fileActivity} scope={fileScope} workspace={workspace} onOpen={fileOpener} onLocate={locateFileOp}
+          <FileCard activity={fileActivity} scope={fileScope} workspace={workspace}
+            onPreview={previewFile} onOpen={fileOpener} onLocate={locateFileOp}
             state={source.detailState} onRetry={source.retryDetail} />
         </div>
 

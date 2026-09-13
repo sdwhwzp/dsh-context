@@ -1,23 +1,36 @@
 // StatsContext (src/client/components/statsContext.tsx) rendered with real
-// React: the eight-cell 2×4 grid — session shape, the priced cost cell with
-// its rate tooltip, and the context-event tally — in both locales. The count
-// figures arrive precomputed (the split generation's wire head carries them);
-// `countsOfRecords` is the inline generation's derivation, pinned here to the
-// same totals.
+// React: the six-cell grid — session shape with the whole-session human-input
+// tally, the chat-line cache-hit cell, and the priced cost cell with its
+// per-model rate tooltip — in both locales, against an injected model-price
+// book (the store never reaches the network). The context-event tallies live
+// on the events card's kind filters (contextView.spec.ts); `countsOfRecords`
+// still derives every count the split generation's wire head carries, pinned
+// here.
 
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
-import { describe, test } from 'vitest'
+import { describe, test, beforeEach, afterEach } from 'vitest'
 import { countsOfRecords, makeStatsContext } from '../../../src/client/components/statsContext'
-import type { ContextEventRecord, RequestRecord, SessionCostUsage } from '../../../src/shared/types'
-import { makeKit, mount, query, queryAll, text } from '../helpers/kit'
+import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
+import type { ContextEventRecord, RequestRecord, SessionCostUsage, TokenUsage } from '../../../src/shared/types'
+import { flush, makeKit, mount, query, queryAll, text } from '../helpers/kit'
 
 const kit = makeKit()
 const kitZh = makeKit('zh')
 const StatsContext = makeStatsContext(kit)
 const StatsContextZh = makeStatsContext(kitZh)
 
-const COST: SessionCostUsage = { flash: { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } }
+/** A minimal real-shaped slice of the models.dev /api.json payload. */
+const PROVIDERS = {
+  deepseek: { models: { 'deepseek-v4-flash': { cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
+  zhipuai: { models: { 'glm-5.3-flash': { cost: { input: 0.075, output: 0.25, cache_read: 0.015, cache_write: 0 } } } },
+}
+
+const COST: SessionCostUsage = {
+  'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+}
+// Prompt-side billed input 300 (100 uncached + 200 read) → hit 66.6% truncated.
+const USAGE: TokenUsage = { uncachedInputTokens: 100, outputTokens: 50, cacheReadTokens: 200, cacheWriteTokens: 0 }
 
 function req(turn?: number): RequestRecord {
   return {
@@ -38,6 +51,15 @@ function cells(container: HTMLElement): { labels: string[]; values: string[] } {
   }
 }
 
+beforeEach(() => {
+  resetModelPrices()
+  setModelPricesLoader(() => Promise.resolve(PROVIDERS))
+})
+
+afterEach(() => {
+  resetModelPrices()
+})
+
 describe('countsOfRecords (the inline generation derivation)', () => {
   test('tallies distinct turns, records, and the three priced event kinds', () => {
     // Two steps in turn 1, one in turn 2, one without a turn (folds as turn 0).
@@ -55,61 +77,221 @@ describe('countsOfRecords (the inline generation derivation)', () => {
 })
 
 describe('StatsContext', () => {
-  test('folds the eight-cell grid: shape stats, cost, and the event tally', async () => {
+  test('folds the six-cell grid: shape stats, the cache-hit cell, and cost', async () => {
     const m = await mount(h(StatsContext, {
       counts: { turns: 3, steps: 4, injects: 3, compactions: 2, prunes: 1 },
+      humanInputs: 7,
       toolCalls: 3,
-      images: 2,
+      usage: USAGE,
       cost: COST,
       locale: 'en',
     }))
+    await flush()
     assert.ok(text(m.container).includes('Context Stats'))
     const { labels, values } = cells(m.container)
-    assert.equal(labels.length, 8)
-    assert.deepEqual(labels, [
-      'Turns', 'Steps', 'Tool Calls', 'Images',
-      'Cost?', 'Injections', 'Compactions', 'Prunes',
-    ])
-    assert.deepEqual(values, ['3', '4', '3', '2', '$0.30', '3', '2', '1'])
+    assert.equal(labels.length, 6)
+    assert.deepEqual(labels, ['Turns', 'Steps', 'Human Inputs?', 'Tool Calls', 'Cache Hit', 'Cost?'])
+    // 1M uncached input at the book's $0.15 miss rate.
+    assert.deepEqual(values, ['3', '4', '7', '3', '66.6%', '$0.15'])
     await m.unmount()
   })
 
-  test('absent counters and cost degrade to zeros and the dash', async () => {
+  test('absent counters, usage, and cost degrade to zeros and the dash', async () => {
     const m = await mount(h(StatsContext, {
       counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: null,
       locale: 'en',
     }))
-    assert.deepEqual(cells(m.container).values, ['0', '0', '0', '0', '—', '0', '0', '0'])
+    await flush()
+    assert.deepEqual(cells(m.container).values, ['0', '0', '0', '0', '—', '—'])
     await m.unmount()
+    // A usage report with nothing billed prompt-side dashes the hit too.
+    const zero: TokenUsage = { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+    const m2 = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: zero,
+      locale: 'en',
+    }))
+    await flush()
+    assert.deepEqual(cells(m2.container).values, ['0', '0', '0', '0', '—', '—'])
+    await m2.unmount()
   })
 
-  test('only the cost cell is tipped; the bubble lists both families with peak/off rates', async () => {
+  test('the cost bubble lists the billed models with their book rates', async () => {
     const m = await mount(h(StatsContext, {
       counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: null,
       cost: COST,
       locale: 'en',
     }))
-    assert.equal(queryAll(m.container, '.lc-stat-tip').length, 1)
-    assert.equal(queryAll(m.container, '.lc-stat-q').length, 1)
-    const tip = text(query(m.container, '.lc-stat-tip'))
-    assert.ok(tip.includes('Per-1M-token rates'))
-    assert.ok(tip.includes('deepseek-v4.1-flash'))
-    assert.ok(tip.includes('deepseek-v4-pro'))
-    assert.ok(tip.includes('miss $0.3/$0.15'))
-    assert.ok(tip.includes('output $1.2/$0.6'))
+    await flush()
+    assert.equal(queryAll(m.container, '.lc-stat-tip').length, 2)
+    assert.equal(queryAll(m.container, '.lc-stat-q').length, 2)
+    const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
+    assert.ok(tips[0].includes('question answerings'), 'the human-inputs tip explains its tally')
+    const costTip = tips[1]
+    assert.ok(costTip.includes('Per-1M-token rates:'))
+    assert.ok(costTip.includes('deepseek-v4-flash'))
+    assert.ok(costTip.includes('hit $0.003'))
+    assert.ok(costTip.includes('miss $0.15'))
+    assert.ok(costTip.includes('write $0.15'))
+    assert.ok(costTip.includes('output $0.6'))
+    assert.ok(costTip.includes('peak windows'), 'a DeepSeek session explains the peak/off-peak scheme')
+    assert.ok(!costTip.includes('peak|off-peak'), 'a peak-only session needs no pair header')
     await m.unmount()
   })
 
-  test('the zh locale localizes labels and prices the cost in CNY', async () => {
+  test('a non-DeepSeek session never sees DeepSeek-specific notes', async () => {
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: null,
+      cost: { 'zai-coding-cn': { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+      locale: 'en',
+    }))
+    await flush()
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    assert.ok(costTip.includes('glm-5.3-flash'))
+    assert.ok(!costTip.includes('DeepSeek'), 'the DeepSeek scheme note stays out of other providers’ bubbles')
+    await m.unmount()
+  })
+
+  test('a multi-provider session names the provider on each model row', async () => {
+    const two: SessionCostUsage = {
+      'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+      'zai-coding-cn': { 'glm-5.3-flash': { peak: { uncached: 2_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+    }
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: null,
+      cost: two,
+      locale: 'en',
+    }))
+    await flush()
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    assert.ok(costTip.includes('deepseek-v4-flash · deepseek-official'))
+    assert.ok(costTip.includes('glm-5.3-flash · zai-coding-cn'))
+    // 1M × $0.15 + 2M × $0.075 = $0.30.
+    assert.ok(cells(m.container).values.at(-1) === '$0.30')
+    await m.unmount()
+  })
+
+  test('the zh locale localizes labels and prices the cost in CNY at 1 CNY = 0.15 USD', async () => {
     const m = await mount(h(StatsContextZh, {
       counts: { turns: 1, steps: 1, injects: 0, compactions: 1, prunes: 0 },
+      usage: USAGE,
       cost: COST,
       locale: 'zh',
     }))
+    await flush()
     assert.ok(text(m.container).includes('上下文统计'))
     const { labels, values } = cells(m.container)
-    assert.deepEqual(labels, ['轮次', '步数', '工具调用', '图片', '预估费用?', '注入', '压缩', '剪枝'])
-    assert.deepEqual(values, ['1', '1', '0', '0', '¥2.00', '0', '1', '0'])
+    assert.deepEqual(labels, ['轮次', '步数', '用户输入?', '工具调用', '缓存命中', '预估费用?'])
+    // $0.15 / 0.15 = ¥1; the rates convert through the same fixed rate.
+    assert.deepEqual(values, ['1', '1', '0', '0', '66.6%', '¥1.00'])
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    assert.ok(costTip.includes('每百万 tokens 价格'))
+    assert.ok(costTip.includes('命中 ¥0.02'))
+    assert.ok(costTip.includes('未命中 ¥1'))
+    assert.ok(costTip.includes('写入 ¥1'))
+    assert.ok(costTip.includes('输出 ¥4'))
+    await m.unmount()
+  })
+
+  test('usage with no book yet stays a dash until the fetch lands', async () => {
+    setModelPricesLoader(() => new Promise(() => {}))
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: USAGE,
+      cost: COST,
+      locale: 'en',
+    }))
+    await flush()
+    assert.ok(cells(m.container).values.at(-1) === '—')
+    assert.ok(!text(m.container).includes('unavailable'), 'a pending fetch is not a failure')
+    await m.unmount()
+  })
+
+  test('a failed price fetch dashes the cell and notes the outage in the tip', async () => {
+    setModelPricesLoader(() => Promise.reject(new Error('down')))
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: USAGE,
+      cost: COST,
+      locale: 'en',
+    }))
+    await flush()
+    assert.ok(cells(m.container).values.at(-1) === '—')
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    assert.ok(costTip.includes('unavailable'))
+    assert.ok(!costTip.includes('Per-1M-token rates'))
+    await m.unmount()
+  })
+
+  test('a DeepSeek off-peak bucket prices at half and the tooltip shows the peak|off pair', async () => {
+    const split: SessionCostUsage = {
+      'deepseek-official': {
+        'deepseek-v4-flash': {
+          peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 },
+          off: { uncached: 2_000_000, cacheRead: 0, cacheWrite: 0, output: 0 },
+        },
+      },
+    }
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: null,
+      cost: split,
+      locale: 'en',
+    }))
+    await flush()
+    // 1M at the $0.15 peak miss rate + 2M at the $0.075 half-price rate.
+    assert.ok(cells(m.container).values.at(-1) === '$0.30')
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    assert.ok(costTip.includes('Per-1M-token rates (peak|off-peak)'), 'an off-peak bucket names the pair in the header')
+    assert.ok(costTip.includes('hit $0.003|$0.0015'))
+    assert.ok(costTip.includes('miss $0.15|$0.075'))
+    assert.ok(costTip.includes('write $0.15|$0.075'))
+    assert.ok(costTip.includes('output $0.6|$0.3'))
+    await m.unmount()
+  })
+
+  test('a session whose models the book cannot price notes the outage too', async () => {
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: USAGE,
+      cost: { 'future-provider': { 'mystery-model': { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+      locale: 'en',
+    }))
+    await flush()
+    assert.ok(cells(m.container).values.at(-1) === '—')
+    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[1]).includes('unavailable'))
+    await m.unmount()
+  })
+
+  test('a hostile cost branch is skipped by the tooltip rows, not fatal', async () => {
+    const hostile = {
+      junk: 5,
+      'zai-coding-cn': {
+        'glm-5.3-flash': {
+          peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 },
+          off: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 },
+        },
+      },
+    } as unknown as SessionCostUsage
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: USAGE,
+      cost: hostile,
+      locale: 'en',
+    }))
+    await flush()
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    assert.ok(costTip.includes('glm-5.3-flash'))
+    assert.ok(!costTip.includes('junk'))
+    // No row may show the peak|off-peak pair — that is DeepSeek's alone.
+    const rows = queryAll(m.container, '.lc-stat-tip-row').map(el => text(el))
+    assert.ok(rows.every(r => !r.includes('|')))
+    // Both buckets bill at list price: 2M × $0.075 — no half-price off-peak.
+    assert.ok(cells(m.container).values.at(-1) === '$0.15')
     await m.unmount()
   })
 })
@@ -134,7 +316,7 @@ describe('the ledger figure', () => {
   test('dsh-spend wins over the local estimate and brings its own currency', async () => {
     // The local estimate would price this usage in USD for an English locale;
     // the ledger answered in CNY, so the cell shows the ledger's money.
-    const m = await mount(h(StatsContext, { counts, cost: COST, spend, locale: 'en' }))
+    const m = await mount(h(StatsContext, { counts, usage: null, cost: COST, spend, locale: 'en' }))
     assert.ok(text(m.container).includes('¥12.50'))
     // The tooltip lists what the ledger priced, not the local rate table.
     const tip = text(query(m.container, '.lc-stat-tip-prices'))
@@ -149,9 +331,10 @@ describe('the ledger figure', () => {
 
   test('an absent or unpriced ledger falls back to the local estimate', async () => {
     for (const value of [null, undefined, { ...spend, cost: null }]) {
-      const m = await mount(h(StatsContext, { counts, cost: COST, spend: value, locale: 'en' }))
-      // The local table prices the fixture's 1M peak uncached flash tokens.
-      assert.ok(text(m.container).includes('$0.30'))
+      const m = await mount(h(StatsContext, { counts, usage: null, cost: COST, spend: value, locale: 'en' }))
+      await flush()
+      // The loaded price book prices the fixture's 1M peak uncached flash tokens.
+      assert.ok(text(m.container).includes('$0.15'))
       await m.unmount()
     }
   })
@@ -167,8 +350,8 @@ describe('the ledger figure', () => {
       ...usage(104_600, 77_600, 7_500_000, 0),
       byModel: [{ model: 'deepseek-v4.1-flash-expires-on-0910', provider: 'deepseek-official', cost: 0.1992, ...usage(104_600, 77_600, 7_500_000, 0) }],
     }
-    const m = await mount(h(StatsContextZh, { counts, cost: COST, spend: usd, locale: 'zh' }))
-    const shown = cells(m.container).values[4]
+    const m = await mount(h(StatsContextZh, { counts, usage: null, cost: COST, spend: usd, locale: 'zh' }))
+    const shown = cells(m.container).values.at(-1)
     assert.equal(shown, '¥1.42')
     const tip = text(query(m.container, '.lc-stat-tip-prices'))
     assert.ok(tip.includes('¥1.42'), tip)
@@ -192,8 +375,8 @@ describe('the ledger figure', () => {
         { model: 'glm-5v-turbo', provider: 'zai', cost: 0.1122, ...usage(40_000, 2_800, 247_700, 0) },
       ],
     }
-    const m = await mount(h(StatsContextZh, { counts, cost: COST, spend: family, locale: 'zh' }))
-    assert.equal(cells(m.container).values[4], '¥8.55')
+    const m = await mount(h(StatsContextZh, { counts, usage: null, cost: COST, spend: family, locale: 'zh' }))
+    assert.equal(cells(m.container).values.at(-1), '¥8.55')
     const tip = text(query(m.container, '.lc-stat-tip-prices'))
     for (const model of ['deepseek-v4-flash-vision-exp', 'deepseek-v4.1-flash-expires-on-0910', 'glm-5v-turbo']) {
       assert.ok(tip.includes(model), `${model} missing from ${tip}`)
@@ -205,7 +388,7 @@ describe('the ledger figure', () => {
   })
 
   test('a session that delegated nothing keeps the note off', async () => {
-    const m = await mount(h(StatsContextZh, { counts, cost: COST, spend, locale: 'zh' }))
+    const m = await mount(h(StatsContextZh, { counts, usage: null, cost: COST, spend, locale: 'zh' }))
     assert.ok(!text(m.container).includes('会话族'), 'a single-session figure claims no family')
     await m.unmount()
   })
@@ -213,6 +396,7 @@ describe('the ledger figure', () => {
   test('a ledger row with no model name still renders', async () => {
     const m = await mount(h(StatsContextZh, {
       counts,
+      usage: null,
       cost: COST,
       spend: { cost: 1, currency: 'USD', rates: { USD: 1, CNY: 7.13 }, sessions: 1, ...usage(1, 0, 0, 0), byModel: [{ model: null, provider: null, cost: 1, ...usage(1, 0, 0, 0) }] },
       locale: 'zh',

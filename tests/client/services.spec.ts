@@ -16,6 +16,7 @@ import {
   imageLoaderOf,
   numOf,
   openPathVia,
+  openResourceVia,
   timelineOf,
   timingOf,
   tokenUsageOf,
@@ -183,30 +184,77 @@ describe('timelineOf', () => {
     assert.ok(!('contextWindow' in dropped))
   })
 
-  test('images/toolCalls/surfaceFloor/archiveFloor are kept only when numbers', () => {
-    const kept = timelineOf({ current: 1, images: 3, toolCalls: 2, surfaceFloor: 10, archiveFloor: 4 })
+  test('images/toolCalls/humanInputs/surfaceFloor/archiveFloor are kept only when numbers', () => {
+    const kept = timelineOf({ current: 1, images: 3, toolCalls: 2, humanInputs: 5, surfaceFloor: 10, archiveFloor: 4 })
     assert.ok(kept !== null)
     assert.equal(kept.images, 3)
     assert.equal(kept.toolCalls, 2)
+    assert.equal(kept.humanInputs, 5)
     assert.equal(kept.surfaceFloor, 10)
     assert.equal(kept.archiveFloor, 4)
-    const dropped = timelineOf({ current: 1, images: 'n', toolCalls: {}, surfaceFloor: null, archiveFloor: true })
+    const dropped = timelineOf({ current: 1, images: 'n', toolCalls: {}, humanInputs: 'x', surfaceFloor: null, archiveFloor: true })
     assert.ok(dropped !== null)
     assert.ok(!('images' in dropped))
     assert.ok(!('toolCalls' in dropped))
+    assert.ok(!('humanInputs' in dropped))
     assert.ok(!('surfaceFloor' in dropped))
     assert.ok(!('archiveFloor' in dropped))
   })
 
-  test('cost is kept only when a plain non-array object', () => {
-    const cost = { 'deepseek-v4-flash': { peak: { input: 1 } } }
+  test('cost is rebuilt per provider/model/period; garbage drops or zeroes', () => {
+    const cost = {
+      'deepseek-official': {
+        'deepseek-v4-flash': {
+          peak: { uncached: 5, cacheRead: 'x', cacheWrite: null, output: 7 },
+          off: { uncached: 1, cacheRead: 2, cacheWrite: 3, output: 4 },
+          junk: { uncached: 9, cacheRead: 0, cacheWrite: 0, output: 0 },
+          broken: null,
+          'broken-array': [],
+        },
+        'deepseek-v4-pro': { peak: [], off: null },
+        'broken-null': null,
+        'broken-array': [],
+      },
+      junk: 'not-a-record',
+      empty: {},
+    }
     const kept = timelineOf({ current: 1, cost })
     assert.ok(kept !== null)
-    assert.equal(kept.cost, cost)
+    assert.deepEqual(kept.cost, {
+      'deepseek-official': {
+        'deepseek-v4-flash': {
+          peak: { uncached: 5, cacheRead: 0, cacheWrite: 0, output: 7 },
+          off: { uncached: 1, cacheRead: 2, cacheWrite: 3, output: 4 },
+        },
+        'deepseek-v4-pro': {},
+      },
+      empty: {},
+    })
+    assert.notEqual(kept.cost, cost, 'the served buckets are a rebuilt copy, never the raw value')
     for (const bad of [[], null, 5]) {
       const out = timelineOf({ current: 1, cost: bad })
       assert.ok(out !== null)
       assert.ok(!('cost' in out))
+    }
+  })
+
+  test('a well-formed payload with a proven cost takes the fast path; a garbage cost diverts to the sanitizer', () => {
+    const cost = { 'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1, cacheRead: 2, cacheWrite: 3, output: 4 } } } }
+    const good = timelineOf({
+      current: { system: 1, tools: 1, user: 1, inject: 1, assistant: 1, tool: 1, total: 7 },
+      requests: [], events: [], nodes: [], archive: [],
+      cost,
+    })
+    assert.ok(good !== null)
+    assert.equal(good.cost, cost, 'the fast path passes a structurally proven cost through untouched')
+    for (const bad of [[], 'junk']) {
+      const diverted = timelineOf({
+        current: { system: 1, tools: 1, user: 1, inject: 1, assistant: 1, tool: 1, total: 7 },
+        requests: [], events: [], nodes: [], archive: [],
+        cost: bad,
+      })
+      assert.ok(diverted !== null)
+      assert.ok(!('cost' in diverted), 'a hostile cost drops through the sanitizer')
     }
   })
 
@@ -797,5 +845,40 @@ describe('sessionSpendOf', () => {
     // A non-array byModel still yields an empty split.
     const odd = await sessionSpendOf(ctxWith({ connection: conn(() => ({ ok: true, value: { cost: 2, byModel: 'nope', currency: 7 } })) }), 's1')
     assert.deepEqual(odd, { cost: 2, currency: 'USD', rates: { USD: 1, CNY: 0 }, sessions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, byModel: [] })
+  })
+})
+
+describe('openResourceVia', () => {
+  const ctxWith = (services: Record<string, unknown>): ClientCtx => ({ get: (name: string) => services[name] }) as unknown as ClientCtx
+
+  test('forwards the address to the Sidebar face and reports the open', () => {
+    const opened: string[] = []
+    const open = openResourceVia(ctxWith({ sidebarRight: { openResource: (address: string) => { opened.push(address) } } }))
+    assert.ok(open !== undefined)
+    assert.equal(open('dsh-resource://file/session/s1/a.ts'), true)
+    assert.deepEqual(opened, ['dsh-resource://file/session/s1/a.ts'])
+  })
+
+  test('an absent or hostile face yields no opener at all', () => {
+    assert.equal(openResourceVia(ctxWith({})), undefined)
+    assert.equal(openResourceVia(ctxWith({ sidebarRight: null })), undefined)
+    assert.equal(openResourceVia(ctxWith({ sidebarRight: {} })), undefined)
+    assert.equal(openResourceVia(ctxWith({ sidebarRight: { openResource: 7 } })), undefined)
+    // A service lookup itself may throw.
+    assert.equal(openResourceVia({ get: () => { throw new Error('boom') } } as unknown as ClientCtx), undefined)
+  })
+
+  test('a refusal reports false instead of throwing, so the caller can fall back', () => {
+    const open = openResourceVia(ctxWith({ sidebarRight: { openResource: () => { throw new Error('no type claims it') } } }))
+    assert.equal(open!('dsh-resource://file/session/s1/a.ts'), false)
+  })
+
+  test('the face is re-proved per call: a revoked service refuses after the opener was built', () => {
+    const services: Record<string, unknown> = { sidebarRight: { openResource: () => {} } }
+    const open = openResourceVia(ctxWith(services))
+    assert.ok(open !== undefined)
+    // The plugin unloaded (HMR): the written face is gone.
+    services.sidebarRight = undefined
+    assert.equal(open('dsh-resource://file/session/s1/a.ts'), false)
   })
 })

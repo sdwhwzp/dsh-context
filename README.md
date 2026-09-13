@@ -47,8 +47,8 @@ Open any session and click the **Context / 上下文** tab:
 
 | Card | The question it answers |
 | --- | --- |
-| **Context Stats** | Turns, steps, live tool calls & images, context-event tallies — plus a list-price cost estimate (hover the `?` for per-1M rates). |
-| **Token Stats** | Where the billed tokens went: cache read/write, uncached input, output — around the cache-hit ring. |
+| **Context Stats** | Turns, steps, human inputs, live tool calls, and the session's cache-hit rate. Cost uses the authorized dsh-spend session-family ledger and its display currency when available; otherwise it estimates from models.dev list prices, including DeepSeek peak/off-peak rates. Hover the `?` for the displayed amount's source and model breakdown. |
+| **Token Stats** | Where the billed tokens went — the same total as the chat stats line under the composer, split by composition (system, tools, messages…) with the provider-exact output closing the ring. |
 | **Timing Stats** | How active time split across model calls, tool runs, and overhead. |
 | **Current Context** | What's in the window *right now*. |
 | **Context Trend** | Every request's size — and its story. |
@@ -102,7 +102,7 @@ Pick **Live (next request)** or any retained step, and browse what that request 
 
 ![Context Events with a compaction](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-events.png)
 
-Every injection, compaction, prune, model switch, and plan-mode toggle — labeled with its producer (instruction file, plugin id, skill name), its net token delta (compactions show what they reclaimed), turn/step, and time. The **Inject / Compact / Prune / Switch / Mode** chips filter the log by kind.
+Every injection, compaction, prune, model switch, and plan-mode toggle — labeled with its producer (instruction file, plugin id, skill name), its net token delta (compactions show what they reclaimed), turn/step, and time. The **Inject / Compact / Prune / Switch / Mode** chips filter the log by kind, each carrying its whole-session event tally.
 
 ### 📁 File Activity — what the agent did to your files
 
@@ -115,6 +115,7 @@ One row per touched file — read, written, or searched — aggregated up to whi
 - **Every mode counts** — native tools, the Minimal preset's `str_replace_editor`, and the nested calls inside PTC `run_code` programs are all folded into per-tool rows.
 - **Searches land on real files** — matched files get their own ops rows with hit counts.
 - **Click a row** to expand its full operation log — every op jumps straight to the exact tool result in the Context browser.
+- **Click a file name** to open its preview in the right Sidebar (dsh 0.1.5-rc.1+), exactly as the built-in Files sidebar does — the same viewer, the same tab-per-file behavior. On a harness without that column the name opens on your system as before.
 
 ### 🕸 Agent Network — the family portrait
 
@@ -140,7 +141,7 @@ In **Settings → Plugins → Plugin configuration**, the **Context** card holds
 
 ## Good to know
 
-- **Estimates vs actuals** — category figures use dsh's own fixed-density heuristic (the same one as its built-in token meter); the pinned trend details and Token/Timing rings show provider-reported actuals next to them.
+- **Estimates vs actuals** — category figures use dsh's own fixed-density heuristic (the same one as its built-in token meter); the pinned trend details show provider-reported actuals next to them, and the Token card pairs its ≈-estimated composition shares with the provider-exact billed total.
 - **Compatibility** — works on `@deepseek-ai/dsh` **0.1.2-rc1+**, across the V0 (0.1.2-rc.x), V2 (0.1.3-alpha.x), and V3 (0.1.5-alpha.x+) session-log generations. The per-release matrix and how it is verified: [docs/compatibility.md](docs/compatibility.md).
 - **I18n** — UI in English and 简体中文.
 

@@ -53,7 +53,9 @@ describe('Donut', () => {
     }))
     const circles = queryAll(m.container, 'circle')
     assert.equal(circles.length, 1)
-    assert.equal(circles[0].getAttribute('stroke'), '#ffffff')
+    // The color rides inline style (var() values can't live in a stroke attribute);
+    // jsdom reports the style keyword in its normalized rgb() spelling.
+    assert.equal(circles[0].style.stroke, 'rgb(255, 255, 255)')
     await m.unmount()
   })
 
@@ -124,6 +126,22 @@ describe('Donut slice divider', () => {
     const [tiny, rest] = queryAll(m.container, '.lc-donut-seg')
     assert.ok(Math.abs(lenOf(tiny) - 0.1) < 1e-9)
     assert.ok(Math.abs(lenOf(rest) - 99.3) < 1e-9)
+    await m.unmount()
+  })
+})
+
+describe('Donut entrance sweep', () => {
+  test('segments carry the sweep-in stagger slot in paint order', async () => {
+    const m = await mount(h(Donut, {
+      segments: [
+        { key: 'a', color: '#ff0000', value: 30 },
+        { key: 'b', color: '#00ff00', value: 70 },
+      ],
+      centerTop: 'x',
+    }))
+    const arcs = queryAll(m.container, '.lc-donut-seg')
+    assert.equal((arcs[0] as HTMLElement).style.getPropertyValue('--lc-i'), '0')
+    assert.equal((arcs[1] as HTMLElement).style.getPropertyValue('--lc-i'), '1')
     await m.unmount()
   })
 })

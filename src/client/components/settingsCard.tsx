@@ -44,7 +44,7 @@ function PrefRow(props: PrefRowProps): ReactElement {
         anchor={(
           <button
             type="button"
-            className="lc-settings-select"
+            className="lc-settings-select hover:enabled:bg-(--dsw-alias-interactive-bg-hover) disabled:opacity-50 disabled:cursor-default"
             disabled={props.disabled}
             aria-haspopup="menu"
             aria-expanded={open}
@@ -97,6 +97,17 @@ export function makeSettingsCard(kit: ViewKit): (props: SettingsCardProps) => Re
               {!state.writable && state.status === 'ready'
                 ? <p className="lc-settings-note" role="status">{t('settings.readOnly')}</p>
                 : null}
+              <PrefRow
+                label={t('settings.placement')}
+                value={state.placement}
+                disabled={disabled}
+                options={[
+                  { id: 'all', label: t('placement.all') },
+                  { id: 'tab', label: t('placement.tab') },
+                  { id: 'sidebar', label: t('placement.sidebar') },
+                ]}
+                onPick={(id) => { props.set?.('defaultPlacement', id) }}
+              />
               <PrefRow
                 label={t('settings.gran')}
                 value={state.granularity}

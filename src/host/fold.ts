@@ -19,7 +19,8 @@
  *   the request/event records are the raw material of `buildTimelineView`.
  */
 
-import type { Category, ContextEventRecord, ContextTimelineDetail, CostFamilyUsage, FileOpRecord, RequestRecord, SessionCostUsage, Snapshot, SurfaceNode, SystemPromptNode, TimingTotals, ToolTimingTotals } from '../shared/types'
+import type { Category, ContextEventRecord, ContextTimelineDetail, CostModelUsage, FileOpRecord, RequestRecord, SessionCostUsage, Snapshot, SurfaceNode, SystemPromptNode, TimingTotals, ToolTimingTotals } from '../shared/types'
+import { isDeepSeekProvider } from '../shared/providers'
 import { estimateSystemContent, estimateSystemTokens } from '../shared/estimate'
 import type { FoldBounds } from './config'
 import {
@@ -116,13 +117,21 @@ export interface TimelineState {
    */
   archived: SurfaceNode[]
   /**
-   * Session-cost raw material: cumulative billed-token totals per DeepSeek
-   * model family and pricing period (see SessionCostUsage). Running
-   * totals — never trimmed, so the estimate always covers the COMPLETE
-   * session log even after the request/event retention bounds cut in.
-   * Absent until a DeepSeek flash/pro request reports usage.
+   * Session-cost raw material: cumulative billed-token totals per
+   * (provider, model), split into pricing periods for DeepSeek (see
+   * SessionCostUsage / CostModelUsage). Running totals — never trimmed, so
+   * the estimate always covers the COMPLETE session log even after the
+   * request/event retention bounds cut in. Absent until a usage-reporting
+   * request with a known model folds.
    */
   cost?: SessionCostUsage
+  /**
+   * Whole-session human-input tally (see Snapshot.humanInputs): every
+   * non-injection `user/message` plus every answered `ask_user_question`
+   * result. Running total — never trimmed, like `cost`/`timing`. Absent until
+   * the first human input folds.
+   */
+  humanInputs?: number
   archiveFloor?: number
   /**
    * The detail collections' revision marker (see ContextTimelineDetail):
@@ -637,32 +646,16 @@ function tokenCountOf(value: unknown): number | null {
 }
 
 /**
- * The DeepSeek model family a model name prices as — matched on the NAME
- * alone (provider-agnostic: official API, proxies, OpenRouter spellings like
- * `deepseek/deepseek-v4.1-flash` and `deepseek/deepseek-flash` all land
- * here). The name must carry a DeepSeek marker (`v4` or `deepseek`) so a
- * foreign flash/pro-named model (gemini-2.0-flash) is never priced.
- */
-function costFamilyOf(model: string | undefined): 'flash' | 'pro' | null {
-  if (model === undefined) return null
-  const m = model.toLowerCase()
-  if (!m.includes('v4') && !m.includes('deepseek')) return null
-  if (m.includes('flash')) return 'flash'
-  if (m.includes('pro')) return 'pro'
-  return null
-}
-
-/**
- * DeepSeek's peak windows (Beijing Time, UTC+8): 09:00-12:00 and 14:00-18:00
- * on weekdays; off-peak (half the peak rate) covers all other hours plus all
- * of Saturday and Sunday.
+ * DeepSeek's peak windows (the official list: UTC 01:00–04:00 and 06:00–10:00,
+ * Monday through Friday — Beijing Time 09:00–12:00 and 14:00–18:00). All other
+ * hours, plus entire weekends, bill at the half-price off-peak rate.
  */
 function isPeakUtc(time: number): boolean {
-  const bj = new Date(time + 8 * 3600_000)
-  const day = bj.getUTCDay()
+  const at = new Date(time)
+  const day = at.getUTCDay()
   if (day === 0 || day === 6) return false
-  const h = bj.getUTCHours()
-  return (h >= 9 && h < 12) || (h >= 14 && h < 18)
+  const h = at.getUTCHours()
+  return (h >= 1 && h < 4) || (h >= 6 && h < 10)
 }
 
 /**
@@ -671,24 +664,31 @@ function isPeakUtc(time: number): boolean {
  * previous state — the apply contract never mutates it in place). The
  * buckets arrive sanitized ({@link BilledUsage}), so the totals stay at the
  * schemas' non-negative safe integers no matter what the provider reported.
+ * The key is the request envelope's (provider, model) face — the exact
+ * lookup the Client's model-price book resolves (models.dev). A request
+ * without a provider still accumulates (under the '' key) and the Client
+ * prices it when the model id is unambiguous; without a model there is
+ * nothing to price. DeepSeek's period-based list splits the buckets
+ * (peak windows at list price, all other hours half price); every other
+ * provider books everything under the list-price period.
  */
 function accumulateCost(st: TimelineState, time: number, usage: BilledUsage): void {
-  const family = costFamilyOf(st.model)
-  if (family === null) return
-  const prev: SessionCostUsage = st.cost ?? {}
-  const fam: CostFamilyUsage = prev[family] ?? {}
-  const period = isPeakUtc(time) ? 'peak' : 'off'
-  const b = fam[period] ?? { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
-  const nextFam: CostFamilyUsage = { ...fam }
-  nextFam[period] = {
+  const model = st.model
+  if (model === undefined) return
+  const provider = st.provider ?? ''
+  const period = isDeepSeekProvider(provider) && !isPeakUtc(time) ? 'off' : 'peak'
+  const models = st.cost?.[provider] ?? {}
+  const periods = models[model] ?? {}
+  const b = periods[period] ?? { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
+  const nextPeriods: CostModelUsage = { ...periods }
+  nextPeriods[period] = {
     uncached: b.uncached + usage.input,
     cacheRead: b.cacheRead + usage.cacheRead,
     cacheWrite: b.cacheWrite + usage.cacheWrite,
     output: b.output + usage.output,
   }
-  const next: SessionCostUsage = { ...prev }
-  next[family] = nextFam
-  st.cost = next
+  const nextModels: Record<string, CostModelUsage> = { ...models, [model]: nextPeriods }
+  st.cost = { ...(st.cost ?? {}), [provider]: nextModels }
 }
 
 /**
@@ -702,6 +702,14 @@ function accumulateCost(st: TimelineState, time: number, usage: BilledUsage): vo
 
 /** The timing card's per-tool ranking cap: the busiest 16 names are kept. */
 const TOOL_TIMING_CAP = 16
+
+/**
+ * The interactive Q&A tool (`dsh-tool-ask-user`): its settled result IS the
+ * user's answer, so it folds into the human-input tally alongside the user's
+ * own messages. One result = one answer submission, however many questions
+ * the prompt carried.
+ */
+const ASK_USER_TOOL = 'ask_user_question'
 
 /** The decode buckets of the generation split, in card order (see TimingTotals). */
 const DECODE_KINDS: readonly DecodeKind[] = ['reasoning', 'text', 'toolarg']
@@ -1027,6 +1035,10 @@ export function applyTimeline(state: TimelineState, event: TimelineEvent, bounds
             }
           }
           s.events.push(rec)
+        } else {
+          // The user's own message (the exact set the surface's `user`
+          // category holds): one human input, whole-session tally.
+          s.humanInputs = (s.humanInputs ?? 0) + 1
         }
         break
       }
@@ -1049,6 +1061,10 @@ export function applyTimeline(state: TimelineState, event: TimelineEvent, bounds
         const s = ensure()
         bumpDetailRev(s)
         const node = applySurface(s, event, event.type, data, toolMsg)
+        // An answered question prompt is a human input too (whole-session
+        // tally): the result only carries its tool name when it pairs with
+        // the armed call, so an unpaired/foreign one counts nothing.
+        if (node.tool === ASK_USER_TOOL) s.humanInputs = (s.humanInputs ?? 0) + 1
         // The file-op derivation (shared/fileOps.ts): the armed call's
         // arguments + the result's presentation meta. Unpaired results book
         // nothing (parity with the surface node's missing tool label).
@@ -1278,6 +1294,9 @@ function headFieldsOf(state: TimelineState): Snapshot {
     // count. Calls still in flight (no result yet) and results compacted or
     // pruned out of the surface are both excluded.
     toolCalls: state.surface.reduce((n, node) => node.cat === 'tool' ? n + 1 : n, 0),
+    // The whole-session human-input tally (see TimelineState.humanInputs) —
+    // a running total, so unlike turns/steps it covers the COMPLETE log.
+    humanInputs: state.humanInputs ?? 0,
     requests: [],
     events: [],
     nodes: [],
@@ -1287,18 +1306,18 @@ function headFieldsOf(state: TimelineState): Snapshot {
   // The cost totals ride the wire as COPIES (same rule as the collections:
   // the served value must never alias persisted state).
   if (state.cost !== undefined) {
-    const copyFam = (f: CostFamilyUsage | undefined): CostFamilyUsage | undefined => {
-      if (f === undefined) return undefined
-      const out: CostFamilyUsage = {}
-      if (f.peak !== undefined) out.peak = { ...f.peak }
-      if (f.off !== undefined) out.off = { ...f.off }
-      return out
-    }
     const cost: SessionCostUsage = {}
-    const flash = copyFam(state.cost.flash)
-    if (flash !== undefined) cost.flash = flash
-    const pro = copyFam(state.cost.pro)
-    if (pro !== undefined) cost.pro = pro
+    for (const provider in state.cost) {
+      const models: Record<string, CostModelUsage> = {}
+      for (const model in state.cost[provider]) {
+        const periods = state.cost[provider][model]
+        const copy: CostModelUsage = {}
+        if (periods.peak !== undefined) copy.peak = { ...periods.peak }
+        if (periods.off !== undefined) copy.off = { ...periods.off }
+        models[model] = copy
+      }
+      cost[provider] = models
+    }
     result.cost = cost
   }
   // The timing totals ride the wire as COPIES too (per-name rows included).
