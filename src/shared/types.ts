@@ -46,7 +46,13 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
   }
 }
 
-export type Category = 'user' | 'inject' | 'assistant' | 'tool'
+/**
+ * The priced surface buckets. `skill` carries every skill-machinery content
+ * the harness injects (issue #66): the `<available_skills>` catalog digest,
+ * a user-explicit `/name` invocation's instructions message, and the content
+ * a `skill`-tool load returns (modeled as a tool result by the harness).
+ */
+export type Category = 'user' | 'inject' | 'skill' | 'assistant' | 'tool'
 
 /**
  * One live system-prompt node (Snapshot.systems) — the harness models the
@@ -141,6 +147,7 @@ export interface Snapshot {
     tools: number
     user: number
     inject: number
+    skill: number
     assistant: number
     tool: number
     total: number
@@ -252,6 +259,17 @@ export interface Snapshot {
  */
 export interface ContextTimelineDetail {
   rev: number
+  /**
+   * The slim wire head at the SAME fold cut as the collections: the
+   * composition scalars (`current`), the window/model envelope, and the
+   * precomputed counts. Sessions listed cold (never attached since the
+   * requesting unit last changed) carry no `contextTimeline` projection row
+   * for the browser's list reads, so the Agent network card fetches this
+   * head per node to render their composition rings. The host always serves
+   * it; optional so a payload missing it still serves the collections (the
+   * detail cards) and only the ring composition degrades.
+   */
+  head?: ContextTimeline
   requests: RequestRecord[]
   events: ContextEventRecord[]
   nodes: SurfaceNode[]
@@ -482,6 +500,14 @@ export interface SurfaceNode {
    */
   gone?: number
   form?: string
+  /**
+   * The producer identity the matching inject event names (host pricing.ts
+   * `injectionSourceName`: the plugin id, the reconciled instruction files,
+   * or the durable kind). Stamped on injection nodes alongside the event, so
+   * the browser rows label them the way the events card does; absent when the
+   * source carries no readable identity or the node predates the stamp.
+   */
+  name?: string
   text?: string
   tool?: string
   err?: boolean
@@ -503,6 +529,13 @@ export interface RequestRecord {
   tool: number
   total: number
   prompt?: number
+  /**
+   * Skill-machinery tokens of this request (the `skill` composition
+   * category — catalog digests, invocation instructions, `skill`-tool
+   * loads). Always written by the current fold; absent on rows folded
+   * before the category existed (read as 0).
+   */
+  skill?: number
   /**
    * Billed cache-read (served) prompt tokens of this request — the
    * hit-rate numerator against `prompt` (input + cacheRead + cacheWrite).

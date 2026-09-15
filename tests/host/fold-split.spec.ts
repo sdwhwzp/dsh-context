@@ -144,7 +144,7 @@ describe('buildTimelineHead', () => {
 })
 
 describe('buildTimelineDetail', () => {
-  test('serves the same collections the inline view serves, plus the revision', () => {
+  test('serves the same collections the inline view serves, plus the revision and the head', () => {
     const { state, view } = driveTimeline(canonicalLog())
     const detail = buildTimelineDetail(state, resolveBounds({}))
     assert.equal(detail.rev, 6)
@@ -155,6 +155,11 @@ describe('buildTimelineDetail', () => {
     assert.deepEqual(detail.archive, view.archive)
     assert.equal(detail.surfaceFloor, view.surfaceFloor)
     assert.equal(detail.archiveFloor, view.archiveFloor)
+    // The slim head rides at the SAME cut: the composition the Agent
+    // network's cold-node ring fetch renders from.
+    assert.ok(detail.head !== undefined)
+    assert.deepEqual(detail.head.current, view.current)
+    assert.deepEqual(detail.head.counts, buildTimelineHead(state).counts)
     assertPlainJson(detail)
     // The detail never aliases the persisted state.
     assert.notEqual(detail.requests[0], state.requests[0])
@@ -206,7 +211,7 @@ describe('the split wire generation (definition slim flag)', () => {
     const detail = buildTimelineDetail(state, resolveBounds({}))
     const inline = timelineDef({}, false).wire.view(state)
     const { counts: _counts, last: _last, detailRev: _rev, ...headScalars } = head
-    const { rev: _detailRev, ...collections } = detail
+    const { rev: _detailRev, head: _detailHead, ...collections } = detail
     assert.deepEqual(inline, { ...headScalars, ...collections })
   })
 })

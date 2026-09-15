@@ -373,7 +373,7 @@ export function timelineOf(value: unknown): ContextTimeline | null {
   // every collection must be a real list. Anything else takes the slow path
   // and is rebuilt into the safe shape below.
   const numericBreakdown = current !== null && typeof current === 'object'
-    && ['system', 'tools', 'user', 'inject', 'assistant', 'tool', 'total']
+    && ['system', 'tools', 'user', 'inject', 'skill', 'assistant', 'tool', 'total']
       .every(k => typeof (current as Record<string, unknown>)[k] === 'number')
   if (numericBreakdown
     && recordsOnly(data.requests)
@@ -406,6 +406,7 @@ export function timelineOf(value: unknown): ContextTimeline | null {
       tools: numOf(safeCurrent.tools),
       user: numOf(safeCurrent.user),
       inject: numOf(safeCurrent.inject),
+      skill: numOf(safeCurrent.skill),
       assistant: numOf(safeCurrent.assistant),
       tool: numOf(safeCurrent.tool),
       total: numOf(safeCurrent.total),
@@ -708,7 +709,13 @@ export function headersOf(value: unknown): ContextHeaders | null {
 
 export interface TriggerCandidate {
   name: string
+  /** Display title; the name itself when absent (a differing title renders the name as a trailing alias). */
+  label?: string
+  /** Visual heading of this candidate's group; its presence suppresses the menu's source-title row. */
+  section?: string
   description?: string
+  /** Row glyph, rendered at a 16px edge. */
+  icon?: ComponentType<{ size?: number }>
 }
 
 /** Pick-moment snapshot of the trigger token span (draftRev CAS). */

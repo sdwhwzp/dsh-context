@@ -30,11 +30,12 @@ import type { TimelineState } from './fold'
 const surfaceNodeSchema = z.object({
   seq: z.number().int().nonnegative(),
   time: z.number().optional(),
-  cat: z.enum(['user', 'inject', 'assistant', 'tool']),
+  cat: z.enum(['user', 'inject', 'skill', 'assistant', 'tool']),
   tokens: z.number().int().nonnegative(),
   imgs: z.number().int().nonnegative().optional(),
   gone: z.number().int().nonnegative().optional(),
   form: z.string().optional(),
+  name: z.string().optional(),
   text: z.string().optional(),
   tool: z.string().optional(),
   err: z.boolean().optional(),
@@ -62,6 +63,11 @@ const requestRecordSchema = z.object({
   tool: z.number().int().nonnegative(),
   total: z.number().int().nonnegative(),
   prompt: z.number().int().nonnegative().optional(),
+  /**
+   * Skill-machinery tokens (issue #66). The fold writes it on every record;
+   * optional so rows folded before the category existed still parse.
+   */
+  skill: z.number().int().nonnegative().optional(),
   cacheRead: z.number().int().nonnegative().optional(),
   output: z.number().int().nonnegative().optional(),
   stepCount: z.number().int().positive().optional(),
@@ -112,6 +118,7 @@ const currentSchema = z.object({
   tools: z.number().int().nonnegative(),
   user: z.number().int().nonnegative(),
   inject: z.number().int().nonnegative(),
+  skill: z.number().int().nonnegative(),
   assistant: z.number().int().nonnegative(),
   tool: z.number().int().nonnegative(),
   total: z.number().int().nonnegative(),
@@ -221,6 +228,7 @@ const timelineStateSchema = z.object({
   sums: z.object({
     user: z.number().int().nonnegative(),
     inject: z.number().int().nonnegative(),
+    skill: z.number().int().nonnegative(),
     assistant: z.number().int().nonnegative(),
     tool: z.number().int().nonnegative(),
   }).strict(),
@@ -367,7 +375,13 @@ export function createContextTimelineDefinition(config: Config, slim: () => bool
     // provider books everything under `peak`). The old shape cannot be
     // reinterpreted, so cached rows refold from the log, which rebuilds the
     // periods.
-    stateVersion: 18,
+    //
+    // 19: the skill-machinery composition bucket (`skill`) joined the state —
+    // skill-catalog digests and `/name` invocation messages left `inject`, and
+    // `skill`-tool loads left `tool` (issue #66). The re-bucketing changes
+    // the fold's per-category sums, so cached rows refold from the log, which
+    // rebuilds them under the new categories.
+    stateVersion: 19,
   }
   return definition
 }

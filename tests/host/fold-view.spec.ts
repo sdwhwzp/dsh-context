@@ -228,6 +228,22 @@ describe('buildTimelineView serving window', () => {
     assert.equal('surfaceFloor' in view, false)
   })
 
+  test('skill nodes pin like injects when the window overflows (issue #66)', () => {
+    const { view } = driveTimeline([
+      userMessage(1, [{ type: 'text', text: '<available_skills>' }], { kind: 'skill-catalog', form: 'catalog' }),
+      userMessage(2, [{ type: 'text', text: 'x1' }]),
+      userMessage(3, [{ type: 'text', text: 'x2' }]),
+      toolCall(4, { callId: 'c1', name: 'skill' }),
+      toolResult(5, { callId: 'c1', content: [{ type: 'text', text: '<skill_content name="pdf">body</skill_content>' }] }),
+    ], { maxNodes: 2 })
+    // Surface nodes are 1 (catalog), 2, 3 (plain user) and 5 (the skill load —
+    // the tool/call at seq 4 carries no surface node). The catalog pins ahead
+    // of the tail; the single dropped plain message sets the floor.
+    assert.deepEqual((view.nodes as SurfaceNode[]).map(n => n.seq), [1, 3, 5])
+    assert.equal(view.droppedNodes, 1)
+    assert.equal(view.surfaceFloor, 2, 'the floor is the newest unserved non-skill seq')
+  })
+
   test('archiveFloor rides through when the state carries one', () => {
     const st = createTimelineState()
     st.archiveFloor = 7

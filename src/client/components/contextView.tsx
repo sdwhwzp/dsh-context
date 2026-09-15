@@ -34,7 +34,7 @@ import { countsOfRecords, makeStatsContext } from './statsContext'
 import { makeStatsTiming } from './statsTiming'
 import { makeStatsTokens } from './statsTokens'
 import { makeLegend, makeStackedBar } from './stackedBar'
-import { aggregateByTurn, attachMarkers, jumpTargetOf, makeTrendChart } from './trendChart'
+import { aggregateByTurn, attachMarkers, jumpTargetOf, makeTrendChart, turnStepsOf } from './trendChart'
 
 import { takeContextFocus } from '../viewFocus'
 import { makeErrorBoundary } from './errorBoundary'
@@ -211,6 +211,9 @@ export function makeContextView(
       () => (granularity === 'turn' ? aggregateByTurn(requests) : requests),
       [requests, granularity],
     )
+    // The step labels' per-turn totals ("第 s 步 (共 n 步)"), tallied over the RAW step records — turn-mode
+    // aggregates read their own stepCount instead.
+    const stepsOf = useMemo(() => turnStepsOf(requests), [requests])
     const markers = useMemo(() => attachMarkers(displayRequests, events), [displayRequests, events])
 
     // Chat → Context jump, leg 1: pick up the assistant-action relay's request for this session (once per mount).
@@ -371,7 +374,7 @@ export function makeContextView(
     if (activeReq !== null && filesBefore !== null) {
       fileScope = activeReq.stepCount !== undefined && activeReq.stepCount > 1
         ? t('detail.turn', { t: activeReq.turn ?? 0, n: activeReq.stepCount })
-        : t('detail.step', { t: activeReq.turn ?? 0, s: activeReq.step ?? 0 })
+        : t('detail.step', { t: activeReq.turn ?? 0, s: activeReq.step ?? 0, n: stepsOf(activeReq.turn) })
     }
 
     // Turn highlight is hover-only: the turn strip hover wins, then the hovered bar's turn — no fallback, so a pinned or default selection
@@ -487,6 +490,7 @@ export function makeContextView(
                 marker={activeReq !== null ? markerOf(activeReq) : undefined}
                 brief={brief}
                 convOf={convOf}
+                stepsOf={stepsOf}
                 onLocate={locateNode}
                 hoverKey={trendHoverCat}
               />
@@ -551,7 +555,7 @@ export function makeContextView(
           <div className="lc-card lc-col flex-1 min-w-[min(360px,100%)]">
             <div className="lc-card-title">
               <span className="lc-card-title-text">{t('events.title')}</span>
-              <div className="lc-kinds">
+              <div className="lc-kinds @max-[380px]/lc-card:flex-wrap">
                 {EVENT_KINDS.map((k) => {
                   const n = kindCounts[k]
                   return (

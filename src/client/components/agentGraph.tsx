@@ -6,9 +6,13 @@
  *
  * Data rides the harness's existing planes end to end — the session-list
  * snapshot (`ctx.sessions.list`: lineage rows + per-session projection
- * values) and the tab's own projections for the current node — so the card
- * adds no RPC of its own beyond one direct-child catalog refresh per
- * session. A harness without the outward sessions service hides the card.
+ * values) and the tab's own projections for the current node. The list block
+ * serves projection values only from the host's projection cache, so a
+ * relative that never attached since the timeline unit last changed lists
+ * pressure-only (occupancy without composition); those nodes fetch their slim
+ * head from the plugin's `/api` detail route (the one call below) and
+ * re-render composed. A harness without the outward sessions service hides
+ * the card.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactElement } from 'react'
@@ -16,6 +20,7 @@ import { CATS } from '../categories'
 import { containHorizontalOverscroll } from '../overscroll'
 import type { ClientCtx } from '../services'
 import type { ViewKit } from '../viewkit'
+import type { ContextTimeline } from '../../shared/types'
 import type { AgentNode, AgentSelfStats } from '../agentTree'
 import {
   AGENT_NODE_R,
@@ -27,6 +32,7 @@ import {
   ringSegments,
   sessionsFaceOf,
 } from '../agentTree'
+import { makeDetailFetcher } from '../timelineSource'
 
 export interface AgentGraphProps {
   sessionId?: string
@@ -50,6 +56,12 @@ export function makeAgentGraph(
   kit: ViewKit,
 ): (props: AgentGraphProps) => ReactElement | null {
   const { t, fmt, catLabel } = kit
+
+  /* Cold-relative head fetches: one in-flight-or-settled promise per session
+     id for the factory's lifetime (page scope). A settled null — transport
+     failure, hostile payload, route absent, session left the live set — is
+     sticky, so a broken relative never retries per snapshot tick. */
+  const heads = new Map<string, Promise<ContextTimeline | null>>()
 
   function AgentGraph(props: AgentGraphProps): ReactElement | null {
     // Resolved lazily at mount (not at apply): the outward sessions service
@@ -105,10 +117,45 @@ export function makeAgentGraph(
       face.refreshSubagents(sessionId).catch(() => {})
     }, [face, sessionId])
 
+    // Composition heads fetched for cold relatives (see the effect below):
+    // landed values re-fold the forest with the row's missing `contextTimeline`
+    // injected.
+    const [landed, setLanded] = useState<ReadonlyMap<string, ContextTimeline>>(new Map())
+
     const built = useMemo(() => {
-      const forest = agentForestOf(snapshot, sessionId, props.self)
+      const forest = agentForestOf(snapshot, sessionId, props.self, landed)
       return forest !== null ? { forest, layout: layoutForest(forest, stageWidth) } : null
-    }, [snapshot, sessionId, props.self, stageWidth])
+    }, [snapshot, sessionId, props.self, stageWidth, landed])
+
+    // Nodes with no composition (occupancy-only, or nothing listed at all —
+    // the projection cache holds no timeline row for either) fetch their slim
+    // head off the detail route and re-render composed. The current node is
+    // excluded: the tab's own projections already feed it live. A remount
+    // (tab switch) resets this state but not the factory's promise cache, so
+    // a cached read REPLAYS into the fresh instance — otherwise a fetched
+    // relative would fall back to green on every remount, forever.
+    useEffect(() => {
+      if (built === null) return
+      const attach = (pending: Promise<ContextTimeline | null>, id: string): void => {
+        void pending.then((head) => {
+          // Same value → same state: the identity bail-out keeps a settled
+          // replay on every snapshot tick from looping.
+          if (head !== null) setLanded(prev => prev.get(id) === head ? prev : new Map(prev).set(id, head))
+        }).catch(() => {})
+      }
+      for (const n of built.forest.nodes) {
+        if (n.isCurrent || (n.head !== null && n.head.parts.length > 0)) continue
+        const cached = heads.get(n.id)
+        if (cached !== undefined) {
+          attach(cached, n.id)
+          continue
+        }
+        const fetcher = makeDetailFetcher(ctx, n.id)
+        const pending = fetcher !== undefined ? fetcher().then(d => d?.head ?? null) : Promise.resolve(null)
+        heads.set(n.id, pending)
+        attach(pending, n.id)
+      }
+    }, [built])
 
     if (built === null) return null
     const { forest, layout } = built

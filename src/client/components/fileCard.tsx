@@ -142,7 +142,7 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
     )
 
     return (
-      <div className="lc-card lc-col">
+      <div className="lc-card lc-col flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">
           <span className="lc-card-title-text">{t('files.title')}</span>
           <span className="lc-card-sub">{props.scope}</span>

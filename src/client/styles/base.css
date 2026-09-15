@@ -53,9 +53,12 @@
  sidebar state. Inline-size containment is safe: every card's width comes
  from its flex row, never from its contents; the one fixed-position overlay
  (the image lightbox) portals to <body>, so the layout-containment fixed-CB
- trap cannot catch it.
+ trap cannot catch it. Border-box is load-bearing on the narrow pane: cards
+ carry the `min-w-[min(360px,100%)]` floor while riding this sheet's padding,
+ and the plugin ships no preflight reset — a content-box card reads the floor
+ as its content width and overflows its row by its own chrome (issue #65).
  */
-.lc-root .lc-card { padding: 7px 8px; margin-bottom: 7px; container: lc-card / inline-size; }
+.lc-root .lc-card { box-sizing: border-box; padding: 7px 8px; margin-bottom: 7px; container: lc-card / inline-size; }
 .lc-root .lc-cols { gap: 7px; margin-bottom: 7px; }
 /* Wraps under width pressure: toggle groups/kind chips in a header drop to
    their own line instead of spilling past the card edge. */

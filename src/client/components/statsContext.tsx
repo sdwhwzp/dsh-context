@@ -164,13 +164,13 @@ export function makeStatsContext(kit: ViewKit): (props: {
         ) : null,
         unpriced ? <span key="unavailable">{t('stats.costUnavailable')}</span> : null,
       ]
-    // The chat stats line's own figure, one decimal: prompt-side cache reads
-    // over the whole billed input (output excluded), dashed until reported.
+    // The harness chat stats line's own formula, shown two decimals deep:
+    // prompt-side cache reads over the whole billed input (output excluded),
+    // dashed until reported.
     const hit = props.usage === null ? null
       : cacheHitPercent(
         numOf(props.usage.cacheReadTokens),
         numOf(props.usage.uncachedInputTokens) + numOf(props.usage.cacheReadTokens) + numOf(props.usage.cacheWriteTokens),
-        1,
       )
     const cell = (label: string, value: string | number, tip?: ReactNode): ReactElement => (
       <div className={'lc-stat' + (tip === undefined ? '' : ' lc-stat-tipped group/tip')}>
@@ -195,7 +195,7 @@ export function makeStatsContext(kit: ViewKit): (props: {
           {cell(t('stats.steps'), props.counts.steps)}
           {cell(t('stats.humanInputs'), props.humanInputs ?? 0, t('stats.humanInputsTip'))}
           {cell(t('stats.toolCalls'), props.toolCalls ?? 0)}
-          {cell(t('stats.cacheHit'), hit === null ? '—' : `${hit}%`)}
+          {cell(t('stats.cacheHit'), hit === null ? '—' : `${hit}%`, t('stats.cacheHitTip'))}
           {cell(t('stats.cost'), priced !== null ? priced.money(priced.cost) : cost === null ? '—' : formatCost(cost, currency), costTip)}
         </div>
       </div>

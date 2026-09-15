@@ -67,7 +67,11 @@ These checks prove source-level seam compatibility, statistical parity with the 
 
 ## Upgrading from an older plugin build
 
-The session-cost rework (estimates priced from the models.dev registry) bumps the timeline projection's `stateVersion` (16 → 18): on upgrade, every cached per-session row is invalidated and re-folded from the durable log, which rebuilds the cost totals under their new per-(provider, model), per-period keys. The bump orphans the `contextTimeline` key for idle sessions, which have no refresh channel until they go live again — such a session re-folds when its log receives its next event. New sessions are exact from their first event. To force a full refold of an existing session sooner, delete its cached projection row — it is a derived cache and is rebuilt from the durable log:
+The skill-injection category (issue #66) bumps the timeline projection's `stateVersion` (18 → 19): skill content — the `<available_skills>` catalog digest, a user-explicit `/name` invocation's instructions message, and the content a `skill`-tool load returns — now folds into its own `skill` composition bucket instead of `inject`/`tool`. The re-bucketing changes the fold's per-category sums, so on upgrade every cached per-session row is invalidated and re-folded from the durable log, which rebuilds them under the new categories. The bump orphans the `contextTimeline` key for idle sessions, which have no refresh channel until they go live again — such a session re-folds when its log receives its next event. New sessions are exact from their first event.
+
+The Agent network card covers the orphaned relatives without waiting for a visit: a session listed without a `contextTimeline` row (composition absent, occupancy only) fetches its slim head from the plugin's `/api/dsh-context/detail` fetch route (mounted through Connection's exact-route registry, behind the same authenticated `/api` fence), which folds the durable log on demand — the node's ring renders the full composition the first time the card opens. The same backfill serves sessions whose cache predates the plugin's installation entirely. Where the route is unavailable (the baseline gate, a connection service without the exact-route registry), the card degrades to the pressure-only occupancy ring as before.
+
+To force a full refold of an existing session sooner, delete its cached projection row — it is a derived cache and is rebuilt from the durable log:
 
 ```bash
 rm ~/.dsh/storages/session_projcache/sessions/<session-id>.json

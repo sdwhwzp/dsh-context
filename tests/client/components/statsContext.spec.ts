@@ -1,7 +1,8 @@
 // StatsContext (src/client/components/statsContext.tsx) rendered with real
 // React: the six-cell grid — session shape with the whole-session human-input
-// tally, the chat-line cache-hit cell, and the priced cost cell with its
-// per-model rate tooltip — in both locales, against an injected model-price
+// tally, the chat-line cache-hit cell with its whole-session share tip, and
+// the priced cost cell with its per-model rate tooltip — in both locales,
+// against an injected model-price
 // book (the store never reaches the network). The context-event tallies live
 // on the events card's kind filters (contextView.spec.ts); `countsOfRecords`
 // still derives every count the split generation's wire head carries, pinned
@@ -29,7 +30,7 @@ const PROVIDERS = {
 const COST: SessionCostUsage = {
   'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
 }
-// Prompt-side billed input 300 (100 uncached + 200 read) → hit 66.6% truncated.
+// Prompt-side billed input 300 (100 uncached + 200 read) → hit 66.66% truncated.
 const USAGE: TokenUsage = { uncachedInputTokens: 100, outputTokens: 50, cacheReadTokens: 200, cacheWriteTokens: 0 }
 
 function req(turn?: number): RequestRecord {
@@ -90,9 +91,9 @@ describe('StatsContext', () => {
     assert.ok(text(m.container).includes('Context Stats'))
     const { labels, values } = cells(m.container)
     assert.equal(labels.length, 6)
-    assert.deepEqual(labels, ['Turns', 'Steps', 'Human Inputs?', 'Tool Calls', 'Cache Hit', 'Cost?'])
+    assert.deepEqual(labels, ['Turns', 'Steps', 'Human Inputs?', 'Tool Calls', 'Cache Hit?', 'Cost?'])
     // 1M uncached input at the book's $0.15 miss rate.
-    assert.deepEqual(values, ['3', '4', '7', '3', '66.6%', '$0.15'])
+    assert.deepEqual(values, ['3', '4', '7', '3', '66.66%', '$0.15'])
     await m.unmount()
   })
 
@@ -125,11 +126,12 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    assert.equal(queryAll(m.container, '.lc-stat-tip').length, 2)
-    assert.equal(queryAll(m.container, '.lc-stat-q').length, 2)
+    assert.equal(queryAll(m.container, '.lc-stat-tip').length, 3)
+    assert.equal(queryAll(m.container, '.lc-stat-q').length, 3)
     const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
     assert.ok(tips[0].includes('question answerings'), 'the human-inputs tip explains its tally')
-    const costTip = tips[1]
+    assert.ok(tips[1].includes('Cumulative cache-read'), 'the cache-hit tip names the whole-session share')
+    const costTip = tips[2]
     assert.ok(costTip.includes('Per-1M-token rates:'))
     assert.ok(costTip.includes('deepseek-v4-flash'))
     assert.ok(costTip.includes('hit $0.003'))
@@ -149,7 +151,7 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
     assert.ok(costTip.includes('glm-5.3-flash'))
     assert.ok(!costTip.includes('DeepSeek'), 'the DeepSeek scheme note stays out of other providers’ bubbles')
     await m.unmount()
@@ -167,7 +169,7 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
     assert.ok(costTip.includes('deepseek-v4-flash · deepseek-official'))
     assert.ok(costTip.includes('glm-5.3-flash · zai-coding-cn'))
     // 1M × $0.15 + 2M × $0.075 = $0.30.
@@ -185,10 +187,11 @@ describe('StatsContext', () => {
     await flush()
     assert.ok(text(m.container).includes('上下文统计'))
     const { labels, values } = cells(m.container)
-    assert.deepEqual(labels, ['轮次', '步数', '用户输入?', '工具调用', '缓存命中', '预估费用?'])
+    assert.deepEqual(labels, ['轮次', '步数', '用户输入?', '工具调用', '缓存命中?', '预估费用?'])
     // $0.15 / 0.15 = ¥1; the rates convert through the same fixed rate.
-    assert.deepEqual(values, ['1', '1', '0', '0', '66.6%', '¥1.00'])
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    assert.deepEqual(values, ['1', '1', '0', '0', '66.66%', '¥1.00'])
+    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[1]).includes('整个会话累计'), 'the cache-hit tip localizes too')
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
     assert.ok(costTip.includes('每百万 tokens 价格'))
     assert.ok(costTip.includes('命中 ¥0.02'))
     assert.ok(costTip.includes('未命中 ¥1'))
@@ -221,7 +224,7 @@ describe('StatsContext', () => {
     }))
     await flush()
     assert.ok(cells(m.container).values.at(-1) === '—')
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
     assert.ok(costTip.includes('unavailable'))
     assert.ok(!costTip.includes('Per-1M-token rates'))
     await m.unmount()
@@ -245,7 +248,7 @@ describe('StatsContext', () => {
     await flush()
     // 1M at the $0.15 peak miss rate + 2M at the $0.075 half-price rate.
     assert.ok(cells(m.container).values.at(-1) === '$0.30')
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
     assert.ok(costTip.includes('Per-1M-token rates (peak|off-peak)'), 'an off-peak bucket names the pair in the header')
     assert.ok(costTip.includes('hit $0.003|$0.0015'))
     assert.ok(costTip.includes('miss $0.15|$0.075'))
@@ -263,7 +266,7 @@ describe('StatsContext', () => {
     }))
     await flush()
     assert.ok(cells(m.container).values.at(-1) === '—')
-    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[1]).includes('unavailable'))
+    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[2]).includes('unavailable'))
     await m.unmount()
   })
 
@@ -284,7 +287,7 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
     assert.ok(costTip.includes('glm-5.3-flash'))
     assert.ok(!costTip.includes('junk'))
     // No row may show the peak|off-peak pair — that is DeepSeek's alone.
