@@ -47,7 +47,7 @@ Open any session and click the **Context / 上下文** tab:
 
 | Card | The question it answers |
 | --- | --- |
-| **Context Stats** | Turns, steps, human inputs, live tool calls, and the session's cache-hit rate. Cost uses the authorized dsh-spend session-family ledger and its display currency when available; otherwise it estimates from models.dev list prices, including DeepSeek peak/off-peak rates. Hover the `?` for the displayed amount's source and model breakdown. |
+| **Context Stats** | Turns, steps, human inputs, live tool calls, and the session's cache-hit rate. Cost uses the authorized dsh-spend session-family ledger and its display currency when available; otherwise it estimates the whole agent family from models.dev list prices, including DeepSeek peak/off-peak rates. A separate cell estimates the subagents’ share from the same list prices. Hover the `?` for the displayed amount's source and model breakdown. |
 | **Token Stats** | Where the billed tokens went — the same total as the chat stats line under the composer, split by composition (system, tools, messages…) with the provider-exact output closing the ring. |
 | **Timing Stats** | How active time split across model calls, tool runs, and overhead. |
 | **Current Context** | What's in the window *right now*. |
