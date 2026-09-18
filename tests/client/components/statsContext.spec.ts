@@ -193,7 +193,7 @@ describe('StatsContext', () => {
     await flush()
     assert.ok(text(m.container).includes('上下文统计'))
     const { labels, values } = cells(m.container)
-    assert.deepEqual(labels, ['轮次', '步数', '用户输入?', '工具调用', '缓存命中?', '预估费用?', '子 Agent 费用?'])
+    assert.deepEqual(labels, ['轮次', '步数', '用户输入?', '工具调用', '缓存命中?', '费用?', '子 Agent 费用?'])
     // $0.15 / 0.15 = ¥1; the rates convert through the same fixed rate.
     assert.deepEqual(values, ['1', '1', '0', '0', '66.66%', '¥1.00', '—'])
     assert.ok(text(queryAll(m.container, '.lc-stat-tip')[1]).includes('整个会话累计'), 'the cache-hit tip localizes too')
