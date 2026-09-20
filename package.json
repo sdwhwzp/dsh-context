@@ -1,6 +1,6 @@
 {
   "name": "dsh-context",
-  "version": "0.53.3-dsh.20260918.1",
+  "version": "0.54.0-dsh.20260920.1",
   "description": "A DeepSeek Harness plugin for context insight and management, with context dashboard and context command, for understanding how the context is made of, and how it evolves.",
   "author": "bowenliang123",
   "repository": {
@@ -58,7 +58,8 @@
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-sidebar-right"
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-ui-workspace"
       ],
       "platform": "web"
     },

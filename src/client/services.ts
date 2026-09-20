@@ -793,6 +793,16 @@ export interface InputTriggersFace {
   }): () => void
 }
 
+/**
+ * The `uiWorkspace` service (harness 0.1.6+), as far as the Context Dashboard
+ * consumes it: the one navigation verb that selects a session and shows its
+ * conversation. Re-proved at the call site; absent on older lines, where
+ * {@link SessionsFace.open} is the verb.
+ */
+export interface UiWorkspaceFace {
+  openSession?(target: string): void
+}
+
 /** The session scope (`ctx.sessions.scope`), used to dispatch the scoped consume-token event. */
 export interface SessionScopeFace {
   bail(subject: unknown, event: string, payload: unknown): unknown
@@ -801,9 +811,10 @@ export interface SessionScopeFace {
 export interface SessionsFace {
   scope(id: string): SessionScopeFace | undefined
   /**
-   * Select a listed session as current — the sidebar row click's own verb
-   * (the Context Dashboard's session cards ride it to jump). Re-proved at the
-   * call site; absent on a face that predates the verb.
+   * Select a listed session as current — the sidebar row click's verb on
+   * harness lines up to 0.1.6-alpha.1 (0.1.6-alpha.2 moved navigation to
+   * {@link UiWorkspaceFace.openSession}). Re-proved at the call site; absent
+   * on a face that predates the verb or that has already dropped it.
    */
   open?(id: string): void
   /**

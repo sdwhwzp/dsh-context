@@ -686,3 +686,28 @@ export interface HeaderEpochContent {
     schema?: unknown
   }>
 }
+
+/** One currency's DeepSeek open-platform balance figures. */
+export interface PlatformBalanceEntry {
+  /** The ISO code the platform reported (`CNY` / `USD`). */
+  currency: string
+  /** Total available funds: the granted and topped-up balances summed. */
+  total: number
+  /** The not-expired granted (gift) balance. */
+  granted: number
+  /** The topped-up balance. */
+  toppedUp: number
+}
+
+/**
+ * The DeepSeek open-platform balance, served by the plugin's
+ * `/api/dsh-context/balance` fetch route (host/balance.ts). `null` on the
+ * wire — and nothing rendered client-side — whenever the platform is not
+ * configured or the read fails: the capsule only ever shows a live figure.
+ */
+export interface PlatformBalance {
+  /** Whether the platform reports the balance sufficient for API calls. */
+  isAvailable: boolean
+  /** One entry per currency the account holds; at least one. */
+  balances: PlatformBalanceEntry[]
+}

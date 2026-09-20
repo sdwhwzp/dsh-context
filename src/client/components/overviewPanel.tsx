@@ -10,7 +10,8 @@
  * the activity heatmap) beside the session column (search, group chips, and
  * the card grid); the heatmap keeps its own fixed 8-week window and PINs the
  * list to a picked day (the panel's drill-down gesture). A session card
- * click jumps to that session through the harness's own `sessions.open` and
+ * click jumps to that session through the harness's own navigation verb
+ * (`uiWorkspace.openSession`, else `sessions.open` — overview.ts) and
  * closes the panel.
  */
 
@@ -28,6 +29,7 @@ import {
 import { overviewStore } from '../overviewStore'
 import type { ClientCtx } from '../services'
 import type { ViewKit } from '../viewkit'
+import { makeBalanceCapsule } from './balanceCapsule'
 import { makeErrorBoundary } from './errorBoundary'
 import { useEscapeClose } from './escapeClose'
 import { makeHeatmap, todayKey } from './heatmap'
@@ -48,6 +50,7 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
   const { t, fmtDuration } = kit
   const Heatmap = makeHeatmap(kit)
   const OverviewCard = makeOverviewCard(kit)
+  const BalanceCapsule = makeBalanceCapsule(ctx, kit)
   const ErrorBoundary = makeErrorBoundary(t)
 
   /** The display currency follows the active locale (zh → CNY), read per render — the slot outlet re-renders on a locale switch. */
@@ -123,6 +126,9 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
           <div className="lc-ov-head">
             <ContextIcon size={18} className="lc-ov-head-icon" />
             <span className="lc-ov-title">{t('ov.title')}</span>
+            {/* The DeepSeek platform balance (client/balance.ts): renders nothing
+                until a live figure lands, so the header row never reflows for it. */}
+            <BalanceCapsule />
             <div className="lc-gran lc-ov-range" role="group" aria-label={t('ov.range.label')}>
               {RANGES.map(r => (
                 <button

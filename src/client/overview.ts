@@ -19,7 +19,7 @@ import { cacheHitPercent } from './format'
 import type { CostCurrency } from './cost'
 import { estimateSessionCost, mergeCostUsage } from './cost'
 import type { ModelPrices } from './cost'
-import { activityOf, asRecord, timelineOf, type ClientCtx, type SessionsFace } from './services'
+import { activityOf, asRecord, timelineOf, type ClientCtx, type SessionsFace, type UiWorkspaceFace } from './services'
 import type { ContextActivity, ContextTimeline, SessionCostUsage } from '../shared/types'
 
 /** One session-list row joined with its (sanitized) projection values. */
@@ -175,6 +175,27 @@ function archivedSetOf(workspaces: unknown): Set<string> {
 }
 
 /**
+ * The id of the session the conversation shows, read the way the harness
+ * line publishes it: lines up to 0.1.6-alpha.1 carry `current` on the list
+ * snapshot; 0.1.6-alpha.2 dropped that field and the sidebar derives the
+ * selection from each row's local retention counts — the row the main view
+ * retains (`retainedBy.mainView > 0`, the harness's own predicate). The
+ * explicit field wins where both exist; undefined when neither names a row.
+ */
+export function currentSessionOf(state: Record<string, unknown>, byId: Record<string, unknown>): string | undefined {
+  if (typeof state.current === 'string') return state.current
+  for (const id of Object.keys(byId)) {
+    try {
+      const mainView = asRecord(asRecord(byId[id])?.retainedBy)?.mainView
+      if (typeof mainView === 'number' && mainView > 0) return id
+    } catch {
+      // A hostile row (throwing accessor) cannot be current; keep scanning.
+    }
+  }
+  return undefined
+}
+
+/**
  * Join the raw session-list snapshot into render-ready rows, or null when
  * the snapshot is unusable (absent service, hostile root — the panel's
  * unavailable note, distinct from a real empty list). Blank rows (a
@@ -191,7 +212,7 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
   const ids: string[] = state.ids.filter((id): id is string => typeof id === 'string')
   const archived = archivedSetOf(workspaces)
   const byId = asRecord(state.byId) ?? {}
-  const current = typeof state.current === 'string' ? state.current : undefined
+  const current = currentSessionOf(state, byId)
   const rows: OverviewRow[] = []
   for (const id of ids) {
     if (archived.has(id)) continue
@@ -473,15 +494,23 @@ export function aggregateDays(rows: readonly OverviewRow[]): Record<string, DayT
 // ---- presentation helpers --------------------------------------------------
 
 /**
- * Jump to one session: the harness's own selection verb (`sessions.open`,
- * the sidebar row click's mechanism). The face is re-proved per call and a
- * hostile or absent service swallows silently — the panel still closes, so
- * the gesture never dead-ends on an error.
+ * Jump to one session through the harness's own navigation verb: the
+ * `uiWorkspace` service's `openSession` (0.1.6+, the only verb left on
+ * 0.1.6-alpha.2), else `sessions.open` (the sidebar row click's verb on
+ * every earlier line). Each face is re-proved per call and a hostile or
+ * absent service swallows silently — the panel still closes, so the gesture
+ * never dead-ends on an error.
  */
 export function openSession(ctx: ClientCtx, id: string): void {
   try {
-    const sessions = ctx.get('sessions') as SessionsFace | undefined
-    if (sessions !== undefined && typeof sessions.open === 'function') sessions.open(id)
+    // A hostile registry may hand back null where the face is declared optional.
+    const workspace = ctx.get('uiWorkspace') as UiWorkspaceFace | null | undefined
+    if (workspace !== undefined && workspace !== null && typeof workspace.openSession === 'function') {
+      workspace.openSession(id)
+      return
+    }
+    const sessions = ctx.get('sessions') as SessionsFace | null | undefined
+    if (sessions !== undefined && sessions !== null && typeof sessions.open === 'function') sessions.open(id)
   } catch { /* the jump is best-effort; the panel closes regardless */ }
 }
 

@@ -115,8 +115,11 @@ beforeEach(() => {
   resetModelPrices()
   setModelPricesLoader(() => Promise.resolve(PROVIDERS))
   backfillPosts.length = 0
+  // The header's balance capsule POSTs its own route on open (client/balance.ts);
+  // only the warm-up trigger is this spec's subject.
   vi.stubGlobal('fetch', async (url: string | URL) => {
-    backfillPosts.push(String(url))
+    const route = String(url)
+    if (route.endsWith('/backfill')) backfillPosts.push(route)
     return { ok: true, json: async () => ({}) }
   })
 })

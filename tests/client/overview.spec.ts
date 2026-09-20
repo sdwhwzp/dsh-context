@@ -8,6 +8,7 @@ import {
   aggregateDays,
   billedOf,
   createdDayOf,
+  currentSessionOf,
   filterRows,
   groupCountsOf,
   inGroup,
@@ -332,7 +333,7 @@ describe('kpisOf', () => {
     assert.equal(kpi.listed, 5)
     assert.equal(kpi.tokens, 200)
     assert.equal(kpi.turns, 5)
-    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 195e-6) < 1e-12, '50×0.1 + 100×1 + 10×1 + 40×2 per 1M')
+    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 390e-6) < 1e-12, 'the DeepSeek peak bucket doubles: 2 × (50×0.1 + 100×1 + 10×1 + 40×2) per 1M')
     assert.equal(kpi.cacheHit, '31.25', '50 reads of 160 billed input, truncated')
     assert.equal(kpi.costSessions, 1, 'only the priced session counts toward the cost cell')
     assert.equal(kpi.usageSessions, 1, 'only the billed session feeds the cache-hit rate')
@@ -356,7 +357,7 @@ describe('kpisOf', () => {
     const kpi = kpisOf(rows, 3, prices, 'usd')
     assert.equal(kpi.costSessions, 1, 'only the priced session counts toward the cost cell')
     assert.equal(kpi.usageSessions, 2, 'both billed sessions feed the cache-hit rate')
-    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 195e-6) < 1e-12, 'the unpriced session adds nothing to the estimate')
+    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 390e-6) < 1e-12, 'the unpriced session adds nothing to the estimate')
   })
 
   test('an unbilled set zeroes and dashes', () => {
@@ -425,10 +426,24 @@ describe('openSession', () => {
     return { get: (name: string) => services[name] } as unknown as ClientCtx
   }
 
-  test('dispatches through the harness selection verb', () => {
+  test('prefers the uiWorkspace navigation verb (0.1.6-alpha.2 dropped sessions.open)', () => {
+    const opened: string[] = []
+    const legacy: string[] = []
+    openSession(ctxWith({
+      uiWorkspace: { openSession: (id: string) => { opened.push(id) } },
+      sessions: { open: (id: string) => { legacy.push(id) } },
+    }), 's1')
+    assert.deepEqual(opened, ['s1'])
+    assert.deepEqual(legacy, [], 'the legacy verb is not called twice over')
+  })
+
+  test('falls back to the sessions selection verb on lines without uiWorkspace', () => {
     const opened: string[] = []
     openSession(ctxWith({ sessions: { open: (id: string) => { opened.push(id) } } }), 's1')
-    assert.deepEqual(opened, ['s1'])
+    openSession(ctxWith({ uiWorkspace: null, sessions: { open: (id: string) => { opened.push(id) } } }), 's2')
+    openSession(ctxWith({ uiWorkspace: {}, sessions: { open: (id: string) => { opened.push(id) } } }), 's3')
+    openSession(ctxWith({ uiWorkspace: { openSession: 7 }, sessions: { open: (id: string) => { opened.push(id) } } }), 's4')
+    assert.deepEqual(opened, ['s1', 's2', 's3', 's4'])
   })
 
   test('absent or verb-less faces swallow silently', () => {
@@ -439,8 +454,44 @@ describe('openSession', () => {
   })
 
   test('a hostile face never throws into the click handler', () => {
+    openSession(ctxWith({ uiWorkspace: { openSession: () => { throw new Error('boom') } } }), 's1')
     openSession(ctxWith({ sessions: { open: () => { throw new Error('boom') } } }), 's1')
     openSession({ get: () => { throw new Error('boom') } } as unknown as ClientCtx, 's1')
+  })
+})
+
+describe('currentSessionOf', () => {
+  test('the list snapshot\'s explicit current field wins where the line still carries it', () => {
+    const byId = { a: { retainedBy: { mainView: 1 } }, b: {} }
+    assert.equal(currentSessionOf({ current: 'b' }, byId), 'b')
+  })
+
+  test('0.1.6-alpha.2: the row the main view retains is current', () => {
+    const byId = {
+      a: { retainedBy: { mainView: 0, sidebar: 2 } },
+      b: { retainedBy: { mainView: 1 } },
+      c: { retainedBy: { mainView: 3 } },
+    }
+    assert.equal(currentSessionOf({}, byId), 'b')
+    assert.equal(currentSessionOf({ current: 7 }, byId), 'b', 'a non-string field falls through to the retention read')
+  })
+
+  test('no retained row, missing or malformed counts, and hostile rows read as no current session', () => {
+    assert.equal(currentSessionOf({}, {}), undefined)
+    assert.equal(currentSessionOf({}, { a: {}, b: { retainedBy: null }, c: { retainedBy: { mainView: '1' } }, d: 4 }), undefined)
+    const hostile: Record<string, unknown> = { y: { retainedBy: { mainView: 1 } } }
+    Object.defineProperty(hostile, 'x', { enumerable: true, get() { throw new Error('boom') } })
+    assert.equal(currentSessionOf({}, hostile), 'y', 'the throwing row is skipped, the retained row still found')
+  })
+
+  test('rowsOfSnapshot marks the retained row on a snapshot without the current field', () => {
+    const rows = rowsOfSnapshot({
+      ids: ['a', 'b'],
+      byId: { a: { displayTitle: 'A' }, b: { displayTitle: 'B', retainedBy: { mainView: 1 } } },
+      phase: 'ready',
+    })
+    assert.ok(rows !== null)
+    assert.deepEqual(rows.map(row => [row.id, row.current]), [['a', false], ['b', true]])
   })
 })
 
