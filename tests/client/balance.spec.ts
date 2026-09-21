@@ -1,12 +1,7 @@
-// The client balance reader (src/client/balance.ts): the delivered payload's
-// boundary proof (hostile entries drop, a payload with no valid entry is no
-// balance), the display-currency pick with the account's first currency as
-// fallback, and the fetch store's never-rejecting, TTL-and-in-flight-shared
-// read of the plugin route.
-
+// Balance parsing, currency selection and fresh account-authorized reads.
 import assert from 'node:assert/strict'
-import { afterEach, beforeEach, describe, test, vi } from 'vitest'
-import { balanceEntryOf, fetchPlatformBalance, platformBalanceOf, resetPlatformBalance } from '../../src/client/balance'
+import { afterEach, describe, test, vi } from 'vitest'
+import { balanceEntryOf, platformBalanceOf, fetchPlatformBalance } from '../../src/client/balance'
 
 const WIRE_BALANCE = {
   isAvailable: true,
@@ -27,17 +22,7 @@ function stubRoute(body: unknown | undefined, mode: 'ok' | 'reject' | 'status' =
   return { calls: () => n }
 }
 
-beforeEach(() => {
-  resetPlatformBalance()
-  vi.useFakeTimers({ toFake: ['Date'] })
-  vi.setSystemTime(1_000_000)
-})
-
-afterEach(() => {
-  resetPlatformBalance()
-  vi.unstubAllGlobals()
-  vi.useRealTimers()
-})
+afterEach(() => { vi.unstubAllGlobals() })
 
 describe('platformBalanceOf', () => {
   test('a delivered wire balance parses whole', () => {
@@ -105,45 +90,58 @@ describe('balanceEntryOf', () => {
 })
 
 describe('fetchPlatformBalance', () => {
-  test('one route read narrows to the balance; identical reads share the TTL', async () => {
+  test('each open reads the current account instead of reusing an administrator response', async () => {
     const { calls } = stubRoute({ ok: true, value: WIRE_BALANCE })
     assert.deepEqual(await fetchPlatformBalance(), WIRE_BALANCE)
-    vi.setSystemTime(1_000_000 + 59_000)
     assert.deepEqual(await fetchPlatformBalance(), WIRE_BALANCE)
-    assert.equal(calls(), 1, 'within the TTL the cached answer serves')
-    vi.setSystemTime(1_000_000 + 61_000)
-    await fetchPlatformBalance()
-    assert.equal(calls(), 2, 'past the TTL the route is read again')
+    assert.equal(calls(), 2)
+    stubRoute({ ok: true, value: null })
+    assert.equal(await fetchPlatformBalance(), null)
   })
 
-  test('every absent answer resolves null without rejecting', async () => {
+  test('absent and malformed answers resolve null without reusing a prior figure', async () => {
     for (const [label, body, mode] of [
-      ['route absent (404)', undefined, 'status'],
+      ['route absent', undefined, 'status'],
       ['transport down', undefined, 'reject'],
-      ['definitive absence', { ok: true, value: null }, 'ok'],
+      ['denied', { ok: true, value: null }, 'ok'],
+      ['missing value', { ok: true }, 'ok'],
       ['bad envelope', { ok: false }, 'ok'],
-      ['value not a record', { ok: true, value: 'nope' }, 'ok'],
+      ['non-record envelope', null, 'ok'],
+      ['invalid value', { ok: true, value: 'nope' }, 'ok'],
     ] as [string, unknown, 'ok' | 'reject' | 'status'][]) {
-      resetPlatformBalance()
       stubRoute(body, mode)
       assert.equal(await fetchPlatformBalance(), null, label)
     }
   })
 
-  test('concurrent reads share the one in-flight route read', async () => {
+  test('an earlier administrator request cannot supply a later account request', async () => {
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
-    let calls = 0
-    vi.stubGlobal('fetch', async () => {
-      calls++
-      await gate
-      return { ok: true, json: async () => ({ ok: true, value: WIRE_BALANCE }) }
+    const fetcher = vi.fn()
+      .mockImplementationOnce(async () => {
+        await gate
+        return { ok: true, json: async () => ({ ok: true, value: WIRE_BALANCE }) }
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, value: null }) })
+    vi.stubGlobal('fetch', fetcher)
+    const administrator = fetchPlatformBalance()
+    try {
+      assert.equal(await fetchPlatformBalance(), null)
+      assert.equal(fetcher.mock.calls.length, 2)
+    } finally {
+      release()
+      assert.deepEqual(await administrator, WIRE_BALANCE)
+    }
+  })
+
+  test('the supplied abort signal reaches the route request', async () => {
+    const controller = new AbortController()
+    const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
+      assert.equal(options.signal, controller.signal)
+      return { ok: true, json: async () => ({ ok: true, value: null }) }
     })
-    const first = fetchPlatformBalance()
-    const second = fetchPlatformBalance()
-    await Promise.resolve()
-    release()
-    assert.deepEqual(await Promise.all([first, second]), [WIRE_BALANCE, WIRE_BALANCE])
-    assert.equal(calls, 1)
+    vi.stubGlobal('fetch', fetcher)
+    assert.equal(await fetchPlatformBalance(controller.signal), null)
+    assert.equal(fetcher.mock.calls.length, 1)
   })
 })

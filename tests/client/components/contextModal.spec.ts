@@ -412,21 +412,26 @@ describe('ContextModal', () => {
 
 describe('ContextModal — the split generation', () => {
   test('the modal shares the detail route: the browser lands the collections on open', async () => {
-    vi.stubGlobal('fetch', async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
+    let release!: () => void
+    const responseReady = new Promise<void>((resolve) => { release = resolve })
+    vi.stubGlobal('fetch', async () => {
+      await responseReady
+      return {
         ok: true,
-        value: {
-          rev: 1,
-          requests: [{ seq: 1, turn: 1, step: 1, time: 1, system: 1, tools: 2, user: 3, inject: 4, assistant: 5, tool: 6, total: 21 }],
-          events: [],
-          nodes: [{ seq: 1, cat: 'assistant', tokens: 5, text: 'modal reply' }],
-          droppedNodes: 0,
-          archive: [],
-        },
-      }),
-    }))
+        status: 200,
+        json: async () => ({
+          ok: true,
+          value: {
+            rev: 1,
+            requests: [{ seq: 1, turn: 1, step: 1, time: 1, system: 1, tools: 2, user: 3, inject: 4, assistant: 5, tool: 6, total: 21 }],
+            events: [],
+            nodes: [{ seq: 1, cat: 'assistant', tokens: 5, text: 'modal reply' }],
+            droppedNodes: 0,
+            archive: [],
+          },
+        }),
+      }
+    })
     const ctx = new TestClientCtx({ services: { sessions: new TestSessions() } })
     const ContextModal = makeContextModal(asClientCtx(ctx), kit, settings)
     const head = timeline({
@@ -439,14 +444,18 @@ describe('ContextModal — the split generation', () => {
       useContextModal: OPEN,
       useProjection: (key: string) => (key === 'contextTimeline' ? head : undefined),
     }))
-    // The composition card paints off the head while the browser's detail note shows.
-    assert.ok(text(m.container).includes(DICT_EN['overview.title']))
-    assert.ok(text(m.container).includes(DICT_EN['detail.loading']))
-    // The detail lands: the browser serves the step picker + the sections.
-    await until(() => !text(m.container).includes(DICT_EN['detail.loading']), 'the modal detail never landed')
-    assert.equal(queryAll(m.container, '.lc-br-pick option').length, 2, 'live + the one served step')
-    assert.ok(text(m.container).includes('1 Item'), 'the assistant section counts the served node')
-    await m.unmount()
+    try {
+      assert.ok(text(m.container).includes(DICT_EN['overview.title']))
+      assert.ok(text(m.container).includes(DICT_EN['detail.loading']))
+      release()
+      await until(() => !text(m.container).includes(DICT_EN['detail.loading']), 'the modal detail never landed')
+      assert.equal(queryAll(m.container, '.lc-br-pick option').length, 2, 'live + the one served step')
+      assert.ok(text(m.container).includes('1 Item'), 'the assistant section counts the served node')
+    } finally {
+      release()
+      await m.unmount()
+      await flush()
+    }
   })
 
   test('a mount that raced the declared inject heals when the face lands mid-open', async () => {

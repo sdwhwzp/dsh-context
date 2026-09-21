@@ -2,16 +2,18 @@
  * BalanceCapsule — the DeepSeek open-platform balance pill in the Context
  * Dashboard's header (the plugin's one account-level figure, beside the
  * session-level ones). Clicking it opens the platform's usage console in a
- * new tab. Mounted only by the dashboard header; it reads the
- * plugin's balance route once per open through client/balance.ts and renders
- * NOTHING while the read is pending, absent, or failed — the pill exists
- * only when there is a live figure to show. The tooltip carries the
- * breakdown (total / granted / topped-up) in the entry's own currency; the
- * entry follows the active locale (zh → CNY) with the account's first
- * currency as the fallback.
+ * new tab. Each mount reads a fresh authorized figure; pending, denied and
+ * failed reads render nothing. Unmount aborts the request and ignores any
+ * late response. The
+ * non-zero parts of the breakdown (topped-up / granted) ride the harness
+ * Tooltip primitive — immediate on hover, where a native `title` lags — in
+ * the entry's own currency (the pill itself carries the total); the entry
+ * follows the active locale (zh → CNY) with the account's first currency as
+ * the fallback.
  */
 
 import { useEffect, useState, type ReactElement } from 'react'
+import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { balanceEntryOf, fetchPlatformBalance } from '../balance'
 import type { PlatformBalance } from '../../shared/types'
 import type { ClientCtx } from '../services'
@@ -32,27 +34,40 @@ export function makeBalanceCapsule(ctx: ClientCtx, kit: ViewKit): () => ReactEle
   return function BalanceCapsule(): ReactElement | null {
     const [balance, setBalance] = useState<PlatformBalance | null>(null)
     useEffect(() => {
-      let on = true
-      // Fire-and-forget: fetchPlatformBalance never rejects, and the `on`
-      // flag drops the result of an unmount mid-read.
-      void fetchPlatformBalance().then((v) => { if (on) setBalance(v) })
-      return () => { on = false }
+      const controller = new AbortController()
+      void fetchPlatformBalance(controller.signal).then((value) => {
+        if (!controller.signal.aborted) setBalance(value)
+      })
+      return () => {
+        controller.abort()
+      }
     }, [])
     const locale = ctx.locale
     const active = typeof locale.getLocale === 'function' ? locale.getLocale().active : 'en'
     const entry = balanceEntryOf(balance, active === 'zh' ? 'cny' : 'usd')
     if (entry === null) return null
     const money = (amount: number): string => symbolOf(entry.currency) + amount.toFixed(2)
-    const tip = [
-      t('balance.tip.total') + ': ' + money(entry.total),
-      t('balance.tip.granted') + ': ' + money(entry.granted),
-      t('balance.tip.toppedUp') + ': ' + money(entry.toppedUp),
-    ].join('\n')
-    return (
-      <a className="lc-ov-balance" title={tip} href={USAGE_URL} target="_blank" rel="noreferrer">
+    // The pill itself carries the total; the tooltip lists only the non-zero
+    // parts of the breakdown, and an all-zero account has nothing to break
+    // down — the pill then rides bare.
+    const tipLines = [
+      ...(entry.toppedUp > 0 ? [t('balance.tip.toppedUp') + ': ' + money(entry.toppedUp)] : []),
+      ...(entry.granted > 0 ? [t('balance.tip.granted') + ': ' + money(entry.granted)] : []),
+    ]
+    const pill = (
+      <a
+        className="lc-ov-balance"
+        aria-label={tipLines.length > 0 ? tipLines.join('\n') : undefined}
+        href={USAGE_URL}
+        target="_blank"
+        rel="noreferrer"
+      >
         <span className="lc-ov-balance-label">{t('balance.title')}</span>
         <span className="lc-ov-balance-value">{money(entry.total)}</span>
       </a>
     )
+    return tipLines.length > 0
+      ? <Tooltip label={tipLines.join('\n')} side="bottom">{pill}</Tooltip>
+      : pill
   }
 }

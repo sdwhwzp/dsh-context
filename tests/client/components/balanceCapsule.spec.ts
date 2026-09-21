@@ -1,16 +1,11 @@
-// BalanceCapsule (src/client/components/balanceCapsule.tsx): renders nothing
-// until a live figure lands (pending, absent, or failed all stay invisible),
-// shows the locale's currency with the account's first currency as fallback,
-// and carries the breakdown in the tooltip. The route read is stubbed per
-// test; the module's TTL cache is reset between tests.
+// Balance rendering waits for a fresh account-authorized read and uses localized tooltips.
 
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
 import { makeBalanceCapsule } from '../../../src/client/components/balanceCapsule'
-import { resetPlatformBalance } from '../../../src/client/balance'
 import { asClientCtx, TestClientCtx } from '../helpers/harness'
-import { flush, makeKit, mount, query, text } from '../helpers/kit'
+import { flush, hover, makeKit, mount, query, queryAll, text, unhover } from '../helpers/kit'
 
 const kit = makeKit()
 
@@ -26,8 +21,13 @@ function stubRoute(body: unknown): void {
   vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => body }))
 }
 
+/** Leave the previous open's figure in storage, as that open would have. */
+function remember(balance: unknown): void {
+  globalThis.localStorage.setItem('dsh-context:platform-balance', JSON.stringify(balance))
+}
+
 afterEach(() => {
-  resetPlatformBalance()
+  globalThis.localStorage.clear()
   vi.unstubAllGlobals()
 })
 
@@ -46,6 +46,20 @@ describe('BalanceCapsule', () => {
     await flush()
     assert.equal(text(m2.container), '')
     await m2.unmount()
+
+    // A route that never answers leaves an unremembered capsule empty too.
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    vi.stubGlobal('fetch', async () => {
+      await gate
+      return { ok: true, json: async () => ({ ok: true, value: WIRE_BALANCE }) }
+    })
+    const pending = makeBalanceCapsule(asClientCtx(new TestClientCtx({ locale: 'en' })), kit)
+    const m3 = await mount(h(pending, {}))
+    assert.equal(text(m3.container), '', 'nothing while the first read is pending')
+    await m3.unmount()
+    release()
+    await flush()
   })
 
   test('the en locale shows USD with the total and the breakdown tooltip', async () => {
@@ -60,11 +74,44 @@ describe('BalanceCapsule', () => {
     assert.equal(pill?.getAttribute('rel'), 'noreferrer')
     assert.equal(query(m.container, '.lc-ov-balance-label')?.textContent, 'DeepSeek balance')
     assert.equal(query(m.container, '.lc-ov-balance-value')?.textContent, '$12.50')
-    const tip = pill?.getAttribute('title') ?? ''
-    assert.ok(tip.includes('Total balance: $12.50'), tip)
-    assert.ok(tip.includes('Granted balance: $2.50'), tip)
-    assert.ok(tip.includes('Topped-up balance: $10.00'), tip)
+    // The breakdown lives in the harness Tooltip's hover bubble (no native
+    // `title`): the pill already carries the total, so only the non-zero
+    // parts ride the bubble — the topped-up line leads the granted one.
+    assert.equal(pill?.getAttribute('title'), null)
+    await hover(pill)
+    assert.equal(
+      query(m.container, '[role="tooltip"]').textContent,
+      'Topped-up balance: $10.00\nGranted balance: $2.50',
+    )
+    await unhover(pill)
+    assert.equal(queryAll(m.container, '[role="tooltip"]').length, 0, 'the bubble drops when the pointer leaves')
     await m.unmount()
+  })
+
+  test('zero sub-items drop from the tooltip; an all-zero account rides bare', async () => {
+    stubRoute({
+      ok: true,
+      value: { isAvailable: true, balances: [{ currency: 'USD', total: 9, granted: 0, toppedUp: 9 }] },
+    })
+    const Capsule = makeBalanceCapsule(asClientCtx(new TestClientCtx({ locale: 'en' })), kit)
+    const m = await mount(h(Capsule, {}))
+    await flush()
+    const pill = query(m.container, '.lc-ov-balance')
+    await hover(pill)
+    assert.equal(query(m.container, '[role="tooltip"]').textContent, 'Topped-up balance: $9.00', 'the zero granted line is gone')
+    await m.unmount()
+
+    stubRoute({
+      ok: true,
+      value: { isAvailable: false, balances: [{ currency: 'USD', total: 0, granted: 0, toppedUp: 0 }] },
+    })
+    const bare = makeBalanceCapsule(asClientCtx(new TestClientCtx({ locale: 'en' })), kit)
+    const m2 = await mount(h(bare, {}))
+    await flush()
+    assert.equal(query(m2.container, '.lc-ov-balance-value')?.textContent, '$0.00', 'the pill still shows the figure')
+    await hover(query(m2.container, '.lc-ov-balance'))
+    assert.equal(queryAll(m2.container, '[role="tooltip"]').length, 0, 'nothing to break down — no bubble')
+    await m2.unmount()
   })
 
   test('the zh locale shows CNY with localized breakdown labels', async () => {
@@ -76,10 +123,40 @@ describe('BalanceCapsule', () => {
     await flush()
     assert.equal(query(m.container, '.lc-ov-balance-label')?.textContent, 'DeepSeek 余额')
     assert.equal(query(m.container, '.lc-ov-balance-value')?.textContent, '¥110.00')
-    const tip = query(m.container, '.lc-ov-balance')?.getAttribute('title') ?? ''
-    assert.ok(tip.includes('总余额: ¥110.00'), tip)
-    assert.ok(tip.includes('赠送余额: ¥10.00'), tip)
-    assert.ok(tip.includes('充值余额: ¥100.00'), tip)
+    await hover(query(m.container, '.lc-ov-balance'))
+    assert.equal(
+      query(m.container, '[role="tooltip"]').textContent,
+      '充值余额: ¥100.00\n赠送余额: ¥10.00',
+    )
+    await m.unmount()
+  })
+
+  test('a stored administrator balance stays hidden until the current account receives a live balance', async () => {
+    remember(WIRE_BALANCE)
+    const fresh = { isAvailable: true, balances: [{ currency: 'USD', total: 9.99, granted: 0.99, toppedUp: 9 }] }
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    vi.stubGlobal('fetch', async () => {
+      await gate
+      return { ok: true, json: async () => ({ ok: true, value: fresh }) }
+    })
+    const Capsule = makeBalanceCapsule(asClientCtx(new TestClientCtx({ locale: 'en' })), kit)
+    const m = await mount(h(Capsule, {}))
+    assert.equal(queryAll(m.container, '.lc-ov-balance-value').length, 0, 'storage cannot authorize the current account')
+    release()
+    await flush()
+    assert.equal(query(m.container, '.lc-ov-balance-value')?.textContent, '$9.99', 'the live figure takes over')
+    await m.unmount()
+  })
+
+  test('a denied or failed read cannot display a previous administrator balance', async () => {
+    remember(WIRE_BALANCE)
+    stubRoute({ ok: false })
+    const Capsule = makeBalanceCapsule(asClientCtx(new TestClientCtx({ locale: 'en' })), kit)
+    const m = await mount(h(Capsule, {}))
+    assert.equal(queryAll(m.container, '.lc-ov-balance-value').length, 0)
+    await flush()
+    assert.equal(queryAll(m.container, '.lc-ov-balance-value').length, 0, 'the current account has no authorized balance')
     await m.unmount()
   })
 
@@ -93,21 +170,5 @@ describe('BalanceCapsule', () => {
     await flush()
     assert.equal(query(m.container, '.lc-ov-balance-value')?.textContent, 'EUR 5.00')
     await m.unmount()
-  })
-
-  test('an unmount before the read lands never updates state', async () => {
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => { release = resolve })
-    vi.stubGlobal('fetch', async () => {
-      await gate
-      return { ok: true, json: async () => ({ ok: true, value: WIRE_BALANCE }) }
-    })
-    const Capsule = makeBalanceCapsule(asClientCtx(new TestClientCtx({ locale: 'en' })), kit)
-    const m = await mount(h(Capsule, {}))
-    assert.equal(text(m.container), '', 'nothing while the read is pending')
-    await m.unmount()
-    release()
-    await flush()
-    assert.ok(true)
   })
 })

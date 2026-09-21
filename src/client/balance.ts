@@ -1,15 +1,4 @@
-/**
- * The DeepSeek platform balance behind the Context Dashboard's header
- * capsule: one lazy read of the plugin's `/api/dsh-context/balance` fetch
- * route (host/balance.ts) per open, deduplicated in flight and remembered
- * briefly so toggling the panel never re-reads.
- *
- * Every outcome that is not a live figure — the route absent (an older host
- * or a connection-less deployment), the platform not configured, a transport
- * failure, a malformed payload — resolves `null`, and the capsule renders
- * nothing: a balance viewer shows a real number or it shows nothing at all,
- * never a spinner or an error where a pill should be.
- */
+/** DeepSeek platform balances read under the current login; no browser balance cache. */
 
 import type { PlatformBalance, PlatformBalanceEntry } from '../shared/types'
 import { asRecord } from './services'
@@ -18,9 +7,6 @@ import { asRecord } from './services'
 // inlines every import, and the host module must never reach it). Same-origin
 // POST under the harness's authenticated `/api` fence.
 const BALANCE_ROUTE = '/api/dsh-context/balance'
-
-/** How long a settled answer (including a `null`) serves identical reads. */
-const TTL_MS = 60_000
 
 /** One platform amount ('110.00', or an already-numeric producer variant), or null. */
 function amountOf(value: unknown): number | null {
@@ -75,34 +61,19 @@ export function balanceEntryOf(
   return balance.balances.find(entry => entry.currency === want) ?? balance.balances[0]
 }
 
-let cached: { at: number; promise: Promise<PlatformBalance | null> } | null = null
-
-/**
- * The capsule's read: one route POST, narrowed through
- * `platformBalanceOf`, deduplicated in flight, TTL-cached. Never rejects.
- */
-export function fetchPlatformBalance(): Promise<PlatformBalance | null> {
-  if (cached !== null && Date.now() - cached.at < TTL_MS) return cached.promise
-  const at = Date.now()
-  const promise = (async (): Promise<PlatformBalance | null> => {
-    try {
-      const response = await fetch(BALANCE_ROUTE, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-      })
-      if (!response.ok) return null
-      const r = asRecord(await response.json())
-      if (r === null || r.ok !== true || r.value === null || r.value === undefined) return null
-      return platformBalanceOf(r.value)
-    } catch {
-      return null
-    }
-  })()
-  cached = { at, promise }
-  return promise
-}
-
-/** Test isolation: drop the cache. */
-export function resetPlatformBalance(): void {
-  cached = null
+/** Read a fresh authorized balance; cancellation or an unavailable route returns null. */
+export async function fetchPlatformBalance(signal?: AbortSignal): Promise<PlatformBalance | null> {
+  try {
+    const response = await fetch(BALANCE_ROUTE, {
+      method: 'POST',
+      signal,
+      headers: { 'content-type': 'application/json' },
+    })
+    if (!response.ok) return null
+    const r = asRecord(await response.json())
+    if (r === null || r.ok !== true || r.value === null || r.value === undefined) return null
+    return platformBalanceOf(r.value)
+  } catch {
+    return null
+  }
 }

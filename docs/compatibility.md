@@ -86,3 +86,7 @@ rm ~/.dsh/storages/session_projcache/sessions/<session-id>.json
 ```
 
 In authenticated account deployments, the platform balance capsule is available only to administrators. User accounts and requests without the verified principal receive no shared balance. Single-account installations retain the upstream behavior.
+
+The balance capsule reads a fresh platform balance on dashboard open and shows only nonzero topped-up and granted amounts. The dashboard also supports a last-24-hours range; account-scoped session filtering applies to every range.
+
+Browser balances are not cached or persisted. Every dashboard open waits for the current login to receive a fresh authorized response, so a previous administrator login cannot supply a balance to a later ordinary account. Closing the capsule cancels its request and discards late responses.
