@@ -89,12 +89,13 @@
 .lc-pi-hint { text-decoration: none; }
 .lc-pi-update { color: var(--dsw-alias-state-warn-primary); font-size: 11px; margin-left: 6px; white-space: nowrap; }
 .lc-pi-label { flex: none; color: var(--dsw-alias-label-secondary); font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The leading site mark rides inline so the row's baseline alignment keeps the label text on the value's baseline. */
+.lc-pi-labelicon { display: inline-block; vertical-align: -2px; margin-right: 4px; }
 /*
  min-width: 0 lets the value shrink inside the flex row and truncate with
  an ellipsis; without it a narrow card pushes the value over the label.
  */
 .lc-pi-value { min-width: 0; color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
-.lc-pi-row-btn .lc-pi-value { font-weight: 400; }
 /* The stats grid's cell count is intrinsic (`repeat(auto-fit, minmax(108px,1fr))` on the element, see
    statsContext.tsx); the donut row's 320px gap fold and 240px stack still ride
    `@max-[…]/lc-card` utilities — statsTokens.tsx / statsTiming.tsx / sliceList.tsx / donut.tsx. */

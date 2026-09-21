@@ -59,7 +59,7 @@ Click **Context Dashboard / 上下文仪表盘** at the bottom-left of the sideb
 
 Open any session and click the **Context / 上下文** tab:
 
-The top row gives Context Stats three times the space of Plugin Info when both cards fit above their minimum widths. Narrow panes stack the cards; the Token Stats and Timing Stats row keeps equal widths. Cost explanations wrap within their stat cells so hidden tooltips do not widen the pane.
+The top row uses a 3:1 flex split between Context Stats and Plugin Info when both cards fit above their minimum widths. Narrow panes stack the cards; the Token Stats and Timing Stats row keeps equal widths. Cost explanations wrap within their stat cells so hidden tooltips do not widen the pane. Plugin Info labels include DeepSeek, GitHub, and settings icons.
 
 ![Context panel overview](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-overview.png)
 
