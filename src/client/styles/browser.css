@@ -17,7 +17,7 @@
 .lc-br-cats { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
 .lc-br-cat { border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); overflow: hidden; }
 .lc-br-cat-empty { opacity: 0.55; }
-.lc-br-cat-row { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; padding: 7px 10px; cursor: pointer; text-align: left; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
+.lc-br-cat-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; padding: 7px 10px; cursor: pointer; text-align: left; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 /*
  Current-composition hover echo: the category row lit by the shared hover link looks hovered — same tint as a physical hover, plus a ring on its color dot.
  */
@@ -29,7 +29,7 @@
 .lc-br-cat-row i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; transition: box-shadow var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-br-cat-label { font-weight: 600; }
 .lc-br-cat-count { color: var(--dsw-alias-label-secondary); font-size: 12px; white-space: nowrap; }
-.lc-br-count-grp { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 4px; }
+.lc-br-count-grp { flex: 1; min-width: min-content; display: inline-flex; align-items: center; gap: 4px; }
 /* Disclosure chevron, drawn in CSS (a bordered box rotated -45°→45°) instead
    of a ▸ glyph: the box rotates about its true center — no glyph wobble — and
    stays crisp at any zoom. */

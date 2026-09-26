@@ -49,6 +49,8 @@ Four surfaces, one story — what your agent is carrying, how it got there, and 
 | **`/context` command** | A centered modal with the same composition and context browser, without leaving the chat. |
 | **Preferences card** | Per-user defaults: view placement, trend granularity & mode, File Activity sort, and more. |
 
+Context Browser category rows wrap at narrow widths so item counts, token estimates, and percentages remain readable.
+
 ## 🗂️ The Context Dashboard
 
 Click **Context Dashboard / 上下文仪表盘** at the bottom-left of the sidebar, right above **Settings**:
