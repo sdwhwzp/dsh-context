@@ -139,6 +139,10 @@ describe('OverviewPanel', () => {
     assert.equal(pulls, 1, 'the baseline re-pull fires on open')
     assert.deepEqual(backfillPosts, ['/api/dsh-context/backfill'], 'the warm-up trigger POST fires on open')
     assert.ok(text(m.container).includes('Context Insights'))
+    // The metrics band is the panel's FIRST row: the six KPI cells span the
+    // card above the aggregate stats pair, out of the insight column.
+    const cardRows = [...query(m.container, '.lc-ov-card').children].map(el => el.className.split(' ')[0])
+    assert.deepEqual(cardRows, ['lc-ov-head', 'lc-ov-kpis', 'lc-ov-stats', 'lc-ov-body'])
     // KPI band: 2 sessions in the 30d range, 1750 tokens billed, priced cost, cache hit.
     const labels = queryAll(m.container, '.lc-stat-label').map(el => el.textContent)
     assert.deepEqual(labels, ['Active Sessions', 'Tokens Used', 'Cost', 'Cache Hit', 'Tool Calls', 'Active Time'])
@@ -156,6 +160,19 @@ describe('OverviewPanel', () => {
     // (only session a carries usage; b folds no cost at all).
     const subs = queryAll(m.container, '.lc-stat-sub').map(el => el.textContent)
     assert.deepEqual(subs.slice(2, 4), ['across 1 sessions', 'across 1 sessions'])
+    // The aggregate stats row: the range's Token Stats ring folded into the
+    // Context tab's OWN composition categories (every fixture category is
+    // billed > 0 here, output exact) beside the Timing Stats ring (the summed
+    // totals, un-split — no fixture carries a decode split).
+    const statsCards = queryAll(m.container, '.lc-ov-stats > .lc-card')
+    assert.equal(statsCards.length, 2)
+    assert.equal(query(statsCards[0], '.lc-donut-center b').textContent, '1.8k')
+    assert.deepEqual(queryAll(statsCards[0], '.lc-sl-label').map(el => el.textContent), [
+      'System Prompt', 'Tool Schemas', 'User Messages', 'Injected Context',
+      'Skill Injections', 'Assistant Messages', 'Tool Results', 'Output',
+    ])
+    assert.equal(query(statsCards[1], '.lc-donut-center b').textContent, '3m0s')
+    assert.ok(text(statsCards[1]).includes('LLM Gen'))
     // Heatmap drew cells for the two ledger days.
     assert.ok(queryAll(m.container, 'button.lc-heat-cell').length >= 2)
     // Cards: a (current, running, grouped), b, and c is outside the 30d range.
@@ -409,6 +426,9 @@ describe('OverviewPanel', () => {
     assert.equal(kpiValues[3], '—', 'no cache hit without billed input')
     assert.equal(kpiValues[4], '0', 'no tool calls without timing')
     assert.equal(kpiValues[5], '—', 'no active time without timing')
+    // The aggregate cards degrade to their empty notes.
+    assert.ok(text(noTimeline.m.container).includes('No billed tokens in this range'))
+    assert.ok(text(noTimeline.m.container).includes('No timing data yet'))
     await noTimeline.m.unmount()
   })
 
@@ -425,6 +445,8 @@ describe('OverviewPanel', () => {
     await flush()
     assert.ok(text(m.container).includes('上下文洞察'))
     assert.ok(text(m.container).includes('活跃会话'))
+    assert.ok(text(m.container).includes('Token 统计'), 'the aggregate stats row rides the zh dictionary too')
+    assert.ok(text(m.container).includes('系统提示词'), 'the Context tab\'s composition categories render in zh')
     assert.ok(text(m.container).includes('打开插件设置'), 'the settings row rides the zh dictionary too')
     await flush() // the price book lands
     const values = queryAll(m.container, '.lc-stat-value').map(el => el.textContent)
