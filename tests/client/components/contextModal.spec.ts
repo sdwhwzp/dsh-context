@@ -69,8 +69,8 @@ describe('ContextModal', () => {
     const ContextModal = makeContextModal(asClientCtx(ctx), kit, settings)
 
     const m1 = await mount(h(ContextModal, { sessionId: 'sm-load1', useContextModal: OPEN }))
-    assert.ok(text(m1.container).includes(DICT_EN.loading))
-    assert.ok(m1.container.querySelector('.lc-modal-card') !== null)
+    assert.ok(text(document.body).includes(DICT_EN.loading))
+    assert.ok(document.body.querySelector('.lc-modal-card') !== null)
     await m1.unmount()
 
     const m2 = await mount(h(ContextModal, {
@@ -78,7 +78,7 @@ describe('ContextModal', () => {
       useContextModal: OPEN,
       useProjection: () => undefined,
     }))
-    assert.ok(text(m2.container).includes(DICT_EN.loading))
+    assert.ok(text(document.body).includes(DICT_EN.loading))
     await m2.unmount()
   })
 
@@ -91,9 +91,9 @@ describe('ContextModal', () => {
       useProjection: (key: string) =>
         key === 'contextTimeline' ? { current: 'junk', requests: 'nope', nodes: 7, archive: null } : undefined,
     }))
-    assert.ok(!text(m.container).includes(DICT_EN.loading))
-    assert.ok(text(m.container).includes(DICT_EN['overview.title']))
-    assert.ok(m.container.querySelector('.lc-br-cats') !== null)
+    assert.ok(!text(document.body).includes(DICT_EN.loading))
+    assert.ok(text(document.body).includes(DICT_EN['overview.title']))
+    assert.ok(document.body.querySelector('.lc-br-cats') !== null)
     await m.unmount()
   })
 
@@ -117,10 +117,10 @@ describe('ContextModal', () => {
       useContextModal: OPEN,
       useProjection: (key: string) => projections[key],
     }))
-    assert.ok(text(m.container).includes('deepseek-v4-flash · deepseek'))
+    assert.ok(text(document.body).includes('deepseek-v4-flash · deepseek'))
 
     // Hovering a composition segment flows into hoverCat (dim + legend chip).
-    const compCard = query(m.container, '.lc-modal-card .lc-card')
+    const compCard = query(document.body, '.lc-modal-card .lc-card')
     const seg = query(compCard, '.lc-stacked-seg')
     await hover(seg)
     assert.ok(query(compCard, '.lc-stacked').className.includes('lc-stacked-dim'))
@@ -139,8 +139,8 @@ describe('ContextModal', () => {
       useContextModal: OPEN,
       useProjection: (key: string) => key === 'contextTimeline' ? timeline({ model: 'only-model' }) : undefined,
     }))
-    assert.ok(text(m1.container).includes('only-model'))
-    assert.ok(!text(m1.container).includes('only-model ·'))
+    assert.ok(text(document.body).includes('only-model'))
+    assert.ok(!text(document.body).includes('only-model ·'))
     await m1.unmount()
 
     const m2 = await mount(h(ContextModal, {
@@ -148,7 +148,7 @@ describe('ContextModal', () => {
       useContextModal: OPEN,
       useProjection: (key: string) => key === 'contextTimeline' ? timeline() : undefined,
     }))
-    const card = query(m2.container, '.lc-modal-card .lc-card')
+    const card = query(document.body, '.lc-modal-card .lc-card')
     assert.equal(card.querySelector('.lc-card-sub'), null)
     await m2.unmount()
   })
@@ -158,8 +158,8 @@ describe('ContextModal', () => {
     const ctx = new TestClientCtx({ services: { sessions } })
     const ContextModal = makeContextModal(asClientCtx(ctx), kit, settings)
     const m = await mount(h(ContextModal, { useContextModal: OPEN, useProjection: () => undefined }))
-    await click(query(m.container, '.lc-modal-backdrop'))
-    assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null)
+    await click(query(document.body, '.lc-modal-backdrop'))
+    assert.ok(document.body.querySelector('.lc-modal-backdrop') !== null)
     assert.equal(sessions.bails.length, 0)
     await m.unmount()
   })
@@ -169,8 +169,8 @@ describe('ContextModal', () => {
     const ctx = new TestClientCtx({ services: { sessions } })
     const ContextModal = makeContextModal(asClientCtx(ctx), kit, settings)
     const m = await mount(h(ContextModal, { sessionId: 'sm-card', useContextModal: OPEN, useProjection: () => undefined }))
-    await click(query(m.container, '.lc-modal-card'))
-    assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null)
+    await click(query(document.body, '.lc-modal-card'))
+    assert.ok(document.body.querySelector('.lc-modal-backdrop') !== null)
     assert.equal(sessions.bails.length, 0)
     await m.unmount()
   })
@@ -187,11 +187,11 @@ describe('ContextModal', () => {
       useContextModal: boundModalHook(sid),
       useProjection: () => undefined,
     }))
-    assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null)
+    assert.ok(document.body.querySelector('.lc-modal-backdrop') !== null)
 
-    await click(query(m.container, '.lc-modal-close'))
+    await click(query(document.body, '.lc-modal-close'))
     assert.equal(modalStoreOf(sid).getSnapshot(), false)
-    assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
+    assert.equal(document.body.querySelector('.lc-modal-backdrop'), null)
     assert.equal(sessions.bails.length, 1)
     assert.equal(sessions.bails[0].event, 'slash/input-consume-token')
     assert.deepEqual(sessions.bails[0].payload, { guard: { kind: 'bare-token', token: '/context' } })
@@ -211,7 +211,7 @@ describe('ContextModal', () => {
       useContextModal: boundModalHook(sid),
       useProjection: () => undefined,
     }))
-    await click(query(m.container, '.lc-modal-backdrop'))
+    await click(query(document.body, '.lc-modal-backdrop'))
     assert.equal(modalStoreOf(sid).getSnapshot(), false)
     assert.equal(sessions.bails.length, 0)
     await m.unmount()
@@ -228,9 +228,9 @@ describe('ContextModal', () => {
       useContextModal: boundModalHook(sid),
       useProjection: () => undefined,
     }))
-    await click(query(m.container, '.lc-modal-backdrop'))
+    await click(query(document.body, '.lc-modal-backdrop'))
     assert.equal(modalStoreOf(sid).getSnapshot(), false)
-    assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
+    assert.equal(document.body.querySelector('.lc-modal-backdrop'), null)
     await m.unmount()
   })
 
@@ -252,7 +252,7 @@ describe('ContextModal', () => {
       useContextModal: boundModalHook(sid),
       useProjection: () => undefined,
     }))
-    await click(query(m.container, '.lc-modal-backdrop'))
+    await click(query(document.body, '.lc-modal-backdrop'))
     assert.equal(modalStoreOf(sid).getSnapshot(), false)
     assert.deepEqual(scoped, [sid])
     await m.unmount()
@@ -279,22 +279,27 @@ describe('ContextModal', () => {
     }))
     // Relocate the mount container under the frame before opening, so the
     // measure walks the real ancestor chain.
+    seat.style.backdropFilter = 'blur(10px)'
+    seat.style.transform = 'translateZ(0)'
+    seat.style.overflow = 'hidden'
     seat.appendChild(m.container)
     await act(async () => {
       modalStoreOf(sid).set(true)
     })
-    assert.equal(query(m.container, '.lc-modal-backdrop').style.left, '280px')
+    assert.equal(query(document.body, '.lc-modal-backdrop').style.left, '280px')
+    assert.equal(query(document.body, '.lc-modal-backdrop').parentElement, document.body)
+    assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
 
     // A sidebar collapse rewrite while open is followed through the observer.
     await act(async () => {
       frame.style.gridTemplateColumns = '56px minmax(0, 1fr) 360px'
     })
     await flush()
-    assert.equal(query(m.container, '.lc-modal-backdrop').style.left, '56px')
+    assert.equal(query(document.body, '.lc-modal-backdrop').style.left, '56px')
 
     disconnectSpy.mockClear()
-    await click(query(m.container, '.lc-modal-backdrop'))
-    assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
+    await click(query(document.body, '.lc-modal-backdrop'))
+    assert.equal(document.body.querySelector('.lc-modal-backdrop'), null)
     assert.equal(disconnectSpy.mock.calls.length, 1)
     frame.remove()
     await m.unmount()
@@ -308,7 +313,7 @@ describe('ContextModal', () => {
       useContextModal: OPEN,
       useProjection: () => undefined,
     }))
-    assert.equal(query(m.container, '.lc-modal-backdrop').style.left, '0px')
+    assert.equal(query(document.body, '.lc-modal-backdrop').style.left, '0px')
     await m.unmount()
   })
 
@@ -324,11 +329,11 @@ describe('ContextModal', () => {
       useProjection: () => undefined,
     }))
     await keydown('a')
-    assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null)
+    assert.ok(document.body.querySelector('.lc-modal-backdrop') !== null)
 
     await keydown('Escape')
     assert.equal(modalStoreOf(sid).getSnapshot(), false)
-    assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
+    assert.equal(document.body.querySelector('.lc-modal-backdrop'), null)
 
     // Listener removed on close: another Escape must not run close() again —
     // with a pending consume armed, a live listener would bail.
@@ -356,7 +361,7 @@ describe('ContextModal', () => {
     await act(async () => {
       modalStoreOf(sid).set(true)
     })
-    const closeBtn = query(m.container, '.lc-modal-close')
+    const closeBtn = query(document.body, '.lc-modal-close')
     closeBtn.focus()
     assert.equal(document.activeElement, closeBtn)
 
@@ -383,7 +388,7 @@ describe('ContextModal', () => {
       modalStoreOf(sid).set(true)
     })
     btn.remove()
-    await click(query(m.container, '.lc-modal-close'))
+    await click(query(document.body, '.lc-modal-close'))
     assert.equal(modalStoreOf(sid).getSnapshot(), false)
     assert.ok(!document.contains(btn))
     await m.unmount()
@@ -403,7 +408,7 @@ describe('ContextModal', () => {
       useProjection: () => undefined,
     }))
     vi.restoreAllMocks()
-    await click(query(m.container, '.lc-modal-close'))
+    await click(query(document.body, '.lc-modal-close'))
     assert.equal(modalStoreOf(sid).getSnapshot(), false)
     assert.equal(document.activeElement, document.body)
     await m.unmount()
@@ -445,12 +450,12 @@ describe('ContextModal — the split generation', () => {
       useProjection: (key: string) => (key === 'contextTimeline' ? head : undefined),
     }))
     try {
-      assert.ok(text(m.container).includes(DICT_EN['overview.title']))
-      assert.ok(text(m.container).includes(DICT_EN['detail.loading']))
+      assert.ok(text(document.body).includes(DICT_EN['overview.title']))
+      assert.ok(text(document.body).includes(DICT_EN['detail.loading']))
       release()
-      await until(() => !text(m.container).includes(DICT_EN['detail.loading']), 'the modal detail never landed')
-      assert.equal(queryAll(m.container, '.lc-br-pick option').length, 2, 'live + the one served step')
-      assert.ok(text(m.container).includes('1 Item'), 'the assistant section counts the served node')
+      await until(() => !text(document.body).includes(DICT_EN['detail.loading']), 'the modal detail never landed')
+      assert.equal(queryAll(document.body, '.lc-br-pick option').length, 2, 'live + the one served step')
+      assert.ok(text(document.body).includes('1 Item'), 'the assistant section counts the served node')
     } finally {
       release()
       await m.unmount()
@@ -476,10 +481,10 @@ describe('ContextModal — the split generation', () => {
       useContextModal: OPEN,
       useProjection: (key: string) => projections[key],
     }))
-    const sysRow = queryAll(m.container, '.lc-br-cat-row').find(r => text(r).includes(DICT_EN['cat.system']))
+    const sysRow = queryAll(document.body, '.lc-br-cat-row').find(r => text(r).includes(DICT_EN['cat.system']))
     assert.ok(sysRow !== undefined)
     await click(sysRow)
-    assert.ok(text(m.container).includes(DICT_EN['browser.headerMetaOnly']), 'the faceless mount shows the static note')
+    assert.ok(text(document.body).includes(DICT_EN['browser.headerMetaOnly']), 'the faceless mount shows the static note')
 
     // The face lands mid-open (cordis replays the pending inject): the modal
     // re-renders, the fetcher builds, and the open epoch fetches by itself.
@@ -501,8 +506,8 @@ describe('ContextModal — the split generation', () => {
         },
       })
     })
-    await until(() => text(m.container).includes('HEALED SYSTEM PROMPT'), 'the open epoch never healed after the face landed')
-    assert.ok(!text(m.container).includes(DICT_EN['browser.headerMetaOnly']))
+    await until(() => text(document.body).includes('HEALED SYSTEM PROMPT'), 'the open epoch never healed after the face landed')
+    assert.ok(!text(document.body).includes(DICT_EN['browser.headerMetaOnly']))
     assert.deepEqual(calls, [{ sessionId: 'sm-race', throughSeq: 1, beforeSeq: 2 }])
     await m.unmount()
     // Unload the declared slot so no face stales into the next test.

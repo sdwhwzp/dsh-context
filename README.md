@@ -165,7 +165,7 @@ Type `/context` (or pick it from the `/` menu) and press Enter:
 
 ![Slash menu with the context command](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-command-entry.png)
 
-A centered dialog opens with the **Current Composition** card and the **Context browser** — the same composition bar, per-step picker, and `vs previous turn` diff badges as the tab:
+The dialog stays within the window beside the sidebar, including when a skin blurs the composer. Its contents scroll inside the card. It opens with the **Current Composition** card and the **Context browser** — the same composition bar, per-step picker, and `vs previous turn` diff badges as the tab:
 
 ![The /context modal](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-command.png)
 

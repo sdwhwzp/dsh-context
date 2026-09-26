@@ -5,6 +5,7 @@
  */
 
 import { createElement as h, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { createPortal } from 'react-dom'
 import { measureDock } from '../dockMeasure'
 import { headlineOf } from '../headline'
 import { modalStoreOf, takePendingConsume } from '../modalStore'
@@ -55,7 +56,7 @@ export function makeContextModal(
     // Dock the mask beside the shell sidebar: 0 until the frame measure lands
     // (the layout effect below resolves it before first paint).
     const [dockLeft, setDockLeft] = useState(0)
-    const backdropRef = useRef<HTMLDivElement | null>(null)
+    const anchorRef = useRef<HTMLSpanElement | null>(null)
     // Session-authorized durable-image loader for the browser's attachment cards, resolved through the harness `uiConversation` service
     // (`imageUrl`); absent service/session degrades the cards to metadata-only, never an error. Same parity as the Context tab.
     const loadImage = useMemo(
@@ -95,17 +96,18 @@ export function makeContextModal(
     // Capture-phase Escape close + focus restore (the shared overlay contract).
     useEscapeClose(open, close)
 
+    // Keep the measurement anchor in the composer; the body portal escapes its skin filters and containing blocks.
     // Dock the mask to the main column: measure the sidebar track once before
     // first paint, then follow the frame's inline template while open (sidebar
     // drags, collapse toggles and narrow-viewport re-solves all rewrite it).
     // An unresolved frame keeps the full-viewport mask.
     useLayoutEffect(() => {
       if (!open) return undefined
-      const dock = measureDock(backdropRef.current)
+      const dock = measureDock(anchorRef.current)
       setDockLeft(dock.left)
       if (dock.frame === null) return undefined
       const observer = new MutationObserver(() => {
-        setDockLeft(measureDock(backdropRef.current).left)
+        setDockLeft(measureDock(anchorRef.current).left)
       })
       observer.observe(dock.frame, { attributes: true, attributeFilter: ['style'] })
       return () => { observer.disconnect() }
@@ -117,39 +119,45 @@ export function makeContextModal(
     const subtitle = data !== null ? (data.model ? data.model : '') + (data.provider ? ' · ' + data.provider : '') : ''
 
     return (
-      <div ref={backdropRef} className="lc-modal-backdrop" style={{ left: dockLeft }} onClick={close}>
-        <div className="lc-modal-card" onClick={(ev) => { ev.stopPropagation() }}>
-          <div className="lc-modal-head">
-            <span className="lc-modal-title">{t('tab')}</span>
-            <button className="lc-modal-close hover:text-(--dsw-alias-label-primary) hover:bg-(--dsw-alias-bg-layer-2)" aria-label={t('cmd.close')} onClick={close}>×</button>
-          </div>
+      <>
+        <span ref={anchorRef} hidden />
+        {createPortal(
+          <div className="lc-modal-backdrop" style={{ left: dockLeft }} onClick={close}>
+            <div className="lc-modal-card" onClick={(ev) => { ev.stopPropagation() }}>
+              <div className="lc-modal-head">
+                <span className="lc-modal-title">{t('tab')}</span>
+                <button className="lc-modal-close hover:text-(--dsw-alias-label-primary) hover:bg-(--dsw-alias-bg-layer-2)" aria-label={t('cmd.close')} onClick={close}>×</button>
+              </div>
 
-          {data === null || head === null ? (
-            <div className="lc-empty">{t('loading')}</div>
-          ) : (
-            <div>
-              <CurrentComposition
-                head={head}
-                subtitle={subtitle}
-                hoverKey={hoverCat}
-                onHoverKey={setHoverCat}
-              />
-              <ContextBrowser
-                data={data}
-                headers={headers}
-                convNodes={convNodes}
-                fetchContent={fetchContent}
-                fetchHeader={fetchHeader}
-                loadImage={loadImage}
-                hoverKey={hoverCat}
-                onHoverKey={setHoverCat}
-                detailState={source.detailState}
-                onDetailRetry={source.retryDetail}
-              />
+              {data === null || head === null ? (
+                <div className="lc-empty">{t('loading')}</div>
+              ) : (
+                <div>
+                  <CurrentComposition
+                    head={head}
+                    subtitle={subtitle}
+                    hoverKey={hoverCat}
+                    onHoverKey={setHoverCat}
+                  />
+                  <ContextBrowser
+                    data={data}
+                    headers={headers}
+                    convNodes={convNodes}
+                    fetchContent={fetchContent}
+                    fetchHeader={fetchHeader}
+                    loadImage={loadImage}
+                    hoverKey={hoverCat}
+                    onHoverKey={setHoverCat}
+                    detailState={source.detailState}
+                    onDetailRetry={source.retryDetail}
+                  />
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </div>
+          </div>,
+          document.body,
+        )}
+      </>
     )
   }
 
