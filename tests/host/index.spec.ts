@@ -48,8 +48,6 @@ function appendRealEnvelopes(session: Session): void {
   session.append('request/header', {
     header: {
       config: { model: 'deepseek-v4-flash', provider: 'deepseek' },
-      system: 'sys',
-      tools: [],
     },
     reason: 'initial',
   })
@@ -97,7 +95,7 @@ describe('dsh-context host plugin', () => {
     assert.ok(headers !== undefined, 'contextHeaders served after real appends')
     assert.equal(headers.headers.length, 1)
     assert.ok(!('system' in headers.headers[0]), 'system text stays in the log, not the projection')
-    assert.ok((headers.headers[0].systemTokens ?? 0) > 0, 'the epoch carries its system token price')
+    assert.ok(!('systemTokens' in headers.headers[0]), 'the system price lives in the timeline systems, never the epoch')
 
     const activity = snapshot.values.contextActivity
     assert.ok(activity !== undefined, 'contextActivity served after real appends')

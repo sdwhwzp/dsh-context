@@ -1,6 +1,6 @@
 // The Context Dashboard's data layer (src/client/overview.ts): the hostile-
-// snapshot row join, filters, sorts, aggregations, relative time, and the
-// session-open verb — every guard branch with hostile fixtures.
+// snapshot row join, filters, sorts, aggregations, and relative time — every
+// guard branch with hostile fixtures.
 
 import assert from 'node:assert/strict'
 import { describe, test, vi } from 'vitest'
@@ -13,7 +13,6 @@ import {
   groupCountsOf,
   inGroup,
   kpisOf,
-  openSession,
   pageOf,
   projectOf,
   rangeStartOf,
@@ -229,11 +228,18 @@ describe('filterRows', () => {
     assert.deepEqual(filterRows(rows, { range: 'all', day: '2026-09-11', query: '' }, now), [], 'no ledger entry')
   })
 
-  test('the query matches title or directory, case-insensitively', () => {
+  test('the query matches title, directory, or last message, case-insensitively', () => {
     assert.deepEqual(filterRows(rows, { range: 'all', day: null, query: 'FRESH' }, now).map(r => r.id), ['new'])
     assert.deepEqual(filterRows(rows, { range: 'all', day: null, query: '/repo' }, now).map(r => r.id), ['new'])
     assert.deepEqual(filterRows(rows, { range: 'all', day: null, query: '  ' }, now).length, 3, 'a blank query matches all')
     assert.deepEqual(filterRows(rows, { range: 'all', day: null, query: 'zzz' }, now), [])
+    // The session's newest own message joins the haystack.
+    const talked = rowOf({ id: 'talk', title: 'quiet title', timeline: { lastUser: 'ship the QUARTERLY report' } as unknown as ContextTimeline })
+    assert.deepEqual(filterRows([talked], { range: 'all', day: null, query: 'quarterly' }, now).map(r => r.id), ['talk'])
+    assert.deepEqual(filterRows([talked], { range: 'all', day: null, query: 'quiet' }, now).map(r => r.id), ['talk'], 'the title still matches')
+    // A non-string last message (a hostile fold shape) never matches.
+    const odd = rowOf({ id: 'odd', title: 'odd one', timeline: { lastUser: 42 } as unknown as ContextTimeline })
+    assert.deepEqual(filterRows([odd], { range: 'all', day: null, query: '42' }, now), [])
   })
 })
 
@@ -426,45 +432,6 @@ describe('relativeTime', () => {
   test('future and invalid stamps read as just-now (clock skew is not an error)', () => {
     assert.equal(relativeTime(t, now + 60_000, now), 'ov.time.now')
     assert.equal(relativeTime(t, Number.NaN, now), 'ov.time.now')
-  })
-})
-
-describe('openSession', () => {
-  function ctxWith(services: Record<string, unknown>): ClientCtx {
-    return { get: (name: string) => services[name] } as unknown as ClientCtx
-  }
-
-  test('prefers the uiWorkspace navigation verb (0.1.6-alpha.2 dropped sessions.open)', () => {
-    const opened: string[] = []
-    const legacy: string[] = []
-    openSession(ctxWith({
-      uiWorkspace: { openSession: (id: string) => { opened.push(id) } },
-      sessions: { open: (id: string) => { legacy.push(id) } },
-    }), 's1')
-    assert.deepEqual(opened, ['s1'])
-    assert.deepEqual(legacy, [], 'the legacy verb is not called twice over')
-  })
-
-  test('falls back to the sessions selection verb on lines without uiWorkspace', () => {
-    const opened: string[] = []
-    openSession(ctxWith({ sessions: { open: (id: string) => { opened.push(id) } } }), 's1')
-    openSession(ctxWith({ uiWorkspace: null, sessions: { open: (id: string) => { opened.push(id) } } }), 's2')
-    openSession(ctxWith({ uiWorkspace: {}, sessions: { open: (id: string) => { opened.push(id) } } }), 's3')
-    openSession(ctxWith({ uiWorkspace: { openSession: 7 }, sessions: { open: (id: string) => { opened.push(id) } } }), 's4')
-    assert.deepEqual(opened, ['s1', 's2', 's3', 's4'])
-  })
-
-  test('absent or verb-less faces swallow silently', () => {
-    openSession(ctxWith({}), 's1')
-    openSession(ctxWith({ sessions: null }), 's1')
-    openSession(ctxWith({ sessions: {} }), 's1')
-    openSession(ctxWith({ sessions: { open: 7 } }), 's1')
-  })
-
-  test('a hostile face never throws into the click handler', () => {
-    openSession(ctxWith({ uiWorkspace: { openSession: () => { throw new Error('boom') } } }), 's1')
-    openSession(ctxWith({ sessions: { open: () => { throw new Error('boom') } } }), 's1')
-    openSession({ get: () => { throw new Error('boom') } } as unknown as ClientCtx, 's1')
   })
 })
 

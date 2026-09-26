@@ -136,11 +136,11 @@ export interface ConversationNodeLike {
  * A durable image attachment reference, as far as this plugin consumes it
  * (dsh's `ImageAttachmentRef`, minimally re-typed so the plugin stays free
  * of an attachment-package dependency). The durable log holds only this ref
- * — never inline bytes. Since dsh 0.1.2-rc.1 the width/height/bytes describe
- * the NORMALIZED raster under a deployment-resolvable policy (defaults:
- * total-pixel budget 2048×2048, long edge capped at 8192px — the 0.1.1 line
- * capped the long edge at 2048px); `originalDimensions` carries the
- * pre-normalization size when normalization reduced the image.
+ * — never inline bytes. On every supported line the width/height/bytes
+ * describe the NORMALIZED raster under a deployment-resolvable policy
+ * (defaults: total-pixel budget 2048×2048, long edge capped at 8192px);
+ * `originalDimensions` carries the pre-normalization size when normalization
+ * reduced the image.
  */
 export interface ImageRefLike {
   attachmentId: string
@@ -800,16 +800,6 @@ export interface InputTriggersFace {
   }): () => void
 }
 
-/**
- * The `uiWorkspace` service (harness 0.1.6+), as far as the Context Dashboard
- * consumes it: the one navigation verb that selects a session and shows its
- * conversation. Re-proved at the call site; absent on older lines, where
- * {@link SessionsFace.open} is the verb.
- */
-export interface UiWorkspaceFace {
-  openSession?(target: string): void
-}
-
 /** The session scope (`ctx.sessions.scope`), used to dispatch the scoped consume-token event. */
 export interface SessionScopeFace {
   bail(subject: unknown, event: string, payload: unknown): unknown
@@ -818,10 +808,10 @@ export interface SessionScopeFace {
 export interface SessionsFace {
   scope(id: string): SessionScopeFace | undefined
   /**
-   * Select a listed session as current — the sidebar row click's verb on
-   * harness lines up to 0.1.6-alpha.1 (0.1.6-alpha.2 moved navigation to
-   * {@link UiWorkspaceFace.openSession}). Re-proved at the call site; absent
-   * on a face that predates the verb or that has already dropped it.
+   * Select a listed session as current — the retired selection spelling,
+   * still served through the 0.1.5 line and gone since the 0.1.6 selection
+   * refactor (issue #90: the verb's home is now the view owner). Re-proved at
+   * the call site via {@link openSessionVia}, which prefers the newer face.
    */
   open?(id: string): void
   /**
@@ -994,6 +984,32 @@ export function openResourceVia(ctx: ClientCtx): ((address: string) => boolean) 
       return false
     }
   }
+}
+
+/**
+ * Jump to one session — the harness's own session-selection verb (issue #90).
+ * Every supported line selects through the view owner (`uiWorkspace`
+ * .openSession, the sidebar row click's own verb); the sessions service's own
+ * `open` is the retired spelling (still served through the 0.1.5 line, gone
+ * since the 0.1.6 selection refactor) and stays as the degradation path for a
+ * composition without the workspace module. Both faces are re-proved per call
+ * (a service can land or be revoked across an HMR reload) and the verb is
+ * invoked bound (the service instance reads its own state); a generation
+ * serving neither, or a hostile face, swallows — the jump is best-effort by
+ * nature.
+ */
+export function openSessionVia(ctx: ClientCtx, id: string): void {
+  try {
+    const workspace = asRecord(ctx.get('uiWorkspace'))
+    const open = workspace?.openSession
+    if (typeof open === 'function') {
+      open.call(workspace, id)
+      return
+    }
+    const sessions = asRecord(ctx.get('sessions'))
+    const legacy = sessions?.open
+    if (typeof legacy === 'function') legacy.call(sessions, id)
+  } catch { /* absent or hostile face — the jump is best-effort */ }
 }
 
 /**

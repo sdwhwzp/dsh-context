@@ -19,7 +19,7 @@ import { cacheHitPercent } from './format'
 import type { CostCurrency } from './cost'
 import { estimateSessionCost, mergeCostUsage } from './cost'
 import type { ModelPrices } from './cost'
-import { activityOf, asRecord, timelineOf, type ClientCtx, type SessionsFace, type UiWorkspaceFace } from './services'
+import { activityOf, asRecord, timelineOf, type ClientCtx, type SessionsFace } from './services'
 import type { ContextActivity, ContextTimeline, SessionCostUsage } from '../shared/types'
 
 /** One session-list row joined with its (sanitized) projection values. */
@@ -295,8 +295,8 @@ export function createdDayOf(activity: ContextActivity | null): string | undefin
 /**
  * The panel's row pipeline: range (by last-activity), then the heatmap's
  * picked day (sessions contributing to that day's merged ledger), then the
- * search box (title or directory substring). Each stage keeps the rows it
- * cannot prove out of the result — never an exception.
+ * search box (title, directory, or last-message substring). Each stage keeps
+ * the rows it cannot prove out of the result — never an exception.
  */
 export function filterRows(
   rows: readonly OverviewRow[],
@@ -314,7 +314,9 @@ export function filterRows(
     if (query !== '') {
       const inTitle = row.title.toLowerCase().includes(query)
       const inCwd = row.cwd !== undefined && row.cwd.toLowerCase().includes(query)
-      if (!inTitle && !inCwd) return false
+      const lastUser = row.timeline?.lastUser
+      const inLastUser = typeof lastUser === 'string' && lastUser.toLowerCase().includes(query)
+      if (!inTitle && !inCwd && !inLastUser) return false
     }
     return true
   })
@@ -493,27 +495,6 @@ export function aggregateDays(rows: readonly OverviewRow[]): Record<string, DayT
 }
 
 // ---- presentation helpers --------------------------------------------------
-
-/**
- * Jump to one session through the harness's own navigation verb: the
- * `uiWorkspace` service's `openSession` (0.1.6+, the only verb left on
- * 0.1.6-alpha.2), else `sessions.open` (the sidebar row click's verb on
- * every earlier line). Each face is re-proved per call and a hostile or
- * absent service swallows silently — the panel still closes, so the gesture
- * never dead-ends on an error.
- */
-export function openSession(ctx: ClientCtx, id: string): void {
-  try {
-    // A hostile registry may hand back null where the face is declared optional.
-    const workspace = ctx.get('uiWorkspace') as UiWorkspaceFace | null | undefined
-    if (workspace !== undefined && workspace !== null && typeof workspace.openSession === 'function') {
-      workspace.openSession(id)
-      return
-    }
-    const sessions = ctx.get('sessions') as SessionsFace | null | undefined
-    if (sessions !== undefined && sessions !== null && typeof sessions.open === 'function') sessions.open(id)
-  } catch { /* the jump is best-effort; the panel closes regardless */ }
-}
 
 /**
  * Re-pull the session-list baseline so host-side projection backfills

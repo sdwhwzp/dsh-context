@@ -171,15 +171,8 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
       assert.equal(staging.dshHasString(baseline.tag, dc.registryNeedle, dc.registryFile), true, 'registry stateOf face')
     })
 
-    test('client: the right Sidebar tab seam (optional per generation)', () => {
+    test('client: the right Sidebar tab seam', () => {
       const sidebar = baseline.client.sidebar
-      if (sidebar === undefined) {
-        // No right Sidebar on this line: the plugin's deferred registration
-        // must never fire, which the always-on client lane pins. Assert the
-        // absence itself so a moved seam cannot read as "unsupported here".
-        assert.equal(staging.dshHasString(baseline.tag, 'sidebarRightTabs', 'packages/client/*/src/**'), false)
-        return
-      }
       assert.equal(staging.dshHasString(baseline.tag, sidebar.serviceNeedle, sidebar.serviceFile), true, 'tab-type registry service')
       assert.equal(staging.dshHasString(baseline.tag, sidebar.slotNeedle, sidebar.slotFile), true, 'keyed body seat')
       assert.equal(staging.dshHasString(baseline.tag, sidebar.titleSlotNeedle, sidebar.slotFile), true, 'keyed chip-title seat')
@@ -187,12 +180,26 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     })
 
     test('client: the right Sidebar guide-entry contract (the contribution\'s shape)', () => {
-      const sidebar = baseline.client.sidebar
-      // No right Sidebar on this line: the entry is never contributed there.
-      if (sidebar === undefined) return
-      for (const field of sidebar.guideEntry.fields) {
-        assert.equal(staging.dshHasString(baseline.tag, field, sidebar.guideEntry.file), true, `guide-entry field: ${field}`)
+      for (const field of baseline.client.sidebar.guideEntry.fields) {
+        assert.equal(staging.dshHasString(baseline.tag, field, baseline.client.sidebar.guideEntry.file), true, `guide-entry field: ${field}`)
       }
+    })
+
+    test('client: the session-jump seam of this generation (issue #90)', () => {
+      // The view owner's navigation verb (the sidebar row click's own), with
+      // the signature this line spells; and the retired sessions-service
+      // `open(id)` selection verb, declared exactly where the line still has it.
+      const nav = baseline.client.sessionNav
+      assert.equal(
+        staging.dshHasString(baseline.tag, nav.workspaceNeedle, nav.workspaceFile),
+        true,
+        'the view-owner navigation verb (uiWorkspace.openSession)',
+      )
+      assert.equal(
+        staging.dshHasString(baseline.tag, 'open(id: SessionId): void', nav.sessionsFile),
+        nav.sessionsOpen,
+        'the retired sessions-service selection verb',
+      )
     })
 
     test('client: MarkdownText chrome prop', () => {
