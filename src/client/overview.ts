@@ -17,9 +17,8 @@
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
 import { billedParts } from './categories'
 import { cacheHitPercent } from './format'
-import type { CostCurrency } from './cost'
 import { estimateSessionCost, mergeCostUsage } from './cost'
-import type { ModelPrices } from './cost'
+import type { CostCurrency, ModelBook } from './cost'
 import { activityOf, asRecord, timelineOf, type ClientCtx, type SessionsFace } from './services'
 import type { ContextActivity, ContextTimeline, SessionCostUsage, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
 
@@ -527,7 +526,7 @@ export interface OverviewKpis {
 export function kpisOf(
   rows: readonly OverviewRow[],
   listed: number,
-  prices: ModelPrices | null | undefined,
+  book: ModelBook | null | undefined,
   currency: CostCurrency,
 ): OverviewKpis {
   const usage = mergeCostUsage(...rows.map(row => row.timeline?.cost))
@@ -544,7 +543,7 @@ export function kpisOf(
     // Each qualifying sub-line counts the sessions its own figure covers: a
     // session with usage but no book rates feeds the cache-hit rate while
     // pricing to nothing.
-    if (estimateSessionCost(cost, prices, currency) !== null) costSessions++
+    if (estimateSessionCost(cost, book, currency) !== null) costSessions++
     if (usageTotalsOf(cost) !== null) usageSessions++
     turns += turnsOf(row.timeline)
     const timing = row.timeline?.timing
@@ -558,7 +557,7 @@ export function kpisOf(
     listed,
     tokens: totals?.total ?? 0,
     turns,
-    cost: estimateSessionCost(usage, prices, currency),
+    cost: estimateSessionCost(usage, book, currency),
     costSessions,
     cacheHit: totals === null ? null : cacheHitPercent(totals.cacheRead, totals.input + totals.cacheRead + totals.cacheWrite),
     usageSessions,

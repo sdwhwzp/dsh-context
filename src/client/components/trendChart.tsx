@@ -119,6 +119,9 @@ export function makeTrendChart(kit: ViewKit): (props: TrendChartProps) => ReactE
   // Entrance stagger cap: long logs render thousands of bars, so the grow-in cascade stops widening after
   // this many columns and late bars simply join within the cap (trendChart.css delays by `--lc-i`).
   const STAGGER_CAP = 20
+  // Step flags: every 5th step bar plants one at its left edge, labeled with its cumulative step number
+  // (5, 10, 15, …) — the chart's only position landmark in step granularity (the turn strip numbers turns).
+  const STEP_FLAG_EVERY = 5
   // Neutral zebra, deliberately DISJOINT from the category palette — the strip must read as a partition layer, not a bottom segment of the
   // composition bars.
   const TURN_FILLS = [
@@ -201,6 +204,8 @@ export function makeTrendChart(kit: ViewKit): (props: TrendChartProps) => ReactE
     deltaScale?: number
     /** Bar index in the render order: the entrance grow-in stagger slot (capped inside, so a long log's cascade stays snappy). */
     enterIndex: number
+    /** The step flag's label (the bar's cumulative step number), or null to plant none. */
+    flag: number | null
     onSelect: (seq: number | null) => void
     onHover: (seq: number | null) => void
   }
@@ -227,6 +232,11 @@ export function makeTrendChart(kit: ViewKit): (props: TrendChartProps) => ReactE
         onClick={() => { props.onSelect(props.selected ? null : req.seq) }}
         onMouseEnter={() => { props.onHover(req.seq) }}
       >
+        {props.flag !== null ? (
+          // Painted UNDER the ✂ marker (it follows in DOM order): on a rare same-bar collision the event
+          // glyph keeps precedence over the landmark.
+          <span className="lc-step-flag" aria-hidden="true"><span className="lc-step-flag-label">{props.flag}</span></span>
+        ) : null}
         {marker !== undefined ? (
           <span
             className="lc-bar-marker"
@@ -658,6 +668,8 @@ export function makeTrendChart(kit: ViewKit): (props: TrendChartProps) => ReactE
                   selected={props.selectedSeq === req.seq}
                   hovered={props.hoveredSeq === req.seq}
                   inTurn={props.activeTurn !== null && (req.turn ?? 0) === props.activeTurn}
+                  // Turn bars skip the flag: the turn strip below already numbers that grid.
+                  flag={props.granularity === 'step' && (i + 1) % STEP_FLAG_EVERY === 0 ? i + 1 : null}
                   maxTotal={maxTotal}
                   upPx={delta ? upPx : undefined}
                   downPx={delta ? downPx : undefined}

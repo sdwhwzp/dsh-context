@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react'
-import { estimateSessionCost, formatCost, type CostCurrency, type ModelPrices } from '../cost'
+import { estimateSessionCost, formatCost, type CostCurrency, type ModelBook } from '../cost'
 import { fmt } from '../format'
 import { useModelPrices } from '../modelPrices'
 import {
@@ -79,7 +79,7 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
 
   function OverviewBody(props: OverviewPanelProps): ReactElement | null {
     const open = useSyncExternalStore(overviewStore.subscribe, overviewStore.getSnapshot)
-    const { prices } = useModelPrices()
+    const { book } = useModelPrices()
     // The hook-level standard-kit reads (unconditional; guarded inside).
     const snapshot = sessionsSnapshotOf(props)
     const wsSnapshot = workspacesSnapshotOf(props)
@@ -131,7 +131,7 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
       sort,
     )
     const paged = pageOf(visible, page)
-    const kpi = kpisOf(ranged, allRows.length, prices, currency)
+    const kpi = kpisOf(ranged, allRows.length, book, currency)
     const days = aggregateDays(allRows)
     const openOne = (id: string): void => {
       openSessionVia(ctx, id)
@@ -180,7 +180,7 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
                 <div className="lc-stat lc-ov-kpi">
                   <span className="lc-stat-label">{t('stats.cost')}</span>
                   <span className="lc-stat-value">{kpi.cost === null ? '—' : formatCost(kpi.cost, currency)}</span>
-                  <span className="lc-stat-sub">{t('ov.kpi.sessionsSub', { n: kpi.costSessions })}</span>
+                  <span className="lc-stat-sub">{t('ov.kpi.pricedSub', { n: kpi.costSessions, total: kpi.sessions })}</span>
                 </div>
                 <div className="lc-stat lc-ov-kpi">
                   <span className="lc-stat-label">{t('stats.cacheHit')}</span>
@@ -296,7 +296,7 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
                             key={row.id}
                             row={row}
                             {...(groups?.[row.id] !== undefined ? { group: groups[row.id] } : {})}
-                            costLabel={cardCostOf(row, prices, currency)}
+                            costLabel={cardCostOf(row, book, currency)}
                             now={now}
                             onOpen={openOne}
                           />
@@ -338,8 +338,8 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
 }
 
 /** One card's priced cost label, or the dash (no book yet, nothing billed, unpriceable model). */
-function cardCostOf(row: OverviewRow, prices: ModelPrices | null, currency: CostCurrency): string {
+function cardCostOf(row: OverviewRow, book: ModelBook | null, currency: CostCurrency): string {
   if (row.timeline?.cost === undefined) return '—'
-  const cost = estimateSessionCost(row.timeline.cost, prices, currency)
+  const cost = estimateSessionCost(row.timeline.cost, book, currency)
   return cost === null ? '—' : formatCost(cost, currency)
 }

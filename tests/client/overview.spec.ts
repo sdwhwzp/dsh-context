@@ -33,6 +33,7 @@ import {
 } from '../../src/client/overview'
 import type { ClientCtx } from '../../src/client/services'
 import type { ContextActivity, ContextTimeline, SessionCostUsage } from '../../src/shared/types'
+import { priceIndexOf } from '../../src/client/cost'
 
 /** The minimal wire-valid timeline head, overridable per case. */
 function timelineOf(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -434,7 +435,7 @@ describe('tokenPartsOf', () => {
 })
 
 describe('kpisOf', () => {
-  const prices = { deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }
+  const prices = { prices: { deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, index: priceIndexOf({ deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, {}) }
 
   test('aggregates sessions, tokens, turns, cost, cache hit, tools, and time across the range', () => {
     const rows = [

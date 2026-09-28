@@ -40,8 +40,8 @@ importers:
         specifier: ^3.18.4
         version: 3.18.4
       '@opencode-ai/models':
-        specifier: ^0.0.72
-        version: 0.0.72
+        specifier: ^0.0.87
+        version: 0.0.87
       '@shikijs/langs':
         specifier: ^4.3.1
         version: 4.4.3
@@ -399,8 +399,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@opencode-ai/models@0.0.72':
-    resolution: {integrity: sha512-a9dXb/6nMzgMliPrvXXlmo0bZ2bBvgsR51rHlvc3GJjgFOxhb/tnzxuzCmLTf9DlDlcY9/ghn6EZrIWltmmf+w==}
+  '@opencode-ai/models@0.0.87':
+    resolution: {integrity: sha512-FomecGQxiD6Kx/WF9YmviQF6DAnTaL8FUbexZwFrV96CQBJp02QPFs6VWfFJvN9Lfesaly06+kDn2Vx6NHtpXw==}
     engines: {node: '>=18'}
     peerDependencies:
       effect: 4.0.0-beta.83
@@ -2564,7 +2564,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@opencode-ai/models@0.0.72': {}
+  '@opencode-ai/models@0.0.87': {}
 
   '@oxc-project/types@0.148.0': {}
 

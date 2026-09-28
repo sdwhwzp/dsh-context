@@ -159,7 +159,7 @@ describe('OverviewPanel', () => {
     // Cost and cache hit qualify with the session count each figure covers
     // (only session a carries usage; b folds no cost at all).
     const subs = queryAll(m.container, '.lc-stat-sub').map(el => el.textContent)
-    assert.deepEqual(subs.slice(2, 4), ['across 1 sessions', 'across 1 sessions'])
+    assert.deepEqual(subs.slice(2, 4), ['1 of 2 sessions priced', 'across 1 sessions'])
     // The aggregate stats row: the range's Token Stats ring folded into the
     // Context tab's OWN composition categories (every fixture category is
     // billed > 0 here, output exact) beside the Timing Stats ring (the summed

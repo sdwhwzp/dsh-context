@@ -394,6 +394,11 @@ export function createContextTimelineDefinition(config: Config, slim: () => bool
     // the `contextTimeline` row too, rebuilding idle sessions' rows instead
     // of orphaning the key.
     //
+    // 21: `deepseek-account` joined the DeepSeek peak/off-peak split
+    // (shared/providers) — its cached cost buckets were all booked under
+    // `peak` and cannot be reinterpreted into the right periods, so rows
+    // refold from the log, which rebuilds the split (issue #91).
+    //
     // Not bumped since: the supported-baseline move (0.1.2-rc.1 → 0.1.5-rc.1,
     // the plugin floor) retired the pre-V3 log-shape branches
     // (`header.system` envelope, `assistant/chunk` floods, `start`/`end`
@@ -407,7 +412,7 @@ export function createContextTimelineDefinition(config: Config, slim: () => bool
     // decode accumulators, which every reader treats as "not served,
     // refold". Bumping would invalidate every in-generation row and orphan
     // the key for idle sessions (the #37 regression) for no correctness gain.
-    stateVersion: 20,
+    stateVersion: 21,
   }
   return definition
 }

@@ -713,6 +713,34 @@ describe('TrendChart markers', () => {
   })
 })
 
+describe('TrendChart step flags', () => {
+  test('every 5th step bar plants a flag labeled with its cumulative step number', async () => {
+    const reqs = Array.from({ length: 12 }, (_, i) => req(i + 1, { turn: 1, step: i }))
+    const m = await mount(h(TrendChart, propsOf(reqs)))
+    const flags = queryAll(m.container, '.lc-step-flag')
+    assert.equal(flags.length, 2)
+    // Single- and multi-digit labels alike; the flag rides its bar (5th and 10th columns).
+    assert.deepEqual(flags.map(f => f.textContent), ['5', '10'])
+    const bs = bars(m.container)
+    assert.equal(queryAll(bs[0], '.lc-step-flag').length, 0)
+    assert.ok(query(bs[4], '.lc-step-flag'))
+    assert.ok(query(bs[9], '.lc-step-flag'))
+    await m.unmount()
+  })
+
+  test('delta mode keeps the flags; turn granularity plants none (the turn strip numbers that grid)', async () => {
+    const reqs = Array.from({ length: 6 }, (_, i) => req(i + 1, { turn: 1, step: i }))
+    const m = await mount(h(TrendChart, propsOf(reqs, { mode: 'delta' })))
+    assert.deepEqual(queryAll(m.container, '.lc-step-flag').map(f => f.textContent), ['5'])
+    await m.unmount()
+
+    const turns = Array.from({ length: 6 }, (_, i) => req(i + 1, { turn: i + 1, step: 0 }))
+    const m2 = await mount(h(TrendChart, propsOf(aggregateByTurn(turns), { granularity: 'turn' })))
+    assert.equal(queryAll(m2.container, '.lc-step-flag').length, 0)
+    await m2.unmount()
+  })
+})
+
 describe('TrendChart tooltips', () => {
   const r1 = req(1, { turn: 1, step: 0 })
   const r4 = req(4, { turn: undefined, step: undefined })

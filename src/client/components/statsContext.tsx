@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react'
 import type { ContextEventRecord, ContextTimeline, RequestRecord, SessionCostUsage, TimelineCounts, TokenUsage } from '../../shared/types'
 import { estimateSessionCost, formatCost, formatPriceRate, mergeCostUsage, peakOf, priceOf, toCurrency } from '../cost'
-import type { CostCurrency, ModelPrices, PriceTriple } from '../cost'
+import type { CostCurrency, ModelBook, PriceTriple } from '../cost'
 import { sessionsFaceOf, subagentCostFoldOf } from '../agentTree'
 import type { AgentHeads } from '../agentHeads'
 import { useSessionsSnapshot } from '../agentHeads'
@@ -31,8 +31,8 @@ interface PriceRow { key: string; label: string; rate: PriceTriple; offRate?: Pr
  * with an off-peak bucket (DeepSeek's period-based list) shows the
  * peak | off-peak pair.
  */
-function priceRowsOf(usage: SessionCostUsage | undefined, prices: ModelPrices | null): PriceRow[] {
-  if (usage === undefined || prices === null) return []
+function priceRowsOf(usage: SessionCostUsage | undefined, book: ModelBook | null): PriceRow[] {
+  if (usage === undefined || book === null) return []
   const rows: PriceRow[] = []
   const multi = Object.keys(usage).length > 1
   for (const provider of Object.keys(usage)) {
@@ -42,7 +42,7 @@ function priceRowsOf(usage: SessionCostUsage | undefined, prices: ModelPrices | 
        reaches here; the guard stays for the helper's own contract. */
     if (models === null) continue
     for (const model of Object.keys(models)) {
-      const rate = priceOf(prices, provider, model)
+      const rate = priceOf(book, provider, model)
       if (rate === null) continue
       const periods = asRecord(models[model])
       // The peak | off-peak pair is DeepSeek's alone (shared/providers): the
@@ -159,17 +159,17 @@ export function makeStatsContext(
       }
       : null
     const currency: CostCurrency = props.locale === 'zh' ? 'cny' : 'usd'
-    const { prices, failed } = useModelPrices()
+    const { book, failed } = useModelPrices()
     // Both cost cells price the same host-folded cumulative totals, at one
     // scope each: the family total (the current agent's own usage plus every
     // subagent session's) in the cost cell, the subagents' share alone in
     // the subagent-cost cell.
     const subUsage = useSubagentCost(props.sessionId)
     const usage = mergeCostUsage(props.cost, subUsage) ?? undefined
-    const cost = priced === null ? estimateSessionCost(usage, prices, currency) : null
-    const subCost = estimateSessionCost(subUsage, prices, currency)
+    const cost = priced === null ? estimateSessionCost(usage, book, currency) : null
+    const subCost = estimateSessionCost(subUsage, book, currency)
     const fmtRate = (usd: number): string => formatPriceRate(toCurrency(usd, currency), currency)
-    const rows = priceRowsOf(usage, prices)
+    const rows = priceRowsOf(usage, book)
     // DeepSeek's peak/off-peak scheme is explained only when the family
     // actually billed a DeepSeek provider — other sessions see nothing of it.
     const deepseek = usage !== undefined && Object.keys(usage).some(p => isDeepSeekProvider(p))
@@ -178,9 +178,9 @@ export function makeStatsContext(
     // Usage folded but nothing priced (the book has not loaded, or carries
     // none of this family's models): say so instead of a bare dash.
     const unpriced = rows.length === 0 && usage !== undefined && Object.keys(usage).length > 0
-      && (failed || prices !== null)
-    const subUnpriced = subUsage !== null && priceRowsOf(subUsage, prices).length === 0
-      && (failed || prices !== null)
+      && (failed || book !== null)
+    const subUnpriced = subUsage !== null && priceRowsOf(subUsage, book).length === 0
+      && (failed || book !== null)
     const costTip: ReactNode = priced !== null
       ? [
         t('stats.costTipLedger'),
