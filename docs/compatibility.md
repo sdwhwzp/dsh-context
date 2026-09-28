@@ -2,16 +2,16 @@
 
 dsh-context declares per-release compatibility with `@deepseek-ai/dsh` in its package manifest (`dsh.compatibility.dshReleases`). This page records what is actually verified for each declared release, and how.
 
-Last verified: **2026-09-25** (plugin `dsh-context@0.56.0` source tree, dsh `0.1.7-rc.2`).
+Last verified: **2026-09-28** (plugin `dsh-context@0.58.0` source tree, dsh `0.1.7-rc.2`).
 
 ## Supported dsh releases
 
 | dsh release | Session log | Declared | Automated seam matrix | Disposable-profile install / uninstall |
 | --- | --- | --- | --- | --- |
 | `0.1.5-rc.1` | V3 | compatible | ✅ baseline `v0.1.5-rc.1` | ✅ install OK → 1 composed row → uninstall OK → 0 rows (verified 2026-09-10) |
-| `0.1.7-rc.2` | V4 | compatible | ✅ baseline `v0.1.7-rc.2` | — (not yet performed manually) |
+| `0.1.7-rc.2` | V4 | compatible | ✅ baseline `v0.1.7-rc.2` | ✅ install OK → uninstall OK (verified manually 2026-09-28) |
 
-The automated seam matrix runs for every row on every `pnpm test`. The disposable-profile column is a manual, per-release check: each release's CLI was installed from npm into a temporary `DSH_HOME` (the real `~/.dsh` is never touched) — `0.1.5-rc.1` on 2026-09-10 against the official npm registry (a stale mirror can 404 the harness's own dependency closure before the plugin is even considered).
+The automated seam matrix runs for every row on every `pnpm test`. The disposable-profile column is a manual, per-release check: each release's CLI was installed from npm into a temporary `DSH_HOME` (the real `~/.dsh` is never touched) — `0.1.5-rc.1` on 2026-09-10 against the official npm registry (a stale mirror can 404 the harness's own dependency closure before the plugin is even considered), and `0.1.7-rc.2` likewise on 2026-09-28.
 
 The supported range is the two lines above: the `0.1.5` line from `rc.1` and the `0.1.7` line from `rc.2` (the first release of that line with a complete npm dependency closure; `rc.2` adds `startsSeries` to the first `request/header` of a resumed series and the `developer/message` tool-registry events, both inert to the fold). Everything older — the `0.1.2`/`0.1.3` generations, the `0.1.1` line, and the alpha previews — was supported through `dsh-context@0.55.x` and is no longer in the support matrix; on such a harness the plugin's baseline gate composes the fallback units and shows the upgrade prompt instead of folding.
 
