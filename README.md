@@ -60,7 +60,7 @@ Click **Context Dashboard / 上下文仪表盘** at the bottom-left of the sideb
 | Section | The question it answers |
 | --- | --- |
 | **KPI band** | How much am I using — sessions, billed tokens, estimated cost, and cache-hit rate over the picked range (7d / 30d / all). |
-| **7-day usage chart** | When did I spend what — each of the last 7 days' billed tokens and estimated cost as a bar pair, folded per turn off the sessions' own request times (not the session's last-active day). |
+| **7-day usage chart** | When did I spend what — each of the last 7 days' billed tokens and estimated cost as a bar pair, folded per turn off the sessions' own request times (not the session's last-active day). Date labels align with their bar pair at every panel width. |
 | **Activity heatmap** | When do I actually work — the last 8 weeks of daily billed tokens; click a day to filter the sessions that were active on it. |
 | **Settings entry** | One row under the heatmap — the same guarded jump to this plugin's preferences as the Context tab's Plugin Info card. |
 | **Context Composition** | Where the context windows went, summed over the range's sessions. |

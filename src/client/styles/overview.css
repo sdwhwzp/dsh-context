@@ -111,9 +111,8 @@
 .lc-ov-usage-bar { flex: none; width: 10px; border-radius: 3px 3px 0 0; }
 .lc-ov-usage-tokens { background: color-mix(in srgb, var(--color-blue-500) 72%, transparent); }
 .lc-ov-usage-cost { background: color-mix(in srgb, var(--color-green-500) 72%, transparent); }
-/* Same flex geometry as .lc-ov-usage-cols, so every label centers under its
-   own column. */
-.lc-ov-usage-days { flex: none; display: flex; gap: 6px; padding-top: 3px; }
+/* Match the columns after the two 42px tick rails and their 6px gaps. */
+.lc-ov-usage-days { flex: none; display: flex; gap: 6px; padding: 3px 48px 0; }
 .lc-ov-usage-day { flex: 1 1 0; min-width: 0; text-align: center; font-size: 9px; line-height: 1.2; color: var(--dsw-alias-label-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .lc-ov-usage-key { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 5px; padding-top: 5px; }
 .lc-ov-usage-swatch { flex: none; width: 10px; height: 8px; border-radius: 2px; }
