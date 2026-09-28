@@ -1009,4 +1009,24 @@ describe('activityOf', () => {
     })
     assert.deepEqual(out, { days: { '2026-09-16': { tokens: 15, requests: 1 } } })
   })
+
+  test('a well-formed pricing record rides both the pass-through and the sanitized copy', () => {
+    const cost = { deepseek: { 'deepseek-v4': { peak: { uncached: 10, cacheRead: 5, cacheWrite: 0, output: 2 } } } }
+    const wire = { days: { '2026-09-16': { tokens: 15, requests: 1, cost } } }
+    assert.ok(activityOf(wire) === (wire as never))
+    const dirty = { days: { '2026-09-16': { tokens: 15, requests: 1, cost }, '09-16': { tokens: 1, requests: 1 } } }
+    assert.deepEqual(activityOf(dirty), { days: { '2026-09-16': { tokens: 15, requests: 1, cost } } })
+  })
+
+  test('a malformed pricing record drops the fee whole; the day survives', () => {
+    const out = activityOf({
+      days: {
+        '2026-09-16': { tokens: 15, requests: 1, cost: 'x' },
+        '2026-09-15': { tokens: 3, requests: 1, cost: { deepseek: 7 } },
+      },
+    })
+    assert.deepEqual(out, {
+      days: { '2026-09-16': { tokens: 15, requests: 1 }, '2026-09-15': { tokens: 3, requests: 1 } },
+    })
+  })
 })

@@ -6,9 +6,12 @@
  * projection values), so the panel draws every session's insight without
  * opening one log.
  *
- * The panel's first row is the KPI metrics band: the range's six figures
- * (sessions, billed tokens, cost, cache hit, tool calls, active time) in one
- * full-width line. Below it, the aggregate stats row folds the same range's
+ * The panel's first row is a 1:1 column pair: the KPI metrics band (the
+ * range's six figures — sessions, billed tokens, cost, cache hit, tool
+ * calls, active time — three per row) beside the last-7-days usage chart
+ * (each day's billed tokens and estimated cost as a bar pair, folded off
+ * the merged daily ledger). Below it, the aggregate stats row folds the
+ * same range's
  * sessions into the two donut cards the per-session Context tab opens with —
  * Token Stats (the composition-split billed volume) and Timing Stats (the
  * summed totals). The body is then a 3:7 column pair: the insight column (the
@@ -40,6 +43,7 @@ import { useEscapeClose } from './escapeClose'
 import { makeHeatmap, todayKey, type HeatMetric } from './heatmap'
 import { makeDonut } from './donut'
 import { makeOverviewTokens } from './overviewTokens'
+import { makeOverviewUsage } from './overviewUsage'
 import { makeStatsTiming } from './statsTiming'
 import { ContextIcon } from '../icon'
 import { makeOverviewCard } from './overviewCard'
@@ -68,6 +72,7 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
   const Donut = makeDonut(kit)
   const OverviewTokens = makeOverviewTokens(kit, Donut)
   const StatsTiming = makeStatsTiming(kit, Donut)
+  const OverviewUsage = makeOverviewUsage(kit)
   const ErrorBoundary = makeErrorBoundary(t)
 
   /** The display currency follows the active locale (zh → CNY), read per render — the slot outlet re-renders on a locale switch. */
@@ -132,7 +137,7 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
     )
     const paged = pageOf(visible, page)
     const kpi = kpisOf(ranged, allRows.length, book, currency)
-    const days = aggregateDays(allRows)
+    const days = aggregateDays(allRows, book, currency)
     const openOne = (id: string): void => {
       openSessionVia(ctx, id)
       overviewStore.set(false)
@@ -163,40 +168,47 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
           {rows === null ? (
             <div className="lc-empty">{t('ov.unavailable')}</div>
           ) : (
-            <>
-              {/* The panel's first row: the KPI metrics band — the range's six
-                  figures in one full-width line. */}
-              <div className="lc-ov-kpis">
-                <div className="lc-stat lc-ov-kpi">
-                  <span className="lc-stat-label">{t('ov.kpi.sessions')}</span>
-                  <span className="lc-stat-value">{kpi.sessions}</span>
-                  <span className="lc-stat-sub">{t('ov.kpi.ofTotal', { n: kpi.listed })}</span>
+            /* The panel's one scroll region: everything under the head — the
+               KPI band, the stats row, and the 3:7 body — scrolls as one. */
+            <div className="lc-ov-scroll">
+              {/* The panel's first row: a 1:1 column pair — the KPI metrics
+                  band (the range's six figures, three per row) beside the
+                  last-7-days usage chart (per-day tokens + cost bars off the
+                  merged ledger; the range selector does not scope it). */}
+              <div className="lc-ov-first">
+                <div className="lc-ov-kpis">
+                  <div className="lc-stat lc-ov-kpi">
+                    <span className="lc-stat-label">{t('ov.kpi.sessions')}</span>
+                    <span className="lc-stat-value">{kpi.sessions}</span>
+                    <span className="lc-stat-sub">{t('ov.kpi.ofTotal', { n: kpi.listed })}</span>
+                  </div>
+                  <div className="lc-stat lc-ov-kpi">
+                    <span className="lc-stat-label">{t('ov.kpi.tokens')}</span>
+                    <span className="lc-stat-value">{fmt(kpi.tokens)}</span>
+                    <span className="lc-stat-sub">{t('stats.turns')} {fmt(kpi.turns)}</span>
+                  </div>
+                  <div className="lc-stat lc-ov-kpi">
+                    <span className="lc-stat-label">{t('stats.cost')}</span>
+                    <span className="lc-stat-value">{kpi.cost === null ? '—' : formatCost(kpi.cost, currency)}</span>
+                    <span className="lc-stat-sub">{t('ov.kpi.pricedSub', { n: kpi.costSessions, total: kpi.sessions })}</span>
+                  </div>
+                  <div className="lc-stat lc-ov-kpi">
+                    <span className="lc-stat-label">{t('stats.cacheHit')}</span>
+                    <span className="lc-stat-value">{kpi.cacheHit === null ? '—' : kpi.cacheHit + '%'}</span>
+                    <span className="lc-stat-sub">{t('ov.kpi.sessionsSub', { n: kpi.usageSessions })}</span>
+                  </div>
+                  <div className="lc-stat lc-ov-kpi">
+                    <span className="lc-stat-label">{t('stats.toolCalls')}</span>
+                    <span className="lc-stat-value">{fmt(kpi.toolCalls)}</span>
+                    <span className="lc-stat-sub">{t('ov.kpi.toolSub', { dur: fmtDuration(kpi.toolsMs) })}</span>
+                  </div>
+                  <div className="lc-stat lc-ov-kpi">
+                    <span className="lc-stat-label">{t('timing.total')}</span>
+                    <span className="lc-stat-value">{fmtDuration(kpi.wallMs)}</span>
+                    <span className="lc-stat-sub">{t('ov.kpi.wallSub', { n: fmt(kpi.calls) })}</span>
+                  </div>
                 </div>
-                <div className="lc-stat lc-ov-kpi">
-                  <span className="lc-stat-label">{t('ov.kpi.tokens')}</span>
-                  <span className="lc-stat-value">{fmt(kpi.tokens)}</span>
-                  <span className="lc-stat-sub">{t('stats.turns')} {fmt(kpi.turns)}</span>
-                </div>
-                <div className="lc-stat lc-ov-kpi">
-                  <span className="lc-stat-label">{t('stats.cost')}</span>
-                  <span className="lc-stat-value">{kpi.cost === null ? '—' : formatCost(kpi.cost, currency)}</span>
-                  <span className="lc-stat-sub">{t('ov.kpi.pricedSub', { n: kpi.costSessions, total: kpi.sessions })}</span>
-                </div>
-                <div className="lc-stat lc-ov-kpi">
-                  <span className="lc-stat-label">{t('stats.cacheHit')}</span>
-                  <span className="lc-stat-value">{kpi.cacheHit === null ? '—' : kpi.cacheHit + '%'}</span>
-                  <span className="lc-stat-sub">{t('ov.kpi.sessionsSub', { n: kpi.usageSessions })}</span>
-                </div>
-                <div className="lc-stat lc-ov-kpi">
-                  <span className="lc-stat-label">{t('stats.toolCalls')}</span>
-                  <span className="lc-stat-value">{fmt(kpi.toolCalls)}</span>
-                  <span className="lc-stat-sub">{t('ov.kpi.toolSub', { dur: fmtDuration(kpi.toolsMs) })}</span>
-                </div>
-                <div className="lc-stat lc-ov-kpi">
-                  <span className="lc-stat-label">{t('timing.total')}</span>
-                  <span className="lc-stat-value">{fmtDuration(kpi.wallMs)}</span>
-                  <span className="lc-stat-sub">{t('ov.kpi.wallSub', { n: fmt(kpi.calls) })}</span>
-                </div>
+                <OverviewUsage days={days} currency={currency} today={todayKey()} />
               </div>
               {/* The aggregate stats row: the range's Token Stats and Timing
                   Stats, folded over the KPI band's own scope (the composition
@@ -325,7 +337,7 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
                   )}
                 </div>
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>

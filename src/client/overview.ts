@@ -570,36 +570,66 @@ export function kpisOf(
   }
 }
 
-/** One merged day of the daily ledgers: billed tokens, model requests, and the sessions active that day. */
+/** One merged day of the daily ledgers: billed tokens, model requests, the sessions active that day, and the day's priced fee. */
 export interface DayTotals {
   tokens: number
   requests: number
   sessions: number
+  /**
+   * The day's estimated spend in the display currency (null: nothing priced —
+   * no pricing record folded, no book yet, or no model the book prices).
+   */
+  cost: number | null
 }
 
 /**
- * Merge every row's daily ledger into one — the heatmap's data. A session
- * counts toward a day only when its own entry carries activity, mirroring
- * the day filter's predicate, so the cell's tooltip previews the click; a
- * zeroed entry is skipped whole. The merged record stays small even over
- * long histories.
+ * Merge every row's daily ledger into one — the heatmap's and the usage
+ * chart's data. A session counts toward a day only when its own entry
+ * carries activity, mirroring the day filter's predicate, so the cell's
+ * tooltip previews the click; a zeroed entry is skipped whole. Each day's
+ * pricing records merge into one SessionCostUsage and price off the SAME
+ * book/estimator the KPI band's cost cell rides (null fee on anything
+ * unpriced). The merged record stays small even over long histories.
  */
-export function aggregateDays(rows: readonly OverviewRow[]): Record<string, DayTotals> {
-  const days: Record<string, DayTotals> = {}
-  // Widened honestly: a Record index read can miss at runtime.
-  const byKey: Record<string, DayTotals | undefined> = days
+export function aggregateDays(
+  rows: readonly OverviewRow[],
+  book: ModelBook | null | undefined,
+  currency: CostCurrency,
+): Record<string, DayTotals> {
+  // The walk merges into a richer record (each day's fee raw material rides
+  // along), then every merged day prices once — no second lookup pass.
+  const merged: Record<string, { tokens: number; requests: number; sessions: number; fees: SessionCostUsage[] }> = {}
+  const byKey: Record<string, { tokens: number; requests: number; sessions: number; fees: SessionCostUsage[] } | undefined> = merged
   for (const row of rows) {
     if (row.activity === null) continue
     for (const key of Object.keys(row.activity.days)) {
       const entry = row.activity.days[key]
       if (entry.tokens <= 0 && entry.requests <= 0) continue
       const prev = byKey[key]
-      if (prev === undefined) days[key] = { tokens: entry.tokens, requests: entry.requests, sessions: 1 }
-      else {
+      if (prev === undefined) {
+        merged[key] = {
+          tokens: entry.tokens,
+          requests: entry.requests,
+          sessions: 1,
+          fees: entry.cost !== undefined ? [entry.cost] : [],
+        }
+      } else {
         prev.tokens += entry.tokens
         prev.requests += entry.requests
         prev.sessions++
+        if (entry.cost !== undefined) prev.fees.push(entry.cost)
       }
+    }
+  }
+  const days: Record<string, DayTotals> = {}
+  for (const [key, day] of Object.entries(merged)) {
+    // No fee records merge to null (nothing priced); records that merge but
+    // match no book price null the same way.
+    days[key] = {
+      tokens: day.tokens,
+      requests: day.requests,
+      sessions: day.sessions,
+      cost: estimateSessionCost(mergeCostUsage(...day.fees), book, currency),
     }
   }
   return days

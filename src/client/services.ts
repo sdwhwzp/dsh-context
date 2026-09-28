@@ -717,12 +717,13 @@ export function headersOf(value: unknown): ContextHeaders | null {
 
 /**
  * Narrow a delivered `contextActivity` value (the per-day ledger the Context
- * Overview's heatmap reads off each session-list row) to a render-safe shape.
- * Absent or non-record stays null (an older host serves no such key — the
- * heatmap renders its empty note). Per-day re-proved: a malformed key or a
- * wrong-typed figure drops just that entry, a hostile day record can never
- * produce a NaN cell, and a well-formed payload passes through untouched
- * (reference-stable for the selector equality).
+ * Overview's heatmap and usage chart read off each session-list row) to a
+ * render-safe shape. Absent or non-record stays null (an older host serves no
+ * such key — the heatmap renders its empty note). Per-day re-proved: a
+ * malformed key or a wrong-typed figure drops just that entry, a malformed
+ * pricing record drops just the fee (the day's tokens survive), a hostile day
+ * record can never produce a NaN cell, and a well-formed payload passes
+ * through untouched (reference-stable for the selector equality).
  */
 export function activityOf(value: unknown): ContextActivity | null {
   const data = asRecord(value)
@@ -742,7 +743,14 @@ export function activityOf(value: unknown): ContextActivity | null {
       dirty = true
       continue
     }
-    days[key] = { tokens, requests }
+    // The day's pricing record (additive-optional): re-proved by the SAME
+    // sanitizer the timeline's session-cost rides. Absent stays absent; a
+    // record with no readable branch drops whole (empty ≠ zero — a truly
+    // metered day always carries a branch), keeping the day's own figures.
+    const proved = costOf(entry.cost)
+    const cost = proved !== undefined && Object.keys(proved).length > 0 ? proved : undefined
+    if (entry.cost !== undefined && cost === undefined) dirty = true
+    days[key] = { tokens, requests, ...(cost !== undefined ? { cost } : {}) }
   }
   // Fully well-formed: pass the delivered value through untouched (cheap, and
   // reference-stable for the selector equality); otherwise the sanitized copy.

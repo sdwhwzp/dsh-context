@@ -513,15 +513,18 @@ describe('kpisOf', () => {
 })
 
 describe('aggregateDays', () => {
+  const book = { prices: { deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, index: priceIndexOf({ deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, {}) }
+  const FEE: SessionCostUsage = { deepseek: { 'deepseek-v4': { peak: { uncached: 100, cacheRead: 50, cacheWrite: 0, output: 40 } } } }
+
   test('merges every row’s ledger, skipping rows without one', () => {
     const rows = [
       rowOf({ activity: { days: { '2026-09-16': { tokens: 5, requests: 1 }, '2026-09-15': { tokens: 2, requests: 2 } } } }),
       rowOf({ activity: { days: { '2026-09-16': { tokens: 7, requests: 3 } } } }),
       rowOf(),
     ]
-    assert.deepEqual(aggregateDays(rows), {
-      '2026-09-16': { tokens: 12, requests: 4, sessions: 2 },
-      '2026-09-15': { tokens: 2, requests: 2, sessions: 1 },
+    assert.deepEqual(aggregateDays(rows, book, 'usd'), {
+      '2026-09-16': { tokens: 12, requests: 4, sessions: 2, cost: null },
+      '2026-09-15': { tokens: 2, requests: 2, sessions: 1, cost: null },
     })
   })
 
@@ -530,10 +533,32 @@ describe('aggregateDays', () => {
       rowOf({ activity: { days: { '2026-09-16': { tokens: 0, requests: 0 }, '2026-09-15': { tokens: 3, requests: 1 } } } }),
       rowOf({ activity: { days: { '2026-09-16': { tokens: 1, requests: 1 } } } }),
     ]
-    assert.deepEqual(aggregateDays(rows), {
-      '2026-09-16': { tokens: 1, requests: 1, sessions: 1 },
-      '2026-09-15': { tokens: 3, requests: 1, sessions: 1 },
+    assert.deepEqual(aggregateDays(rows, book, 'usd'), {
+      '2026-09-16': { tokens: 1, requests: 1, sessions: 1, cost: null },
+      '2026-09-15': { tokens: 3, requests: 1, sessions: 1, cost: null },
     })
+  })
+
+  test('each day’s pricing records merge and price off the book; unpriced days stay null', () => {
+    const rows = [
+      rowOf({ activity: { days: {
+        '2026-09-16': { tokens: 5, requests: 1, cost: FEE },
+        '2026-09-15': { tokens: 2, requests: 2 },
+      } } }),
+      rowOf({ activity: { days: { '2026-09-16': { tokens: 7, requests: 3, cost: { deepseek: { 'deepseek-v4': { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 1 } } } } } } } }),
+      rowOf({ activity: { days: { '2026-09-14': { tokens: 9, requests: 1, cost: { openai: { 'gpt-5': { peak: { uncached: 10, cacheRead: 0, cacheWrite: 0, output: 1 } } } } } } } }),
+    ]
+    const days = aggregateDays(rows, book, 'usd')
+    // The DeepSeek peak buckets double the list price: (100·1 + 50·0.1 + 40·2)·2/1e6 plus the
+    // second session's (1·1 + 1·2)·2/1e6.
+    assert.ok(Math.abs((days['2026-09-16'].cost ?? 0) - 376e-6) < 1e-12)
+    assert.equal(days['2026-09-15'].cost, null, 'a day without pricing records prices to nothing')
+    assert.equal(days['2026-09-14'].cost, null, 'a model the book cannot price prices to nothing')
+  })
+
+  test('a day with no book prices to null', () => {
+    const rows = [rowOf({ activity: { days: { '2026-09-16': { tokens: 5, requests: 1, cost: FEE } } } })]
+    assert.equal(aggregateDays(rows, null, 'cny')['2026-09-16'].cost, null)
   })
 })
 

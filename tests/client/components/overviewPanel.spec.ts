@@ -139,10 +139,16 @@ describe('OverviewPanel', () => {
     assert.equal(pulls, 1, 'the baseline re-pull fires on open')
     assert.deepEqual(backfillPosts, ['/api/dsh-context/backfill'], 'the warm-up trigger POST fires on open')
     assert.ok(text(m.container).includes('Context Insights'))
-    // The metrics band is the panel's FIRST row: the six KPI cells span the
-    // card above the aggregate stats pair, out of the insight column.
+    // The head stays fixed; the one scroll region under it carries the 1:1
+    // first row (the KPI band beside the last-7-days usage chart), the
+    // aggregate stats pair, and the insight/session body.
     const cardRows = [...query(m.container, '.lc-ov-card').children].map(el => el.className.split(' ')[0])
-    assert.deepEqual(cardRows, ['lc-ov-head', 'lc-ov-kpis', 'lc-ov-stats', 'lc-ov-body'])
+    assert.deepEqual(cardRows, ['lc-ov-head', 'lc-ov-scroll'])
+    const scrollRows = [...query(m.container, '.lc-ov-scroll').children].map(el => el.className.split(' ')[0])
+    assert.deepEqual(scrollRows, ['lc-ov-first', 'lc-ov-stats', 'lc-ov-body'])
+    // The pair's halves: the KPI band's six cells, then the usage chart.
+    assert.equal(queryAll(m.container, '.lc-ov-first > .lc-ov-kpis .lc-stat').length, 6)
+    assert.ok(query(m.container, '.lc-ov-first > .lc-card.lc-ov-usage') !== null, 'the usage chart rides the row')
     // KPI band: 2 sessions in the 30d range, 1750 tokens billed, priced cost, cache hit.
     const labels = queryAll(m.container, '.lc-stat-label').map(el => el.textContent)
     assert.deepEqual(labels, ['Active Sessions', 'Tokens Used', 'Cost', 'Cache Hit', 'Tool Calls', 'Active Time'])

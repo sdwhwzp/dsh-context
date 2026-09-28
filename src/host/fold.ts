@@ -640,7 +640,7 @@ export interface UsageLike {
 }
 
 /** One usage object's buckets, deeply normalized to billed counts (see {@link tokenCountOf}). */
-interface BilledUsage {
+export interface BilledUsage {
   input: number
   cacheRead: number
   cacheWrite: number
@@ -677,8 +677,12 @@ export function tokenCountOf(value: unknown): number | null {
  * DeepSeek's peak windows (the official list: UTC 01:00–04:00 and 06:00–10:00,
  * Monday through Friday — Beijing Time 09:00–12:00 and 14:00–18:00). All other
  * hours, plus entire weekends, bill at the half-price off-peak rate.
+ *
+ * Exported for the activity unit (host/activity.ts): the daily ledger prices
+ * each day's buckets with the same split, so its per-day fees sum to the
+ * session-cost totals the timeline fold books.
  */
-function isPeakUtc(time: number): boolean {
+export function isPeakUtc(time: number): boolean {
   const at = new Date(time)
   const day = at.getUTCDay()
   if (day === 0 || day === 6) return false

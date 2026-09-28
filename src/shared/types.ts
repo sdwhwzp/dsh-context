@@ -116,6 +116,16 @@ export interface ActivityDay {
   tokens: number
   /** Completed model calls (assistant settlements) that day. */
   requests: number
+  /**
+   * The day's billed buckets keyed provider → model → pricing period — the
+   * same SessionCostUsage raw material the timeline's session-cost totals
+   * carry, scoped to the day the requests INITIATED in, so the client prices
+   * each day off the same model-price book as the KPI band. ADDITIVE-OPTIONAL:
+   * absent on rows folded before the field existed (older plugin builds), on
+   * days whose settlements predate any model header, and on settlements the
+   * provider left unmetered — the usage chart degrades to tokens-only bars.
+   */
+  cost?: SessionCostUsage
 }
 
 /**
