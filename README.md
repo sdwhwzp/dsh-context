@@ -131,6 +131,8 @@ Pick **Live (next request)** or any retained step, and browse what that request 
 
 ![Assistant replies with kind filter chips](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-browser-assistant-kinds.png)
 
+- **Read reply content** — expanded replies label their text **Answer**. Tool-name capsules toggle their containing message row; call headings are plain text. Open **Tool Schemas** to inspect tool definitions.
+
 - **Tool results open into the full call** — the tool name and arguments with its **OK/error** status, the result body with line count and a **Raw / Markdown** toggle:
 
 ![A tool result expanded with Raw/Markdown toggle](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-browser-tool-result.png)
