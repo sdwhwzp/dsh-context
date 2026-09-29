@@ -8,7 +8,7 @@ import type { DnaItem } from '../dna'
 import type { ContentFetcher, ConversationNodeLike, HeaderFetcher } from '../services'
 import type { ContextSettings, DefaultToolSort } from '../settings'
 import type { ViewKit } from '../viewkit'
-import { blockSummaryOf, callSummaryOf, parseCallArgs } from '../callSummary'
+import { blockSummaryOf, callNamesOf, callSummaryOf, parseCallArgs } from '../callSummary'
 import type { DetailState } from '../timelineSource'
 import { makeDetailNote } from './detailNote'
 import { makeNodeText } from './nodes'
@@ -170,6 +170,8 @@ function Section(props: {
   count?: number
   actions?: ReactNode
   meta?: ReactNode
+  /** Makes the head label a click affordance (the call head's schema reveal); hover styling rides the link class. */
+  onLabelClick?: () => void
   children: ReactNode
 }): ReactElement {
   const right = props.actions !== undefined || props.meta !== undefined
@@ -177,7 +179,11 @@ function Section(props: {
     <div className="lc-ts-card">
       <div className={'lc-ts-card-head' + (props.foldHead === true ? ' lc-ts-card-head-wrap' : '')}>
         {/* The title recovers an ellipsized label: long mono call names truncate under width pressure. */}
-        <b className={props.labelClass} title={props.label}>{props.label}</b>
+        <b
+          className={(props.labelClass ?? '') + (props.onLabelClick !== undefined ? ' lc-ts-label-link' : '')}
+          title={props.label}
+          onClick={props.onLabelClick}
+        >{props.label}</b>
         {right ? <span className="lc-ts-card-right">{props.meta}{props.actions}</span> : null}
         {props.count !== undefined ? <span className="lc-ts-card-count">{props.count}</span> : null}
       </div>
@@ -356,6 +362,8 @@ function BlocksBody(props: {
   rich: RichKit
   img: ImageKit
   labels: DetailLabels
+  /** The call head's schema reveal, threaded to every call card and the nested tool-result recursion. */
+  onSchema: (name: string) => void
 }): ReactElement {
   const { rich, img, labels } = props
   const out: ReactNode[] = []
@@ -398,6 +406,7 @@ function BlocksBody(props: {
         key={out.length}
         name={typeof blk?.name === 'string' ? blk.name : '?'}
         argsRaw={blk?.argsRaw ?? blk?.arguments}
+        onSchema={props.onSchema}
       />)
       continue
     }
@@ -410,6 +419,7 @@ function BlocksBody(props: {
         rich={rich}
         img={img}
         labels={labels}
+        onSchema={props.onSchema}
       />)
       continue
     }
@@ -471,13 +481,17 @@ function ToolCallCard(props: {
   argsRaw: unknown
   arrow?: string
   status?: ReactNode
+  /** Reveals the tool's definition row in the Tool Schemas category. */
+  onSchema: (name: string) => void
 }): ReactElement {
   const args = useMemo(() => parseCallArgs(props.argsRaw), [props.argsRaw])
+  const onSchema = props.onSchema
   return (
     <Section
       label={(props.arrow ?? '→') + ' ' + props.name}
       labelClass="lc-ts-call-name"
       meta={props.status}
+      onLabelClick={() => { onSchema(props.name) }}
     >
       {args !== null
         ? Object.keys(args).map(k => <CallArgRow key={k} name={k} value={args[k]} />)
@@ -510,6 +524,8 @@ function NodeContent(props: {
   rich: RichKit
   img: ImageKit
   labels: DetailLabels
+  /** The call head's schema reveal, threaded to every block body this node renders. */
+  onSchema: (name: string) => void
 }): ReactElement {
   const { node, conv, rich, img, labels } = props
   if (conv === undefined) {
@@ -526,7 +542,10 @@ function NodeContent(props: {
     )
   }
   if (conv.kind === 'assistant' && Array.isArray(conv.blocks)) {
-    return <BlocksBody blocks={conv.blocks} richable textLabel={labels.answer} rich={rich} img={img} labels={labels} />
+    return <BlocksBody
+      blocks={conv.blocks} richable textLabel={labels.answer}
+      rich={rich} img={img} labels={labels} onSchema={props.onSchema}
+    />
   }
   if (conv.kind === 'tool-result') {
     const { err, exit } = toolErrOf(node, conv)
@@ -538,10 +557,14 @@ function NodeContent(props: {
             name={conv.call.name}
             argsRaw={conv.call.argsRaw}
             status={labels.callState(err, exit)}
+            onSchema={props.onSchema}
           />
           : null}
         {Array.isArray(conv.content)
-          ? <BlocksBody blocks={conv.content} richable={false} textLabel={labels.result} rich={rich} img={img} labels={labels} />
+          ? <BlocksBody
+            blocks={conv.content} richable={false} textLabel={labels.result}
+            rich={rich} img={img} labels={labels} onSchema={props.onSchema}
+          />
           : null}
       </>
     )
@@ -552,7 +575,10 @@ function NodeContent(props: {
       : <></>
   }
   if (Array.isArray(conv.content)) {
-    return <BlocksBody blocks={conv.content} richable textLabel={labels.content} rich={rich} img={img} labels={labels} />
+    return <BlocksBody
+      blocks={conv.content} richable textLabel={labels.content}
+      rich={rich} img={img} labels={labels} onSchema={props.onSchema}
+    />
   }
   return <div className="lc-br-note">{props.hint}</div>
 }
@@ -571,6 +597,63 @@ function byCatOf(asm: Assembled): Partial<Record<Category, SurfaceNode[]>> {
 function nodeNameOf(n: SurfaceNode): string {
   return typeof n.name === 'string' ? n.name : ''
 }
+
+/**
+ * The content kinds one assistant message proves, as the assistant category's
+ * kind chips count and filter them: thinking (a reasoning block — only the
+ * conversation join can prove it), tool calls (join blocks, else the fold's
+ * text-less-reply `calls` stamp), and answer text (join blocks, else the
+ * node's `text`). Legacy `content` joins classify the same way the body
+ * renders them. The flags are independent, so a combined reply lights
+ * several chips.
+ */
+function msgKindsOf(n: SurfaceNode, conv: ConversationNodeLike | undefined): { think: boolean; tool: boolean; answer: boolean } {
+  let think = false
+  let tool = false
+  let answer = false
+  for (const blocks of [conv?.blocks, conv?.content]) {
+    if (!Array.isArray(blocks)) continue
+    for (const b of blocks) {
+      const blk = b !== null && typeof b === 'object' ? b as { type?: unknown; kind?: unknown } : null
+      const k = blk !== null
+        ? typeof blk.kind === 'string' ? blk.kind : typeof blk.type === 'string' ? blk.type : ''
+        : ''
+      if (k === 'reasoning') think = true
+      else if (k === 'tool-call') tool = true
+      else if (k === 'text') answer = true
+    }
+  }
+  return {
+    think,
+    tool: tool || (Array.isArray(n.calls) && n.calls.length > 0),
+    answer: answer || (typeof n.text === 'string' && n.text !== ''),
+  }
+}
+
+/**
+ * The reasoning texts one assistant row's conversation join proves, concatenated for the row filter's scan —
+ * the fold stamps no reasoning on the node, so this is the only scan face the thinking blocks expose. Both block
+ * vocabularies classify here (the body renders the same blocks as the Reasoning sections); malformed blocks drop.
+ */
+function reasoningTextOf(conv: ConversationNodeLike | undefined): string {
+  if (conv === undefined) return ''
+  let out = ''
+  for (const blocks of [conv.blocks, conv.content]) {
+    if (!Array.isArray(blocks)) continue
+    for (const b of blocks) {
+      const blk = b !== null && typeof b === 'object' ? b as { type?: unknown; kind?: unknown; text?: unknown } : null
+      const k = blk !== null
+        ? typeof blk.kind === 'string' ? blk.kind : typeof blk.type === 'string' ? blk.type : ''
+        : ''
+      if (k === 'reasoning' && typeof blk?.text === 'string') out += blk.text + '\n'
+    }
+  }
+  return out
+}
+
+/** The assistant rows' kind chips, in display order. */
+const ROW_KINDS = ['think', 'tool', 'answer'] as const
+type RowKind = (typeof ROW_KINDS)[number]
 
 function countOf(asm: Assembled, byCat: Partial<Record<Category, SurfaceNode[]>>, c: string): number {
   if (c === 'system') return asm.system !== null ? 1 : 0
@@ -614,6 +697,10 @@ export function makeContextBrowser(
     // it, while step picks (setOpenCat(null) below) keep it so the same lens
     // compares epochs.
     const [rowQuery, setRowQuery] = useState('')
+    // The assistant category's picked kind chip (null = none). It follows the
+    // text filter's lens rules: reset on a category switch, kept across step
+    // picks.
+    const [rowKind, setRowKind] = useState<RowKind | null>(null)
     // Mount-time default from the plugin settings card; in-toolbar toggling
     // stays mount-local and never writes back.
     const [toolSort, setToolSort] = useState<DefaultToolSort>(() => settings.defaultToolSort())
@@ -795,7 +882,19 @@ export function makeContextBrowser(
       if (it === undefined) return
       setCat(it.cat)
       setRowQuery('')
+      setRowKind(null)
       setOpenElem(key)
+      focusScrollRef.current = true
+    }
+
+    // A tool-name capsule (a row tag or a call head) reveals the tool's definition row in the Tool Schemas category —
+    // the same open + unfilter + one-shot scroll reveal the DNA bands use. A name the header epoch does not declare
+    // still lands on the category, where the filter can find it.
+    const revealSchema = (name: string): void => {
+      setCat('tools')
+      setRowQuery('')
+      setRowKind(null)
+      setOpenElem('tool:' + name)
       focusScrollRef.current = true
     }
 
@@ -829,6 +928,7 @@ export function makeContextBrowser(
       setCat(c)
       // A different category opens unfiltered — the lens belongs to the open one.
       setRowQuery('')
+      setRowKind(null)
       setOpenElem(singleKeyOf(c))
     }
     const toggleElem = (key: string) => { setOpenElem(openElem === key ? null : key) }
@@ -848,7 +948,7 @@ export function makeContextBrowser(
           <button type="button" className="lc-br-elem-row hover:bg-(--dsw-alias-interactive-bg-hover)" onClick={() => { toggleElem(key) }}>
             <span className={'lc-br-chev' + (open ? ' lc-br-chev-on' : '')} />
             {err ? <span className="lc-br-err-dot" title={t('node.failed')} /> : null}
-            {tag !== null ? <span className="lc-br-tag">{tag}</span> : null}
+            {tag !== null ? <span className="lc-br-tags">{tag}</span> : null}
             <span className="lc-br-preview">{preview}</span>
             {trailing !== null ? trailing : null}
             {time !== undefined ? <span className="lc-br-time">{fmtTime(time)}</span> : null}
@@ -857,6 +957,24 @@ export function makeContextBrowser(
           {open ? <div className="lc-br-content">{body}</div> : null}
         </div>
       )
+    }
+
+    // The row's tag slot: inert tags render as one capsule; tool-named tags render one CLICKABLE capsule per
+    // distinct call name, in first-appearance order, repeats folded into a ×N multiplier ('bash ×3'). The capsule
+    // click stops propagation — the row button owns the toggle, and a bubbling toggle would overwrite the reveal.
+    const rowTagNode = (tag: string | null, names: readonly string[] | null): ReactNode => {
+      if (tag === null) return null
+      if (names === null) return <span className="lc-br-tag">{tag}</span>
+      const counts = new Map<string, number>()
+      for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1)
+      return [...counts.entries()].map(([name, count]) => (
+        <span
+          key={name}
+          className="lc-br-tag lc-br-tag-link"
+          title={t('browser.schemaTip')}
+          onClick={(e) => { e.stopPropagation(); revealSchema(name) }}
+        >{count > 1 ? name + ' ×' + String(count) : name}</span>
+      ))
     }
 
     const catBody = (c: string): ReactNode => {
@@ -980,9 +1098,10 @@ export function makeContextBrowser(
          which requires count > 0 ⟺ byCat[c] exists; defensive. */
       const nodes = (byCat[c as Category] ?? []).slice().reverse()
       // Derive each row's display facts first so the text filter scans exactly
-      // what the rows show (tag + preview) at zero extra derivation cost; the
-      // survivors render unchanged. Identity-labeled injection rows keep their
-      // folded content out of the preview, so the filter scans `text` too.
+      // what the rows show (tag + preview, plus the assistant join's reasoning)
+      // at derivation time, not per keystroke; the survivors render unchanged.
+      // Identity-labeled injection rows keep their folded content out of the
+      // preview, so the filter scans `text` too.
       const rows = nodes.map((n) => {
         const conv = bySeq.get(n.seq)
         // A `skill`-tool load reclassifies into the `skill` bucket (issue #66)
@@ -991,10 +1110,14 @@ export function makeContextBrowser(
         // Tag carries the compact fact (tool name, injection form) — one shared subtle chip style; the preview line carries the text — each
         // fact shown once.
         let tag: string | null = null
+        // The tool names the tag carries, when it names tools (tool rows, a call breadcrumb) — they render as
+        // clickable segments revealing the tool's schema; every other tag stays inert text.
+        let tagNames: string[] | null = null
         let preview = nodeText(n)
         const id = nodeNameOf(n)
         if (n.cat === 'tool') {
           tag = n.tool ?? '?'
+          tagNames = n.tool !== undefined ? [n.tool] : null
           preview = callSummaryOf(conv) ?? t('node.toolResult')
         } else if (n.cat === 'skill') {
           // Skill content (issue #66): a load/invocation names itself, and a
@@ -1005,16 +1128,22 @@ export function makeContextBrowser(
           preview = (n.skill === undefined && id !== '' ? id : null)
             ?? (n.text !== undefined && n.text !== '' ? n.text : null)
             ?? callSummaryOf(conv) ?? preview
-        } else if (n.cat === 'assistant' && Array.isArray(n.calls) && n.calls.length > 0) {
-          // Call targets join as a breadcrumb (`bash › write`); the preview carries the reply text, else the first call's own summary for a
-          // text-less turn.
-          tag = n.calls.join(' › ')
-          preview = (n.text !== undefined && n.text !== '' ? n.text : null)
-            ?? blockSummaryOf(conv)
-            ?? t('node.empty')
-        } else if (n.cat === 'assistant' && (n.text === undefined || n.text === '')) {
-          // A text-less turn can still preview a self-summarizing call from the join even when the node carries no call list.
-          preview = blockSummaryOf(conv) ?? preview
+        } else if (n.cat === 'assistant') {
+          // The fold stamps `calls` only on TEXT-LESS replies; a reply carrying both text and calls recovers its breadcrumb through the
+          // conversation join — the same recovery the step brief applies. The call names join into the tag's scan
+          // text (the filter scans what the rows say) and render as one capsule per distinct name; the preview
+          // carries the reply text, else the first call's own summary for a text-less turn.
+          const names = Array.isArray(n.calls) && n.calls.length > 0 ? n.calls : callNamesOf(conv)
+          if (names.length > 0) {
+            tag = names.join(' › ')
+            tagNames = names
+            preview = (n.text !== undefined && n.text !== '' ? n.text : null)
+              ?? blockSummaryOf(conv)
+              ?? t('node.empty')
+          } else if (n.text === undefined || n.text === '') {
+            // A text-less turn can still preview a self-summarizing call from the join even when the node carries no call list.
+            preview = blockSummaryOf(conv) ?? preview
+          }
         } else if (n.cat === 'user') {
           // User messages with image uploads gain an Image chip on the collapsed row (detected via the conversation join, like the expanded
           // body); expanded, the grid shows anyway.
@@ -1024,38 +1153,77 @@ export function makeContextBrowser(
           if (imgCount > 0 && openElem !== `n${n.seq}`) {
             tag = t('attach.image') + (imgCount > 1 ? ' ×' + String(imgCount) : '')
           }
-        } else if (n.cat === 'inject') {
+        } else {
+          // The last category ('inject'): the form label tags the row; the
+          // source identity (when stamped) is more scannable than the raw
+          // content, which stays one expand away.
           tag = t('form.' + (n.form || 'context'))
           if (id !== '') {
-            // The source identity the events card names (plugin id, reconciled
-            // instruction files, durable kind) — more scannable than the raw
-            // content, which stays one expand away.
             preview = id
           } else if (n.text !== undefined && n.text !== '') {
             preview = n.form === 'snapshot' ? t('node.snapshot') + n.text : n.text
           }
         }
-        return { n, conv, rowErr, tag, preview }
+        return {
+          n,
+          conv,
+          rowErr,
+          tag,
+          tagNames,
+          preview,
+          // The join's reasoning texts feed the scan (assistant rows only — no other category carries them).
+          reasoning: n.cat === 'assistant' ? reasoningTextOf(conv) : '',
+          kinds: msgKindsOf(n, conv),
+        }
       })
       const q = rowQuery.trim().toLowerCase()
-      const shown = q === '' ? rows : rows.filter(r =>
-        (r.tag ?? '').toLowerCase().includes(q) || r.preview.toLowerCase().includes(q)
-        || (typeof r.n.text === 'string' && r.n.text.toLowerCase().includes(q)))
+      // The assistant category's kind chips: per-kind message counts over ALL
+      // of the shown step's rows (the chips report the step's composition, not
+      // the text-lens survivors). A picked kind filters to the rows carrying
+      // it, intersected with the text query; picking it again clears.
+      const kindCounts = c === 'assistant'
+        ? ROW_KINDS.map(k => ({ k, n: rows.reduce((acc, r) => acc + (r.kinds[k] ? 1 : 0), 0) }))
+        : null
+      const shown = q === '' && rowKind === null
+        ? rows
+        : rows.filter(r =>
+          (rowKind === null || r.kinds[rowKind])
+          && (q === ''
+            || (r.tag ?? '').toLowerCase().includes(q) || r.preview.toLowerCase().includes(q)
+            || (typeof r.n.text === 'string' && r.n.text.toLowerCase().includes(q))
+            || r.reasoning.toLowerCase().includes(q)))
       // The toolbar stays mounted on an empty match, or the filter could
       // never be cleared from the UI.
-      const rowctl = <RowToolbar value={rowQuery} placeholder={t('browser.search.' + c)} onChange={setRowQuery} />
+      const rowctl = kindCounts === null
+        ? <RowToolbar value={rowQuery} placeholder={t('browser.search.' + c)} onChange={setRowQuery} />
+        : (
+          <RowToolbar value={rowQuery} placeholder={t('browser.search.' + c)} tip={t('browser.kindTip')} onChange={setRowQuery}>
+            {kindCounts.map(({ k, n }) => (
+              <button
+                key={k}
+                type="button"
+                className={'lc-gran-btn' + (rowKind === k ? ' lc-gran-on' : '')}
+                onClick={() => { setRowKind(rowKind === k ? null : k) }}
+              >
+                {t('browser.kind.' + k)}
+                <span className="lc-kind-n">{fmt(n)}</span>
+              </button>
+            ))}
+          </RowToolbar>
+        )
       if (shown.length === 0) {
         return <div>{rowctl}<div className="lc-br-note">{t('browser.rowNoMatch')}</div></div>
       }
       return (
         <div>
           {rowctl}
-          {shown.map(({ n, conv, rowErr, tag, preview }) => elemRow(`n${n.seq}`, tag, preview, n.tokens, n.time,
+          {shown.map(({ n, conv, rowErr, tag, tagNames, preview }) => elemRow(`n${n.seq}`, rowTagNode(tag, tagNames), preview, n.tokens, n.time,
             <NodeContent
               node={n}
               conv={conv}
               rich={rich}
               img={{ Card: ImageCard, load: props.loadImage }}
+              onSchema={revealSchema}
               // Localized section titles handed in by the parent so the body stays a pure function of props.
               labels={{
                 thinking: t('block.thinking'),

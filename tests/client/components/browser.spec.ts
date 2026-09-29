@@ -1069,6 +1069,7 @@ describe('ContextBrowser message categories', () => {
       { kind: 'image', attachment: { attachmentId: 'b2', name: 'pic.png', bytes: 4096, width: 640, height: 480 } },
       { type: 'mystery', foo: 1 },
       { type: 'text', text: 42 },
+      { kind: 'reasoning', text: 42 },
       'plain string block',
       { foo: 'bar' },
     ] },
@@ -1211,11 +1212,135 @@ describe('ContextBrowser message categories', () => {
     await typeToolSearch(m, '')
     assert.equal(elemRows(m).length, 8)
 
-    // The call-breadcrumb tag matches too (an assistant row's 'bash › write').
+    // The call-breadcrumb tag matches too — both the fold's stamp ('bash › write')
+    // and the join-recovered breadcrumb on a mixed text+calls reply.
     await click(catRow(m, 'assistant'))
     assert.equal(query<HTMLInputElement>(m.container, '.lc-br-tool-search').value, '', 'another category opens unfiltered')
     await typeToolSearch(m, 'bash')
+    assert.deepEqual(previews(), ['full cascade', 'done all'])
+    await m.unmount()
+  })
+
+  test('assistant kind chips: per-kind counts, click filters, re-click clears, switch resets', async () => {
+    const m = await mountBrowser()
+    await click(catRow(m, 'assistant'))
+    const toolctl = query(m.container, '.lc-br-toolctl')
+    assert.equal(queryAll(m.container, '.lc-br-toolctl .lc-gran').length, 1, 'only the assistant toolbar carries the kind group')
+    assert.equal(query(toolctl, '.lc-gran').getAttribute('title'), kit.t('browser.kindTip'))
+    assert.equal(query<HTMLInputElement>(toolctl, '.lc-br-tool-search').placeholder, 'Filter by reply, calls, or thinking…')
+    const chips = () => queryAll<HTMLButtonElement>(m.container, '.lc-br-toolctl .lc-gran-btn')
+    // Counts over ALL of the shown step's rows: thinking rides the join's
+    // reasoning block (seq 68), tools the joined calls (62/63/64/68) plus the
+    // unjoined node's `calls` stamp (61), answers the joined text blocks plus
+    // the nodes' own text (61/66/67/68).
+    assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools5', 'Answer4'])
+    const previews = () => elemRows(m).map(r => text(query(r, '.lc-br-preview')))
+    assert.equal(elemRows(m).length, 8)
+
+    // Tools: the joined tool-call blocks plus the unjoined `calls` stamp.
+    await click(chips()[1])
+    assert.ok(chips()[1].className.includes('lc-gran-on'))
+    assert.deepEqual(previews(), ['full cascade', 'b.ts', '(empty reply)', 'a.ts', 'done all'])
+    // The counts report the step's composition — the text lens narrows on top of them.
+    await typeToolSearch(m, 'done')
     assert.deepEqual(previews(), ['done all'])
+    assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools5', 'Answer4'])
+    await typeToolSearch(m, 'zzz')
+    assert.equal(elemRows(m).length, 0)
+    assert.ok(text(query(m.container, '.lc-br-body')).includes('No rows match the current filter'))
+    assert.equal(chips().length, 3, 'the chips stay mounted on an empty match')
+    await typeToolSearch(m, '')
+    assert.equal(elemRows(m).length, 5)
+
+    // Re-click clears; the other two kinds each keep only their own rows.
+    await click(chips()[1])
+    assert.equal(elemRows(m).length, 8)
+    await click(chips()[0])
+    assert.deepEqual(previews(), ['full cascade'])
+    await click(chips()[2])
+    assert.ok(chips()[2].className.includes('lc-gran-on'))
+    assert.ok(!chips()[0].className.includes('lc-gran-on'), 'the kinds are exclusive')
+    assert.deepEqual(previews(), ['full cascade', 'legacy', 'Calls ', 'done all'])
+
+    // A category switch resets the picked kind with the text lens.
+    await click(catRow(m, 'user'))
+    assert.equal(queryAll(m.container, '.lc-br-toolctl .lc-gran-btn').length, 0)
+    await click(catRow(m, 'assistant'))
+    assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools5', 'Answer4'])
+    assert.ok(chips().every(c => !c.className.includes('lc-gran-on')))
+    assert.equal(elemRows(m).length, 8)
+    await m.unmount()
+  })
+
+  test('tool-name capsules reveal the schema row; the row toggle stays out of the way', async () => {
+    const headers: ContextHeaders = { headers: [{ seq: 1, time: 1, systemTokens: 3, tools: [{ name: 'bash', tokens: 5 }, { name: 'write', tokens: 3 }] }] }
+    const m = await mountBrowser({ headers })
+    await click(catRow(m, 'assistant'))
+    // The stamped breadcrumb (seq 61) renders one clickable capsule per distinct call name.
+    const crumbRow = elemRows(m).find(r => text(r).includes('done all')) as HTMLElement
+    const links = queryAll(crumbRow, '.lc-br-tag-link')
+    assert.deepEqual(links.map(l => text(l)), ['bash', 'write'])
+    await click(links[0])
+    // The reveal opens the Tool Schemas category with the bash definition row expanded...
+    assert.ok(text(query(m.container, '.lc-br-cat-open')).includes('Tool Schemas'))
+    const open = queryAll(m.container, '.lc-br-elem-on')
+    assert.equal(open.length, 1)
+    assert.ok(text(open[0]).includes('bash'))
+    // ...and ONLY the schema body is open: the segment click stopped propagation,
+    // so the assistant row's own toggle never overwrote the reveal.
+    assert.equal(queryAll(m.container, '.lc-br-content').length, 1)
+    await m.unmount()
+  })
+
+  test('the expanded body’s call head reveals the tool schema too', async () => {
+    const headers: ContextHeaders = { headers: [{ seq: 1, time: 1, systemTokens: 3, tools: [{ name: 'bash', tokens: 5 }, { name: 'noargs', tokens: 2 }] }] }
+    const m = await mountBrowser({ headers })
+    await click(catRow(m, 'assistant'))
+    const row = elemRows(m).find(r => text(r).includes('full cascade')) as HTMLElement
+    await click(row)
+    const head = queryAll(m.container, '.lc-ts-card-head b').find(el => text(el) === '→ bash') as HTMLElement
+    await click(head)
+    const open = queryAll(m.container, '.lc-br-elem-on')
+    assert.equal(open.length, 1)
+    assert.ok(text(open[0]).includes('bash'), 'the call head lands on the bash schema row, expanded')
+    await m.unmount()
+  })
+
+  test('repeated call names fold into ×N capsules in first-appearance order', async () => {
+    const headers: ContextHeaders = { headers: [{ seq: 1, time: 1, systemTokens: 3, tools: [{ name: 'bash', tokens: 5 }, { name: 'write', tokens: 3 }] }] }
+    const data = tl({
+      current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 8, tool: 0, total: 8 },
+      nodes: [node({ seq: 2, cat: 'assistant', tokens: 8, calls: ['bash', 'write', 'bash', 'bash'] })],
+    })
+    const m = await mount(h(Browser, props({ data, headers })))
+    await click(catRow(m, 'assistant'))
+    // 'bash › write › bash › bash' groups into two capsules: the repeat multiplier keeps the first-appearance order.
+    const row = elemRows(m)[0]
+    const links = queryAll(row, '.lc-br-tag-link')
+    assert.deepEqual(links.map(l => text(l)), ['bash ×3', 'write'])
+    // The folded capsule still reveals the named tool's schema.
+    await click(links[0])
+    const open = queryAll(m.container, '.lc-br-elem-on')
+    assert.equal(open.length, 1)
+    assert.ok(text(open[0]).includes('bash'))
+    assert.equal(queryAll(m.container, '.lc-br-content').length, 1, 'the row toggle never fires')
+    await m.unmount()
+  })
+
+  test('the assistant text filter scans the join’s reasoning blocks', async () => {
+    const m = await mountBrowser()
+    await click(catRow(m, 'assistant'))
+    // 'thinking hard' rides seq 68's reasoning block — no tag, preview, or node text carries it.
+    await typeToolSearch(m, 'thinking hard')
+    const rows = elemRows(m)
+    assert.equal(rows.length, 1)
+    assert.ok(text(rows[0]).includes('full cascade'))
+    // A malformed reasoning block (non-string text) drops from the scan whole — its value matches nothing.
+    await typeToolSearch(m, '42')
+    assert.equal(elemRows(m).length, 0)
+    assert.ok(text(query(m.container, '.lc-br-body')).includes('No rows match the current filter'))
+    await typeToolSearch(m, '')
+    assert.equal(elemRows(m).length, 8)
     await m.unmount()
   })
 
@@ -1232,17 +1357,19 @@ describe('ContextBrowser message categories', () => {
     await click(catRow(m, 'assistant'))
     const rows = elemRows(m)
     const rowOf = (preview: string) => rows.find(r => text(r).includes(preview)) as HTMLElement
-    assert.ok(text(rowOf('done all')).includes('bash › write'), 'call breadcrumb tag')
-    assert.ok(text(rowOf('a.ts')).includes('write'), 'block summary previews a textless turn')
+    const capsOf = (row: HTMLElement) => queryAll(row, '.lc-br-tag').map(c => text(c))
+    assert.deepEqual(capsOf(rowOf('done all')), ['bash', 'write'], 'call breadcrumb: one capsule per distinct call')
+    assert.ok(capsOf(rowOf('a.ts')).includes('write'), 'block summary previews a textless turn')
     const tags = rows.map(r => {
-      const tag = r.querySelector<HTMLElement>('.lc-br-tag')
+      const caps = capsOf(r)
       const preview = text(query(r, '.lc-br-preview'))
-      return `${tag === null ? '∅' : text(tag)}|${preview}`
+      return `${caps.length === 0 ? '∅' : caps.join(',')}$|${preview}`
     })
-    assert.ok(tags.includes('read|(empty reply)'), 'no self-summarizing call → empty marker')
-    assert.ok(tags.includes('∅|b.ts'), 'textless turn previews the joined call summary')
-    assert.ok(tags.includes('∅|(empty reply)'), 'no join, no calls → empty marker')
-    assert.ok(tags.includes('∅|Calls '), 'empty call list previews as a bare Calls label (nodeText)')
+    assert.ok(tags.includes('read$|(empty reply)'), 'no self-summarizing call → empty marker')
+    assert.ok(tags.includes('edit$|b.ts'), 'a textless turn tags the joined call name and previews its summary')
+    assert.ok(tags.includes('bash,broken,noargs$|full cascade'), 'a mixed reply tags one capsule per join-recovered call, in order')
+    assert.ok(tags.includes('∅$|(empty reply)'), 'no join, no calls → empty marker')
+    assert.ok(tags.includes('∅$|Calls '), 'empty call list previews as a bare Calls label (nodeText)')
 
     await click(rowOf('full cascade'))
     const content = query(m.container, '.lc-br-content')
@@ -1254,7 +1381,7 @@ describe('ContextBrowser message categories', () => {
     assert.ok(heads.some(s => s.includes('→ ?')), 'nameless call card')
     assert.ok(heads.some(s => s.includes('→ noargs')))
     assert.ok(heads.some(s => s.includes('Result')), 'nested tool-result text section')
-    assert.ok(heads.filter(s => s.includes('Other content')).length === 5, 'unknown blocks render raw JSON')
+    assert.ok(heads.filter(s => s.includes('Other content')).length === 6, 'unknown blocks render raw JSON')
     assert.ok(heads.some(s => s.includes('Images')))
     // Call arg rows: string, number and object values.
     const argVals = queryAll(content, '.lc-ts-arg-row').map(el => text(el))
@@ -1920,6 +2047,19 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
       assert.equal(query<HTMLInputElement>(m.container, '.lc-br-tool-search').value, '')
       assert.equal(queryAll(m.container, '.lc-br-elem-on').length, 1)
       assert.ok(text(query(m.container, '.lc-br-body')).includes('hi'))
+
+      // A stale kind chip clears the same way — even when the band reopens the SAME category (zero counts render too).
+      await click(catRow(m, 'assistant'))
+      const toolsChip = queryAll(m.container, '.lc-br-toolctl .lc-gran-btn')[1]
+      assert.equal(text(toolsChip), 'Tools0')
+      await click(toolsChip)
+      assert.ok(text(query(m.container, '.lc-br-body')).includes('No rows match'))
+      await click(bands(m)[5])
+      const kindChips = queryAll(m.container, '.lc-br-toolctl .lc-gran-btn')
+      assert.equal(kindChips.length, 3)
+      assert.ok(kindChips.every(b => !b.className.includes('lc-gran-on')), 'the band click clears a stale kind chip')
+      assert.equal(elemRows(m).length, 1)
+      assert.equal(queryAll(m.container, '.lc-br-elem-on').length, 1)
 
       // The system band opens the system section (metadata-only note without a header fetcher).
       await click(bands(m)[0])

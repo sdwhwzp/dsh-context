@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { estimateSessionCost, formatCost, formatPriceRate, mergeCostUsage, peakOf, priceIndexOf, priceOf, toCurrency } from '../../src/client/cost'
+import { estimateSessionCost, formatCost, formatPriceRate, mergeCostUsage, priceFaceOf, priceIndexOf, priceOf, toCurrency } from '../../src/client/cost'
 import type { ModelBook, ModelPrices } from '../../src/client/cost'
 import type { CostBucketTotals } from '../../src/shared/types'
 
@@ -142,6 +142,25 @@ describe('priceIndexOf / the model-side resolution tiers', () => {
 
   test('tier: a provider the model id itself names wins over mirrors', () => {
     assert.deepEqual(priceOf(BOOK_B, 'any-gateway', 'deepseek-v4-flash'), FLASH, 'deepseek-v4-flash names deepseek')
+  })
+
+  test('a deepseek- model id prices from the first-party branch first (issue #93)', () => {
+    // The live-registry shape: azure re-lists `deepseek-v4-pro` flat (no
+    // cache_read published) and its `@ai-sdk/azure` package is the only
+    // self-named one — DeepSeek rides `@ai-sdk/openai-compatible`, so the
+    // model-side tiers would hand the id to azure. The `deepseek-` spelling
+    // prices from DeepSeek's own listing instead.
+    const AZURE_FLAT = { hit: 1.74, miss: 1.74, write: 1.74, out: 3.48 }
+    const hostBook = bookOf({
+      deepseek: { 'deepseek-v4-pro': PRO },
+      azure: { 'deepseek-v4-pro': AZURE_FLAT, 'deepseek-v4-pro-0813': AZURE_FLAT, 'gpt-x': AZURE_FLAT },
+    }, { deepseek: '@ai-sdk/openai-compatible', azure: '@ai-sdk/azure' })
+    assert.deepEqual(priceOf(hostBook, 'hx', 'deepseek-v4-pro'), PRO, 'the id names deepseek; a self-named SDK proves hosting, not authorship')
+    assert.deepEqual(priceOf(hostBook, 'hx', 'DeepSeek-V4-Pro'), PRO, 'the seam is case-insensitive')
+    assert.deepEqual(priceOf(hostBook, 'hx', 'deepseek-v4-pro-0813'), AZURE_FLAT, 'an id the first party does not list falls back to the model-side tiers')
+    assert.deepEqual(priceOf(hostBook, 'hx', 'gpt-x'), AZURE_FLAT, 'a model id outside the seam resolves as before')
+    const hostOnly = bookOf({ azure: { 'deepseek-junk': AZURE_FLAT } }, { azure: '@ai-sdk/azure' })
+    assert.deepEqual(priceOf(hostOnly, 'hx', 'deepseek-junk'), AZURE_FLAT, 'no first-party branch in the book leaves the tiers in charge')
   })
 
   test('tier: a lone carrier prices without any vendor signal', () => {
@@ -350,12 +369,17 @@ describe('mergeCostUsage', () => {
   })
 })
 
-describe('peakOf', () => {
-  test('doubles every rate component onto the official peak list', () => {
-    // The book's deepseek figures ARE the official off-peak rates; doubled
-    // they must reproduce the official peak list (api-docs.deepseek.com):
-    // flash peak per 1M — hit $0.006, miss $0.3, output $1.2.
-    assert.deepEqual(peakOf(FLASH), { hit: 0.006, miss: 0.3, write: 0.3, out: 1.2 })
+describe('priceFaceOf', () => {
+  test('names the registry face every resolution path lands on', () => {
+    // Direct branch: the dsh provider's rename maps onto the registry id.
+    assert.deepEqual(priceFaceOf(BOOK_B, 'deepseek-official', 'deepseek-v4-flash'), { pid: 'deepseek', mid: 'deepseek-v4-flash', rate: FLASH })
+    assert.deepEqual(priceFaceOf(BOOK_B, 'kimi-coding', 'k3'), { pid: 'moonshotai', mid: 'kimi-k3', rate: K3 }, 'the suffix path names the full registry spelling')
+    // First-party seam: a deepseek- id prices from DeepSeek's own branch.
+    assert.deepEqual(priceFaceOf(BOOK_B, 'future-gateway', 'deepseek-v4-pro'), { pid: 'deepseek', mid: 'deepseek-v4-pro', rate: PRO })
+    // Model-side tiers: the winning candidate's own face.
+    assert.deepEqual(priceFaceOf(BOOK_B, 'any-gateway', 'kimi-k2.7-code'), { pid: 'moonshotai', mid: 'kimi-k2.7-code', rate: KIMI })
+    assert.equal(priceFaceOf(BOOK_B, '', 'mystery'), null)
+    assert.equal(priceFaceOf(null, 'deepseek-official', 'deepseek-v4-flash'), null)
   })
 })
 
@@ -377,18 +401,10 @@ describe('formatCost', () => {
 })
 
 describe('formatPriceRate', () => {
-  test('trims trailing zeros from a fixed-notation figure', () => {
-    assert.equal(formatPriceRate(3.0, 'cny'), '¥3')
-    assert.equal(formatPriceRate(4.5, 'cny'), '¥4.5')
-  })
-
-  test('trims trailing zeros from a precision-notation figure', () => {
-    assert.equal(formatPriceRate(0.007, 'usd'), '$0.007')
-    assert.equal(formatPriceRate(0.1, 'usd'), '$0.1')
-  })
-
-  test('strips the dot left behind when every decimal was a zero', () => {
-    assert.equal(formatPriceRate(9.0, 'cny'), '¥9')
-    assert.equal(formatPriceRate(1.5, 'cny'), '¥1.5')
+  test('always renders two decimals in the currency symbol', () => {
+    assert.equal(formatPriceRate(3, 'cny'), '¥3.00')
+    assert.equal(formatPriceRate(4.5, 'cny'), '¥4.50')
+    assert.equal(formatPriceRate(0.007, 'usd'), '$0.01')
+    assert.equal(formatPriceRate(0.1, 'usd'), '$0.10')
   })
 })

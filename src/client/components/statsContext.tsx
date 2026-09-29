@@ -7,8 +7,8 @@
 
 import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react'
 import type { ContextEventRecord, ContextTimeline, RequestRecord, SessionCostUsage, TimelineCounts, TokenUsage } from '../../shared/types'
-import { estimateSessionCost, formatCost, formatPriceRate, mergeCostUsage, peakOf, priceOf, toCurrency } from '../cost'
-import type { CostCurrency, ModelBook, PriceTriple } from '../cost'
+import { estimateSessionCost, formatCost, formatPriceRate, mergeCostUsage, priceFaceOf, toCurrency } from '../cost'
+import type { CostCurrency, ModelBook, PriceFace } from '../cost'
 import { sessionsFaceOf, subagentCostFoldOf } from '../agentTree'
 import type { AgentHeads } from '../agentHeads'
 import { useSessionsSnapshot } from '../agentHeads'
@@ -20,21 +20,26 @@ import { formatSpendCost, spendDisplayCurrency } from '../spendMoney'
 import { isDeepSeekProvider } from '../../shared/providers'
 import type { ViewKit } from '../viewkit'
 
-/** One billed model's tooltip row: its display label and USD rates (`offRate` present only when the model billed off-peak). */
-interface PriceRow { key: string; label: string; rate: PriceTriple; offRate?: PriceTriple }
+/** One billed model's tooltip block: the usage key and the registry face its price resolved to. */
+interface PriceRow { key: string; face: PriceFace }
+
+/** The four billed buckets of a price block, in display order, with their label keys. */
+const BANDS: readonly (readonly [keyof PriceFace['rate'], string])[] = [
+  ['hit', 'stats.costHit'],
+  ['miss', 'stats.costMiss'],
+  ['write', 'stats.costWrite'],
+  ['out', 'stats.costOut'],
+]
 
 /**
- * The rate rows for the models this session actually billed — the usage
- * keys priced against the book, in fold order. Hostile branches skip;
- * unpriced models drop (their buckets simply do not contribute). The label
- * carries the provider only when the session billed more than one; a model
- * with an off-peak bucket (DeepSeek's period-based list) shows the
- * peak | off-peak pair.
+ * The billed models' price blocks — the usage keys priced against the book,
+ * in fold order, each carrying the registry face (models.dev provider id ·
+ * model id) its rates resolved from. Hostile branches skip; unpriced models
+ * drop (their buckets simply do not contribute).
  */
 function priceRowsOf(usage: SessionCostUsage | undefined, book: ModelBook | null): PriceRow[] {
   if (usage === undefined || book === null) return []
   const rows: PriceRow[] = []
-  const multi = Object.keys(usage).length > 1
   for (const provider of Object.keys(usage)) {
     const models = asRecord(usage[provider])
     /* v8 ignore next 1 -- the fold's inputs are mergeCostUsage's own output
@@ -42,21 +47,9 @@ function priceRowsOf(usage: SessionCostUsage | undefined, book: ModelBook | null
        reaches here; the guard stays for the helper's own contract. */
     if (models === null) continue
     for (const model of Object.keys(models)) {
-      const rate = priceOf(book, provider, model)
-      if (rate === null) continue
-      const periods = asRecord(models[model])
-      // The peak | off-peak pair is DeepSeek's alone (shared/providers): the
-      // book lists its off-peak rates, so the peak column always doubles it
-      // (the estimator prices the peak bucket at the same doubled rate) —
-      // other providers bill everything at book price.
-      const deepseek = isDeepSeekProvider(provider)
-      const billedOff = deepseek && periods !== null && periods.off !== undefined
-      rows.push({
-        key: provider + '/' + model,
-        label: multi && provider !== '' ? `${model} · ${provider}` : model,
-        rate: deepseek ? peakOf(rate) : rate,
-        ...(billedOff ? { offRate: rate } : {}),
-      })
+      const face = priceFaceOf(book, provider, model)
+      if (face === null) continue
+      rows.push({ key: provider + '/' + model, face })
     }
   }
   return rows
@@ -170,17 +163,47 @@ export function makeStatsContext(
     const subCost = estimateSessionCost(subUsage, book, currency)
     const fmtRate = (usd: number): string => formatPriceRate(toCurrency(usd, currency), currency)
     const rows = priceRowsOf(usage, book)
-    // DeepSeek's peak/off-peak scheme is explained only when the family
-    // actually billed a DeepSeek provider — other sessions see nothing of it.
+    const subRows = priceRowsOf(subUsage ?? undefined, book)
+    // DeepSeek's peak/off-peak scheme is explained only when the tip's own
+    // scope actually billed a DeepSeek provider — other sessions see nothing
+    // of it.
     const deepseek = usage !== undefined && Object.keys(usage).some(p => isDeepSeekProvider(p))
     const subDeepseek = subUsage !== null && Object.keys(subUsage).some(p => isDeepSeekProvider(p))
-    const anyPair = rows.some(r => r.offRate !== undefined)
     // Usage folded but nothing priced (the book has not loaded, or carries
-    // none of this family's models): say so instead of a bare dash.
+    // none of this scope's models): say so instead of a bare dash.
     const unpriced = rows.length === 0 && usage !== undefined && Object.keys(usage).length > 0
       && (failed || book !== null)
-    const subUnpriced = subUsage !== null && priceRowsOf(subUsage, book).length === 0
-      && (failed || book !== null)
+    const subUnpriced = subRows.length === 0 && subUsage !== null && (failed || book !== null)
+    // One scope's price table: the billed buckets' rates at the book's list
+    // per model — a zero list price carries no information, so its band drops
+    // (free/token-plan listings keep only their listing line) — each block
+    // closed by the listing line naming the registry face (provider id ·
+    // model id) the rates resolved from.
+    const pricesBlock = (blocks: PriceRow[]): ReactNode =>
+      blocks.length > 0 ? (
+        <span key="prices" className="lc-stat-tip-prices">
+          <span className="lc-stat-tip-head">{t('stats.costPriceHead')}</span>
+          {blocks.map(r => (
+            <span key={r.key} className="lc-stat-tip-row">
+              {BANDS.filter(([bucket]) => r.face.rate[bucket] > 0).map(([bucket, label]) => (
+                <span key={bucket} className="lc-stat-tip-band">
+                  <i>{t(label)}</i>
+                  {' '}
+                  <b>{fmtRate(r.face.rate[bucket])}</b>
+                </span>
+              ))}
+              <span className="lc-stat-tip-by">{t('stats.costPriceBy', { p: r.face.pid, m: r.face.mid })}</span>
+            </span>
+          ))}
+        </span>
+      ) : null
+    // The shared footnotes: the CNY conversion note in the CNY display, and
+    // DeepSeek's peak-window scheme when the scope billed a DeepSeek provider.
+    const notes = (deep: boolean): ReactElement[] =>
+      [
+        currency === 'cny' ? <span key="cny">{t('stats.costTipCny')}</span> : null,
+        deep ? <span key="peak">{t('stats.costTipDeepseek')}</span> : null,
+      ].filter((el): el is ReactElement => el !== null)
     const costTip: ReactNode = priced !== null
       ? [
         t('stats.costTipLedger'),
@@ -197,34 +220,17 @@ export function makeStatsContext(
         </span>,
       ]
       : [
-        t('stats.costTip') + (deepseek ? ' ' + t('stats.costTipDeepseek') : ''),
-        rows.length > 0 ? (
-          <span key="prices" className="lc-stat-tip-prices">
-            <span className="lc-stat-tip-head">
-              {anyPair ? t('stats.costPriceHeadPair') : t('stats.costPriceHead')}
-            </span>
-            {rows.map((r) => {
-              const cells: [string, number, number | undefined][] = [
-                [t('stats.costHit'), r.rate.hit, r.offRate?.hit],
-                [t('stats.costMiss'), r.rate.miss, r.offRate?.miss],
-                [t('stats.costWrite'), r.rate.write, r.offRate?.write],
-                [t('stats.costOut'), r.rate.out, r.offRate?.out],
-              ]
-              return (
-                <span key={r.key} className="lc-stat-tip-row">
-                  <b className="lc-stat-tip-model">{r.label}</b>
-                  {cells.map(([name, peak, off]) => (
-                    <span key={name}>{' · '}{name} {off === undefined ? fmtRate(peak) : `${fmtRate(peak)}|${fmtRate(off)}`}</span>
-                  ))}
-                </span>
-              )
-            })}
-          </span>
-        ) : null,
+        t('stats.costTip'),
+        pricesBlock(rows),
+        ...notes(deepseek),
         unpriced ? <span key="unavailable">{t('stats.costUnavailable')}</span> : null,
       ]
+    // The subagents' own share: scope explanation, its own price table, then
+    // the outage note when the subagents' models priced against nothing.
     const subTip: ReactNode = [
-      t('stats.subCostTip') + (subDeepseek ? ' ' + t('stats.costTipDeepseek') : ''),
+      t('stats.subCostTip'),
+      pricesBlock(subRows),
+      ...notes(subDeepseek),
       subUnpriced ? <span key="unavailable">{t('stats.costUnavailable')}</span> : null,
     ]
     // The harness chat stats line's own formula, shown two decimals deep:
@@ -235,16 +241,31 @@ export function makeStatsContext(
         numOf(props.usage.cacheReadTokens),
         numOf(props.usage.uncachedInputTokens) + numOf(props.usage.cacheReadTokens) + numOf(props.usage.cacheWriteTokens),
       )
-    const cell = (label: string, value: string | number, tip?: ReactNode): ReactElement => (
-      <div className={'lc-stat' + (tip === undefined ? '' : ' lc-stat-tipped group/tip')}>
-        <span className="lc-stat-label">
-          {label}
-          {tip !== undefined && <i className="lc-stat-q group-hover/tip:text-(--dsw-alias-label-primary) group-hover/tip:border-(--dsw-alias-label-primary)" aria-hidden="true">?</i>}
-        </span>
-        <b className="lc-stat-value">{typeof value === 'number' ? fmt(value) : value}</b>
-        {tip !== undefined && <span className="lc-tip lc-stat-tip group-hover/tip:opacity-100" role="tooltip">{tip}</span>}
-      </div>
-    )
+    const cell = (label: string, value: string | number, tip?: ReactNode, href?: string): ReactElement => {
+      // The framed cell body, as a div — or as an anchor opening the models.dev
+      // provider listing in a new tab when the caller hands a destination (the
+      // tooltip still frames and reveals off this same element).
+      const body = (
+        <>
+          <span className="lc-stat-label">
+            {label}
+            {tip !== undefined && <i className="lc-stat-q group-hover/tip:text-(--dsw-alias-label-primary) group-hover/tip:border-(--dsw-alias-label-primary)" aria-hidden="true">?</i>}
+          </span>
+          <b className="lc-stat-value">{typeof value === 'number' ? fmt(value) : value}</b>
+          {tip !== undefined && <span className="lc-tip lc-stat-tip group-hover/tip:opacity-100" role="tooltip">{tip}</span>}
+        </>
+      )
+      const className = 'lc-stat' + (tip === undefined ? '' : ' lc-stat-tipped group/tip')
+      return href === undefined
+        ? <div className={className}>{body}</div>
+        : <a className={className} href={href} target="_blank" rel="noreferrer noopener">{body}</a>
+    }
+    // The cost cell links to the listing when ONE models.dev provider priced
+    // the whole scope — the natural "check these rates" destination. A
+    // multi-provider scope names each face in the tooltip instead and stays
+    // unlinked.
+    const costPids = new Set(rows.map(r => r.face.pid).filter(p => p !== ''))
+    const costHref = costPids.size === 1 ? 'https://models.dev/providers/' + [...costPids][0] + '/' : undefined
     return (
       <div className="lc-card lc-col-stats flex-[3] min-w-[min(360px,100%)]">
         <div className="lc-card-title">
@@ -259,7 +280,7 @@ export function makeStatsContext(
           {cell(t('stats.humanInputs'), props.humanInputs ?? 0, t('stats.humanInputsTip'))}
           {cell(t('stats.toolCalls'), props.toolCalls ?? 0)}
           {cell(t('stats.cacheHit'), hit === null ? '—' : `${hit}%`, t('stats.cacheHitTip'))}
-          {cell(t('stats.cost'), priced !== null ? priced.money(priced.cost) : cost === null ? '—' : formatCost(cost, currency), costTip)}
+          {cell(t('stats.cost'), priced !== null ? priced.money(priced.cost) : cost === null ? '—' : formatCost(cost, currency), costTip, priced === null ? costHref : undefined)}
           {cell(t('stats.subCost'), subCost === null ? '—' : formatCost(subCost, currency), subTip)}
         </div>
       </div>
