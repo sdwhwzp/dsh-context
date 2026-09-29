@@ -17,6 +17,7 @@ import { useTimelineSource } from '../timelineSource'
 import type { ViewKit } from '../viewkit'
 import { makeContextBrowser } from './browser'
 import { makeCurrentComposition } from './currentComposition'
+import { makeDetailNote } from './detailNote'
 import { makeErrorBoundary } from './errorBoundary'
 import { useEscapeClose } from './escapeClose'
 import { makeLegend, makeStackedBar } from './stackedBar'
@@ -36,6 +37,7 @@ export function makeContextModal(
   const Legend = makeLegend(kit)
   const CurrentComposition = makeCurrentComposition(kit, StackedBar, Legend)
   const ContextBrowser = makeContextBrowser(kit, StackedBar, settings)
+  const DetailNote = makeDetailNote(kit)
   const ErrorBoundary = makeErrorBoundary(t)
 
   function ContextModalBody(props: ContextModalProps): ReactElement | null {
@@ -130,7 +132,11 @@ export function makeContextModal(
               </div>
 
               {data === null || head === null ? (
-                <div className="lc-empty">{t('loading')}</div>
+                source.detailState === 'failed' ? (
+                  <DetailNote state="failed" onRetry={source.retryDetail} />
+                ) : (
+                  <div className="lc-empty">{t('loading')}</div>
+                )
               ) : (
                 <div>
                   <CurrentComposition
