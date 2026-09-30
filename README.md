@@ -118,7 +118,7 @@ One stacked bar per model request — finer than per-message — so you watch th
 
 - **Hover & pin** — scrub for an instant tooltip; click to pin the full breakdown, with provider-reported **Actual Prompt / Output / Cache** next to the estimates.
 - **Live linkage** — hovering a bar previews that step's assembled context in the Context browser beside the chart; leaving the chart returns to your own pick.
-- **DNA detail** — the shared DNA toggle splits trend bars into individual context items and displays the same item colors in the browser. In Delta mode, additions and removals appear on opposite sides of zero; selecting a band opens its item at that request.
+- **DNA detail** — the shared DNA toggle splits trend bars into individual context items and displays the same item colors in the browser. In Delta mode, additions and removals appear on opposite sides of zero; selecting a band opens its item at that request. Hovering the padding outside a band shows the signed net delta rather than labeling token churn as a total.
 
 ### 🧭 Context Browser — open the box of any request
 
