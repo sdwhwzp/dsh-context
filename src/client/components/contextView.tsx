@@ -6,7 +6,7 @@
  */
 
 import { createElement as h, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import type { ContextEventRecord, RequestRecord, SurfaceNode } from '../../shared/types'
+import type { Category, ContextEventRecord, RequestRecord, SurfaceNode } from '../../shared/types'
 import { briefNodes, briefOf } from '../brief'
 import { headlineOf } from '../headline'
 import type { ContextViewProps } from '../services'
@@ -36,6 +36,8 @@ import { makeStatsTiming } from './statsTiming'
 import { makeStatsTokens } from './statsTokens'
 import { makeLegend, makeStackedBar } from './stackedBar'
 import { aggregateByTurn, attachMarkers, jumpTargetOf, makeTrendChart, turnStepsOf } from './trendChart'
+import { assemble } from '../assemble'
+import { trendBandsOf } from '../dna'
 
 import { subscribeContextFocus, takeContextFocus } from '../viewFocus'
 import { revealInScrollParent } from '../revealScroll'
@@ -109,6 +111,11 @@ export function makeContextView(
     // 'total' plots each request's cumulative composition, 'delta' its incremental change vs the previous one;
     // like granularity, the default is read at mount and in-chart toggling never writes back.
     const [trendMode, setTrendMode] = useState<'total' | 'delta'>(() => settings.defaultTrendMode())
+    // DNA mode: the trend bars become per-item fingerprints of each request's context (dna.ts); like the
+    // toggles above, mount-local and never written back — and SHARED with the Context browser, whose DNA
+    // toggle rides this same state so both switches move as one. Orthogonal to the Total/Delta switch —
+    // delta diffs the bands against the previous bar, so the two combine into a per-item change view.
+    const [dna, setDna] = useState(false)
     // Adaptive scale (the title-adjacent toggle): the trend bars rescale to the visible window; like the two
     // toggles above, mount-local and never written back.
     const [adaptive, setAdaptive] = useState(false)
@@ -129,7 +136,9 @@ export function makeContextView(
       })
     }
     // Step-brief → browser reveal bridge: one-shot focus request consumed by the Context browser.
-    const [nodeFocus, setNodeFocus] = useState<{ step: number | 'live'; seq: number; cat: SurfaceNode['cat'] } | null>(null)
+    // `key` is the band key both DNA surfaces share ('sys' / 'tool:<name>' / 'n<seq>'), so the
+    // same bridge serves the brief's message locates and the trend chart's DNA band picks.
+    const [nodeFocus, setNodeFocus] = useState<{ step: number | 'live'; key: string; cat: Category | 'system' | 'tools' } | null>(null)
     const clearNodeFocus = useCallback(() => { setNodeFocus(null) }, [])
 
     // Session-authorized durable-image loader for the browser's attachment cards, resolved through the harness `uiConversation` service
@@ -221,6 +230,22 @@ export function makeContextView(
     // aggregates read their own stepCount instead.
     const stepsOf = useMemo(() => turnStepsOf(requests), [requests])
     const markers = useMemo(() => attachMarkers(displayRequests, events), [displayRequests, events])
+    // DNA mode's per-bar bands: one assemble() per displayed record — the same pure client-side
+    // reconstruction the Context browser uses — memoized on the timeline so hover-driven re-renders
+    // never reassemble. Turn bars assemble at the aggregate's (its last step's) seq, exactly the
+    // step the bar plots. Null whenever DNA is off (the chart's stacked modes never pay for it).
+    /* v8 ignore next 1 -- a missing projection returns the loading screen before the trend card
+       (and its DNA toggle) renders, so `dna && data === null` cannot occur. */
+    const dnaBands = useMemo(
+      () => (dna && data !== null ? displayRequests.map(req => trendBandsOf(assemble(data, headers, req.seq))) : null),
+      [dna, data, headers, displayRequests],
+    )
+    // A DNA band click reveals the item in the Context browser through the same one-shot bridge
+    // the step brief uses — the band key ('sys' / 'tool:<name>' / 'n<seq>') opens the very row
+    // the browser's own DNA bands click open, at the bar's step.
+    const revealBand = useCallback((seq: number, band: { key: string; cat: Category | 'system' | 'tools' }): void => {
+      setNodeFocus({ step: seq, key: band.key, cat: band.cat })
+    }, [])
 
     // Chat → Context jump, leg 1: pick up the assistant-action relay's request for this session —
     // once per mount, and again on every later record (the sidebar landing keeps this view mounted
@@ -359,7 +384,7 @@ export function makeContextView(
       const seq = op.parent ?? op.seq
       const step = locateStepOf(requests, seq, op.gone)
       if (step === null) return
-      setNodeFocus({ step, seq, cat: 'tool' })
+      setNodeFocus({ step, key: 'n' + String(seq), cat: 'tool' })
     }, [requests])
     // A brief row's reveal target: inputs/opener live in the picked step's OWN assembled surface; the response node (seq === the
     // request's) first appears in the NEXT step's surface — or the live surface when the last bar is picked.
@@ -369,7 +394,7 @@ export function makeContextView(
       if (activeReq === null) return
       const next = isResponse && activeIdx + 1 < displayRequests.length ? displayRequests[activeIdx + 1] : null
       const step: number | 'live' = isResponse ? (next !== null ? next.seq : 'live') : activeReq.seq
-      setNodeFocus({ step, seq: node.seq, cat: node.cat })
+      setNodeFocus({ step, key: 'n' + String(node.seq), cat: node.cat })
     }, [activeReq, activeIdx, displayRequests])
 
     if (!data) {
@@ -440,6 +465,16 @@ export function makeContextView(
       <div className="lc-card">
         <div className="lc-card-title">
           <span className="lc-card-title-text">{t('trend.title')}</span>
+          {/* The DNA toggle rides the title text's right, left of the adaptive switch (the browser
+              card's DNA toggle idiom): each bar becomes that request's per-item context fingerprint;
+              combined with Delta, each band shows that item's change against the previous bar. */}
+          <span className="lc-gran lc-trend-dna" role="group" title={t('trend.dnaTip')}>
+            <button
+              type="button"
+              className={'lc-gran-btn' + (dna ? ' lc-gran-on' : '')}
+              onClick={() => { setDna(v => !v) }}
+            >{t('trend.dna')}</button>
+          </span>
           {/* The adaptive switch rides the title's right (the browser card's DNA toggle idiom): bars rescale
               to the bars currently on screen instead of the whole retained log. */}
           <span className="lc-gran lc-trend-adaptive" role="group" title={t('trend.adaptiveHint')}>
@@ -500,6 +535,8 @@ export function makeContextView(
                 hoverCat={trendHoverCat}
                 focusCat={focusCat}
                 adaptive={adaptive}
+                dna={dnaBands}
+                onPickBand={revealBand}
                 onSelect={setSelectedSeq}
                 onHover={setHoveredSeq}
                 onHoverTurn={setHoverTurn}
@@ -541,6 +578,9 @@ export function makeContextView(
         loadImage={loadImage}
         detailState={source.detailState}
         onDetailRetry={source.retryDetail}
+        // The DNA switch is shared with the trend card: both toggles move as one.
+        dna={dna}
+        onDnaChange={setDna}
       />
     )
 

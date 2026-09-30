@@ -474,9 +474,13 @@ describe('ContextView — interactions', () => {
     const titleText = query(card, '.lc-card-title-text')
     assert.equal(text(titleText), DICT_EN['trend.title'])
 
-    // The switch is the title text's NEXT sibling — left of the card's right-hand control cluster.
+    // The switch is the DNA toggle's NEXT sibling — the pair rides the title text's right, left of the
+    // card's right-hand control cluster.
     const toggleOf = () => buttonByText(m.container, DICT_EN['trend.adaptive'])
-    assert.equal(toggleOf().parentElement?.previousElementSibling, titleText)
+    const dnaGroupOf = () => buttonByText(m.container, DICT_EN['trend.dna']).parentElement as HTMLElement
+    assert.ok(dnaGroupOf().className.includes('lc-trend-dna'))
+    assert.equal(dnaGroupOf().previousElementSibling, titleText)
+    assert.equal(toggleOf().parentElement?.previousElementSibling, dnaGroupOf())
     assert.equal(toggleOf().parentElement?.getAttribute('title'), DICT_EN['trend.adaptiveHint'])
     assert.ok(!toggleOf().className.includes('lc-gran-on'), 'off at mount')
 
@@ -488,6 +492,77 @@ describe('ContextView — interactions', () => {
     await click(toggleOf())
     assert.ok(!toggleOf().className.includes('lc-gran-on'))
     assert.equal(text(query(m.container, '.lc-axis-top')), '420')
+    await m.unmount()
+  })
+
+  test('the trend card\'s DNA toggle fingerprints the bars, combinable with Delta', async () => {
+    const m = await mountRich('sv-trend-dna')
+    const dnaBtn = () => buttonByText(m.container, DICT_EN['trend.dna'])
+    assert.ok(!dnaBtn().className.includes('lc-gran-on'), 'off at mount')
+    const dnaGroup = dnaBtn().parentElement as HTMLElement
+    assert.ok(dnaGroup.className.includes('lc-trend-dna'))
+    assert.equal(dnaGroup.getAttribute('title'), DICT_EN['trend.dnaTip'])
+    assert.ok((dnaGroup.nextElementSibling as HTMLElement | null)?.className.includes('lc-trend-adaptive'), 'DNA rides left of the adaptive switch')
+
+    // DNA on: the bars become per-item fingerprints and the axis reads totals.
+    await click(dnaBtn())
+    assert.ok(dnaBtn().className.includes('lc-gran-on'))
+    assert.equal(queryAll(m.container, '.lc-bar-dna').length, 3)
+    assert.equal(text(query(m.container, '.lc-axis-top')), '420')
+
+    // The strip reads in the model's read order: the tool schema leads, then the messages by seq.
+    const g = query(m.container, '.lc-bar[data-seq="4"] .lc-bar-dna').style.background
+    const amberAt = g.indexOf('color-amber-500')
+    const greenAt = g.indexOf('color-green-500')
+    const blueAt = g.indexOf('color-blue-500')
+    const tealAt = g.indexOf('color-teal-500')
+    assert.ok(amberAt >= 0 && greenAt > amberAt && blueAt > greenAt && tealAt > blueAt, g)
+
+    // DNA + Delta: the mode switch stays live and each bar diffs its bands against the previous
+    // one — the first bar carries no change (no strip), the axis turns signed around a zero line.
+    await click(buttonByText(m.container, DICT_EN['gran.delta']))
+    assert.equal(queryAll(m.container, '.lc-bar-dna').length, 2)
+    assert.ok(text(query(m.container, '.lc-axis-mid')).includes('0'), 'the delta zero line label rides the axis')
+
+    // DNA off: the segmented delta arms are back with the Delta state intact.
+    await click(dnaBtn())
+    assert.ok(!dnaBtn().className.includes('lc-gran-on'))
+    assert.equal(queryAll(m.container, '.lc-bar-dna').length, 0)
+    assert.ok(queryAll(m.container, '.lc-bar-up').length > 0, 'delta arms are back')
+    await m.unmount()
+  })
+
+  test('the trend and browser DNA toggles move as one', async () => {
+    const m = await mountRich('sv-dna-link')
+    const trendDna = () => query(m.container, '.lc-trend-dna .lc-gran-btn')
+    const browserDna = () => query(m.container, '.lc-br-dna-ctl .lc-gran-btn')
+    assert.ok(!trendDna().className.includes('lc-gran-on') && !browserDna().className.includes('lc-gran-on'), 'both off at mount')
+
+    // The browser follows the trend toggle — its composition bar redraws as a fingerprint too.
+    await click(trendDna())
+    assert.ok(browserDna().className.includes('lc-gran-on'), 'the browser follows the trend toggle')
+    assert.equal(queryAll(m.container, '.lc-br-bar-dna').length, 1)
+
+    // And the trend follows the browser toggle — the chart's strips drop away.
+    await click(browserDna())
+    assert.ok(!trendDna().className.includes('lc-gran-on'), 'the trend follows the browser toggle')
+    assert.equal(queryAll(m.container, '.lc-bar-dna').length, 0)
+    assert.equal(queryAll(m.container, '.lc-br-bar-dna').length, 0)
+    await m.unmount()
+  })
+
+  test('clicking a DNA band reveals that item in the Context browser', async () => {    const m = await mountRich('sv-dna-reveal')
+    await click(buttonByText(m.container, DICT_EN['trend.dna']))
+    // Give the strip a real 112px stack area, then click its very top: the hit is the LAST band of
+    // bar seq 4 — the 'file output' tool result (system and the header lead the strip below it).
+    const dnaDiv = query(m.container, '.lc-bar[data-seq="4"] .lc-bar-dna')
+    dnaDiv.getBoundingClientRect = () => ({ top: 0, left: 0, right: 14, bottom: 112, width: 14, height: 112, x: 0, y: 0, toJSON: () => null }) as DOMRect
+    await act(async () => { dnaDiv.dispatchEvent(new MouseEvent('click', { bubbles: true, clientY: 0 })) })
+    await flush()
+    // The browser left the live surface for the bar's step and opened the node's row — the pin
+    // alone would only select the step (accordion reset), so the open row is the reveal.
+    assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, '4')
+    assert.ok(text(query(m.container, '.lc-br-elem-on')).includes('file output'))
     await m.unmount()
   })
 
