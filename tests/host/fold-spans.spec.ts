@@ -1,7 +1,7 @@
 // The timing strip's span fold (src/host/fold.ts): every completed step
 // flushes its painted time slices — the TTFT wait, the decode blocks in
 // stream order, the tool-run windows, and the in-step residue — into the
-// persisted `spans` collection the client lays out on one true time axis.
+// persisted `spans` collection the client packs gapless by duration share.
 // Pinned here: the step/end tiling (clamp into the step window, first-wins
 // de-overlap, residue gap-fill, so the step always tiles gapless while IDLE
 // time between steps carries no span), the supersede/consume lifecycle of
@@ -81,9 +81,10 @@ describe('spans — the step flush', () => {
   test('a redacted reasoning block still paints: the marker tiles its window even though no chunk stamps a token', () => {
     // The provider's durable stream carries the reasoning BLOCK markers but
     // packs no reasoning chunks (the content is redacted): the first token
-    // lands on a tool-call fragment at 952. Metering (ttftMs) keeps the
-    // first-token definition — but the strip must not let the wait swallow
-    // the 588ms of reasoning the legend's own tally reports.
+    // lands on a tool-call fragment at 952. Metering (ttftMs) opens the
+    // decode window at the MARKER — anchoring the wait at the token would
+    // charge the 588ms the legend's own tally reports to the wait as well,
+    // and the rows would double-count it past 100%.
     const { state } = driveTimeline([
       stepStart(1, { time: 0 }),
       assistantMessage(2, {
@@ -98,8 +99,14 @@ describe('spans — the step flush', () => {
       toolResult(4, { callId: 'c1', content: text('ok'), time: 1_095 }),
       stepEnd(5, { time: 1_095 }),
     ])
-    assert.equal(state.timing?.ttftMs, 952, 'metering keeps the first-token definition')
+    assert.equal(state.timing?.ttftMs, 364, 'the wait ends at the first marker, not the first token')
+    assert.equal(state.timing?.genMs, 699, 'the generation window opens at the same marker')
     assert.equal(state.timing?.reasoningMs, 588, 'the tally tiles the marker window regardless')
+    assert.equal(
+      (state.timing?.reasoningMs ?? 0) + (state.timing?.textMs ?? 0) + (state.timing?.toolArgMs ?? 0),
+      state.timing?.genMs,
+      'the decode buckets partition the generation window exactly — no double count',
+    )
     assert.deepEqual(state.spans, [
       { kind: 'ttft', start: 0, end: 364 },
       { kind: 'reasoning', start: 364, end: 952 },
@@ -264,25 +271,26 @@ describe('spans — the step flush', () => {
 
 describe('spans — retention, wire, and schema faces', () => {
   test('the collection keeps the newest tail past the 2_000-span cap', () => {
-    // 1_001 steps × 2 spans each: the cap must drop the oldest step whole.
+    // 41 steps × 50 spans each (a 48-marker decode run): 2_050 spans — the
+    // cap must drop the oldest step whole. Fewer, denser steps keep the fold
+    // cheap enough for a CI runner's 5s test timeout.
     const events: TimelineEvent[] = []
-    for (let i = 0; i < 1_001; i++) {
+    for (let i = 0; i < 41; i++) {
       const start = i * 10_000
+      const stream: unknown[] = [chunkRec(start + 100, { type: 'text-delta', text: 'x' })]
+      for (let m = 0; m < 48; m++) {
+        stream.push(chunkRec(start + 100 + m * 10, { type: 'block-start', index: 0, blockType: m % 2 === 0 ? 'text' : 'reasoning' }))
+      }
       events.push(
         stepStart(i * 3 + 1, { time: start }),
-        assistantMessage(i * 3 + 2, { time: start + 1_000, stream: [chunkRec(start + 100, { type: 'text-delta', text: 'x' })] }),
+        assistantMessage(i * 3 + 2, { time: start + 1_000, stream }),
         stepEnd(i * 3 + 3, { time: start + 1_400 }),
       )
     }
-    // Retention needs the full event sequence, but not a recursive scan of
-    // every growing state. The cases below cover intermediate JSON states.
-    const def = timelineDef()
-    let state = def.init()
-    for (const event of events) state = def.apply(state, event)
-    def.stateSchema.parse(assertPlainJson(state))
+    const { state } = driveTimeline(events)
     assert.equal(state.spans.length, 2_000)
     assert.deepEqual(state.spans[0], { kind: 'ttft', start: 10_000, end: 10_100 }, 'the oldest step left the window')
-    assert.deepEqual(state.spans.at(-1), { kind: 'other', start: 10_000_100, end: 10_001_400 })
+    assert.deepEqual(state.spans.at(-1), { kind: 'other', start: 401_000, end: 401_400 })
   })
 
   test('the inline wire view serves COPIES; the slim head omits the collection whole', () => {
