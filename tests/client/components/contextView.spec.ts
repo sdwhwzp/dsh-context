@@ -244,14 +244,14 @@ describe('ContextView — baseline gate', () => {
     const View = makeView(new TestClientCtx())
     const m = await mount(h(View, {
       sessionId: 'sv-gated',
-      useProjection: projectionsFor(timeline({ unsupported: { current: '0.1.1-rc.2', minimum: '0.1.5-rc.1' } })),
+      useProjection: projectionsFor(timeline({ unsupported: { current: '0.1.1-rc.2', minimum: '0.1.7-rc.2' } })),
     }))
     // The modal pops over the tab, naming both versions.
     assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null)
     const card = query(m.container, '.lc-gate-card')
     assert.ok(text(card).includes(DICT_EN['gate.title']))
     assert.ok(text(card).includes('v0.1.1-rc.2'))
-    assert.ok(text(card).includes('v0.1.5-rc.1'))
+    assert.ok(text(card).includes('v0.1.7-rc.2'))
     // The cards keep rendering the fallback's zeroed data behind it.
     assert.ok(text(m.container).includes(DICT_EN['overview.title']))
     assert.ok(text(m.container).includes(DICT_EN['trend.empty']))
@@ -1359,10 +1359,13 @@ describe('ContextView — chat→Context jump', () => {
 
     // The jump remount: restore applies 42, then the jump resolves and the
     // reveal scrolls the composition card to the scrollport's top (42 + 350).
+    // jsdom reports 0 for both — the scroller must overflow to be operative.
     requestContextFocus('sv-jumpscroll', 4)
     const scroller2 = document.createElement('div')
     scroller2.setAttribute('data-conversation-scroll', '')
     scroller2.style.overflowY = 'auto'
+    Object.defineProperty(scroller2, 'scrollHeight', { value: 800 })
+    Object.defineProperty(scroller2, 'clientHeight', { value: 300 })
     const m2 = await mountInScroller(h(View, props), scroller2)
     assert.equal(scroller2.scrollTop, 392, 'restore(42) overridden by the card reveal delta(350)')
     assert.ok(query(m2.container, '.lc-bar[data-seq="4"]').className.includes('lc-bar-selected'))

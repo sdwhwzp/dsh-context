@@ -79,7 +79,7 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
   // The first row's aggregate pair: the range's sessions folded into the two
   // donut cards the per-session Context tab opens with (Timing Stats reused
   // verbatim over the summed totals).
-  const Donut = makeDonut(kit)
+  const Donut = makeDonut()
   const OverviewTokens = makeOverviewTokens(kit, Donut)
   const StatsTiming = makeStatsTiming(kit, Donut)
   const OverviewUsage = makeOverviewUsage(kit)
@@ -355,9 +355,9 @@ export function makeOverviewPanel(ctx: ClientCtx, kit: ViewKit): (props: Overvie
   }
 }
 
-/** One card's priced cost label, or the dash (no book yet, nothing billed, unpriceable model). */
+/** One card's priced cost label at the team scope, or the dash (no book yet, nothing billed, unpriceable models). */
 function cardCostOf(row: OverviewRow, book: ModelBook | null, currency: CostCurrency): string {
-  if (row.timeline?.cost === undefined) return '—'
-  const cost = estimateSessionCost(row.timeline.cost, book, currency)
+  if (row.familyCost === null) return '—'
+  const cost = estimateSessionCost(row.familyCost, book, currency)
   return cost === null ? '—' : formatCost(cost, currency)
 }

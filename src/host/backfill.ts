@@ -44,8 +44,10 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { interruptedTurnClosers, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { interruptedTurnClosers } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+import { type ColdReadGate, makeColdReadGate } from './coldRead'
+import { type ConnectionHostFace, fetchRouteRegistrar } from './connection'
 
 /** The plugin's warm-up trigger route, under the authenticated `/api` fence. */
 export const BACKFILL_ROUTE = '/api/dsh-context/backfill'
@@ -57,13 +59,12 @@ interface SessionQueryLike {
 
 /**
  * The cache's two cold-path verbs, as consumed (re-proved at runtime). The
- * cached-rows probe's face differs across the supported range — dsh
- * 0.1.5-rc.1 takes `(meta, inheritedEventCount, keys)` while dsh 0.1.7-rc.2
- * dropped the offset (`(meta, keys)`, the lifecycle identity riding the
- * header alone) — so {@link servesRows} re-proves the shape per call.
+ * cached-rows probe rides the current face — `(meta, keys?)`, the lifecycle
+ * identity riding the header alone (the offset parameter belonged to the
+ * dropped 0.1.5 line and never existed on a supported one).
  */
 interface ProjectionCacheLike {
-  cachedSnapshot(meta: SessionHeader, offsetOrKeys: unknown, keys?: readonly string[]): unknown
+  cachedSnapshot(meta: SessionHeader, keys?: readonly string[]): unknown
   coldSnapshot(header: SessionHeader, inheritedEventCount: unknown, events: readonly SessionEvent[]): unknown
 }
 
@@ -79,21 +80,7 @@ interface PersistenceLike {
   open(id: string, access: 'read', options?: { signal?: AbortSignal }): Promise<ReadHandleLike>
 }
 
-/** The host `connection` service, as far as the trigger route consumes it. */
-interface ConnectionHostFace {
-  fetch?: {
-    register?(route: {
-      path: string
-      methods: readonly string[]
-      requestBody: 'buffered'
-      // Connection hands the authenticated caller to every /api route; this
-      // fork reads it so only an authorized account can summon the pass.
-      fetch: (request: Request, principal?: unknown) => Response | Promise<Response>
-    }): () => void
-  }
-}
-
-/** The typed failure envelope (the same shape the detail route serves). */
+/** Failure returned when the caller cannot access the requested account sessions. */
 function failure(code: string, message: string): Response {
   return Response.json({ ok: false, error: { code, message } }, { headers: { 'cache-control': 'no-store' } })
 }
@@ -131,24 +118,6 @@ function headerOf(record: unknown): SessionHeader | null {
 /** The probe keys: the projection keys the cache must already serve. */
 const PROBE_KEYS = ['contextActivity', 'contextTimeline']
 
-/**
- * Probe the cache through the face the running generation serves. The older
- * spelling is tried first and the newer one answers the fallback: on a
- * 0.1.7-rc.2 cache the 3-arg call binds the branded offset onto `keys`,
- * where `new Set(0)` throws as soon as a served record is reached — while a
- * record-less session returns `undefined` without throwing, which is the
- * correct "not served" either way. On 0.1.5-rc.1 the 3-arg face answers
- * directly; if it ever throws there, the 2-arg retry degrades to the same
- * "not served" verdict through the caller's catch.
- */
-function cachedSnapshotOf(cache: ProjectionCacheLike, header: SessionHeader): unknown {
-  try {
-    return cache.cachedSnapshot(header, SessionLogOffset(0), PROBE_KEYS)
-  } catch {
-    return cache.cachedSnapshot(header, PROBE_KEYS)
-  }
-}
-
 /** Whether the cache already serves BOTH projection rows for this header (nothing to backfill). */
 function servesRows(cache: ProjectionCacheLike, header: SessionHeader): boolean {
   try {
@@ -157,8 +126,9 @@ function servesRows(cache: ProjectionCacheLike, header: SessionHeader): boolean 
     // misses and the session takes the cold-read path — correct either way.
     // Both keys must be served: a version-stale row (the timeline's head
     // gained `lastUser` at stateVersion 20) reads as absent here, so the
-    // session's stale rows get their one cold refold at startup.
-    const block = asRecord(cachedSnapshotOf(cache, header))
+    // session's stale rows get their one cold refold at startup. A hostile
+    // face's throw reads as "not served" the same way.
+    const block = asRecord(cache.cachedSnapshot(header, PROBE_KEYS))
     const values = asRecord(block?.values)
     return values !== null
       && values.contextActivity !== undefined
@@ -239,9 +209,12 @@ function messageOf(error: unknown): string {
  * when the dashboard first opens; the cold-path faces compose `launch`.
  * Either half may land first; the first request after both launches the one
  * pass, and every later request is a no-op. Returns the deferred injects'
- * disposer (abort on unload).
+ * disposer (abort on unload). Every cold read runs through the shared
+ * host-wide gate (coldRead.ts): one read at a time, and the pass stops
+ * early when the gate skips under heap pressure — folded rows persist and
+ * every remaining session keeps its on-demand refold paths.
  */
-export function watchActivityBackfill(ctx: Context): () => void {
+export function watchActivityBackfill(ctx: Context, coldReads: ColdReadGate = makeColdReadGate()): () => void {
   let requested = false
   let started = false
   let launch: (() => void) | null = null
@@ -252,11 +225,7 @@ export function watchActivityBackfill(ctx: Context): () => void {
   }
 
   const routeFiber = ctx.inject(['connection'], (c) => {
-    const connection = c.get('connection') as ConnectionHostFace | undefined
-    // Bind at extraction (an unbound hand-off loses `this` on the real face).
-    const register = typeof connection?.fetch?.register === 'function'
-      ? connection.fetch.register.bind(connection.fetch)
-      : undefined
+    const register = fetchRouteRegistrar(c.get('connection') as ConnectionHostFace | undefined)
     if (register === undefined) return
     try {
       c.effect(() => register({
@@ -311,6 +280,7 @@ export function watchActivityBackfill(ctx: Context): () => void {
       if (!Array.isArray(listed)) return
       let folded = 0
       let refused = 0
+      let paused = false
       for (const record of listed) {
         if (abort.signal.aborted) return
         const header = headerOf(record)
@@ -318,10 +288,20 @@ export function watchActivityBackfill(ctx: Context): () => void {
         if (isLive(sessions, header.id)) continue
         if (servesRows(cache as unknown as ProjectionCacheLike, header)) continue
         try {
-          const log = await readColdLog(persistence as unknown as PersistenceLike, header.id, abort.signal)
-          // The handle's header is authoritative (fixed at open); the listed
-          // one was only the probe's identity witness.
-          ;(cache as unknown as ProjectionCacheLike).coldSnapshot(log.header, log.inheritedEventCount, log.events)
+          const admitted = await coldReads.admit(async () => {
+            const log = await readColdLog(persistence as unknown as PersistenceLike, header.id, abort.signal)
+            // The handle's header is authoritative (fixed at open); the listed
+            // one was only the probe's identity witness.
+            ;(cache as unknown as ProjectionCacheLike).coldSnapshot(log.header, log.inheritedEventCount, log.events)
+            return true
+          })
+          if (admitted === undefined) {
+            // Skipped under heap pressure: end the pass here — pressure does
+            // not fall within a pacing tick, so hammering the gate per
+            // remaining session only delays the host's own work.
+            paused = true
+            break
+          }
           folded++
         } catch (error: unknown) {
           if (isUnsupportedFormat(error)) {
@@ -337,6 +317,9 @@ export function watchActivityBackfill(ctx: Context): () => void {
         await new Promise(resolve => setTimeout(resolve, YIELD_MS))
       }
       if (folded > 0) ctx.logger.info(`dsh-context: projection rows backfilled for ${folded} session(s)`)
+      if (paused) {
+        ctx.logger.info('dsh-context: projection backfill stopped early under heap pressure (remaining sessions refold on their next live activity)')
+      }
       if (refused > 0) {
         ctx.logger.info(`dsh-context: projection backfill skipped ${refused} session(s) (legacy log format is not migratable; sources left unchanged)`)
       }

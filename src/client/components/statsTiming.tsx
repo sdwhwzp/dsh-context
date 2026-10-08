@@ -63,7 +63,7 @@ export function makeStatsTiming(kit: ViewKit, Donut: (props: DonutProps) => Reac
   spans?: TimingSpan[]
 }) => ReactElement {
   const { t, fmt, fmtDuration, fmtShare } = kit
-  const SliceList = makeSliceList(kit)
+  const SliceList = makeSliceList()
   const TimingStrip = makeTimingStrip(kit)
   return function StatsTiming(props: { timing: TimingTotals | null; spans?: TimingSpan[] }): ReactElement {
     // The legend row ↔ donut segment hover link (shared key, set from either side).
@@ -183,7 +183,7 @@ export function makeStatsTiming(kit: ViewKit, Donut: (props: DonutProps) => Reac
       ].filter(row => !row.dim)
     }
     return (
-      <div className="lc-card lc-col-stats lc-col-donut flex-1 min-w-[min(360px,100%)]">
+      <div className="lc-card lc-col-donut flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">
           <span className="lc-card-title-text">{t('timing.title')}</span>
           {tps !== null && (

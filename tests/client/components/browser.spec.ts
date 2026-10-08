@@ -6,13 +6,13 @@
 import { act, createElement as h, useState } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
-import { makeContextBrowser, type ContextBrowserProps } from '../../../src/client/components/browser'
+import { makeContextBrowser, stepStampOf, type ContextBrowserProps } from '../../../src/client/components/browser'
 import { makeStackedBar } from '../../../src/client/components/stackedBar'
 import { DICT_EN } from '../../../src/client/i18n'
 import { UNKNOWN_TOOL_SOURCE, type ContextHeaders, type ContextTimeline, type HeaderEpochContent, type RequestRecord, type SurfaceNode } from '../../../src/shared/types'
 import { headersOf, type ConversationNodeLike, type ImageLoader } from '../../../src/client/services'
 import { createContextSettings } from '../../../src/client/settings'
-import { click, flush, hover, makeKit, mount, query, queryAll, text, unhover, type Mounted } from '../helpers/kit'
+import { click, flush, hover, makeKit, mount, query, queryAll, surfaceNode, text, unhover, type Mounted } from '../helpers/kit'
 
 const kit = makeKit()
 const settings = createContextSettings()
@@ -49,9 +49,6 @@ function req(over: Partial<RequestRecord>): RequestRecord {
   }
 }
 
-function node(over: Partial<SurfaceNode> & { seq: number }): SurfaceNode {
-  return { cat: 'user', tokens: 5, ...over }
-}
 
 function catRow(m: Mounted, cat: keyof typeof ROW): HTMLElement {
   return queryAll(m.container, '.lc-br-cat-row')[ROW[cat]]
@@ -124,7 +121,7 @@ describe('ContextBrowser live surface', () => {
         req({ seq: 20, turn: 1, step: 1, prompt: 800 }),
         req({ seq: 7, time: 500, turn: undefined, step: undefined }),
       ],
-      nodes: [node({ seq: 1, text: 'hello' })],
+      nodes: [surfaceNode({ seq: 1, text: 'hello' })],
     })
     const m = await mount(h(Browser, props({ data })))
     assert.ok(text(query(m.container, '.lc-card-title-text')).includes('Context Browser'))
@@ -189,7 +186,7 @@ describe('ContextBrowser live surface', () => {
     const data = tl({
       current: { system: 0, tools: 0, user: 10, inject: 0, skill: 0, assistant: 0, tool: 0, total: 10 },
       requests: [req({ seq: 3, turn: 1, step: 0 }), req({ seq: 10, turn: 1, step: 1 })],
-      nodes: [node({ seq: 6, text: 'served' })],
+      nodes: [surfaceNode({ seq: 6, text: 'served' })],
       droppedNodes: 2,
       surfaceFloor: 5,
       archiveFloor: 8,
@@ -211,8 +208,8 @@ describe('ContextBrowser live surface', () => {
     const data = tl({
       current: { system: 0, tools: 0, user: 30, inject: 0, skill: 0, assistant: 10, tool: 0, total: 40 },
       requests: [req({ seq: 10, turn: 1, step: 0, user: 25 }), req({ seq: 20, turn: 1, step: 1, user: 30, assistant: 10, prompt: 800 })],
-      nodes: [node({ seq: 1, text: 'first question' }), node({ seq: 11, cat: 'assistant', tokens: 10, text: 'first answer' })],
-      archive: [node({ seq: 0, tokens: 5, text: 'archived hello', gone: 15 })],
+      nodes: [surfaceNode({ seq: 1, text: 'first question' }), surfaceNode({ seq: 11, cat: 'assistant', tokens: 10, text: 'first answer' })],
+      archive: [surfaceNode({ seq: 0, tokens: 5, text: 'archived hello', gone: 15 })],
     })
     const m = await mount(h(Browser, props({ data })))
     await pickStep(m, '10')
@@ -245,7 +242,7 @@ describe('ContextBrowser live surface', () => {
         req({ seq: 4, turn: 2, step: 1, system: 1, tools: 2, user: 40, total: 43 }),
         req({ seq: 5, turn: 3, step: 0, system: 1, tools: 2, user: 50, total: 53 }),
       ],
-      nodes: [0, 1, 2, 3, 4, 5].map(seq => node({ seq, tokens: seq })),
+      nodes: [0, 1, 2, 3, 4, 5].map(seq => surfaceNode({ seq, tokens: seq })),
     })
     const m = await mount(h(Browser, props({ data })))
     const userRow = (): HTMLElement => queryAll(m.container, '.lc-br-cat')[ROW.user]
@@ -295,8 +292,8 @@ describe('ContextBrowser live surface', () => {
         req({ seq: 2, turn: 1, step: 1, user: 25, total: 25 }),
         req({ seq: 3, turn: 2, step: 0, user: 15, total: 15 }),
       ],
-      nodes: [node({ seq: 1, tokens: 10, text: 'kept' })],
-      archive: [node({ seq: 0, tokens: 15, text: 'pruned away', gone: 3 })],
+      nodes: [surfaceNode({ seq: 1, tokens: 10, text: 'kept' })],
+      archive: [surfaceNode({ seq: 0, tokens: 15, text: 'pruned away', gone: 3 })],
     })
     const m = await mount(h(Browser, props({ data })))
     await pickStep(m, '3')
@@ -313,7 +310,7 @@ describe('ContextBrowser live surface', () => {
     const data = tl({
       current: { system: 0, tools: 0, user: 10, inject: 0, skill: 0, assistant: 0, tool: 0, total: 10 },
       requests: [req({ seq: 10, turn: 1, step: 0, user: 10, total: 10 })],
-      nodes: [node({ seq: 1, text: 'hi' })],
+      nodes: [surfaceNode({ seq: 1, text: 'hi' })],
     })
     const hovers: (string | null)[] = []
     const el = h(Browser, props({ data, hoverKey: null, onHoverKey: (k) => { hovers.push(k) } }))
@@ -344,7 +341,7 @@ describe('ContextBrowser live surface', () => {
     const data = tl({
       current: { system: 0, tools: 0, user: 10, inject: 0, skill: 0, assistant: 0, tool: 0, total: 10 },
       requests: [req({ seq: 10, turn: 1, step: 0, user: 10, total: 10, prompt: 700 })],
-      nodes: [node({ seq: 1, text: 'hi' })],
+      nodes: [surfaceNode({ seq: 1, text: 'hi' })],
     })
     const m = await mount(h(Browser, props({ data, previewSeq: 10 })))
     const meta = text(query(m.container, '.lc-br-meta'))
@@ -360,6 +357,123 @@ describe('ContextBrowser live surface', () => {
     assert.ok(text(query(m.container, '.lc-br-meta')).includes('Live · Next Request'))
     assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, 'live')
     await m.unmount()
+  })
+
+  test('element rows carry the introducing step stamp merged with the time (T{t} S{s} · clock); the live tail carries none', async () => {
+    const data = tl({
+      current: { system: 10, tools: 10, user: 10, inject: 10, skill: 10, assistant: 10, tool: 10, total: 70 },
+      requests: [
+        req({ seq: 20, turn: 1, step: 1 }),
+        req({ seq: 30, turn: 1, step: 2 }),
+        req({ seq: 40, turn: 2, step: 1 }),
+      ],
+      systems: [{ seq: 22, time: 100, tokens: 10 }],
+      nodes: [
+        surfaceNode({ seq: 5, cat: 'user', tokens: 1 }),
+        surfaceNode({ seq: 25, cat: 'inject', tokens: 1, form: 'snapshot', text: 'state', time: 60_000 }),
+        surfaceNode({ seq: 35, cat: 'assistant', tokens: 1 }),
+        surfaceNode({ seq: 36, cat: 'skill', tokens: 1, skill: 's' }),
+        surfaceNode({ seq: 45, cat: 'tool', tokens: 1, tool: 'bash' }),
+      ],
+    })
+    // The header epoch at seq 22 enters the context with the seq-30 request, like the inject node.
+    const headers: ContextHeaders = { headers: [{ seq: 22, time: 100, systemTokens: 10, tools: [{ name: 't1', tokens: 5 }] }] }
+    const epoch = withEpochContent(headers, { 22: { system: 'SYS', tools: [{ name: 't1', schema: {} }] } })
+    const m = await mount(h(Browser, props({ data, headers: epoch.headers, fetchHeader: epoch.fetchHeader })))
+    const stampOfCat = async (cat: keyof typeof ROW): Promise<string[]> => {
+      await click(catRow(m, cat))
+      await flush()
+      const body = query(queryAll(m.container, '.lc-br-cat')[ROW[cat]], '.lc-br-body')
+      return queryAll(body, '.lc-br-time').map(el => text(el))
+    }
+    assert.deepEqual(await stampOfCat('user'), ['T1 S1'], 'a stamp without a clock stands alone')
+    const [injectStamp] = await stampOfCat('inject')
+    assert.match(injectStamp, /^T1 S2 · \d{2}:\d{2}:\d{2}$/, 'the stamp merges with the clock into one run')
+    assert.deepEqual(await stampOfCat('assistant'), ['T2 S1'])
+    assert.deepEqual(await stampOfCat('skill'), ['T2 S1'])
+    // The tool result landed after the last logged request: no request carries it yet, so it wears the
+    // PENDING estimate — the newest tail item is a tool result, the turn continues, next step predicted.
+    await click(catRow(m, 'tool'))
+    await flush()
+    const toolBody = query(queryAll(m.container, '.lc-br-cat')[ROW.tool], '.lc-br-body')
+    const pendingMeta = query(toolBody, '.lc-br-time')
+    assert.equal(text(pendingMeta), 'T2 S2')
+    assert.ok(pendingMeta.className.includes('lc-br-time-pending'), 'the pending estimate wears the dotted underline')
+    assert.equal(pendingMeta.title, 'Expected in the Turn 2 · Step 2 request (not yet sent)')
+    assert.equal(queryAll(toolBody, '.lc-br-elem-row').length, 1, 'the row still renders with the pending stamp')
+    // System prompt and tool schemas share the epoch's introducing step.
+    assert.deepEqual(await stampOfCat('system'), ['T1 S2'])
+    assert.deepEqual(await stampOfCat('tools'), ['T1 S2'])
+    const tip = query(queryAll(m.container, '.lc-br-cat')[ROW.tools], '.lc-br-time').title
+    assert.equal(tip, 'First carried by the Turn 1 · Step 2 request')
+    await m.unmount()
+  })
+
+  test('pending tail stamp: a newest user message predicts the next turn\'s first step', async () => {
+    const data = tl({
+      current: { system: 0, tools: 0, user: 10, inject: 0, skill: 0, assistant: 0, tool: 10, total: 20 },
+      requests: [req({ seq: 20, turn: 1, step: 1 })],
+      nodes: [
+        surfaceNode({ seq: 5, cat: 'user', tokens: 1 }),
+        surfaceNode({ seq: 25, cat: 'tool', tokens: 1, tool: 'bash' }),
+        surfaceNode({ seq: 30, cat: 'user', tokens: 1 }),
+      ],
+    })
+    const m = await mount(h(Browser, props({ data })))
+    await click(catRow(m, 'tool'))
+    await flush()
+    const toolBody = query(queryAll(m.container, '.lc-br-cat')[ROW.tool], '.lc-br-body')
+    assert.equal(text(query(toolBody, '.lc-br-time')), 'T2 S1', 'a waiting user message opens the next turn')
+    await m.unmount()
+  })
+
+  test('pending tail stamp: a text-only final reply ended the turn; a reply with pending calls continues it', async () => {
+    const ended = tl({
+      current: { system: 0, tools: 0, user: 10, inject: 0, skill: 0, assistant: 10, tool: 0, total: 20 },
+      requests: [req({ seq: 20, turn: 1, step: 1 })],
+      nodes: [
+        surfaceNode({ seq: 5, cat: 'user', tokens: 1 }),
+        surfaceNode({ seq: 25, cat: 'assistant', tokens: 1, text: 'final answer' }),
+      ],
+    })
+    const m1 = await mount(h(Browser, props({ data: ended })))
+    await click(catRow(m1, 'assistant'))
+    await flush()
+    assert.equal(text(query(query(queryAll(m1.container, '.lc-br-cat')[ROW.assistant], '.lc-br-body'), '.lc-br-time')), 'T2 S1')
+    await m1.unmount()
+    const continuing = tl({
+      current: { system: 0, tools: 0, user: 10, inject: 0, skill: 0, assistant: 10, tool: 0, total: 20 },
+      requests: [req({ seq: 20, turn: 1, step: 1 })],
+      nodes: [
+        surfaceNode({ seq: 5, cat: 'user', tokens: 1 }),
+        surfaceNode({ seq: 25, cat: 'assistant', tokens: 1, calls: ['bash'] }),
+      ],
+    })
+    const m2 = await mount(h(Browser, props({ data: continuing })))
+    await click(catRow(m2, 'assistant'))
+    await flush()
+    assert.equal(text(query(query(queryAll(m2.container, '.lc-br-cat')[ROW.assistant], '.lc-br-body'), '.lc-br-time')), 'T1 S2')
+    await m2.unmount()
+  })
+})
+
+describe('stepStampOf', () => {
+  const r = (seq: number, turn?: number, step?: number): RequestRecord => req({ seq, turn, step })
+
+  test('an item stamps to the FIRST request logged after it, whatever the wire order', () => {
+    const input = [r(30, 2, 1), r(10, 1, 1), r(20, 1, 2)]
+    const stamp = stepStampOf(input)
+    assert.deepEqual(stamp(5), { turn: 1, step: 1 })
+    assert.deepEqual(stamp(10), { turn: 1, step: 2 }, 'an item AT a request seq is carried by the NEXT request')
+    assert.deepEqual(stamp(25), { turn: 2, step: 1 })
+    assert.equal(input[0].seq, 30, 'the caller array is not reordered')
+  })
+
+  test('the live tail and turn-less introducers stamp null', () => {
+    const stamp = stepStampOf([r(10, undefined, undefined), r(20, 1, 1)])
+    assert.equal(stamp(5), null, 'the introducing request carries no turn/step numbers')
+    assert.deepEqual(stamp(15), { turn: 1, step: 1 })
+    assert.equal(stamp(25), null, 'no request follows the item yet')
   })
 })
 
@@ -390,12 +504,14 @@ describe('ContextBrowser header epochs', () => {
     // The single system row is already expanded.
     assert.equal(queryAll(m.container, '.lc-br-content').length, 1)
     assert.ok(queryAll(m.container, '.lc-ts-desc-md').length >= 1, 'markdown view by default')
-    const rawBtn = queryAll(m.container, '.lc-rich-seg-btn')[0]
+    // Scope to the detail body: the header's own granularity toggles wear the
+    // same shared lc-gran classes.
+    const rawBtn = queryAll(body, '.lc-gran-btn')[0]
     assert.equal(text(rawBtn), 'Raw')
     await click(rawBtn)
     const lines = queryAll(m.container, '.lc-ts-line').map(line => line.textContent)
     assert.deepEqual(lines, ['SYS B', 'second line'])
-    await click(queryAll(m.container, '.lc-rich-seg-btn')[1])
+    await click(queryAll(body, '.lc-gran-btn')[1])
     assert.ok(queryAll(m.container, '.lc-ts-desc-md').length >= 1, 'markdown restored')
     await click(catRow(m, 'system'))
     assert.equal(queryAll(m.container, '.lc-br-body').length, 0)
@@ -599,9 +715,9 @@ describe('ContextBrowser header epochs', () => {
     await m.unmount()
   })
 
-  test('a V3 system prompt rides the timeline systems list, fetched from its own event seq', async () => {
-    // The V3 generation: the header epoch carries NO system price (the prompt
-    // is a `system/message` surface node), so the section resolves the prompt
+  test('a system prompt rides the timeline systems list, fetched from its own event seq', async () => {
+    // The header epoch carries NO system price (the prompt is a
+    // `system/message` surface node), so the section resolves the prompt
     // from `data.systems` and reads its text off that node's seq.
     const headers: ContextHeaders = { headers: [{ seq: 15, time: 1500, tools: [{ name: 'x', tokens: 1 }] }] }
     const data = tl({
@@ -611,14 +727,14 @@ describe('ContextBrowser header epochs', () => {
     const asked: number[] = []
     const fetchHeader = (seq: number): Promise<HeaderEpochContent> => {
       asked.push(seq)
-      return Promise.resolve(seq === 7 ? { system: 'V3 PROMPT', tools: [] } : { tools: [] })
+      return Promise.resolve(seq === 7 ? { system: 'THE PROMPT', tools: [] } : { tools: [] })
     }
     const m = await mount(h(Browser, props({ data, headers, fetchHeader })))
     assert.ok(text(catRow(m, 'system')).includes(kit.t('browser.items', { n: 1 })))
     await click(catRow(m, 'system'))
     await flush()
     assert.deepEqual(asked, [7], 'the prompt is fetched from the system node, not the header epoch')
-    assert.ok(text(query(m.container, '.lc-br-body')).includes('V3 PROMPT'))
+    assert.ok(text(query(m.container, '.lc-br-body')).includes('THE PROMPT'))
     await m.unmount()
   })
 
@@ -833,13 +949,13 @@ describe('ContextBrowser tool schemas', () => {
       current: { system: 10, tools: 160, user: 0, inject: 0, skill: 0, assistant: 10, tool: 80, total: 260 },
       requests: [req({ seq: 4, turn: 1, step: 0 })],
       nodes: [
-        node({ seq: 2, cat: 'assistant', tokens: 10 }),
-        node({ seq: 3, cat: 'tool', tool: 'beta', tokens: 20 }),
-        node({ seq: 5, cat: 'tool', tool: 'beta', tokens: 20 }),
-        node({ seq: 6, cat: 'tool', tool: 'gamma', tokens: 20 }),
-        node({ seq: 7, cat: 'tool', tool: 'delta', tokens: 20 }),
+        surfaceNode({ seq: 2, cat: 'assistant', tokens: 10 }),
+        surfaceNode({ seq: 3, cat: 'tool', tool: 'beta', tokens: 20 }),
+        surfaceNode({ seq: 5, cat: 'tool', tool: 'beta', tokens: 20 }),
+        surfaceNode({ seq: 6, cat: 'tool', tool: 'gamma', tokens: 20 }),
+        surfaceNode({ seq: 7, cat: 'tool', tool: 'delta', tokens: 20 }),
         // An unpaired result (no name stamped by the fold) hits nothing.
-        node({ seq: 8, cat: 'tool', tokens: 20 }),
+        surfaceNode({ seq: 8, cat: 'tool', tokens: 20 }),
       ],
     })
     const m = await mount(h(Browser, props({ data, headers: hitHeaders, fetchHeader: () => Promise.resolve({ tools: [] }) })))
@@ -875,7 +991,7 @@ describe('ContextBrowser tool schemas', () => {
     ] }] }
     const data = tl({
       current: { system: 10, tools: 101, user: 0, inject: 0, skill: 0, assistant: 0, tool: 10, total: 121 },
-      nodes: [node({ seq: 2, cat: 'tool', tool: 'zzz', tokens: 10 })],
+      nodes: [surfaceNode({ seq: 2, cat: 'tool', tool: 'zzz', tokens: 10 })],
     })
     const names = (m: Mounted) => elemRows(m).map(r => text(query(r, '.lc-br-preview')))
     const sortBtns = (container: ParentNode) => queryAll(container, '.lc-br-toolctl .lc-gran-btn')
@@ -1150,27 +1266,27 @@ describe('ContextBrowser message categories', () => {
   const data = tl({
     current: { system: 0, tools: 0, user: 40, inject: 20, skill: 0, assistant: 60, tool: 30, total: 150 },
     nodes: [
-      node({ seq: 1, tokens: 10, text: 'with images', time: 100 }),
-      node({ seq: 2, tokens: 9, text: 'one pic', time: 200 }),
-      node({ seq: 3, tokens: 5, text: 'fallback text', time: 300 }),
-      node({ seq: 4, tokens: 4, text: '', time: 400 }),
-      node({ seq: 5, tokens: 4, text: 'no content array', time: 500 }),
-      node({ seq: 50, cat: 'inject', tokens: 5, form: 'snapshot', text: 'state' }),
-      node({ seq: 51, cat: 'inject', tokens: 5, form: 'notice', text: 'heads up' }),
-      node({ seq: 55, cat: 'inject', tokens: 5, form: 'notice', text: '' }),
-      node({ seq: 56, cat: 'inject', tokens: 5, text: 'no form' }),
-      node({ seq: 54, cat: 'inject', tokens: 5, form: 'relay', text: 'relay body' }),
-      node({ seq: 61, cat: 'assistant', tokens: 8, calls: ['bash', 'write'], text: 'done all' }),
-      node({ seq: 62, cat: 'assistant', tokens: 8, calls: ['write'] }),
-      node({ seq: 63, cat: 'assistant', tokens: 8, calls: ['read'] }),
-      node({ seq: 64, cat: 'assistant', tokens: 8 }),
-      node({ seq: 65, cat: 'assistant', tokens: 8 }),
-      node({ seq: 66, cat: 'assistant', tokens: 8, calls: [], text: 'plain text' }),
-      node({ seq: 67, cat: 'assistant', tokens: 8, text: 'legacy' }),
-      node({ seq: 68, cat: 'assistant', tokens: 20, text: 'full cascade' }),
-      node({ seq: 70, tokens: 6, text: 'summary node' }),
-      node({ seq: 71, tokens: 6, text: '' }),
-      node({ seq: 72, tokens: 6, text: 'empty summary' }),
+      surfaceNode({ seq: 1, tokens: 10, text: 'with images', time: 100 }),
+      surfaceNode({ seq: 2, tokens: 9, text: 'one pic', time: 200 }),
+      surfaceNode({ seq: 3, tokens: 5, text: 'fallback text', time: 300 }),
+      surfaceNode({ seq: 4, tokens: 4, text: '', time: 400 }),
+      surfaceNode({ seq: 5, tokens: 4, text: 'no content array', time: 500 }),
+      surfaceNode({ seq: 50, cat: 'inject', tokens: 5, form: 'snapshot', text: 'state' }),
+      surfaceNode({ seq: 51, cat: 'inject', tokens: 5, form: 'notice', text: 'heads up' }),
+      surfaceNode({ seq: 55, cat: 'inject', tokens: 5, form: 'notice', text: '' }),
+      surfaceNode({ seq: 56, cat: 'inject', tokens: 5, text: 'no form' }),
+      surfaceNode({ seq: 54, cat: 'inject', tokens: 5, form: 'relay', text: 'relay body' }),
+      surfaceNode({ seq: 61, cat: 'assistant', tokens: 8, calls: ['bash', 'write'], text: 'done all' }),
+      surfaceNode({ seq: 62, cat: 'assistant', tokens: 8, calls: ['write'] }),
+      surfaceNode({ seq: 63, cat: 'assistant', tokens: 8, calls: ['read'] }),
+      surfaceNode({ seq: 64, cat: 'assistant', tokens: 8 }),
+      surfaceNode({ seq: 65, cat: 'assistant', tokens: 8 }),
+      surfaceNode({ seq: 66, cat: 'assistant', tokens: 8, calls: [], text: 'plain text' }),
+      surfaceNode({ seq: 67, cat: 'assistant', tokens: 8, text: 'legacy' }),
+      surfaceNode({ seq: 68, cat: 'assistant', tokens: 20, text: 'full cascade' }),
+      surfaceNode({ seq: 70, tokens: 6, text: 'summary node' }),
+      surfaceNode({ seq: 71, tokens: 6, text: '' }),
+      surfaceNode({ seq: 72, tokens: 6, text: 'empty summary' }),
     ],
   })
 
@@ -1243,7 +1359,7 @@ describe('ContextBrowser message categories', () => {
   test('a single-node category opens its node with the category', async () => {
     const solo = tl({
       current: { system: 0, tools: 0, user: 10, inject: 0, skill: 0, assistant: 0, tool: 0, total: 10 },
-      nodes: [node({ seq: 1, tokens: 10, text: 'only message', time: 100 })],
+      nodes: [surfaceNode({ seq: 1, tokens: 10, text: 'only message', time: 100 })],
     })
     const m = await mount(h(Browser, props({
       data: solo,
@@ -1360,7 +1476,7 @@ describe('ContextBrowser message categories', () => {
     const headers: ContextHeaders = { headers: [{ seq: 1, time: 1, systemTokens: 3, tools: [{ name: 'bash', tokens: 5 }, { name: 'write', tokens: 3 }] }] }
     const data = tl({
       current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 8, tool: 0, total: 8 },
-      nodes: [node({ seq: 2, cat: 'assistant', tokens: 8, calls: ['bash', 'write', 'bash', 'bash'] })],
+      nodes: [surfaceNode({ seq: 2, cat: 'assistant', tokens: 8, calls: ['bash', 'write', 'bash', 'bash'] })],
     })
     const m = await mount(h(Browser, props({ data, headers })))
     await click(catRow(m, 'assistant'))
@@ -1508,13 +1624,13 @@ describe('ContextBrowser message categories', () => {
       nodes: [
         // Stamped rows: the identity the events card names replaces the raw
         // content preview (which stays one expand away).
-        node({ seq: 50, cat: 'inject', tokens: 9, form: 'snapshot', name: '@deepseek-ai/dsh-system-prompt', text: 'policy sections' }),
-        node({ seq: 51, cat: 'inject', tokens: 9, form: 'instructions', name: 'AGENTS.md', text: '<system-reminder> instructions' }),
+        surfaceNode({ seq: 50, cat: 'inject', tokens: 9, form: 'snapshot', name: '@deepseek-ai/dsh-system-prompt', text: 'policy sections' }),
+        surfaceNode({ seq: 51, cat: 'inject', tokens: 9, form: 'instructions', name: 'AGENTS.md', text: '<system-reminder> instructions' }),
         // Unstamped (rows folded before the stamp existed): content stands.
-        node({ seq: 52, cat: 'inject', tokens: 9, form: 'snapshot', text: 'state' }),
+        surfaceNode({ seq: 52, cat: 'inject', tokens: 9, form: 'snapshot', text: 'state' }),
         // Hostile drift: a non-string / empty stamp degrades to the content.
-        node({ seq: 53, cat: 'inject', tokens: 9, name: 42 as never, text: 'drift body' }),
-        node({ seq: 54, cat: 'inject', tokens: 9, name: '', text: 'empty body' }),
+        surfaceNode({ seq: 53, cat: 'inject', tokens: 9, name: 42 as never, text: 'drift body' }),
+        surfaceNode({ seq: 54, cat: 'inject', tokens: 9, name: '', text: 'empty body' }),
       ],
     })
     const m = await mount(h(Browser, props({ data })))
@@ -1545,13 +1661,13 @@ describe('ContextBrowser message categories', () => {
       nodes: [
         // An invocation message previews its own text; the catalog digest tags
         // its form; the `skill`-tool load (no node text) previews the call.
-        node({ seq: 70, cat: 'skill', tokens: 9, skill: 'code-review', text: 'skill body' }),
-        node({ seq: 71, cat: 'skill', tokens: 9, form: 'catalog' }),
-        node({ seq: 72, cat: 'skill', tokens: 9, tool: 'skill', skill: 'grilling' }),
+        surfaceNode({ seq: 70, cat: 'skill', tokens: 9, skill: 'code-review', text: 'skill body' }),
+        surfaceNode({ seq: 71, cat: 'skill', tokens: 9, form: 'catalog' }),
+        surfaceNode({ seq: 72, cat: 'skill', tokens: 9, tool: 'skill', skill: 'grilling' }),
         // Hostile drift: a skill node with neither a name nor a form.
-        node({ seq: 73, cat: 'skill', tokens: 4 }),
+        surfaceNode({ seq: 73, cat: 'skill', tokens: 4 }),
         // A stamped catalog digest previews its source identity, not the digest text.
-        node({ seq: 74, cat: 'skill', tokens: 9, form: 'catalog', name: 'skill-catalog', text: 'digest body' }),
+        surfaceNode({ seq: 74, cat: 'skill', tokens: 9, form: 'catalog', name: 'skill-catalog', text: 'digest body' }),
       ],
     })
     const m = await mount(h(Browser, props({ data, convNodes })))
@@ -1603,17 +1719,17 @@ describe('ContextBrowser tool results', () => {
     { kind: 'tool-result', seq: 93, call: { name: 'bash', argsRaw: '' }, content: 'raw-text' as never },
   )
   const nodes: SurfaceNode[] = [
-    ...cases.map(c => node({ seq: c.seq, cat: 'tool', tokens: 9, tool: 'bash' })),
-    node({ seq: 91, cat: 'tool', tokens: 9, tool: 'read' }),
-    node({ seq: 92, cat: 'tool', tokens: 9, tool: 'bash' }),
-    node({ seq: 93, cat: 'tool', tokens: 9, tool: 'bash' }),
+    ...cases.map(c => surfaceNode({ seq: c.seq, cat: 'tool', tokens: 9, tool: 'bash' })),
+    surfaceNode({ seq: 91, cat: 'tool', tokens: 9, tool: 'read' }),
+    surfaceNode({ seq: 92, cat: 'tool', tokens: 9, tool: 'bash' }),
+    surfaceNode({ seq: 93, cat: 'tool', tokens: 9, tool: 'bash' }),
     // Fold-stamped err flag, no join.
-    node({ seq: 94, cat: 'tool', tokens: 9, tool: 'write', err: true }),
+    surfaceNode({ seq: 94, cat: 'tool', tokens: 9, tool: 'write', err: true }),
     // No join at all → placeholder preview; missing tool name → '?'.
-    node({ seq: 95, cat: 'tool', tokens: 9, tool: 'bash' }),
-    node({ seq: 96, cat: 'tool', tokens: 9 }),
+    surfaceNode({ seq: 95, cat: 'tool', tokens: 9, tool: 'bash' }),
+    surfaceNode({ seq: 96, cat: 'tool', tokens: 9 }),
     // A joined, clean result: the OK-state expansion target below.
-    node({ seq: 97, cat: 'tool', tokens: 9, tool: 'bash' }),
+    surfaceNode({ seq: 97, cat: 'tool', tokens: 9, tool: 'bash' }),
   ]
   convNodes.push({ kind: 'tool-result', seq: 97, call: { name: 'bash', argsRaw: '{}' }, content: [{ type: 'text', text: 'skill body' }] })
 
@@ -1695,7 +1811,7 @@ describe('ContextBrowser tool results', () => {
 describe('ContextBrowser targeted content fetch', () => {
   const data = tl({
     current: { system: 0, tools: 0, user: 10, inject: 0, skill: 0, assistant: 0, tool: 0, total: 10 },
-    nodes: [node({ seq: 5, tokens: 5, text: 'pageable' }), node({ seq: 6, tokens: 5, text: 'also pageable' })],
+    nodes: [surfaceNode({ seq: 5, tokens: 5, text: 'pageable' }), surfaceNode({ seq: 6, tokens: 5, text: 'also pageable' })],
   })
 
   const openFirstRow = async (m: Mounted) => {
@@ -1828,7 +1944,7 @@ describe('ContextBrowser focus bridges', () => {
   const data = tl({
     current: { system: 10, tools: 60, user: 10, inject: 0, skill: 0, assistant: 0, tool: 0, total: 80 },
     requests: [req({ seq: 10, turn: 1, step: 0, total: 80 }), req({ seq: 20, turn: 1, step: 1, total: 80 })],
-    nodes: [node({ seq: 1, tokens: 5, text: 'focusable' }), node({ seq: 11, cat: 'assistant', tokens: 5, text: 'answer' })],
+    nodes: [surfaceNode({ seq: 1, tokens: 5, text: 'focusable' }), surfaceNode({ seq: 11, cat: 'assistant', tokens: 5, text: 'answer' })],
   })
   const convNodes: ConversationNodeLike[] = [{ kind: 'user', seq: 1, content: [{ type: 'text', text: 'focusable' }] }]
 
@@ -1924,9 +2040,9 @@ describe('ContextBrowser open-category reporting', () => {
     const data = tl({
       requests: [req({ seq: 10, turn: 1, step: 0 }), req({ seq: 20, turn: 2, step: 0 })],
       nodes: [
-        node({ seq: 1, cat: 'user', text: 'hi' }),
-        node({ seq: 2, cat: 'user', text: 'again' }),
-        node({ seq: 3, cat: 'tool', tokens: 30, tool: 'bash', text: 'out' }),
+        surfaceNode({ seq: 1, cat: 'user', text: 'hi' }),
+        surfaceNode({ seq: 2, cat: 'user', text: 'again' }),
+        surfaceNode({ seq: 3, cat: 'tool', tokens: 30, tool: 'bash', text: 'out' }),
       ],
     })
     const opens: (string | null)[] = []
@@ -1945,7 +2061,7 @@ describe('ContextBrowser open-category reporting', () => {
   })
 
   test('a pin change and a brief reveal report their reset / target category', async () => {
-    const data = tl({ requests: [req({ seq: 10, turn: 1, step: 0 })], nodes: [node({ seq: 1, cat: 'user', text: 'hi' })] })
+    const data = tl({ requests: [req({ seq: 10, turn: 1, step: 0 })], nodes: [surfaceNode({ seq: 1, cat: 'user', text: 'hi' })] })
     const opens: (string | null)[] = []
     const onOpenCat = (c: string | null): void => { opens.push(c) }
     const m = await mount(h(Browser, props({ data, onOpenCat })))
@@ -1972,10 +2088,10 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     current: { system: 100, tools: 75, user: 20, inject: 10, skill: 0, assistant: 40, tool: 30, total: 275 },
     requests: [req({ seq: 20, turn: 1, step: 0, system: 100, tools: 75, user: 20, inject: 0, assistant: 40, tool: 30, total: 265 })],
     nodes: [
-      node({ seq: 2, tokens: 20, time: 2000, text: 'hi' }),
-      node({ seq: 3, cat: 'tool', tokens: 30, time: 3000, tool: 'bash' }),
-      node({ seq: 4, cat: 'assistant', tokens: 40 }),
-      node({ seq: 5, cat: 'inject', tokens: 10, form: 'notice' }),
+      surfaceNode({ seq: 2, tokens: 20, time: 2000, text: 'hi' }),
+      surfaceNode({ seq: 3, cat: 'tool', tokens: 30, time: 3000, tool: 'bash' }),
+      surfaceNode({ seq: 4, cat: 'assistant', tokens: 40 }),
+      surfaceNode({ seq: 5, cat: 'inject', tokens: 10, form: 'notice' }),
     ],
   })
 
@@ -2069,9 +2185,9 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     const data = tl({
       current: { system: 0, tools: 0, user: 0, inject: 40, skill: 0, assistant: 0, tool: 20, total: 60 },
       nodes: [
-        node({ seq: 1, cat: 'inject', tokens: 10, skill: 'code' }),
-        node({ seq: 2, cat: 'tool', tokens: 20 }),
-        node({ seq: 3, cat: 'inject', tokens: 30 }),
+        surfaceNode({ seq: 1, cat: 'inject', tokens: 10, skill: 'code' }),
+        surfaceNode({ seq: 2, cat: 'tool', tokens: 20 }),
+        surfaceNode({ seq: 3, cat: 'inject', tokens: 30 }),
       ],
     })
     const m = await mount(h(Browser, props({ data, headers: null })))
@@ -2136,7 +2252,7 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
   test('a tiny item stays a hoverable filament (the minBand floor) while the tooltip reports the true share', async () => {
     const data = tl({
       current: { system: 0, tools: 0, user: 2, inject: 0, skill: 0, assistant: 998, tool: 0, total: 1000 },
-      nodes: [node({ seq: 1, tokens: 2, text: 'ok' }), node({ seq: 2, cat: 'assistant', tokens: 998 })],
+      nodes: [surfaceNode({ seq: 1, tokens: 2, text: 'ok' }), surfaceNode({ seq: 2, cat: 'assistant', tokens: 998 })],
     })
     const m = await mount(h(Browser, props({ data, headers: null })))
     await click(dnaButton(m))

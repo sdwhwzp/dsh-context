@@ -34,7 +34,7 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
   breakdown: ContextBreakdown | null
 }) => ReactElement {
   const { t, fmt, fmtShare, catLabel } = kit
-  const SliceList = makeSliceList(kit)
+  const SliceList = makeSliceList()
   return function StatsTokens(props: {
     usage: TokenUsage | null
     current: Snapshot['current']
@@ -66,7 +66,7 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
       count: p.key === 'output' ? `${fmt(p.value)} · ${t('tokens.outputNote')}` : '≈' + fmt(p.value),
     }))
     return (
-      <div className="lc-card lc-col-stats lc-col-donut flex-1 min-w-[min(360px,100%)]">
+      <div className="lc-card lc-col-donut flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">
           <span className="lc-card-title-text">{t('tokens.title')}</span>
           {hit !== null && (

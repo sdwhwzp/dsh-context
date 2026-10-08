@@ -123,13 +123,13 @@ export function makeRichText(kit: ViewKit): RichKit {
     const seg = (m: RichMode, label: string, tip: string) => (
       <button
         type="button"
-        className={'lc-rich-seg-btn' + (props.mode === m ? ' lc-rich-seg-on' : '')}
+        className={'lc-gran-btn' + (props.mode === m ? ' lc-gran-on' : '')}
         title={tip}
         onClick={() => { props.onPick(m) }}
       >{label}</button>
     )
     return (
-      <span className="lc-rich-seg">
+      <span className="lc-gran">
         {seg('raw', t('rich.raw'), t('rich.toRaw'))}
         {seg('md', t('rich.md'), t('rich.toMd'))}
       </span>
@@ -184,7 +184,7 @@ export function makeRichText(kit: ViewKit): RichKit {
 
   function RichText(props: { text: string; mode: RichMode }): ReactElement {
     // Reference-stable per locale: a fresh object identity would discard the
-    // renderer's cached elements on every render (0.1.2+ faces).
+    // renderer's cached elements on every render.
     const mdLabels = useMemo<MarkdownChrome>(() => ({
       code: { copyLabel: t('rich.md.copy'), copiedLabel: t('rich.md.copied') },
       footnotes: t('rich.md.footnotes'),

@@ -45,7 +45,7 @@ export function makeContextModal(
     const open = typeof props.useContextModal === 'function' ? props.useContextModal(s => s) : false
     // The timeline source (timelineSource.ts) — shares the tab's per-session
     // detail store, so an open tab's detail serves the modal with no refetch.
-    const source = useTimelineSource(ctx, props)
+    const source = useTimelineSource(props)
     const data = source.data
     const pressure = projectionOf(props, 'contextPressure', contextPressureOf)
     const breakdown = projectionOf(props, 'contextBreakdown', contextBreakdownOf)
@@ -57,7 +57,7 @@ export function makeContextModal(
     const [hoverCat, setHoverCat] = useState<string | null>(null)
     // Dock the mask beside the shell sidebar: 0 until the frame measure lands
     // (the layout effect below resolves it before first paint).
-    const [dockLeft, setDockLeft] = useState(0)
+    const [dockInsets, setDockInsets] = useState({ left: 0, right: 0 })
     const anchorRef = useRef<HTMLSpanElement | null>(null)
     // Session-authorized durable-image loader for the browser's attachment cards, resolved through the harness `uiConversation` service
     // (`imageUrl`); absent service/session degrades the cards to metadata-only, never an error. Same parity as the Context tab.
@@ -99,17 +99,18 @@ export function makeContextModal(
     useEscapeClose(open, close)
 
     // Keep the measurement anchor in the composer; the body portal escapes its skin filters and containing blocks.
-    // Dock the mask to the main column: measure the sidebar track once before
+    // Dock the mask to the main column: measure both sidebar tracks once before
     // first paint, then follow the frame's inline template while open (sidebar
     // drags, collapse toggles and narrow-viewport re-solves all rewrite it).
     // An unresolved frame keeps the full-viewport mask.
     useLayoutEffect(() => {
       if (!open) return undefined
       const dock = measureDock(anchorRef.current)
-      setDockLeft(dock.left)
+      setDockInsets({ left: dock.left, right: dock.right })
       if (dock.frame === null) return undefined
       const observer = new MutationObserver(() => {
-        setDockLeft(measureDock(anchorRef.current).left)
+        const next = measureDock(anchorRef.current)
+        setDockInsets({ left: next.left, right: next.right })
       })
       observer.observe(dock.frame, { attributes: true, attributeFilter: ['style'] })
       return () => { observer.disconnect() }
@@ -124,7 +125,7 @@ export function makeContextModal(
       <>
         <span ref={anchorRef} hidden />
         {createPortal(
-          <div className="lc-modal-backdrop" style={{ left: dockLeft }} onClick={close}>
+          <div className="lc-modal-backdrop" style={dockInsets} onClick={close}>
             <div className="lc-modal-card" onClick={(ev) => { ev.stopPropagation() }}>
               <div className="lc-modal-head">
                 <span className="lc-modal-title">{t('tab')}</span>

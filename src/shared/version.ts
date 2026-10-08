@@ -11,7 +11,7 @@
  */
 
 /** The oldest supported dsh release (see the matrix note above). */
-export const BASELINE_DSH_VERSION = '0.1.5-rc.1'
+export const BASELINE_DSH_VERSION = '0.1.7-rc.2'
 
 /**
  * Release-channel rank at an equal X.Y.Z: a final release outranks its
@@ -63,18 +63,6 @@ function compareParsed(a: ParsedVersion, b: ParsedVersion): number {
   if (a.patch !== b.patch) return a.patch - b.patch
   if (a.rank !== b.rank) return a.rank - b.rank
   return a.serial - b.serial
-}
-
-/**
- * Compare two version strings (negative / zero / positive). An unparseable
- * side compares EQUAL — the gate only ever acts on a strict, proven
- * below-baseline result.
- */
-export function compareVersions(a: string, b: string): number {
-  const x = parseVersion(a)
-  const y = parseVersion(b)
-  if (x === null || y === null) return 0
-  return compareParsed(x, y)
 }
 
 /**

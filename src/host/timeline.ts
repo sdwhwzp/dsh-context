@@ -150,7 +150,8 @@ const costModelSchema = z.object({
 
 const costModelsSchema = z.record(z.string(), costModelSchema)
 
-const costUsageSchema = z.record(z.string(), costModelsSchema)
+/** The session-cost wire shape — shared by every projection that serves one (activity.ts imports it). */
+export const costUsageSchema = z.record(z.string(), costModelsSchema)
 
 const toolTimingSchema = z.object({
   calls: z.number().int().nonnegative(),
@@ -417,11 +418,15 @@ export function createContextTimelineDefinition(config: Config, slim: () => bool
     // `peak` and cannot be reinterpreted into the right periods, so rows
     // refold from the log, which rebuilds the split (issue #91).
     //
-    // Not bumped since: the supported-baseline move (0.1.2-rc.1 → 0.1.5-rc.1,
-    // the plugin floor) retired the pre-V3 log-shape branches
+    // Not bumped since: the supported-baseline moves (0.1.2-rc.1 →
+    // 0.1.5-rc.1 → 0.1.7-rc.2, the plugin floor) retired log-shape branches
+    // that only unsupported logs exercise — first the pre-V3 spellings
     // (`header.system` envelope, `assistant/chunk` floods, `start`/`end`
-    // replacement endpoints, `tool/code-dispatch`) that only pre-V3 logs
-    // exercise — no supported log folds differently. Rows folded from those
+    // replacement endpoints, `tool/code-dispatch`), then the V3 wrapper
+    // spellings (the `tool-result` content block, the event-level `data.error`
+    // mark) once the floor left every supported harness on the V4 generation,
+    // whose migration rewrites them before the fold ever runs — no supported
+    // log folds differently. Rows folded from those
     // logs cannot reach this schema anyway: the projection cache's identity
     // gate (cache-record format version vs the header's current-generation
     // version) discards them wholesale and the session refolds from the
