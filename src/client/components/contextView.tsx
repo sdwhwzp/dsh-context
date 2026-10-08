@@ -31,7 +31,7 @@ import { makeFileCard } from './fileCard'
 import { makePluginInfo } from './pluginInfo'
 import { makeUpgradeGate } from './upgradeGate'
 import { makeRequestDetail } from './requestDetail'
-import { countsOfRecords, makeStatsContext, makeSubagentCost } from './statsContext'
+import { countsOfRecords, makeStatsContext, makeSubagentCost, toolTallyOf } from './statsContext'
 import { makeStatsTiming } from './statsTiming'
 import { makeStatsTokens } from './statsTokens'
 import { makeLegend, makeStackedBar } from './stackedBar'
@@ -95,7 +95,7 @@ export function makeContextView(
     // no longer mirrors it. Absent → derived fallback.
     const pressure = projectionOf(props, 'contextPressure', contextPressureOf)
     // Official token-meter `tokenUsage` projection — the same data the chat stats line below the input box reads for its '缓存命中' figure, so
-    // the stats board's cache-hit cell reuses it verbatim; absent → the cell drops to a dash instead of estimating.
+    // the Token card's figures reuse it verbatim; absent → the card drops them instead of estimating.
     const usage = projectionOf(props, 'tokenUsage', tokenUsageOf)
     // Official token-meter `contextBreakdown` projection — the exact rows the chat ring's click-open panel shows, so the overview legend
     // reads identically by construction; absent → the fold's own same-estimator sums inside headlineOf.
@@ -119,6 +119,10 @@ export function makeContextView(
     // Adaptive scale (the title-adjacent toggle): the trend bars rescale to the visible window; like the two
     // toggles above, mount-local and never written back.
     const [adaptive, setAdaptive] = useState(false)
+    // The duration overlay (the title-adjacent toggle): each bar's step active time as a curve over the
+    // bars, read off the right-hand quartile axis. The settings card's `defaultDurationCurve` seeds the mount
+    // state (default on); in-chart toggling stays mount-local and never writes back.
+    const [durationCurve, setDurationCurve] = useState(() => settings.defaultDurationCurve() === 'show')
     // Strip-clicked turn: chart switches to turn granularity and scroll-centers that turn's bar, then clears via onFocusTurnHandled.
     const [focusTurn, setFocusTurn] = useState<number | null>(null)
     // Chat → Context jump: the assistant-action relay's one-shot request, held until the projection data is in, then resolved into a
@@ -335,6 +339,20 @@ export function makeContextView(
       },
       [data, briefList, convOf, filesBefore],
     )
+    // The stats card's pill tallies: the WHOLE-session file-op counts (null
+    // bound, off the same derivations the FileCard rides) for the I/O card,
+    // and the live-surface per-tool tally (toolTallyOf — the head's own
+    // `toolCalls` predicate) for the tool card's most-called pills.
+    const ioTotals = useMemo(
+      () => {
+        const totals = (data !== null && data.fileOps !== undefined
+          ? activityOfOps(data.fileOps, data.archive, null)
+          : activityOf(briefList, convOf, null)).totals
+        return { reads: totals.read.ops, writes: totals.write.ops, searches: totals.search.ops, images: totals.image.ops }
+      },
+      [data, briefList, convOf],
+    )
+    const toolTally = useMemo(() => (data ? toolTallyOf(data.nodes) : []), [data])
     // The session's workspace root — './'-relative row paths when known; read per
     // render (an observable snapshot), so the next projection push re-renders with it.
     const workspace = typeof ctx.get === 'function' ? workspaceOf(ctx, typeof sessionId === 'string' ? sessionId : undefined) : undefined
@@ -465,28 +483,31 @@ export function makeContextView(
       <div className="lc-card">
         <div className="lc-card-title">
           <span className="lc-card-title-text">{t('trend.title')}</span>
-          {/* The DNA toggle rides the title text's right, left of the adaptive switch (the browser
-              card's DNA toggle idiom): each bar becomes that request's per-item context fingerprint;
-              combined with Delta, each band shows that item's change against the previous bar. */}
-          <span className="lc-gran lc-trend-dna" role="group" title={t('trend.dnaTip')}>
+          {/* The three display modifiers ride the title text's right as ONE multi-toggle segmented group
+              (the browser card's DNA toggle idiom), each segment lighting independently: DNA draws every
+              bar as that request's per-item context fingerprint (with Delta, per-item changes against the
+              previous bar); Adaptive rescales the axis to the visible bars, following the scroll; Duration
+              overlays each bar's step active time as a curve read off the right-hand quartile axis. */}
+          <span className="lc-gran lc-trend-mods" role="group">
             <button
               type="button"
               className={'lc-gran-btn' + (dna ? ' lc-gran-on' : '')}
+              title={t('trend.dnaTip')}
               onClick={() => { setDna(v => !v) }}
             >{t('trend.dna')}</button>
-          </span>
-          {/* The adaptive switch rides the title's right (the browser card's DNA toggle idiom): bars rescale
-              to the bars currently on screen instead of the whole retained log. */}
-          <span className="lc-gran lc-trend-adaptive" role="group" title={t('trend.adaptiveHint')}>
             <button
               type="button"
               className={'lc-gran-btn' + (adaptive ? ' lc-gran-on' : '')}
+              title={t('trend.adaptiveHint')}
               onClick={() => { setAdaptive(on => !on) }}
             >{t('trend.adaptive')}</button>
+            <button
+              type="button"
+              className={'lc-gran-btn' + (durationCurve ? ' lc-gran-on' : '')}
+              title={t('trend.durationTip')}
+              onClick={() => { setDurationCurve(on => !on) }}
+            >{t('trend.duration')}</button>
           </span>
-          {focusCat !== null
-            ? <span className="lc-card-sub">{t('trend.focus', { cat: kit.catLabel(focusCat) })}</span>
-            : null}
           <div className="lc-trend-ctl">
             <div className="lc-gran">
               <button
@@ -535,6 +556,7 @@ export function makeContextView(
                 hoverCat={trendHoverCat}
                 focusCat={focusCat}
                 adaptive={adaptive}
+                durationCurve={durationCurve}
                 dna={dnaBands}
                 onPickBand={revealBand}
                 onSelect={setSelectedSeq}
@@ -594,7 +616,8 @@ export function makeContextView(
             pair in a narrow pane at the cards' min-width floors. */}
         {inSidebar ? null : (
           <div className="lc-cols lc-head">
-            <StatsContext counts={counts} humanInputs={data.humanInputs} toolCalls={data.toolCalls} usage={usage}
+            <StatsContext counts={counts} humanInputs={data.humanInputs} toolCalls={data.toolCalls}
+              files={ioTotals} tools={toolTally}
               cost={data.cost} spend={spend} locale={activeLocale} sessionId={typeof sessionId === 'string' ? sessionId : undefined} />
             <PluginInfo />
           </div>

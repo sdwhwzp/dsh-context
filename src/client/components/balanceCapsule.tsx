@@ -1,19 +1,16 @@
 /**
  * BalanceCapsule — the DeepSeek open-platform balance pill in the Context
- * Dashboard's header (the plugin's one account-level figure, beside the
+ * Insights page's heading (the plugin's one account-level figure, beside the
  * session-level ones). Clicking it opens the platform's usage console in a
  * new tab. Each mount reads a fresh authorized figure; pending, denied and
- * failed reads render nothing. Unmount aborts the request and ignores any
- * late response. The
- * non-zero parts of the breakdown (topped-up / granted) ride the harness
- * Tooltip primitive — immediate on hover, where a native `title` lags — in
+ * failed reads render nothing. Unmount aborts the request and ignores late
+ * responses. The non-zero breakdown uses the page's portaled hover tip in
  * the entry's own currency (the pill itself carries the total); the entry
  * follows the active locale (zh → CNY) with the account's first currency as
  * the fallback.
  */
 
 import { useEffect, useState, type ReactElement } from 'react'
-import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { balanceEntryOf, fetchPlatformBalance } from '../balance'
 import type { PlatformBalance } from '../../shared/types'
 import type { ClientCtx } from '../services'
@@ -54,10 +51,11 @@ export function makeBalanceCapsule(ctx: ClientCtx, kit: ViewKit): () => ReactEle
       ...(entry.toppedUp > 0 ? [t('balance.tip.toppedUp') + ': ' + money(entry.toppedUp)] : []),
       ...(entry.granted > 0 ? [t('balance.tip.granted') + ': ' + money(entry.granted)] : []),
     ]
-    const pill = (
+    return (
       <a
         className="lc-ov-balance"
         aria-label={tipLines.length > 0 ? tipLines.join('\n') : undefined}
+        {...(tipLines.length > 0 ? { 'data-lc-tip': tipLines.join('\n'), 'data-lc-tip-side': 'bottom' } : {})}
         href={USAGE_URL}
         target="_blank"
         rel="noreferrer"
@@ -66,8 +64,5 @@ export function makeBalanceCapsule(ctx: ClientCtx, kit: ViewKit): () => ReactEle
         <span className="lc-ov-balance-value">{money(entry.total)}</span>
       </a>
     )
-    return tipLines.length > 0
-      ? <Tooltip label={tipLines.join('\n')} side="bottom">{pill}</Tooltip>
-      : pill
   }
 }

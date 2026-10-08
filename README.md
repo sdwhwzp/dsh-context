@@ -9,7 +9,7 @@
 **The best [DeepSeek Harness plugin](https://www.deepseek.com/harness/) for Agent's context insights and management.**
 
 [`dsh-context`](https://www.npmjs.com/package/dsh-context) provides full context lifecycle management features.
-- **Context Dashboard** — the cross-session overview above Settings on the sidebar foot: KPI band with a 7-day token/cost usage chart, activity heatmap, aggregate composition ring, and filterable session cards that jump straight into any session.
+- **Context Insights page** — the cross-session overview as a first-level sidebar panel (beside Plugins and Automation tasks): KPI band with a 7-day token/cost usage chart, activity heatmap, aggregate composition ring, and filterable session cards that jump straight into any session.
 - **Context tab** — an UI context dashboard for DeepSeek Harness's context stats, composition, trend, events, and messages.
 - **Context panel** — the same dashboard as a right-sidebar tab (dsh 0.1.5-rc.1+): pick **Context** on the sidebar's guide page and the panel opens beside the chat.
 - **`/context` command** — the slash command shows the context model for current context composition and recent context evolution.
@@ -44,18 +44,18 @@ Four surfaces, one story — what your agent is carrying, how it got there, and 
 
 | Where | What you get |
 | --- | --- |
-| **Context Dashboard** | Every session at a glance: usage, cost, cache hit, daily activity, and per-session context profiles — filtered by range, day, group, or search, one click to jump in. |
+| **Context Insights page** | Every session at a glance: usage, cost, cache hit, daily activity, and per-session context profiles — filtered by range, day, group, or search, one click to jump in. |
 | **Context tab** | The full dashboard: stats, composition, per-request trend, events, file activity, and the agent network — in every session. |
 | **`/context` command** | A centered modal with the same composition and context browser, without leaving the chat. |
 | **Preferences card** | Per-user defaults: view placement, trend granularity & mode, File Activity sort, and more. |
 
 Context Browser category rows wrap at narrow widths so item counts, token estimates, and percentages remain readable.
 
-## 🗂️ The Context Dashboard
+## 🗂️ The Context Insights page
 
-Click **Context Dashboard / 上下文仪表盘** at the bottom-left of the sidebar, right above **Settings**:
+Click **Context Insights / 上下文洞察** in the sidebar's panel list — the same row level as **Plugins** and **Automation tasks** — and the page opens as a full center-column panel:
 
-![Context Dashboard](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-dashboard.png)
+![The Context Insights page](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-dashboard.png)
 
 | Section | The question it answers |
 | --- | --- |
@@ -78,7 +78,7 @@ The top row uses a 3:1 flex split between Context Stats and Plugin Info when bot
 | Card | The question it answers |
 | --- | --- |
 | **Context Stats** | Turns, steps, human inputs, live tool calls, and the session's cache-hit rate. Cost uses the authorized dsh-spend session-family ledger and its display currency when available; otherwise it estimates the whole agent family from models.dev list prices, including DeepSeek peak/off-peak rates. A separate cell estimates the subagents’ share from the same list prices. Hover the `?` for the displayed amount's source and model breakdown. |
-| **Token Stats** | Where the billed tokens went — the same total as the chat stats line under the composer, split by composition (system, tools, messages…) with the provider-exact output closing the ring. |
+| **Token Stats** | Where the billed tokens went — the same total as the chat stats line under the composer, split by composition (system, tools, messages…) with the provider-exact output closing the ring, and the session's cache-hit rate in the corner. |
 | **Timing Stats** | How active time splits across model calls, tool runs, and overhead, plus decode throughput for calls with both output-token usage and first-token timing. A packed time strip shows completed steps in order, excludes idle gaps, and links its hover details with the timing legend. |
 | **Current Context** | What's in the window *right now*. |
 | **Context Trend** | Every request's size — and its story. |
@@ -87,7 +87,7 @@ The top row uses a 3:1 flex split between Context Stats and Plugin Info when bot
 | **File Activity** | What the agent *did* to your files. |
 | **Agent Network** | The whole agent family, live. |
 
-The headline occupancy and composition read the **same official token-meter projections as the chat composer's context ring** (`contextPressure` / `contextBreakdown`), so the figures always match what the ring tells you.
+The headline occupancy and composition read the **same official token-meter projections as the chat composer's context ring** (`contextPressure` / `contextBreakdown`), so the figures always match what the ring tells you — the card's percentage is that same occupancy, printed with one decimal.
 
 ### Context Stats
 
@@ -181,7 +181,7 @@ The dialog stays within the window beside the sidebar, including when a skin blu
 
 ## ⚙️ Settings
 
-The **Context** preferences card holds this plugin's per-user settings — default placement, trend granularity (Step/Turn), trend mode (Total/Delta), tool and File Activity sort, and the sidebar insights entry. Where it lives depends on your dsh release:
+The **Context** preferences card holds this plugin's per-user settings — default placement, trend granularity (Step/Turn), trend mode (Total/Delta), the trend duration curve (shown by default), tool and File Activity sort, and the sidebar insights entry. Where it lives depends on your dsh release:
 
 - **dsh 0.1.7+** — the sidebar **Plugins** entry → the **dsh-context** bundle's page → its **Configuration** section (the card is served by the entry's live Config form).
 - **older releases** — **Settings → Plugins → Plugin configuration** → the **Context** card.
