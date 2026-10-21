@@ -291,7 +291,7 @@ export function makeTrendChart(kit: ViewKit): (props: TrendChartProps) => ReactE
         {props.flag !== null ? (
           // Painted UNDER the ✂ marker (it follows in DOM order): on a rare same-bar collision the event
           // glyph keeps precedence over the landmark.
-          <span className="lc-step-flag" aria-hidden="true"><span className="lc-step-flag-label">{props.flag}</span></span>
+          <span className="lc-trend-flag" aria-hidden="true"><span className="lc-trend-flag-label">{props.flag}</span></span>
         ) : null}
         {marker !== undefined ? (
           <span

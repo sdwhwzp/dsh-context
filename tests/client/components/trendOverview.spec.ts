@@ -78,7 +78,7 @@ describe('TrendOverview total-mode ribbon', () => {
     assert.equal(query(svg, 'polygon').getAttribute('points'), '0,74.67 1,74.67 1,112 0,112')
     assert.equal(query(m.container, '.lc-turn-label').textContent, '1')
     // The quartiles collapse onto the sole record; the interior filter plants no pole.
-    assert.equal(queryAll(m.container, '.lc-step-flag').length, 0)
+    assert.equal(queryAll(m.container, '.lc-trend-flag').length, 0)
     await m.unmount()
   })
 
@@ -217,42 +217,72 @@ describe('TrendOverview flags and markers', () => {
 
   test('plants poles at the record quartiles and the full span (step granularity)', async () => {
     const m = await mount(h(TrendOverview, propsOf(steps(47))))
-    const flags = queryAll(m.container, '.lc-step-flag')
+    const flags = queryAll(m.container, '.lc-trend-flag')
     assert.equal(flags.length, 4)
     const idx = [12, 23, 35]
     flags.slice(0, 3).forEach((f, i) => assert.ok(Math.abs(parseFloat(f.style.left) - idx[i] / 46 * 100) < 1e-9, f.style.left))
     // The full-span pole hugs inside the pane's right edge (left 100% falls wholly past the scroller's clip).
     assert.equal(flags[3].style.left, 'calc(100% - 1px)')
-    assert.deepEqual(flags.map(f => query(f, '.lc-step-flag-label').textContent), ['13', '24', '36', '47'])
+    assert.deepEqual(flags.map(f => query(f, '.lc-trend-flag-label').textContent), ['13', '24', '36', '47'])
     await m.unmount()
   })
 
   test('short logs keep the collapsed-at-start pole out but keep the full-span pole', async () => {
     // Two records: the mid quartiles collapse; only the full-span pole survives, at the right edge.
     const two = await mount(h(TrendOverview, propsOf(steps(2))))
-    const flag = query(two.container, '.lc-step-flag')
-    assert.equal(query(flag, '.lc-step-flag-label').textContent, '2')
+    const flag = query(two.container, '.lc-trend-flag')
+    assert.equal(query(flag, '.lc-trend-flag-label').textContent, '2')
     assert.equal(flag.style.left, 'calc(100% - 1px)')
     await two.unmount()
     // Three records: the interior ½ pole and the full-span pole.
     const three = await mount(h(TrendOverview, propsOf(steps(3))))
-    const flags = queryAll(three.container, '.lc-step-flag')
-    assert.deepEqual(flags.map(f => query(f, '.lc-step-flag-label').textContent), ['2', '3'])
+    const flags = queryAll(three.container, '.lc-trend-flag')
+    assert.deepEqual(flags.map(f => query(f, '.lc-trend-flag-label').textContent), ['2', '3'])
     assert.equal(flags[0].style.left, '50%')
     await three.unmount()
     // The sole record IS both edges: no pole (its label would hang past the left clip).
     const one = await mount(h(TrendOverview, propsOf([req(1, { turn: 1, step: 0 })])))
-    assert.equal(queryAll(one.container, '.lc-step-flag').length, 0)
+    assert.equal(queryAll(one.container, '.lc-trend-flag').length, 0)
     await one.unmount()
   })
 
-  test('turn granularity skips the poles and labels the strip quartiles plus the full span (by width)', async () => {
-    const m = await mount(h(TrendOverview, propsOf(steps(10, 2), { granularity: 'turn' })))
-    assert.equal(queryAll(m.container, '.lc-step-flag').length, 0)
+  test('turn granularity poles its record quartiles with the turn numbers, and the strip still labels by width', async () => {
+    const m = await mount(h(TrendOverview, propsOf(aggregateByTurn(steps(10, 2)), { granularity: 'turn' })))
+    const flags = queryAll(m.container, '.lc-trend-flag')
+    assert.equal(flags.length, 4)
+    flags.slice(0, 3).forEach((f, i) => assert.ok(Math.abs(parseFloat(f.style.left) - (i + 1) / 4 * 100) < 1e-9, f.style.left))
+    assert.equal(flags[3].style.left, 'calc(100% - 1px)')
+    assert.deepEqual(flags.map(f => query(f, '.lc-trend-flag-label').textContent), ['2', '3', '4', '5'])
     assert.deepEqual(queryAll(m.container, '.lc-turn-label').map(l => l.textContent), ['2', '3', '4', '5'])
     const blocks = queryAll(m.container, '.lc-turn')
     assert.equal(blocks.length, 5)
-    assert.equal(blocks[0].style.flexGrow, '2')
+    // One record per turn: the blocks match the ribbon's equal turn slots.
+    assert.deepEqual(blocks.map(b => b.style.flexGrow), ['1', '1', '1', '1', '1'])
+    await m.unmount()
+  })
+
+  test('turn poles and strip blocks share the equal-width turn axis, not the step-span widths', async () => {
+    const aggs = aggregateByTurn([
+      req(1, { turn: 1, step: 0 }),
+      req(2, { turn: 2, step: 0 }),
+      ...Array.from({ length: 50 }, (_, i) => req(3 + i, { turn: 3, step: i })),
+    ])
+    const m = await mount(h(TrendOverview, propsOf(aggs, { granularity: 'turn' })))
+    // Three equal ribbon slots: the interior ½ pole lands on turn 2, the full span on turn 3.
+    assert.deepEqual(queryAll(m.container, '.lc-trend-flag-label').map(l => l.textContent), ['2', '3'])
+    assert.equal(queryAll(m.container, '.lc-trend-flag')[1].style.left, 'calc(100% - 1px)')
+    // The blocks are equal too (a heavy turn does not widen its block), so every quartile gets a label.
+    assert.deepEqual(queryAll(m.container, '.lc-turn').map(b => b.style.flexGrow), ['1', '1', '1'])
+    assert.deepEqual(queryAll(m.container, '.lc-turn-label').map(l => l.textContent), ['1', '2', '3'])
+    await m.unmount()
+  })
+
+  test('turn poles carry the absolute turn numbers, not window ordinals', async () => {
+    // Retention trimmed the head: the first plotted turn is 301, and the flags say so.
+    const aggs = aggregateByTurn([301, 302, 303, 304, 305].map((turn, i) => req(i + 1, { turn, step: 0 })))
+    const m = await mount(h(TrendOverview, propsOf(aggs, { granularity: 'turn' })))
+    assert.deepEqual(queryAll(m.container, '.lc-trend-flag-label').map(l => l.textContent), ['302', '303', '304', '305'])
+    assert.deepEqual(queryAll(m.container, '.lc-turn-label').map(l => l.textContent), ['302', '303', '304', '305'])
     await m.unmount()
   })
 

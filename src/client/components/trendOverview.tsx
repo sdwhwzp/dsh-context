@@ -6,8 +6,8 @@
  * while a ribbon keeps every step's exact figure at its own x and interpolates between them — the same polyline
  * convention the duration overlay already rides. Interaction mirrors the bars': the surface picks the NEAREST
  * record (vertical brand rule + the shared tip), a click pins it, and the turn strip below keeps its zebra blocks
- * proportional (grow ∝ step span), hover-dimmed by a wash over the plot's other turns. Nothing preloads: the
- * component mounts only while the face is on, and its drawing geometry memoizes per data/mode change (a
+ * proportional (grow ∝ the records they span), hover-dimmed by a wash over the plot's other turns. Nothing
+ * preloads: the component mounts only while the face is on, and its drawing geometry memoizes per data/mode change (a
  * hover-driven parent render never rebuilds the polygons). Mutually exclusive with DNA mode (per-bar fingerprints
  * are illegible at ribbon scale) and Adaptive (the whole log IS the visible window).
  */
@@ -151,17 +151,17 @@ function ribbonGeometry(requests: RequestRecord[], delta: boolean, durationOn: b
   return geo
 }
 
-/** The turn strip's labeled groups: the group holding each WIDTH quartile of the total step span (the strip's
- * blocks grow ∝ span, so a count-quartile label could sit far off the ribbon's quarter marks). Deduped. */
-function wideQuartiles(groups: { span: number }[]): number[] {
-  const total = groups.reduce((s, g) => s + g.span, 0)
+/** The turn strip's labeled groups: the group holding each WIDTH quartile of the record span (blocks grow ∝ their
+ * record count, the ribbon's own x units), so the labels land by the ribbon's quarter marks. Deduped. */
+function wideQuartiles(groups: { count: number }[]): number[] {
+  const total = groups.reduce((s, g) => s + g.count, 0)
   const picks: number[] = []
   for (const q of FLAG_FRACS) {
     let acc = 0
     let pick = groups.length - 1
     // A run of undersized heads can carry no quartile inside it: the wide tail group holds the mark.
     for (let g = 0; g + 1 < groups.length; g++) {
-      acc += groups[g].span
+      acc += groups[g].count
       if (acc > q * total) {
         pick = g
         break
@@ -196,25 +196,23 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
     if (n === 0) return null
     // The stretched-unit x scale: one unit per record; a single record closes its bands across the full width.
     const u = n > 1 ? n - 1 : 1
-    // `span` counts the STEP columns the group covers (step records count one each), so strip blocks stay
-    // proportional to the bars they span in both granularities.
-    const groups: { turn: number; count: number; span: number; first: number }[] = []
+    // Blocks grow ∝ the RECORDS they span — the ribbon's own x unit: a step record counts one, and turn
+    // granularity's one-record-per-turn aggregates stay equal width, as the bars face paints them.
+    const groups: { turn: number; count: number; first: number }[] = []
     for (let i = 0; i < n; i++) {
       const req = requests[i]
       let grp = groups.length > 0 ? groups[groups.length - 1] : null
       if (grp === null || grp.turn !== (req.turn ?? 0)) {
-        grp = { turn: req.turn ?? 0, count: 0, span: 0, first: i }
+        grp = { turn: req.turn ?? 0, count: 0, first: i }
         groups.push(grp)
       }
       grp.count++
-      grp.span += req.stepCount ?? 1
     }
-    // Quartile + full-span flags, deduped (see FLAG_FRACS for the collapsed-at-start rule). Step granularity poles
-    // the record list (turn bars skip it — the strip numbers that grid); the strip labels its width quartiles
-    // plus the full-span group in both.
-    const flagSteps = props.granularity === 'step'
-      ? [...new Set(FLAG_FRACS.map(q => Math.round(q * (n - 1))))].filter(idx => idx > 0)
-      : []
+    // Quartile + full-span flags, deduped (see FLAG_FRACS for the collapsed-at-start rule): both granularities pole
+    // the record quarters, labeled with a step's 1-based position or the turn number it lands on (contextView feeds
+    // one record per turn in turn granularity).
+    const flagRecords = [...new Set(FLAG_FRACS.map(q => Math.round(q * (n - 1))))].filter(idx => idx > 0)
+    const flagLabel = (idx: number): number => (props.granularity === 'step' ? idx + 1 : requests[idx].turn ?? 0)
     const flagGroups = wideQuartiles(groups)
     // A delta quarter mark yields entirely when its 11px label box would overlap the zero label — the bars' check
     // (shared by the axis label and its dashed guide).
@@ -381,16 +379,16 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
                     >{'✂'}</span>
                   )
                 })}
-                {flagSteps.map(idx => (
+                {flagRecords.map(idx => (
                   <span
                     key={`flag-${idx}`}
-                    className="lc-step-flag"
+                    className="lc-trend-flag"
                     // The full-span pole hugs inside the pane's right edge: at left 100% the 1px pole falls wholly
                     // past the scroller's clip, so it insets by its own width while the label still reads leftward.
                     style={{ left: idx === n - 1 ? 'calc(100% - 1px)' : `${idx / u * 100}%` }}
                     aria-hidden="true"
                   >
-                    <span className="lc-step-flag-label">{idx + 1}</span>
+                    <span className="lc-trend-flag-label">{flagLabel(idx)}</span>
                   </span>
                 ))}
               </div>
@@ -402,7 +400,7 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
                   <span
                     key={`turn-${gi}`}
                     className={'lc-turn' + (on ? ' lc-turn-on' : '')}
-                    style={{ flexGrow: grp.span, flexBasis: 0, background: TURN_FILLS[gi % TURN_FILLS.length] }}
+                    style={{ flexGrow: grp.count, flexBasis: 0, background: TURN_FILLS[gi % TURN_FILLS.length] }}
                     title={`T${grp.turn}`}
                     onMouseEnter={() => { props.onHoverTurn(grp.turn) }}
                     onClick={() => { props.onPickTurn(grp.turn) }}

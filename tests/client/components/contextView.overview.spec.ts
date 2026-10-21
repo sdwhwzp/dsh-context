@@ -49,8 +49,9 @@ describe('ContextView — overview face', () => {
     assert.equal(svg.getAttribute('viewBox'), '0 0 2 112')
     // The whole retained log's axis: max 420.
     assert.equal(query(m.container, '.lc-axis-top').textContent, '420')
-    // Quartile + full-span step flags (3 records: the interior ½ and the full span) and the turn strip's labels.
-    assert.deepEqual(queryAll(m.container, '.lc-step-flag-label').map(f => f.textContent), ['2', '3'])
+    // Quartile + full-span record flags (3 records: the interior ½ and the full span), labeled by step, and the
+    // turn strip's labels.
+    assert.deepEqual(queryAll(m.container, '.lc-trend-flag-label').map(f => f.textContent), ['2', '3'])
     assert.deepEqual(queryAll(m.container, '.lc-turn-label').map(l => l.textContent), ['1', '0'])
 
     // Clicking a strip block forces turn granularity and pins the turn's closing record.
