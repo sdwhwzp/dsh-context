@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { createContextSettings, type SettingsScopeLike } from '../../src/client/settings'
+import { createContextSettings, overviewThresholdOf, type SettingsScopeLike } from '../../src/client/settings'
 
 /** A faithful in-memory settings form (the harness configForms.get contract:
  * getSnapshot/subscribe/set), not a mock of plugin code. */
@@ -52,6 +52,7 @@ describe('createContextSettings defaults', () => {
       fileSort: 'count',
       insightsEntry: 'show',
       durationCurve: 'show',
+      overviewAutoSteps: '200',
       fleetTab: 'show',
       promptPrefix: '',
       promptSuffix: '',
@@ -65,7 +66,17 @@ describe('createContextSettings defaults', () => {
     assert.equal(s.defaultFileSort(), 'count')
     assert.equal(s.insightsEntry(), 'show')
     assert.equal(s.defaultDurationCurve(), 'show')
+    assert.equal(s.overviewAutoSteps(), '200')
     assert.equal(s.fleetTab(), 'show')
+  })
+})
+
+describe('overviewThresholdOf', () => {
+  test('maps the numeric steps to a threshold and off to null', () => {
+    assert.equal(overviewThresholdOf('100'), 100)
+    assert.equal(overviewThresholdOf('200'), 200)
+    assert.equal(overviewThresholdOf('300'), 300)
+    assert.equal(overviewThresholdOf('off'), null)
   })
 })
 
@@ -94,6 +105,8 @@ describe('set', () => {
     assert.equal(s.defaultDeltaBase(), 'turn')
     s.set('promptPrefix', 'Be terse.')
     assert.equal(s.store.getSnapshot().promptPrefix, 'Be terse.')
+    s.set('overviewAutoSteps', 'off')
+    assert.equal(s.overviewAutoSteps(), 'off')
   })
 
   test('an unchanged value does not notify listeners', () => {
@@ -238,6 +251,7 @@ describe('attach', () => {
         defaultFileSort: 'path',
         insightsEntry: 'hide',
         defaultDurationCurve: 'hide',
+        overviewAutoSteps: '300',
         fleetTab: 'hide',
         promptPrefix: 'Be terse.',
         promptSuffix: 'Sign as Atlas.',
@@ -255,6 +269,7 @@ describe('attach', () => {
       fileSort: 'path',
       insightsEntry: 'hide',
       durationCurve: 'hide',
+      overviewAutoSteps: '300',
       fleetTab: 'hide',
       promptPrefix: 'Be terse.',
       promptSuffix: 'Sign as Atlas.',
@@ -290,6 +305,7 @@ describe('attach', () => {
         fileSort: 'count',
         insightsEntry: 'show',
         durationCurve: 'show',
+        overviewAutoSteps: '200',
         fleetTab: 'show',
         promptPrefix: '',
         promptSuffix: '',
@@ -302,7 +318,7 @@ describe('attach', () => {
     const s = createContextSettings()
     s.attach(new TestSettingsScope({
       status: 'ready',
-      value: { defaultPlacement: 'window', defaultGranularity: 'bogus', defaultTrendMode: 7, defaultDeltaBase: 'bogus', defaultToolSort: 'alpha', defaultFileSort: 'alpha', insightsEntry: 42, defaultDurationCurve: 'always', fleetTab: 7, promptPrefix: 9, promptSuffix: {} },
+      value: { defaultPlacement: 'window', defaultGranularity: 'bogus', defaultTrendMode: 7, defaultDeltaBase: 'bogus', defaultToolSort: 'alpha', defaultFileSort: 'alpha', insightsEntry: 42, defaultDurationCurve: 'always', overviewAutoSteps: 200, fleetTab: 7, promptPrefix: 9, promptSuffix: {} },
       writable: false,
     }))
     assert.equal(s.defaultPlacement(), 'all')
@@ -313,6 +329,7 @@ describe('attach', () => {
     assert.equal(s.defaultFileSort(), 'count')
     assert.equal(s.insightsEntry(), 'show')
     assert.equal(s.defaultDurationCurve(), 'show')
+    assert.equal(s.overviewAutoSteps(), '200')
     assert.equal(s.fleetTab(), 'show')
     assert.equal(s.store.getSnapshot().promptPrefix, '', 'a non-string prompt value degrades to the empty default')
     assert.equal(s.store.getSnapshot().promptSuffix, '')
@@ -347,11 +364,20 @@ describe('attach', () => {
     assert.equal(s.defaultDurationCurve(), 'show')
   })
 
+  test('an invalid scope auto-overview value degrades to the default instead of keeping the current one', () => {
+    const s = createContextSettings()
+    s.set('overviewAutoSteps', '100')
+    assert.equal(s.overviewAutoSteps(), '100')
+    const scope = new TestSettingsScope({ status: 'ready', value: { overviewAutoSteps: '50' }, writable: false })
+    s.attach(scope)
+    assert.equal(s.overviewAutoSteps(), '200')
+  })
+
   test('explicit schema-default values are accepted', () => {
     const s = createContextSettings()
     s.attach(new TestSettingsScope({
       status: 'ready',
-      value: { defaultPlacement: 'all', defaultGranularity: 'step', defaultTrendMode: 'total', defaultDeltaBase: 'step', defaultToolSort: 'count', defaultFileSort: 'count', insightsEntry: 'show' },
+      value: { defaultPlacement: 'all', defaultGranularity: 'step', defaultTrendMode: 'total', defaultDeltaBase: 'step', defaultToolSort: 'count', defaultFileSort: 'count', insightsEntry: 'show', overviewAutoSteps: '200' },
       writable: false,
     }))
     assert.equal(s.defaultPlacement(), 'all')
@@ -361,6 +387,7 @@ describe('attach', () => {
     assert.equal(s.defaultToolSort(), 'count')
     assert.equal(s.defaultFileSort(), 'count')
     assert.equal(s.insightsEntry(), 'show')
+    assert.equal(s.overviewAutoSteps(), '200')
   })
 
   test('missing fields keep the current state', () => {
@@ -369,6 +396,7 @@ describe('attach', () => {
     s.set('defaultToolSort', 'size')
     s.set('insightsEntry', 'hide')
     s.set('defaultDurationCurve', 'hide')
+    s.set('overviewAutoSteps', '100')
     s.set('promptPrefix', 'drafted')
     s.attach(new TestSettingsScope({ status: 'ready', value: { defaultFileSort: 'latest' }, writable: false }))
     assert.equal(s.defaultPlacement(), 'tab', 'the in-session choice survives a section without the field')
@@ -378,6 +406,7 @@ describe('attach', () => {
     assert.equal(s.defaultFileSort(), 'latest')
     assert.equal(s.insightsEntry(), 'hide', 'the in-session entry choice survives a section without the field')
     assert.equal(s.defaultDurationCurve(), 'hide', 'the in-session curve choice survives a section without the field')
+    assert.equal(s.overviewAutoSteps(), '100', 'the in-session auto-overview choice survives a section without the field')
     assert.equal(s.store.getSnapshot().promptPrefix, 'drafted', 'the in-session prompt text survives a section without the field')
   })
 
@@ -474,6 +503,7 @@ describe('attach', () => {
       fileSort: 'count',
       insightsEntry: 'show',
       durationCurve: 'show',
+      overviewAutoSteps: '200',
       fleetTab: 'show',
       promptPrefix: '',
       promptSuffix: '',

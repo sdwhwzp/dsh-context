@@ -188,7 +188,7 @@ dsh plugin --profile web update dsh-context@latest
 
 ## ⚙️ 设置
 
-**Context** 偏好设置卡片保存此插件的用户级设置——默认位置（**Context** 和 **Fleet** 会话标签页、右侧 Sidebar 面板，或两者）、**Fleet** 标签页自身的显示 / 隐藏开关、趋势粒度（Step/Turn）、趋势模式（Total/Delta）、默认显示的趋势时长曲线、工具和 File Activity 排序，以及侧边栏洞察入口。该卡片位于 **Plugins** 页面：侧边栏的 **Plugins** 入口 → **dsh-context** 插件包页面 → **Configuration** 区域（卡片由该入口的实时 Config 表单提供）。
+**Context** 偏好设置卡片保存此插件的用户级设置——默认位置（**Context** 和 **Fleet** 会话标签页、右侧 Sidebar 面板，或两者）、**Fleet** 标签页自身的显示 / 隐藏开关、趋势粒度（Step/Turn）、趋势模式（Total/Delta）、达到 100、200（默认）或 300 个保留步骤后自动开启总览（也可关闭）、默认显示的趋势时长曲线、工具和 File Activity 排序，以及侧边栏洞察入口。该卡片位于 **Plugins** 页面：侧边栏的 **Plugins** 入口 → **dsh-context** 插件包页面 → **Configuration** 区域（卡片由该入口的实时 Config 表单提供）。
 
 **System Prompt · Prefix / Suffix** 行用于填写自由文本，并将其拼接到每个会话系统提示词的最前面 / 最后面，对所有 Agent（包括子 Agent）生效——它们是随 Harness 自身提示词组装流程一同应用的部署级角色设定或行为规则。修改从下一轮开始生效；将某行留空即可停用对应设置。
 

@@ -2,13 +2,12 @@ import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, test, vi } from 'vitest'
 import { createContextSettings } from '../../../src/client/settings'
-import type { SettingsScopeLike } from '../../../src/client/settings'
 import type { UseChatLike } from '../../../src/client/services'
 import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
 import { DICT_EN } from '../../../src/client/i18n'
 import { TestClientCtx, TestLocale } from '../helpers/harness'
 import { click, flush, mount, query, queryAll, silenceWindowErrors, text } from '../helpers/kit'
-import { buttonByText, makeView, projectionsFor, richTimeline, T0, timeline } from './contextViewHarness'
+import { buttonByText, makeView, projectionsFor, richTimeline, settingsWith, T0, timeline } from './contextViewHarness'
 
 describe('ContextView — locale and settings', () => {
   // A real-shaped models.dev slice: the cost cell prices against the injected
@@ -58,17 +57,7 @@ describe('ContextView — locale and settings', () => {
   })
 
   test('mount-time granularity/trend/file-sort defaults come from the bound settings scope', async () => {
-    const settings = createContextSettings()
-    const scope: SettingsScopeLike = {
-      getSnapshot: () => ({
-        status: 'ready',
-        writable: true,
-        value: { defaultGranularity: 'turn', defaultTrendMode: 'delta', defaultFileSort: 'path', defaultDurationCurve: 'hide' },
-      }),
-      subscribe: () => () => {},
-      set: async () => {},
-    }
-    const detach = settings.attach(scope)
+    const settings = settingsWith({ defaultGranularity: 'turn', defaultTrendMode: 'delta', defaultFileSort: 'path', defaultDurationCurve: 'hide' })
     const View = makeView(new TestClientCtx(), settings)
     // Two file reads (the 2-op path sorts AFTER the 1-op one under 'count' but BEFORE it under 'path').
     const m = await mount(h(View, {
@@ -97,7 +86,6 @@ describe('ContextView — locale and settings', () => {
     assert.equal(queryAll(m.container, '.lc-bar').length, 2)
     assert.deepEqual(queryAll(m.container, '.lc-fa-row').map(r => r.title), ['/a.ts', '/z.ts'])
     await m.unmount()
-    detach()
   })
 })
 

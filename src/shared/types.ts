@@ -170,6 +170,9 @@ export type InsightsEntry = 'show' | 'hide'
 
 export type DefaultDurationCurve = 'show' | 'hide'
 
+/** Retained-step count at which the trend turns its Overview ribbon on; 'off' never auto-switches. */
+export type OverviewAutoSteps = 'off' | '100' | '200' | '300'
+
 /** Whether the Fleet conversation tab is served. */
 export type FleetTab = 'show' | 'hide'
 
@@ -182,6 +185,7 @@ export interface PluginSettings {
   defaultFileSort: DefaultFileSort
   insightsEntry: InsightsEntry
   defaultDurationCurve: DefaultDurationCurve
+  overviewAutoSteps: OverviewAutoSteps
   fleetTab: FleetTab
   /** Free text joined ahead of the harness's assembled system prompt; empty disables. */
   promptPrefix: string

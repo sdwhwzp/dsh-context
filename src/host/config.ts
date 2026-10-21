@@ -55,6 +55,7 @@ export const Config = z.object({
   defaultFileSort: volatileField(z.union(['count', 'latest', 'path', 'name']).default('count').loose()),
   insightsEntry: volatileField(z.union(['show', 'hide']).default('show').loose()),
   defaultDurationCurve: volatileField(z.union(['show', 'hide']).default('show').loose()),
+  overviewAutoSteps: volatileField(z.union(['100', '200', '300', 'off']).default('200').loose()),
   fleetTab: volatileField(z.union(['show', 'hide']).default('show').loose()),
   // Loose: a stale persisted value (or a non-string) degrades to the empty default instead of failing the entry.
   promptPrefix: volatileField(z.string().default('').loose()),

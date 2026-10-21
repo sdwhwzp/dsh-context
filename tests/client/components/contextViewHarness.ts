@@ -78,6 +78,17 @@ export function makeView(ctx: TestClientCtx, settings = createContextSettings())
   return makeContextView(asClientCtx(ctx), kit, settings, makeAgentHeads())
 }
 
+/** Settings bound to a ready Host form carrying `value`, so specs can pin mount-time defaults. */
+export function settingsWith(value: Record<string, unknown>) {
+  const settings = createContextSettings()
+  settings.attach({
+    getSnapshot: () => ({ status: 'ready', writable: true, value }),
+    subscribe: () => () => {},
+    set: async () => {},
+  })
+  return settings
+}
+
 export function buttonByText(container: ParentNode, label: string): HTMLElement {
   const hit = queryAll(container, 'button').find(b => text(b) === label)
   if (hit === undefined) throw new Error(`button not found: ${label}`)

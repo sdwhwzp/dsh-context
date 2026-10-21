@@ -5,9 +5,14 @@ import type { SurfaceNode } from '../../../src/shared/types'
 import type { UseChatLike } from '../../../src/client/services'
 import { TestClientCtx } from '../helpers/harness'
 import { flush, makeKit, mount, queryAll } from '../helpers/kit'
-import { buttonByText, makeView, projectionsFor, T0, timeline } from './contextViewHarness'
+import { buttonByText, makeView, projectionsFor, settingsWith, T0, timeline } from './contextViewHarness'
 
 const kit = makeKit()
+
+/** The view with the auto-overview threshold off, so a 600-step log stays on the bars face from the first commit. */
+function makeViewNoAutoOverview() {
+  return makeView(new TestClientCtx(), settingsWith({ overviewAutoSteps: 'off' }))
+}
 
 function bigTimeline() {
   const requests = Array.from({ length: 600 }, (_, i) => ({
@@ -32,7 +37,7 @@ function bigTimeline() {
 
 describe('ContextView lazy DNA bands', () => {
   test('a long log builds DNA bands only for the rendered window', async () => {
-    const View = makeView(new TestClientCtx())
+    const View = makeViewNoAutoOverview()
     const m = await mount(h(View, {
       sessionId: 'sv-lazy-dna',
       useProjection: projectionsFor(bigTimeline()),
@@ -51,7 +56,7 @@ describe('ContextView lazy DNA bands', () => {
   })
 
   test('delta mode on a long log keeps every band so its axis stays exact', async () => {
-    const View = makeView(new TestClientCtx())
+    const View = makeViewNoAutoOverview()
     const m = await mount(h(View, {
       sessionId: 'sv-lazy-dna-delta',
       useProjection: projectionsFor(bigTimeline()),

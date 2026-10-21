@@ -171,6 +171,18 @@ function PreferenceRows(props: { t: Translate; state: SettingsState; set?: Setti
         <ShowHideRow t={t} label={t('settings.durationCurve')} value={state.durationCurve} disabled={disabled}
           onPick={(id) => { set?.('defaultDurationCurve', id) }} />
         <PrefRow
+          label={t('settings.overviewAuto')}
+          value={state.overviewAutoSteps}
+          disabled={disabled}
+          options={[
+            { id: '100', label: t('settings.overviewAutoSteps', { n: 100 }) },
+            { id: '200', label: t('settings.overviewAutoSteps', { n: 200 }) },
+            { id: '300', label: t('settings.overviewAutoSteps', { n: 300 }) },
+            { id: 'off', label: t('settings.overviewAutoOff') },
+          ]}
+          onPick={(id) => { set?.('overviewAutoSteps', id) }}
+        />
+        <PrefRow
           label={t('settings.deltaBase')}
           value={state.deltaBase}
           disabled={disabled}

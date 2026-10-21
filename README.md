@@ -197,7 +197,7 @@ The dialog stays within the window beside the sidebar, including when a skin blu
 
 ## ⚙️ Settings
 
-The **Context** preferences card holds this plugin's per-user settings — default placement (the **Context** and **Fleet** conversation tabs, the right Sidebar panel, or both), the **Fleet** tab's own Show/Hide switch, trend granularity (Step/Turn), trend mode (Total/Delta), the trend duration curve (shown by default), tool and File Activity sort, and the sidebar insights entry. It lives on the **Plugins** page: the sidebar **Plugins** entry → the **dsh-context** bundle's page → its **Configuration** section (the card is served by the entry's live Config form).
+The **Context** preferences card holds this plugin's per-user settings — default placement (the **Context** and **Fleet** conversation tabs, the right Sidebar panel, or both), the **Fleet** tab's own Show/Hide switch, trend granularity (Step/Turn), trend mode (Total/Delta), automatic Overview after 100, 200 (default), or 300 retained steps (or Off), the trend duration curve (shown by default), tool and File Activity sort, and the sidebar insights entry. It lives on the **Plugins** page: the sidebar **Plugins** entry → the **dsh-context** bundle's page → its **Configuration** section (the card is served by the entry's live Config form).
 
 The **System Prompt · Prefix / Suffix** rows hold free text joined at the very start / end of every session's system prompt, for all agents (subagents included) — a per-deployment persona or behavioral rule that rides the harness's own prompt assembly. Edits apply from the next turn; leave a row empty to disable it.
 

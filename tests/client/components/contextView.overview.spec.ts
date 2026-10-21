@@ -3,9 +3,35 @@
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
+import { createElement as h } from 'react'
 import { DICT_EN } from '../../../src/client/i18n'
-import { click, query, queryAll, text } from '../helpers/kit'
-import { buttonByText, mountRich } from './contextViewHarness'
+import type { OverviewAutoSteps } from '../../../src/shared/types'
+import { TestClientCtx } from '../helpers/harness'
+import { click, mount, query, queryAll, text } from '../helpers/kit'
+import { buttonByText, makeView, mountRich, projectionsFor, settingsWith, T0, timeline } from './contextViewHarness'
+
+/** A session with `n` retained request steps, one per column. */
+function stepsTimeline(n: number) {
+  return timeline({
+    model: 'deepseek-v4-flash',
+    provider: 'deepseek',
+    contextWindow: 128000,
+    requests: Array.from({ length: n }, (_, i) => ({
+      seq: (i + 1) * 2,
+      turn: Math.floor(i / 2) + 1,
+      step: (i % 2) + 1,
+      time: T0 + i * 1000,
+      system: 100, tools: 200, user: 10, inject: 0, assistant: 20, tool: 0,
+      total: 330,
+    })),
+  })
+}
+
+/** Settings bound to one auto-overview choice, served the way the Host form would. */
+function viewWith(value: OverviewAutoSteps, sessionId: string, steps: number) {
+  const View = makeView(new TestClientCtx(), settingsWith({ overviewAutoSteps: value }))
+  return { View, props: { sessionId, useProjection: projectionsFor(stepsTimeline(steps)) } }
+}
 
 describe('ContextView — overview face', () => {
   test('the Overview chip rides right of Duration and clears DNA/Adaptive on activation', async () => {
@@ -59,6 +85,67 @@ describe('ContextView — overview face', () => {
     assert.ok(buttonByText(m.container, DICT_EN['gran.turn']).className.includes('lc-gran-on'))
     assert.match(query(m.container, '.lc-fit-cursor').className, /lc-fit-pin/)
     assert.ok(text(m.container).includes(DICT_EN['detail.turn'].replace('{t}', '1').replace('{n}', '2')))
+    await m.unmount()
+  })
+
+  test('a log at the configured step count mounts on the ribbon face', async () => {
+    const { View, props } = viewWith('100', 'sv-overview-auto', 100)
+    const m = await mount(h(View, props))
+    assert.equal(queryAll(m.container, '.lc-bar').length, 0)
+    assert.ok(query(m.container, '.lc-fit-svg'))
+    assert.ok(buttonByText(m.container, DICT_EN['trend.overview']).className.includes('lc-gran-on'))
+    await m.unmount()
+  })
+
+  test('crossing the threshold mid-session switches once, and a manual toggle-off sticks', async () => {
+    const { View, props } = viewWith('100', 'sv-overview-auto-grow', 99)
+    const m = await mount(h(View, props))
+    assert.equal(queryAll(m.container, '.lc-bar').length, 99)
+    // DNA is on before the crossing: the auto activation clears it (the faces are exclusive).
+    await click(buttonByText(m.container, DICT_EN['trend.dna']))
+    await m.update(h(View, { ...props, useProjection: projectionsFor(stepsTimeline(100)) }))
+    assert.equal(queryAll(m.container, '.lc-bar').length, 0)
+    assert.ok(buttonByText(m.container, DICT_EN['trend.overview']).className.includes('lc-gran-on'))
+    assert.equal(buttonByText(m.container, DICT_EN['trend.dna']).className.includes('lc-gran-on'), false)
+    // The reader turns the ribbon off; the next steps never force it back on.
+    await click(buttonByText(m.container, DICT_EN['trend.overview']))
+    assert.equal(queryAll(m.container, '.lc-bar').length, 100)
+    await m.update(h(View, { ...props, useProjection: projectionsFor(stepsTimeline(101)) }))
+    assert.equal(queryAll(m.container, '.lc-bar').length, 101)
+    await m.unmount()
+  })
+
+  test('a higher threshold or the off choice keeps the bars', async () => {
+    for (const [choice, steps] of [['300', 100], ['off', 300]] as const) {
+      const { View, props } = viewWith(choice, `sv-overview-auto-${choice}`, steps)
+      const m = await mount(h(View, props))
+      assert.ok(queryAll(m.container, '.lc-bar').length > 0, `${choice} leaves the bars face on`)
+      assert.equal(query(m.container, '.lc-chart-scroll').className.includes('lc-chart-fit'), false)
+      await m.unmount()
+    }
+  })
+
+  test('a manual toggle-off survives a session round trip out of an auto-opened session', async () => {
+    const { View, props } = viewWith('100', 'sv-overview-auto-sticky', 100)
+    const m = await mount(h(View, props))
+    await click(buttonByText(m.container, DICT_EN['trend.overview']))
+    assert.equal(queryAll(m.container, '.lc-bar').length, 100)
+    // Another session and back: the fired marker keeps the reader's choice for the first one.
+    await m.update(h(View, { ...props, sessionId: 'sv-overview-auto-other', useProjection: projectionsFor(stepsTimeline(3)) }))
+    assert.ok(queryAll(m.container, '.lc-bar').length > 0)
+    await m.update(h(View, props))
+    assert.equal(queryAll(m.container, '.lc-bar').length, 100)
+    const other = { ...props, sessionId: 'sv-overview-auto-qualified', useProjection: projectionsFor(stepsTimeline(100)) }
+    await m.update(h(View, other))
+    assert.ok(buttonByText(m.container, DICT_EN['trend.overview']).className.includes('lc-gran-on'))
+    await m.update(h(View, props))
+    assert.equal(queryAll(m.container, '.lc-bar').length, 100)
+    await click(buttonByText(m.container, DICT_EN['trend.dna']))
+    await click(buttonByText(m.container, DICT_EN['trend.adaptive']))
+    await m.update(h(View, other))
+    assert.ok(buttonByText(m.container, DICT_EN['trend.overview']).className.includes('lc-gran-on'))
+    assert.equal(buttonByText(m.container, DICT_EN['trend.dna']).className.includes('lc-gran-on'), false)
+    assert.equal(buttonByText(m.container, DICT_EN['trend.adaptive']).className.includes('lc-gran-on'), false)
     await m.unmount()
   })
 })

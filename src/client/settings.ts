@@ -1,9 +1,14 @@
 /** The plugin's user-settings binding (browser half): the Host-served `dsh-context` namespace carries per-user
  * display preferences, degrading to the schema defaults wherever that surface is absent or read-only. */
 
-import type { DefaultDeltaBase, DefaultFileSort, DefaultGranularity, DefaultDurationCurve, DefaultPlacement, DefaultToolSort, DefaultTrendMode, FleetTab, InsightsEntry, SettingsField } from '../shared/types'
+import type { DefaultDeltaBase, DefaultFileSort, DefaultGranularity, DefaultDurationCurve, DefaultPlacement, DefaultToolSort, DefaultTrendMode, FleetTab, InsightsEntry, OverviewAutoSteps, SettingsField } from '../shared/types'
 
 export type { DefaultDeltaBase, DefaultFileSort, DefaultToolSort, SettingsField } from '../shared/types'
+
+/** The auto-overview threshold in retained steps; null when the preference is off. */
+export function overviewThresholdOf(value: OverviewAutoSteps): number | null {
+  return value === 'off' ? null : Number(value)
+}
 
 /** The bound settings form (`ctx.configForms.get`), as consumed. */
 export interface SettingsScopeLike {
@@ -30,6 +35,7 @@ export interface SettingsState {
   fileSort: DefaultFileSort
   insightsEntry: InsightsEntry
   durationCurve: DefaultDurationCurve
+  overviewAutoSteps: OverviewAutoSteps
   fleetTab: FleetTab
   promptPrefix: string
   promptSuffix: string
@@ -47,6 +53,7 @@ export interface ContextSettings {
   defaultFileSort(): DefaultFileSort
   insightsEntry(): InsightsEntry
   defaultDurationCurve(): DefaultDurationCurve
+  overviewAutoSteps(): OverviewAutoSteps
   fleetTab(): FleetTab
   attach(scope: SettingsScopeLike): () => void
   /** Persist one preference choice (local echo, then the fenced scope write). */
@@ -62,6 +69,7 @@ type Prefs = {
   fileSort?: DefaultFileSort
   insightsEntry?: InsightsEntry
   durationCurve?: DefaultDurationCurve
+  overviewAutoSteps?: OverviewAutoSteps
   fleetTab?: FleetTab
   promptPrefix?: string
   promptSuffix?: string
@@ -79,6 +87,7 @@ function prefsOf(value: unknown): Prefs {
     ...(v.defaultFileSort === 'count' || v.defaultFileSort === 'latest' || v.defaultFileSort === 'path' || v.defaultFileSort === 'name' ? { fileSort: v.defaultFileSort } : {}),
     ...(v.insightsEntry === 'show' || v.insightsEntry === 'hide' ? { insightsEntry: v.insightsEntry } : {}),
     ...(v.defaultDurationCurve === 'show' || v.defaultDurationCurve === 'hide' ? { durationCurve: v.defaultDurationCurve } : {}),
+    ...(v.overviewAutoSteps === '100' || v.overviewAutoSteps === '200' || v.overviewAutoSteps === '300' || v.overviewAutoSteps === 'off' ? { overviewAutoSteps: v.overviewAutoSteps } : {}),
     ...(v.fleetTab === 'show' || v.fleetTab === 'hide' ? { fleetTab: v.fleetTab } : {}),
     ...(typeof v.promptPrefix === 'string' ? { promptPrefix: v.promptPrefix } : {}),
     ...(typeof v.promptSuffix === 'string' ? { promptSuffix: v.promptSuffix } : {}),
@@ -86,7 +95,7 @@ function prefsOf(value: unknown): Prefs {
 }
 
 export function createContextSettings(): ContextSettings {
-  let state: SettingsState = { status: 'loading', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'count', insightsEntry: 'show', durationCurve: 'show', fleetTab: 'show', promptPrefix: '', promptSuffix: '', writable: false }
+  let state: SettingsState = { status: 'loading', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'count', insightsEntry: 'show', durationCurve: 'show', overviewAutoSteps: '200', fleetTab: 'show', promptPrefix: '', promptSuffix: '', writable: false }
   let scope: SettingsScopeLike | undefined
   const listeners = new Set<() => void>()
   /** Every field is a scalar, so a shallow compare is the store's identity check — and a new preference
@@ -120,6 +129,7 @@ export function createContextSettings(): ContextSettings {
       fileSort: prefs.fileSort ?? state.fileSort,
       insightsEntry: prefs.insightsEntry ?? (raw?.insightsEntry === undefined ? state.insightsEntry : 'show'),
       durationCurve: prefs.durationCurve ?? (raw?.defaultDurationCurve === undefined ? state.durationCurve : 'show'),
+      overviewAutoSteps: prefs.overviewAutoSteps ?? (raw?.overviewAutoSteps === undefined ? state.overviewAutoSteps : '200'),
       fleetTab: prefs.fleetTab ?? (raw?.fleetTab === undefined ? state.fleetTab : 'show'),
       promptPrefix: prefs.promptPrefix ?? (raw?.promptPrefix === undefined ? state.promptPrefix : ''),
       promptSuffix: prefs.promptSuffix ?? (raw?.promptSuffix === undefined ? state.promptSuffix : ''),
@@ -143,6 +153,7 @@ export function createContextSettings(): ContextSettings {
     defaultFileSort: () => state.fileSort,
     insightsEntry: () => state.insightsEntry,
     defaultDurationCurve: () => state.durationCurve,
+    overviewAutoSteps: () => state.overviewAutoSteps,
     fleetTab: () => state.fleetTab,
     attach(bound) {
       scope = bound

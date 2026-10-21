@@ -15,6 +15,7 @@ import { activityOf, activityOfOps, locateStepOf, previewAddressOf, surfaceSeqOf
 import type { SessionSpend } from '../services'
 import type { FileEntry, FileOp } from '../fileActivity'
 import type { ContextSettings } from '../settings'
+import { overviewThresholdOf } from '../settings'
 import type { ViewKit } from '../viewkit'
 import type { AgentHeads } from '../agentHeads'
 import { agentSelfOf } from '../agentTree'
@@ -163,7 +164,32 @@ export function makeContextView(
     // The overview face: the whole retained log as one continuous ribbon (trendOverview.tsx). Exclusive with DNA
     // mode (per-bar fingerprints are illegible at ribbon scale) and Adaptive (the whole log IS the visible
     // window): activating one clears the others.
-    const [overview, setOverview] = useState(false)
+    const [overview, setOverviewState] = useState(false)
+    const overviewSelections = useRef(new Map<string | undefined, boolean>())
+    const overviewSession = useRef(sessionId)
+    function setOverview(on: boolean): void {
+      overviewSelections.current.set(sessionId, on)
+      setOverviewState(on)
+    }
+    // The auto-overview threshold: the first time this session's retained log holds the configured number of
+    // steps, the trend switches to its ribbon face. Fired once per session for this view's lifetime, so a
+    // reader's own toggle-off sticks.
+    const overviewAutoAt = overviewThresholdOf(settings.overviewAutoSteps())
+    const overviewAutoFired = useRef(new Set<string | undefined>())
+    useLayoutEffect(() => {
+      if (overviewSession.current !== sessionId) {
+        overviewSession.current = sessionId
+        const selected = overviewSelections.current.get(sessionId) ?? false
+        setOverviewState(selected)
+        if (selected) { setDna(false); setAdaptive(false) }
+      }
+      if (data === null || overviewAutoAt === null || overviewAutoFired.current.has(sessionId)) return
+      if (data.requests.length < overviewAutoAt) return
+      overviewAutoFired.current.add(sessionId)
+      setOverview(true)
+      setDna(false)
+      setAdaptive(false)
+    }, [data, sessionId, overviewAutoAt])
     const [durationCurve, setDurationCurve] = useState(() => settings.defaultDurationCurve() === 'show')
     const [focusTurn, setFocusTurn] = useState<number | null>(null)
     const [jumpSeq, setJumpSeq] = useState<number | null>(null)
