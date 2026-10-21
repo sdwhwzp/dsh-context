@@ -60,6 +60,7 @@ Last verified: **2026-10-20** (dsh-context `0.73.3`, dsh `0.1.7-rc.2` / `0.2.0-r
 
 - **Limitation — declared divergence:** the timing card's wait/generation boundary opens at the first OBSERVABLE instant (the first token, or an earlier `block-start` marker the token packing could not stamp), not at the meter's first-token anchor — so marker-tiled decode buckets and the split never double-count one window.
 - **Limitation — daily-ledger attribution:** `contextTimeline.cost` prices at the settlement instant while the daily ledger prices at the step-initiation instant, so a tariff-boundary step can split its peak/off buckets differently between the lifetime total and the KPI band; the ledger also retains 400 days (`MAX_KEPT_DAYS` in `src/host/activity.ts`).
+- **Limitation — statutory holidays:** no holiday calendar is maintained (by decision), so a holiday-weekday request inside the peak windows prices at peak where the platform bills off-peak; the tooltip states the weekday/weekend rule. (`src/host/foldMetering.ts` `isBeijingPeak`)
 
 ## 5 · Client surface
 

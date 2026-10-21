@@ -632,8 +632,8 @@ describe('unknown event types', () => {
 
 describe('session-cost accumulation', () => {
   const usage = { inputTokens: 100 }
-  // DeepSeek peak windows: UTC weekdays 01:00–04:00 and 06:00–10:00. 2024-01-01
-  // is a Monday; 2024-01-06/07 the weekend. 02:00 UTC Monday is peak; the
+  // DeepSeek peak windows: Beijing Time weekdays 09:00–12:00 and 14:00–18:00 (UTC 01:00–04:00 and
+  // 06:00–10:00). 2024-01-01 is a Monday; 2024-01-06/07 the weekend. 02:00 UTC Monday is peak; the
   // helpers' default clock (1970-01-01T00:00:01 UTC) is off-peak.
   const PEAK = Date.UTC(2024, 0, 1, 2, 0, 0)
   const at100 = (seq: number, time: number) => assistantMessage(seq, { usage, time })

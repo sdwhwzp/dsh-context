@@ -350,6 +350,22 @@ describe('TrendOverview pointer interaction', () => {
     await m.unmount()
   })
 
+  test('the pointer tracks locally without waiting for the parent hover', async () => {
+    const m = await mount(h(TrendOverview, propsOf(reqs)))
+    const surface = query(m.container, '.lc-chart')
+    stubSurfaceRect(surface)
+    // HoveredSeq never changes here: the local state alone must paint the cursor and the tip.
+    await moveX(surface, 200)
+    assert.equal(query(m.container, '.lc-fit-cursor').style.left, '50%')
+    assert.equal(query(query(m.container, '.lc-chart-tip'), 'span').textContent, kit.t('tip.step', { t: 1, s: 2, n: 5 }))
+    await moveX(surface, 120)
+    assert.equal(query(m.container, '.lc-fit-cursor').style.left, '25%')
+    await unhover(surface)
+    assert.equal(queryAll(m.container, '.lc-fit-cursor').length, 0)
+    assert.equal(queryAll(m.container, '.lc-chart-tip').length, 0)
+    await m.unmount()
+  })
+
   test('a zero-width rect picks the first record', async () => {
     const spies = { hover: [] as (number | null)[] }
     const m = await mount(h(TrendOverview, propsOf(reqs, { onHover: (s) => { spies.hover.push(s) } })))

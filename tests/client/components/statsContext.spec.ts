@@ -325,6 +325,8 @@ describe('StatsContext', () => {
     assert.ok(costTip.includes('Cache write $0.15'))
     assert.ok(costTip.includes('Output $0.60'))
     assert.ok(costTip.includes('peak windows'), 'a DeepSeek session explains the peak/off-peak scheme')
+    assert.ok(costTip.includes('off-peak rates'), 'the tip says the listed rates are the off-peak tier')
+    assert.ok(costTip.includes('twice the listed rate'), 'the tip says peak bills at twice the listed rate')
     assert.ok(!costTip.includes('|'), 'no peak|off pairs — the footnotes carry the scheme')
     await m.unmount()
   })
@@ -430,6 +432,8 @@ describe('StatsContext', () => {
     const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
     assert.ok(costTip.includes('含当前智能体及所有层级的子智能体'), 'the cost tip names the family scope too — all levels')
     assert.ok(costTip.includes('每百万 Token 价格'))
+    assert.ok(costTip.includes('挂牌价为谷时价'), 'the zh tip says the listed rates are off-peak')
+    assert.ok(costTip.includes('2 倍计费'), 'the zh tip says peak bills at twice the listed rate')
     assert.ok(costTip.includes('按 deepseek · deepseek-v4-flash 在 models.dev 的刊登价格如上。'))
     assert.ok(costTip.includes('人民币按 1 元 = 0.15 美元换算。'), 'the CNY display carries the conversion footnote')
     assert.ok(costTip.includes('缓存输入 ¥0.02'))
@@ -536,7 +540,7 @@ describe('StatsContext', () => {
     // No row may show the peak|off-peak pair — that is DeepSeek's alone.
     const rows = queryAll(m.container, '.lc-stat-tip-row').map(el => text(el))
     assert.ok(rows.every(r => !r.includes('|')))
-    // Both buckets bill at list price: 2M × $0.075 — no half-price off-peak.
+    // Both buckets bill at list price (only DeepSeek's peak doubles): 2M × $0.075.
     assert.ok(headsOf(m.container).totals[3] === '2.0M/$0.15')
     await m.unmount()
   })

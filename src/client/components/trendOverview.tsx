@@ -12,7 +12,7 @@
  * are illegible at ribbon scale) and Adaptive (the whole log IS the visible window).
  */
 
-import { Fragment, useLayoutEffect, useMemo, useRef, type ReactElement } from 'react'
+import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { Category, ContextEventRecord, RequestRecord } from '../../shared/types'
 import { CATS, CAT_COLOR } from '../categories'
 import { RISE_CLASS, TURN_FILLS, preprocessTrend, trendMaxima, turnStepsOf, trendTipRows } from './trendChart'
@@ -193,6 +193,15 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
     const surfaceRef = useRef<HTMLDivElement | null>(null)
     const wrapRef = useRef<HTMLDivElement | null>(null)
     const lastIdxRef = useRef<number | null>(null)
+    // Pointer hover is local to the ribbon (the bars' idiom): the tip and cursor must track the pointer, while the
+    // parent's preview follows a throttle/transition and would otherwise freeze a sweep at its first record. The
+    // pointer is hoveredSeq's only producer, so its record wins while inside; leaving drops the local override.
+    const [localHover, setLocalHover] = useState<number | null>(null)
+    const hoverSeq = localHover ?? props.hoveredSeq
+    const handleHover = useCallback((seq: number | null): void => {
+      setLocalHover(seq)
+      props.onHover(seq)
+    }, [props.onHover])
     if (n === 0) return null
     // The stretched-unit x scale: one unit per record; a single record closes its bands across the full width.
     const u = n > 1 ? n - 1 : 1
@@ -242,19 +251,19 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
       const idx = pick(e)
       if (lastIdxRef.current !== idx) {
         lastIdxRef.current = idx
-        props.onHover(requests[idx].seq)
+        handleHover(requests[idx].seq)
       }
     }
     const onLeave = (): void => {
       lastIdxRef.current = null
-      props.onHover(null)
+      handleHover(null)
     }
     const onClick = (e: { clientX: number; currentTarget: HTMLElement }): void => {
       const seq = requests[pick(e)].seq
       props.onSelect(props.selectedSeq === seq ? null : seq)
     }
 
-    const hoveredIdx = props.hoveredSeq !== null ? requests.findIndex(r => r.seq === props.hoveredSeq) : -1
+    const hoveredIdx = hoverSeq !== null ? requests.findIndex(r => r.seq === hoverSeq) : -1
     const selectedIdx = props.selectedSeq !== null ? requests.findIndex(r => r.seq === props.selectedSeq) : -1
     const stepsOf = useMemo(() => turnStepsOf(props.requests), [props.requests])
     // Re-position the tip after every commit (it mounts on hover changes); reads batch before paint — the

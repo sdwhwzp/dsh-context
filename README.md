@@ -83,7 +83,7 @@ The top row uses a 3:1 flex split between Context Stats and Plugin Info when bot
 
 | Card | The question it answers |
 | --- | --- |
-| **Context Stats** | Turns, steps, human inputs, live tool calls, and the session's cache-hit rate. Cost uses the authorized dsh-spend session-family ledger and its display currency when available; otherwise it estimates the whole agent family from models.dev list prices, including DeepSeek peak/off-peak rates. A separate cell estimates the subagents’ share from the same list prices. Hover the `?` for the displayed amount's source and model breakdown. |
+| **Context Stats** | Turns, steps, human inputs, live tool calls, and the session's cache-hit rate. Cost uses the authorized dsh-spend session-family ledger and its display currency when available; otherwise it estimates the whole agent family from models.dev list prices. DeepSeek's listed rates are the off-peak tier, and peak windows bill at 2×. A separate cell estimates the subagents’ share from the same list prices. Hover the `?` for the displayed amount's source and model breakdown. |
 | **Token Stats** | Where the billed tokens went — the same total as the chat stats line under the composer, split by composition (system, tools, messages…) with the provider-exact output closing the ring, and the session's cache-hit rate in the corner. |
 | **Timing Stats** | How active time splits across model calls, tool runs, and overhead, plus decode throughput for calls with both output-token usage and first-token timing. A packed time strip shows completed steps in order, excludes idle gaps, and links its hover details with the timing legend. |
 | **Current Context** | What's in the window *right now*. |

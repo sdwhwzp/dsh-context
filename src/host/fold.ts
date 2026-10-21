@@ -765,6 +765,6 @@ export function applyTimeline(state: TimelineState, event: TimelineEvent, bounds
 // The pre-split surface, kept for the specs; production callers import the owning sibling directly.
 export { createTimelineState, trimToLastTurns } from './foldState'
 export type { TimelineEvent, TimelineState } from './foldState'
-export { addBilledUsage, isPeakUtc, tokenCountOf } from './foldMetering'
+export { addBilledUsage, isBeijingPeak, tokenCountOf } from './foldMetering'
 export type { BilledUsage, UsageLike } from './foldMetering'
 export { buildTimelineDetail, buildTimelineHead, buildTimelineView } from './foldWire'

@@ -47,7 +47,7 @@ export const DICT_ZH = {
   'stats.costTipTree': '本会话委派出去的工作（工作流成员、子代理）各自独立记账，这里已合计该会话族的 {n} 个会话。',
   'stats.cost': '费用',
   'stats.costTip': '估算的费用，含当前智能体及所有层级的子智能体，仅供参考。',
-  'stats.costTipDeepseek': 'DeepSeek 高峰时段（北京时间工作日 9:00–12:00、14:00–18:00）按挂牌价计费，其余时段半价。',
+  'stats.costTipDeepseek': 'DeepSeek 在 models.dev 的挂牌价为谷时价；高峰时段（北京时间周一至周五 9:00–12:00、14:00–18:00）按挂牌价的 2 倍计费，周六、周日全天为谷时。',
   'stats.costTipCny': '人民币按 1 元 = 0.15 美元换算。',
   'stats.currentAgent': '当前 Agent',
   'stats.teamSubs': '子 Agent × {n}',

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { applyActivity, contextActivitySchema, createContextActivityDefinition } from '../../src/host/activity'
-import { isPeakUtc } from '../../src/host/fold'
+import { isBeijingPeak } from '../../src/host/fold'
 import { dayKeyOf } from '../../src/shared/days'
 
 /** Local noon of a day offset from 2026-01-01 — deterministic in every timezone. */
@@ -437,7 +437,7 @@ describe('applyActivity: the route in force', () => {
     state = applyActivity(state, assistantMessage(OFF_UTC, { inputTokens: 10 }))
     const day = state.days[dayKeyOf(OFF_UTC) ?? '']
     assert.deepEqual(day?.cost, { '': { 'deepseek-v4': { peak: { uncached: 10, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
-      'an unattributed provider is not DeepSeek, so no off-peak halving')
+      'an unattributed provider is not DeepSeek, so its usage books under peak and is never doubled')
   })
 })
 
@@ -469,7 +469,7 @@ describe('applyActivity: the initiation stamp', () => {
       '2026-01-01': {
         tokens: 9,
         requests: 1,
-        cost: { 'deepseek-official': { 'deepseek-v4': { [isPeakUtc(at(0)) ? 'peak' : 'off']: { uncached: 9, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+        cost: { 'deepseek-official': { 'deepseek-v4': { [isBeijingPeak(at(0)) ? 'peak' : 'off']: { uncached: 9, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
       },
     })
   })
@@ -583,7 +583,7 @@ describe('applyActivity: the per-day pricing record', () => {
     state = applyActivity(state, assistantMessage(at(0), { inputTokens: 1, outputTokens: 2 }))
     state = applyActivity(state, assistantMessage(at(0), { inputTokens: 3 }))
     assert.deepEqual(state.days['2026-01-01'].cost, {
-      'deepseek-official': { 'deepseek-v4': { [isPeakUtc(at(0)) ? 'peak' : 'off']: { uncached: 4, cacheRead: 0, cacheWrite: 0, output: 2 } } },
+      'deepseek-official': { 'deepseek-v4': { [isBeijingPeak(at(0)) ? 'peak' : 'off']: { uncached: 4, cacheRead: 0, cacheWrite: 0, output: 2 } } },
     })
   })
 
@@ -594,7 +594,7 @@ describe('applyActivity: the per-day pricing record', () => {
     assert.deepEqual(state.days['2026-01-01'], {
       tokens: 1,
       requests: 2,
-      cost: { 'deepseek-official': { 'deepseek-v4': { [isPeakUtc(at(0)) ? 'peak' : 'off']: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+      cost: { 'deepseek-official': { 'deepseek-v4': { [isBeijingPeak(at(0)) ? 'peak' : 'off']: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
     })
   })
 

@@ -404,7 +404,8 @@ export interface TimingTotals {
 }
 
 /** One billed model's totals split by pricing period: providers without period pricing book
- * everything under `peak`; DeepSeek bills `peak` at list price and `off` at half. */
+ * everything under `peak`; DeepSeek's `peak` buckets price at twice the list (off-peak) rate,
+ * `off` buckets at list. */
 export interface CostModelUsage {
   peak?: CostBucketTotals
   off?: CostBucketTotals

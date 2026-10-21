@@ -78,7 +78,7 @@ dsh plugin --profile web update dsh-context@latest
 
 | 卡片 | 解答的问题 |
 | --- | --- |
-| **Context Stats** | 轮次、步骤、用户输入、实时工具调用——以及根据 models.dev 价格列表估算的成本（将鼠标悬停在 `?` 上可查看每百万 Token 单价；支持 DeepSeek 高峰 / 非高峰价格）。 |
+| **Context Stats** | 轮次、步骤、用户输入、实时工具调用——以及根据 models.dev 价格列表估算的成本（将鼠标悬停在 `?` 上可查看每百万 Token 单价；仅 DeepSeek 区分高峰 / 非高峰：其挂牌价为谷时价，高峰时段按 2 倍计费）。 |
 | **Token Stats** | 计费 Token 用在了哪里——总量与输入框下方聊天统计行相同，按组成（system、tools、messages……）拆分，并以服务商精确报告的输出 Token 补足环形图，角落显示会话缓存命中率。 |
 | **Timing Stats** | 活跃时间如何分布在模型调用、工具运行和开销之间。 |
 | **Current Context** | 此刻窗口中的内容。 |
