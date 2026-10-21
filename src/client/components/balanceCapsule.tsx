@@ -23,7 +23,7 @@ function symbolOf(currency: string): string {
   return currency + ' '
 }
 
-/** The platform console page behind the capsule's click — usage and top-ups. */
+/** The platform console page behind the capsule's click. */
 const USAGE_URL = 'https://platform.deepseek.com/usage'
 
 export function makeBalanceCapsule(ctx: ClientCtx, kit: ViewKit): () => ReactElement | null {
@@ -44,9 +44,7 @@ export function makeBalanceCapsule(ctx: ClientCtx, kit: ViewKit): () => ReactEle
     const entry = balanceEntryOf(balance, active === 'zh' ? 'cny' : 'usd')
     if (entry === null) return null
     const money = (amount: number): string => symbolOf(entry.currency) + amount.toFixed(2)
-    // The pill itself carries the total; the tooltip lists only the non-zero
-    // parts of the breakdown, and an all-zero account has nothing to break
-    // down — the pill then rides bare.
+    // The tooltip lists only the non-zero breakdown parts, so an all-zero account rides bare.
     const tipLines = [
       ...(entry.toppedUp > 0 ? [t('balance.tip.toppedUp') + ': ' + money(entry.toppedUp)] : []),
       ...(entry.granted > 0 ? [t('balance.tip.granted') + ': ' + money(entry.granted)] : []),

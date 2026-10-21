@@ -2,11 +2,12 @@
 
 import type { PlatformBalance, PlatformBalanceEntry } from '../shared/types'
 import { asRecord } from './services'
+import { BALANCE_ROUTE } from './apiRoutes'
 
 // The balance route of host/balance.ts — re-declared here (the client bundle
 // inlines every import, and the host module must never reach it). Same-origin
 // POST under the harness's authenticated `/api` fence.
-const BALANCE_ROUTE = '/api/dsh-context/balance'
+
 
 /** One platform amount ('110.00', or an already-numeric producer variant), or null. */
 function amountOf(value: unknown): number | null {

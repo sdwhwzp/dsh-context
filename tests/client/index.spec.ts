@@ -1,7 +1,4 @@
-// Client entry (src/client/index.ts): the plugin's apply() wiring asserted
-// through the faithful harness-context seams — dictionaries, slots, the
-// /context trigger source, and the deferred configForms inject — plus real
-// renders of the registered components.
+// Client entry (src/client/index.ts): the plugin's apply() wiring through the faithful harness-context seams.
 
 import { createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
@@ -12,8 +9,7 @@ import type { SettingsField, SettingsScopeLike, SettingsState } from '../../src/
 import { TestClientCtx, TestSessions, asClientCtx } from './helpers/harness'
 import { mount, query, queryAll, text } from './helpers/kit'
 
-// The entry ships via `module.exports` (bundle handoff shape); its runtime
-// exports are the plugin triple, opaque to the static import type.
+// The entry ships via `module.exports` (bundle handoff shape); its runtime exports are the plugin triple, opaque to the static import type.
 const { name, inject, apply } = (await import('../../src/client/index')) as unknown as {
   name: string
   inject: string[]
@@ -90,7 +86,7 @@ describe('client entry: dictionaries', () => {
     assert.equal(dicts.zh, DICT_ZH)
     assert.equal(dicts.en, DICT_EN)
     // The bound translate resolves through the active-locale → en chain.
-    assert.equal(ctx.locale.bind('dsh-context')('tab'), 'Context')
+    assert.equal(ctx.locale.bind('dsh-context')('tab.context'), 'Context')
     ctx.dispose()
     assert.equal(ctx.locale.namespaces.has('dsh-context'), false)
   })
@@ -98,7 +94,7 @@ describe('client entry: dictionaries', () => {
   test('the zh active locale binds the zh dictionary arm', () => {
     const ctx = new TestClientCtx({ locale: 'zh' })
     applyTo(ctx)
-    assert.equal(ctx.locale.bind('dsh-context')('tab'), '上下文')
+    assert.equal(ctx.locale.bind('dsh-context')('tab.context'), '上下文')
     ctx.dispose()
   })
 })
@@ -108,7 +104,7 @@ describe('client entry: conversation.view slot', () => {
     const ctx = new TestClientCtx()
     applyTo(ctx)
     const entries = ctx.slots.of('conversation.view')
-    assert.equal(entries.length, 1)
+    assert.equal(entries.length, 2)
     const { registration, component } = entries[0]
     assert.equal(registration.name, 'conversation.view')
     assert.equal(registration.id, 'context')
@@ -125,11 +121,44 @@ describe('client entry: conversation.view slot', () => {
     ctx.dispose()
   })
 
-  test('the tab label translates to zh under an zh locale', () => {
+  test('registers the Fleet tab right of the Context tab, and its component renders the same card', async () => {
+    const ctx = new TestClientCtx({ services: { sessions: { list: { getSnapshot: () => ({ byId: {} }), subscribe: () => () => {} } } } })
+    applyTo(ctx)
+    const { registration, component } = ctx.slots.of('conversation.view')[1]
+    assert.equal(registration.name, 'conversation.view')
+    assert.equal(registration.id, 'fleet')
+    assert.equal(registration.order, 30)
+    assert.equal(registration.locale, 'dsh-context')
+    assert.equal(registration.label?.(), 'Fleet')
+
+    const el = component({ sessionId: 's1', useProjection: () => undefined }) as ReactElement
+    assert.equal(typeof el.type, 'function')
+    assert.equal((el.type as { name: string }).name, 'FleetView')
+    const m = await mount(el)
+    assert.equal(query(m.container, '.lc-empty').textContent, 'Reading the session log…')
+    await m.unmount()
+    ctx.dispose()
+  })
+
+  test('the tab labels translate to zh under an zh locale', () => {
     const ctx = new TestClientCtx({ locale: 'zh' })
     applyTo(ctx)
-    assert.equal(ctx.slots.of('conversation.view')[0].registration.label?.(), '上下文')
+    const labels = ctx.slots.of('conversation.view').map(e => e.registration.label?.())
+    assert.deepEqual(labels, ['上下文', '编队'])
     ctx.dispose()
+  })
+
+  test('the fleetTab preference serves and withdraws the Fleet tab alone', () => {
+    const scope = scopeWith({ status: 'ready', value: { fleetTab: 'hide' }, writable: true })
+    const ctx = new TestClientCtx({ services: { configForms: formsServing(scope) } })
+    applyTo(ctx)
+    assert.deepEqual(ctx.slots.of('conversation.view').map(e => e.registration.id), ['context'], 'only the Context tab is served')
+    scope.emit({ status: 'ready', value: { fleetTab: 'show' }, writable: true })
+    assert.deepEqual(ctx.slots.of('conversation.view').map(e => e.registration.id), ['context', 'fleet'])
+    scope.emit({ status: 'ready', value: { fleetTab: 'hide' }, writable: true })
+    assert.deepEqual(ctx.slots.of('conversation.view').map(e => e.registration.id), ['context'], 'the Context tab is never churned')
+    ctx.dispose()
+    assert.deepEqual(ctx.slots.of('conversation.view'), [])
   })
 })
 
@@ -360,7 +389,8 @@ describe('client entry: configForms inject', () => {
     const m = await mount(h(el.type as never, {
       useContextSettings: <T,>(sel: (state: SettingsState) => T): T => sel(store.getSnapshot()),
     }))
-    assert.equal(queryAll(m.container, '.lc-settings-select').length, 8)
+    assert.equal(queryAll(m.container, '.lc-settings-select').length, 9)
+    assert.equal(queryAll(m.container, '.lc-settings-textarea').length, 2)
     assert.equal(m.container.querySelector('.lc-settings-head'), null, 'no settings-section chrome on this seat')
     await m.unmount()
     disposeRegistration()
@@ -412,11 +442,21 @@ describe('client entry: placement gating', () => {
     return rec
   }
 
+  test('a registry that hands back no disposer unwinds the tab mount without a throw', () => {
+    const ctx = new TestClientCtx()
+    // A foreign/hostile registry: the registration contract's disposer is absent, so the mount's own
+    // disposer must skip it rather than call a non-function on the placement flip.
+    ;(ctx.slots as unknown as { register: () => unknown }).register = () => undefined
+    applyTo(ctx)
+    ctx.dispose()
+    assert.deepEqual(ctx.slots.of('conversation.view'), [])
+  })
+
   test("the persisted 'sidebar' placement skips the conversation tab and keeps the sidebar", () => {
     const scope = scopeWith({ status: 'ready', value: { defaultPlacement: 'sidebar' }, writable: true })
     const ctx = new TestClientCtx({ services: { configForms: formsServing(scope) } })
     applyTo(ctx)
-    assert.deepEqual(ctx.slots.of('conversation.view'), [], 'the dropped tab never registered')
+    assert.deepEqual(ctx.slots.of('conversation.view'), [], 'the dropped tabs never registered')
     const tabs = registry()
     ctx.setService('sidebarRightTabs', tabs)
     assert.equal(tabs.definitions.length, 1, 'the kept sidebar still registers')
@@ -432,22 +472,67 @@ describe('client entry: placement gating', () => {
     applyTo(ctx)
     const tabs = registry()
     ctx.setService('sidebarRightTabs', tabs)
-    assert.equal(ctx.slots.of('conversation.view').length, 1, "the default 'all' carries both")
+    assert.equal(ctx.slots.of('conversation.view').length, 2, "the default 'all' carries both tabs")
 
     scope.emit({ status: 'ready', value: { defaultPlacement: 'tab' }, writable: true })
     assert.equal(tabs.disposed, 1, 'the sidebar registration unwound')
     assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab'), [])
     assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab.title'), [])
-    assert.equal(ctx.slots.of('conversation.view').length, 1)
+    assert.equal(ctx.slots.of('conversation.view').length, 2)
 
     scope.emit({ status: 'ready', value: { defaultPlacement: 'all' }, writable: true })
     assert.equal(tabs.definitions.length, 2, 'the sidebar re-registered')
     assert.equal(ctx.slots.of('sidebar.right.pane.tab').length, 1)
-    assert.equal(ctx.slots.of('conversation.view').length, 1, 'the kept tab is never churned')
+    assert.equal(ctx.slots.of('conversation.view').length, 2, 'the kept tabs are never churned')
     ctx.dispose()
     assert.equal(tabs.disposed, 2)
     assert.deepEqual(ctx.slots.of('conversation.view'), [])
     assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab'), [])
+  })
+})
+
+describe('client entry: second-mount guard', () => {
+  test('a ledger already seating the jump marker skips the whole apply', () => {
+    const sources: unknown[] = []
+    const ctx = new TestClientCtx({ services: { inputTriggers: { registerSource: (src: unknown) => {
+      sources.push(src)
+      return () => {
+        const i = sources.indexOf(src)
+        if (i >= 0) sources.splice(i, 1)
+      }
+    } } } })
+    applyTo(ctx)
+    const first = ctx.slots.of('conversation.view').length
+    assert.ok(first > 0, 'the first mount registers')
+    assert.equal(sources.length, 1, 'the first mount registers the /context source')
+    // The second mount of the same bundle — the static profile bundle plus a dynamic-runner run in one page.
+    applyTo(ctx)
+    assert.equal(ctx.slots.of('conversation.view').length, first, 'no second tab is seated')
+    assert.equal(ctx.slots.of('conversation.chat.assistant-actions').length, 1)
+    assert.equal(ctx.slots.of('conversation.input.overlay').length, 1)
+    assert.equal(ctx.slots.of('main').length, 1)
+    assert.equal(ctx.slots.of('sidebar.panellist').length, 1)
+    assert.equal(sources.length, 1, 'no second /context source')
+    ctx.dispose()
+  })
+
+  test('a ledger seating foreign entries only fails open into a full mount', () => {
+    const ctx = new TestClientCtx()
+    ctx.slots.register({ name: 'conversation.chat.assistant-actions', id: 'feedback' }, () => null)
+    applyTo(ctx)
+    assert.equal(ctx.slots.of('conversation.view').length, 2, 'the tabs register')
+    assert.equal(ctx.slots.of('conversation.chat.assistant-actions').length, 2, 'the jump registers beside the foreign row')
+    ctx.dispose()
+  })
+
+  test('a hostile ledger face fails open into a full mount', () => {
+    const ctx = new TestClientCtx()
+    ;(ctx.slots as unknown as { entries: () => never }).entries = () => {
+      throw new Error('boom')
+    }
+    applyTo(ctx)
+    assert.equal(ctx.slots.of('conversation.view').length, 2)
+    ctx.dispose()
   })
 })
 

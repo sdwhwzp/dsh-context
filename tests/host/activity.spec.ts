@@ -1,7 +1,3 @@
-// The `contextActivity` projection unit (src/host/activity.ts): the daily
-// ledger fold — event filtering, usage sanitizing, day accumulation, the
-// retention cap, the copying view, and the schema roundtrip.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -23,11 +19,20 @@ function assistantMessage(time: number, usage?: unknown): SessionEvent {
   } as never
 }
 
+function turnMessage(time: number, turn: number, usage?: unknown): SessionEvent {
+  return {
+    type: 'assistant/message',
+    seq: 1,
+    time,
+    data: { turn, ...(usage === undefined ? {} : { usage }) },
+  } as never
+}
+
 describe('contextActivity unit: shape', () => {
   test('the definition carries the contract fields', () => {
     const def = createContextActivityDefinition()
     assert.equal(def.key, 'contextActivity')
-    assert.equal(def.stateVersion, 3, 'the seed-boundary ledger reset is the third shape')
+    assert.equal(def.stateVersion, 5, 'the daily turns/tool/wall tallies are the fifth shape')
     assert.deepEqual(def.init(), { days: {} })
   })
 
@@ -163,6 +168,203 @@ describe('contextActivity unit: the view', () => {
   })
 })
 
+/** A `user/message` carrying (or faking) a `skill-invocation` source. */
+function skillInvocation(time: number, source: unknown): SessionEvent {
+  return { type: 'user/message', seq: 1, time, data: { source } } as never
+}
+
+function toolCall(time: number, callId: unknown, name: unknown): SessionEvent {
+  return { type: 'tool/call', seq: 1, time, data: { callId, name } } as never
+}
+
+function skillResult(time: number, text: string, callId?: string): SessionEvent {
+  return {
+    type: 'tool/result',
+    seq: 1,
+    time,
+    data: { message: { toolCallId: callId, content: [{ type: 'text', text }] } },
+  } as never
+}
+
+const INVOCATION = { kind: 'skill-invocation', name: 'tdd', form: 'instructions' }
+
+describe('applyActivity: skill loads', () => {
+  test('a `/name` invocation books its name on its day', () => {
+    const state = applyActivity({ days: {} }, skillInvocation(at(0), INVOCATION))
+    assert.deepEqual(state.days, {
+      '2026-01-01': { tokens: 0, requests: 0, skills: { tdd: { n: 1, last: at(0) } } },
+    })
+  })
+
+  test('a `skill`-tool result books the wrapper’s name only when paired to a `skill` call', () => {
+    let state = applyActivity({ days: {} }, toolCall(at(0), 'c1', 'skill'))
+    assert.deepEqual(state.skillCalls, ['c1'], 'the call arms the pairing claim')
+    state = applyActivity(state, skillResult(at(0), '<skill_content name="ponytail">…</skill_content>', 'c1'))
+    assert.deepEqual(state.days['2026-01-01'].skills, { ponytail: { n: 1, last: at(0) } })
+    assert.equal(state.skillCalls, undefined, 'the claim consumes once')
+  })
+
+  test('a wrapper in another tool’s result books no skill (a `read` quoting the wrapper is no load)', () => {
+    let state = applyActivity({ days: {} }, toolCall(at(0), 'c1', 'read'))
+    state = applyActivity(state, skillResult(at(0), 'source text quoting <skill_content name="…"> inline', 'c1'))
+    assert.equal(state.days['2026-01-01'].skills, undefined)
+    assert.equal(state.days['2026-01-01'].toolCalls, 1, 'the read still prices its tool run')
+    // Wholly unpaired results add no tool run (a trimmed/foreign call).
+    state = applyActivity(state, skillResult(at(0), '<skill_content name="ponytail">…</skill_content>', 'c9'))
+    assert.equal(state.days['2026-01-01'].skills, undefined)
+    assert.equal(state.days['2026-01-01'].toolCalls, 1)
+  })
+
+  test('the lifted toolCallId and the durable source callId both pair', () => {
+    let state = applyActivity({ days: {} }, toolCall(at(0), 'c1', 'skill'))
+    const viaSource = {
+      type: 'tool/result',
+      seq: 2,
+      time: at(0),
+      data: { message: { source: { callId: 'c1' }, content: [{ type: 'text', text: '<skill_content name="tdd">…</skill_content>' }] } },
+    } as never
+    state = applyActivity(state, viaSource)
+    assert.deepEqual(state.days['2026-01-01'].skills, { tdd: { n: 1, last: at(0) } })
+  })
+
+  test('a paired result without the wrapper consumes the claim but books no skill', () => {
+    let state = applyActivity({ days: {} }, toolCall(at(0), 'c1', 'skill'))
+    state = applyActivity(state, skillResult(at(0), 'skill load failed', 'c1'))
+    assert.equal(state.days['2026-01-01'].skills, undefined)
+    assert.equal(state.days['2026-01-01'].toolCalls, 1)
+    assert.equal(state.skillCalls, undefined)
+  })
+
+  test('consuming one claim keeps the others pending', () => {
+    let state = applyActivity({ days: {} }, toolCall(at(0), 'c1', 'skill'))
+    state = applyActivity(state, toolCall(at(0), 'c2', 'skill'))
+    state = applyActivity(state, skillResult(at(0), '<skill_content name="tdd">…</skill_content>', 'c1'))
+    assert.deepEqual(state.skillCalls, ['c2'], 'the drained claim leaves its sibling armed')
+    assert.deepEqual(state.days['2026-01-01'].skills, { tdd: { n: 1, last: at(0) } })
+  })
+
+  test('the pairing list is bounded and duplicate arms are inert', () => {
+    let state: ReturnType<typeof applyActivity> = { days: {} }
+    state = applyActivity(state, toolCall(at(0), 'c1', 'skill'))
+    assert.ok(applyActivity(state, toolCall(at(0), 'c1', 'skill')) === state, 're-arming the same id is a no-op')
+    for (let i = 0; i < 120; i++) {
+      state = applyActivity(state, toolCall(at(0), `x${i}`, 'skill'))
+    }
+    assert.equal(state.skillCalls?.length, 100, 'the oldest pending claims drop first')
+    assert.equal(state.skillCalls?.includes('c1'), false)
+    // Non-skill calls and unreadable ids never arm a skill claim (the bash run still times itself).
+    for (const ev of [
+      toolCall(at(0), 'c2', 'bash'),
+      toolCall(at(0), 7, 'skill'),
+      toolCall(at(0), '', 'skill'),
+      toolCall(at(0), undefined, 'skill'),
+      { type: 'tool/call', seq: 1, time: at(0), data: null } as never,
+    ]) {
+      assert.deepEqual(applyActivity(state, ev).skillCalls, state.skillCalls, JSON.stringify(ev.data))
+    }
+  })
+
+  test('loads tally per name; the last instant never walks back on a disordered replay', () => {
+    let state = applyActivity({ days: {} }, skillInvocation(at(0), INVOCATION))
+    state = applyActivity(state, toolCall(at(0) + 60_000, 'c1', 'skill'))
+    state = applyActivity(state, skillResult(at(0) + 60_000, '<skill_content name="tdd">…</skill_content>', 'c1'))
+    state = applyActivity(state, skillInvocation(at(0), { kind: 'skill-invocation', name: 'tdd' }))
+    assert.deepEqual(state.days['2026-01-01'].skills, { tdd: { n: 3, last: at(0) + 60_000 } })
+    state = applyActivity(state, skillInvocation(at(1), INVOCATION))
+    assert.deepEqual(state.days['2026-01-02'].skills, { tdd: { n: 1, last: at(1) } }, 'distinct days key apart')
+  })
+
+  test('a developer/message carrier books its source too', () => {
+    const event = {
+      type: 'developer/message',
+      seq: 1,
+      time: at(0),
+      data: { message: { source: INVOCATION } },
+    } as never
+    const state = applyActivity({ days: {} }, event)
+    assert.deepEqual(state.days['2026-01-01'].skills, { tdd: { n: 1, last: at(0) } })
+  })
+
+  test('non-load messages and hostile payloads return the state unchanged', () => {
+    const state = applyActivity({ days: {} }, assistantMessage(at(0), { inputTokens: 1 }))
+    const cases: SessionEvent[] = [
+      skillInvocation(at(0), undefined), // no source
+      skillInvocation(at(0), null),
+      skillInvocation(at(0), 'skill-invocation'), // non-object source
+      skillInvocation(at(0), { kind: 'plugin', name: 'tdd' }), // another kind
+      skillInvocation(at(0), { kind: 'skill-invocation' }), // name absent
+      skillInvocation(at(0), { kind: 'skill-invocation', name: 7 }), // non-string name
+      skillInvocation(at(0), { kind: 'skill-invocation', name: '' }), // empty name
+      { type: 'user/message', seq: 1, time: at(0), data: null } as never, // no data
+      { type: 'user/message', seq: 1, time: Number.NaN, data: { source: INVOCATION } } as never, // unreadable time
+      skillResult(at(0), '<skill_content name="tdd">…</skill_content>'), // no call id at all
+      { type: 'tool/result', seq: 1, time: at(0), data: null } as never, // no data
+      { type: 'tool/result', seq: 1, time: at(0), data: { message: null } } as never, // no message
+      { type: 'tool/result', seq: 1, time: at(0), data: { message: { toolCallId: 7 } } } as never, // unreadable ids
+      { type: 'tool/result', seq: 1, time: at(0), data: { message: { toolCallId: '' } } } as never,
+      { type: 'tool/result', seq: 1, time: at(0), data: { message: { source: { callId: 9 } } } } as never,
+      { type: 'tool/result', seq: 1, time: at(0), data: { message: { source: 'x' } } } as never,
+    ]
+    for (const event of cases) {
+      assert.ok(applyActivity(state, event) === state, JSON.stringify(event.data))
+    }
+  })
+
+  test('a settlement keeps the day’s skill table; the seed reset clears it', () => {
+    let state = applyActivity({ days: {} }, skillInvocation(at(0), INVOCATION))
+    state = applyActivity(state, assistantMessage(at(0), { inputTokens: 4 }))
+    assert.deepEqual(state.days['2026-01-01'], {
+      tokens: 4,
+      requests: 1,
+      skills: { tdd: { n: 1, last: at(0) } },
+    })
+    const cut = applyActivity(state, { type: 'session/end-seed', seq: 2, time: at(0), data: { inherited: true } } as never)
+    assert.deepEqual(cut, { days: {} })
+  })
+
+  test('a skill load on a priced day keeps the day’s tokens and fee', () => {
+    let state = applyActivity({ days: {} }, requestHeader('deepseek-v4', 'deepseek-official'))
+    state = applyActivity(state, assistantMessage(at(0), { inputTokens: 10, outputTokens: 5 }))
+    state = applyActivity(state, skillInvocation(at(0), INVOCATION))
+    const day = state.days['2026-01-01']
+    assert.equal(day.tokens, 15)
+    assert.equal(day.requests, 1)
+    assert.ok(day.cost !== undefined, 'the pricing record rides on')
+    assert.deepEqual(day.skills, { tdd: { n: 1, last: at(0) } })
+  })
+
+  test('the persisted previous state is never mutated (skill path copy-on-write)', () => {
+    const before = applyActivity({ days: {} }, skillInvocation(at(0), INVOCATION))
+    const after = applyActivity(before, skillInvocation(at(0), INVOCATION))
+    assert.deepEqual(before.days['2026-01-01'].skills, { tdd: { n: 1, last: at(0) } })
+    assert.deepEqual(after.days['2026-01-01'].skills, { tdd: { n: 2, last: at(0) } })
+  })
+
+  test('a day’s name table is capped: new names drop, booked names keep tallying', () => {
+    let state: ReturnType<typeof applyActivity> = { days: {} }
+    for (let i = 0; i < 100; i++) {
+      state = applyActivity(state, skillInvocation(at(0), { kind: 'skill-invocation', name: `skill-${i}` }))
+    }
+    const capped = applyActivity(state, skillInvocation(at(0), { kind: 'skill-invocation', name: 'skill-100' }))
+    assert.ok(capped === state, 'the 101st distinct name books nothing')
+    const again = applyActivity(state, skillInvocation(at(0), { kind: 'skill-invocation', name: 'skill-0' }))
+    assert.equal(again.days['2026-01-01'].skills?.['skill-0'].n, 2, 'a booked name still grows')
+  })
+
+  test('the wire view passes its schema with a skill table; the state schema round-trips it', () => {
+    const def = createContextActivityDefinition()
+    const state = applyActivity(def.init(), skillInvocation(at(0), INVOCATION))
+    const view = def.wire.view(state)
+    assert.equal(def.wire.viewSchema.safeParse(view).success, true)
+    assert.equal(def.stateSchema.safeParse(state).success, true)
+    assert.equal(def.stateSchema.safeParse({ days: { '2026-01-01': { tokens: 0, requests: 0, skills: { tdd: { n: 1.5, last: 0 } } } } }).success, false, 'a fractional tally')
+    assert.equal(def.stateSchema.safeParse({ days: { '2026-01-01': { tokens: 0, requests: 0, skills: { tdd: { n: 1 } } } } }).success, false, 'a missing last')
+    assert.equal(def.stateSchema.safeParse({ days: { '2026-01-01': { tokens: 0, requests: 0, skills: { tdd: { n: 1, last: Number.NaN } } } } }).success, false, 'a non-finite last')
+    assert.equal(def.stateSchema.safeParse({ days: {}, skillCalls: ['c1'] }).success, true, 'pending skill-call claims round-trip')
+    assert.equal(def.stateSchema.safeParse({ days: {}, skillCalls: [7] }).success, false, 'claims are strings')
+  })
+})
+
 /** A `request/header` event carrying the route in force (the fold's only model/provider source). */
 function requestHeader(model: unknown, provider: unknown): SessionEvent {
   return {
@@ -289,6 +491,80 @@ describe('applyActivity: the initiation stamp', () => {
   })
 })
 
+describe('applyActivity: turn, tool-run, and step-time attribution', () => {
+  const late = new Date(2026, 0, 1, 23, 30).getTime()
+  const early = new Date(2026, 0, 2, 0, 30).getTime()
+
+  test('a turn books once, on the initiation day of its first settlement', () => {
+    let state = applyActivity({ days: {} }, requestHeader('deepseek-v4', 'deepseek-official'))
+    state = applyActivity(state, stepStart(at(0)))
+    state = applyActivity(state, turnMessage(at(0), 7, { inputTokens: 1 }))
+    state = applyActivity(state, stepEnd(at(0)))
+    state = applyActivity(state, stepStart(at(1)))
+    state = applyActivity(state, turnMessage(at(1), 7, { inputTokens: 1 }))
+    state = applyActivity(state, stepEnd(at(1)))
+    assert.equal(state.days['2026-01-01'].turns, 1)
+    assert.equal(state.days['2026-01-02'].turns, undefined, 'the same turn never re-books on a later day')
+    state = applyActivity(state, stepStart(at(1)))
+    state = applyActivity(state, turnMessage(at(1), 8, { inputTokens: 1 }))
+    assert.equal(state.days['2026-01-02'].turns, 1, 'the next turn books its own day')
+  })
+
+  test('a tool run books its duration on the step-start day, across midnight', () => {
+    let state = applyActivity({ days: {} }, requestHeader('deepseek-v4', 'deepseek-official'))
+    state = applyActivity(state, stepStart(late))
+    state = applyActivity(state, toolCall(late, 'c1', 'bash'))
+    state = applyActivity(state, skillResult(early, 'done', 'c1'))
+    assert.equal(state.days['2026-01-01'].toolCalls, 1)
+    assert.equal(state.days['2026-01-01'].toolsMs, early - late)
+    assert.equal(state.days['2026-01-02'], undefined)
+  })
+
+  test('a step wall time books on the step-start day, across midnight', () => {
+    let state = applyActivity({ days: {} }, stepStart(late))
+    state = applyActivity(state, stepEnd(early))
+    assert.equal(state.days['2026-01-01'].wallMs, early - late)
+    assert.equal(state.days['2026-01-02'], undefined)
+  })
+
+  test('an unreadable or undatable tool start never arms', () => {
+    const state = applyActivity({ days: {} }, requestHeader('deepseek-v4', 'deepseek-official'))
+    assert.ok(applyActivity(state, toolCall(Number.NaN, 'c1', 'bash')) === state, 'a non-finite start')
+    assert.ok(applyActivity(state, toolCall(1e30, 'c2', 'bash')) === state, 'a start outside the day-key range')
+    const negative = applyActivity(state, stepStart(-2 * 86_400_000))
+    assert.equal(applyActivity(negative, toolCall(at(0), 'c3', 'bash')).toolStarts, undefined, 'a step stamp with no local day')
+  })
+
+  test('a later settlement keeps the day’s tool and wall tallies', () => {
+    const start = at(0)
+    let state = applyActivity({ days: {} }, requestHeader('deepseek-v4', 'deepseek-official'))
+    state = applyActivity(state, stepStart(start))
+    state = applyActivity(state, turnMessage(start, 1, { inputTokens: 1 }))
+    state = applyActivity(state, stepEnd(start + 100))
+    state = applyActivity(state, stepStart(start + 200))
+    state = applyActivity(state, toolCall(start + 200, 'c1', 'bash'))
+    state = applyActivity(state, skillResult(start + 300, 'done', 'c1'))
+    state = applyActivity(state, stepStart(start + 400))
+    state = applyActivity(state, turnMessage(start + 400, 2, { inputTokens: 1 }))
+    state = applyActivity(state, stepEnd(start + 500))
+    const day = state.days['2026-01-01']
+    assert.equal(day.turns, 2)
+    assert.equal(day.toolCalls, 1)
+    assert.equal(day.toolsMs, 100)
+    assert.equal(day.wallMs, 200, 'the first and last completed steps')
+  })
+
+  test('a tagged seed cut clears the turn cursor and pending tool starts', () => {
+    let state = applyActivity({ days: {} }, requestHeader('deepseek-v4', 'deepseek-official'))
+    state = applyActivity(state, stepStart(at(0)))
+    state = applyActivity(state, turnMessage(at(0), 1, { inputTokens: 1 }))
+    state = applyActivity(state, toolCall(at(0), 'c1', 'bash'))
+    assert.ok(state.lastTurn !== undefined && state.toolStarts !== undefined)
+    state = applyActivity(state, { type: 'session/end-seed', seq: 1, time: at(0), data: { inherited: true } } as never)
+    assert.deepEqual(state, { days: {} })
+  })
+})
+
 describe('applyActivity: the per-day pricing record', () => {
   test('DeepSeek peak windows book the doubled list price; off-peak books the plain one', () => {
     let state = applyActivity({ days: {} }, requestHeader('deepseek-v4', 'deepseek-official'))
@@ -343,10 +619,37 @@ describe('contextActivity unit: the schemas over the pricing record', () => {
     state = applyActivity(state, assistantMessage(at(0), { inputTokens: 1, outputTokens: 2 }))
     assert.equal(def.stateSchema.safeParse(state).success, true)
     assert.equal(def.stateSchema.safeParse({ days: {}, model: 'm', provider: 'p', stepStart: 1 }).success, true)
+    assert.equal(def.stateSchema.safeParse({ days: {}, lastTurn: 3, toolStarts: { c1: { start: 1, day: '2026-01-01' } } }).success, true)
+    assert.equal(def.stateSchema.safeParse({ days: {}, toolStarts: { c1: { start: -1, day: '2026-01-01' } } }).success, false)
+    assert.equal(def.stateSchema.safeParse({ days: { '2026-01-01': { tokens: 0, requests: 0, turns: 1, toolCalls: 2, toolsMs: 1.5, wallMs: 2 } } }).success, true)
+    assert.equal(def.stateSchema.safeParse({ days: { '2026-01-01': { tokens: 0, requests: 0, turns: 1.5 } } }).success, false)
+    assert.equal(contextActivitySchema.safeParse({ days: { '2026-01-01': { tokens: 0, requests: 0, turns: 1, toolCalls: 2, toolsMs: 1.5, wallMs: 2 } } }).success, true)
     const view = def.wire.view(state)
     assert.equal(def.wire.viewSchema.safeParse(view).success, true)
     assert.equal(contextActivitySchema.safeParse(view).success, true)
     assert.deepEqual(view.days, state.days, 'the view copies the entries whole')
+  })
+
+  test('the served view never aliases a day\'s nested cost or skill records', () => {
+    const def = createContextActivityDefinition()
+    let state = applyActivity(def.init(), requestHeader('deepseek-v4', 'deepseek-official'))
+    state = applyActivity(state, stepStart(at(0)))
+    state = applyActivity(state, assistantMessage(at(0), { inputTokens: 1, outputTokens: 2 }))
+    state = applyActivity(state, skillInvocation(at(0), INVOCATION))
+    const view = def.wire.view(state)
+    const day = Object.keys(state.days)[0]
+    const served = view.days[day]
+    const persisted = state.days[day]
+    assert.ok(persisted.cost !== undefined && persisted.skills !== undefined, 'the fixture carries both records')
+    // `cost` is four levels deep and `skills` two; a shallow day copy would leave both pointing at persisted state,
+    // so a mutating registry, cache writer, or wire payload would write straight into the fold's own record.
+    assert.notEqual(served.cost, persisted.cost)
+    assert.notEqual(served.cost?.['deepseek-official'], persisted.cost?.['deepseek-official'])
+    assert.notEqual(served.cost?.['deepseek-official']?.['deepseek-v4'], persisted.cost?.['deepseek-official']?.['deepseek-v4'])
+    assert.notEqual(served.cost?.['deepseek-official']?.['deepseek-v4']?.off, persisted.cost?.['deepseek-official']?.['deepseek-v4']?.off)
+    assert.notEqual(served.skills, persisted.skills)
+    assert.notEqual(served.skills?.tdd, persisted.skills?.tdd)
+    assert.deepEqual(served, persisted)
   })
 
   test('a malformed pricing record fails both schemas (strict: no drift)', () => {
@@ -358,4 +661,12 @@ describe('contextActivity unit: the schemas over the pricing record', () => {
     assert.equal(def.wire.viewSchema.safeParse(bad).success, false)
     assert.equal(contextActivitySchema.safeParse(bad).success, false)
   })
+})
+
+test('prototype-named skills retain finite persisted counters', () => {
+  let state = applyActivity({ days: {} }, skillInvocation(at(0), INVOCATION))
+  for (const name of ['constructor', '__proto__', 'toString']) {
+    state = applyActivity(state, skillInvocation(at(0) + 1000, { ...INVOCATION, name }))
+    assert.deepEqual(state.days['2026-01-01'].skills?.[name], { n: 1, last: at(0) + 1000 })
+  }
 })

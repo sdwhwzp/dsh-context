@@ -1,12 +1,8 @@
-// FileCard (src/client/components/fileCard.tsx) rendered with real React:
-// purpose/form filter chips, path search, per-file rows with count badges
-// and line deltas, expandable operation logs, the op-level locate hook,
-// workspace-relative path display, and the system-open affordance.
-
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { makeFileCard } from '../../../src/client/components/fileCard'
+import type { FileFilter } from '../../../src/client/components/fileCard'
 import type { FileActivity, FileEntry, FileOp } from '../../../src/client/fileActivity'
 import { createContextSettings } from '../../../src/client/settings'
 import { makeKit, mount, query, queryAll, text, click } from '../helpers/kit'
@@ -22,10 +18,9 @@ function fileOp(seq: number, kind: FileOp['kind'], tool: string, over: Partial<F
 }
 
 function entry(path: string, over: Partial<FileEntry>): FileEntry {
-  return { path, form: 'text', reads: 0, writes: 0, searches: 0, added: 0, removed: 0, errs: 0, ops: [], ...over }
+  return { path, form: 'text', reads: 0, writes: 0, searches: 0, added: 0, removed: 0, ops: [], ...over }
 }
 
-/** Five files exercising every row anatomy: split paths, all badges, deltas both ways, failures, a directory, an image. */
 function richActivity(over: Partial<FileActivity> = {}): FileActivity {
   return {
     entries: [
@@ -34,7 +29,6 @@ function richActivity(over: Partial<FileActivity> = {}): FileActivity {
         writes: 2,
         added: 2,
         removed: 3,
-        errs: 1,
         ops: [
           fileOp(7, 'read', 'read'),
           fileOp(5, 'write', 'edit', { added: 2, removed: 1 }),
@@ -63,7 +57,7 @@ function richActivity(over: Partial<FileActivity> = {}): FileActivity {
 }
 
 function chipByLabel(container: ParentNode, label: string): HTMLElement {
-  const hit = queryAll(container, '.lc-fa-ctl .lc-gran-btn').find(b => text(b).startsWith(label))
+  const hit = queryAll(container, '.lc-fa-chips .lc-gran-btn').find(b => text(b).startsWith(label))
   if (hit === undefined) throw new Error(`chip not found: ${label}`)
   return hit
 }
@@ -84,26 +78,36 @@ async function typeSearch(container: ParentNode, value: string): Promise<void> {
 }
 
 describe('FileCard — empty state', () => {
-  test('no file ops renders the empty state without controls', async () => {
+  test('no file ops keeps the controls so the card measures the same as a populated one', async () => {
     const m = await mount(h(FileCard, {
       activity: richActivity({ entries: [] }),
-      scope: 'Turn 1 · Step 1',
     }))
     assert.ok(text(m.container).includes('No file reads, writes, or searches'))
-    assert.ok(text(m.container).includes('Turn 1 · Step 1'))
-    assert.equal(queryAll(m.container, '.lc-fa-ctl').length, 0)
+    // The empty state wears the SAME controls and the SAME reserved lane as a populated card: the card's
+    // activity re-scopes on every step, and a controls-free empty state resized the page on the first read.
+    assert.equal(queryAll(m.container, '.lc-card-title .lc-fa-chips').length, 1)
+    assert.equal(queryAll(m.container, '.lc-fa-ctl').length, 1)
+    assert.equal(queryAll(m.container, '.lc-fa-meta').length, 1)
+    assert.equal(queryAll(m.container, '.lc-lane').length, 1)
+    assert.equal(queryAll(m.container, '.lc-fa-list').length, 0)
     await m.unmount()
   })
 })
 
 describe('FileCard — header, rows, and filters', () => {
   test('renders chips with op counts, the meta strip, and fully-dressed rows', async () => {
-    const m = await mount(h(FileCard, { activity: richActivity(), scope: 'Up to latest' }))
+    const m = await mount(h(FileCard, { activity: richActivity() }))
     // Chip op counts: all = 12 + 3 + 1.
     assert.ok(text(chipByLabel(m.container, 'All')).includes('16'))
     assert.ok(text(chipByLabel(m.container, 'Read')).includes('12'))
     assert.ok(text(chipByLabel(m.container, 'Images')).includes('1'))
-    // Meta strip: file count + aggregate delta (+7 −3).
+    // Layout: the title row carries the file tally, then the chips; the search and the sort share the band below.
+    assert.equal(queryAll(m.container, '.lc-card-sub').length, 0)
+    assert.equal(queryAll(m.container, '.lc-card-title .lc-fa-meta').length, 1)
+    assert.equal(queryAll(m.container, '.lc-card-title .lc-fa-chips .lc-gran-btn').length, 5)
+    assert.ok(query(m.container, '.lc-fa-ctl input.lc-fa-search') !== null)
+    assert.equal(queryAll(m.container, '.lc-fa-ctl .lc-fa-sort .lc-gran-btn').length, 4)
+    assert.equal(queryAll(m.container, '.lc-fa-meta .lc-fa-sort').length, 0)
     const meta = query(m.container, '.lc-fa-meta')
     assert.ok(text(meta).includes('5 files'))
     assert.ok(text(meta).includes('+7'))
@@ -114,7 +118,6 @@ describe('FileCard — header, rows, and filters', () => {
     assert.equal(rows.length, 5)
     // Default order is most-active first: many.log (9 ops) → a.ts (4) → the one-op files by recency.
     assert.deepEqual(rows.map(r => r.title), ['/var/many.log', '/src/a.ts', '/shots/ui.png', 'solo.md', '/src/'])
-    // Path split: muted dir + bold base; every badge and the row delta.
     const first = rows[0]
     assert.ok(first.querySelector('.lc-fa-path em')?.textContent === '/var/')
     assert.ok(first.querySelector('.lc-fa-path b')?.textContent === 'many.log')
@@ -126,16 +129,16 @@ describe('FileCard — header, rows, and filters', () => {
     assert.ok(aRow.querySelector('.lc-fa-path b')?.textContent === 'a.ts')
     assert.equal(queryAll(aRow, '.lc-fa-badge').length, 2) // read + write
     assert.ok(text(aRow).includes('+2') && text(aRow).includes('−3'))
-    assert.ok(aRow.querySelector('.lc-br-err-dot') !== null)
+    // Failures surface on the expanded op rows only: the collapsed row keeps no error dot.
+    assert.equal(queryAll(aRow, '.lc-br-err-dot').length, 0)
     assert.ok(aRow.title === '/src/a.ts')
-    // The directory row trims its trailing slash for display.
     const dirRow = rows.find(r => r.title === '/src/')
     assert.ok(dirRow !== undefined)
     assert.ok(dirRow.querySelector('.lc-fa-path b')?.textContent === 'src')
-    // The extension-less row relativizes with no workspace known: a './' dir span, and no badges beyond its own kind.
+    // The extension-less row relativizes with no workspace known: the dropped './' leaves no dir span.
     const solo = rows.find(r => r.title === 'solo.md')
     assert.ok(solo !== undefined)
-    assert.ok(solo.querySelector('.lc-fa-path em')?.textContent === './')
+    assert.ok(solo.querySelector('.lc-fa-path em') === null)
     assert.ok(solo.querySelector('.lc-fa-path b')?.textContent === 'solo.md')
     assert.ok(text(solo).includes('+5') && !text(solo).includes('−'))
     // solo.md's only op is timeless: the row drops its time cell.
@@ -144,14 +147,14 @@ describe('FileCard — header, rows, and filters', () => {
   })
 
   test('purpose and form chips isolate rows; re-clicking restores all', async () => {
-    const m = await mount(h(FileCard, { activity: richActivity(), scope: 'live' }))
+    const m = await mount(h(FileCard, { activity: richActivity() }))
     const paths = () => queryAll(m.container, '.lc-fa-row').map(r => r.title)
 
-    // Kind chips always carry their badge-color class; the neutral chips don't.
+    // Kind chips always carry their badge-color class; the aggregate carries its blue one; Images stays neutral.
     assert.ok(chipByLabel(m.container, 'Read').className.includes('lc-fa-chip-read'))
     assert.ok(chipByLabel(m.container, 'Written').className.includes('lc-fa-chip-write'))
     assert.ok(chipByLabel(m.container, 'Searched').className.includes('lc-fa-chip-search'))
-    assert.ok(!chipByLabel(m.container, 'All').className.includes('lc-fa-chip-'))
+    assert.ok(chipByLabel(m.container, 'All').className.includes('lc-fa-chip-all'))
     assert.ok(!chipByLabel(m.container, 'Images').className.includes('lc-fa-chip-'))
 
     await click(chipByLabel(m.container, 'Written'))
@@ -201,7 +204,7 @@ describe('FileCard — header, rows, and filters', () => {
         removed: 0,
       },
     }
-    const m = await mount(h(FileCard, { activity, scope: 'live' }))
+    const m = await mount(h(FileCard, { activity }))
     const titles = () => queryAll(m.container, '.lc-fa-row').map(r => r.title)
     // 'count' over everything: total ops lead.
     assert.deepEqual(titles(), ['/logs/x.log', '/src/idx.md', '/code/y.ts', '/src/pat.txt'])
@@ -218,7 +221,7 @@ describe('FileCard — header, rows, and filters', () => {
   })
 
   test('path search narrows rows and reports no matches', async () => {
-    const m = await mount(h(FileCard, { activity: richActivity(), scope: 'live' }))
+    const m = await mount(h(FileCard, { activity: richActivity() }))
     await typeSearch(m.container, 'A.TS')
     assert.deepEqual(queryAll(m.container, '.lc-fa-row').map(r => r.title), ['/src/a.ts'])
     await typeSearch(m.container, 'zzz')
@@ -229,12 +232,11 @@ describe('FileCard — header, rows, and filters', () => {
     await m.unmount()
   })
 
-  test('the sort toggle defaults to most-active and switches to latest and path', async () => {
-    const m = await mount(h(FileCard, { activity: richActivity(), scope: 'live' }))
+  test('the sort toggle defaults to most-active and switches to latest, path, and name', async () => {
+    const m = await mount(h(FileCard, { activity: richActivity() }))
     const titles = () => queryAll(m.container, '.lc-fa-row').map(r => r.title)
     const sortBtns = queryAll(m.container, '.lc-fa-sort .lc-gran-btn')
-    assert.equal(sortBtns.length, 3)
-    // Count order by default: 9 ops → 4 ops → one-op files by recency.
+    assert.equal(sortBtns.length, 4)
     assert.ok(sortBtns[0].className.includes('lc-gran-on'))
     assert.deepEqual(titles(), ['/var/many.log', '/src/a.ts', '/shots/ui.png', 'solo.md', '/src/'])
     // Latest order: many.log (seq 28) → ui.png (9) → solo.md (8) → a.ts (7) → /src/ (6).
@@ -245,9 +247,33 @@ describe('FileCard — header, rows, and filters', () => {
     await click(sortBtns[2])
     assert.ok(sortBtns[2].className.includes('lc-gran-on'))
     assert.deepEqual(titles(), ['/shots/ui.png', '/src/', '/src/a.ts', '/var/many.log', 'solo.md'])
+    // Name order: ascending over the last segment (a.ts → many.log → solo.md → src → ui.png).
+    await click(sortBtns[3])
+    assert.ok(sortBtns[3].className.includes('lc-gran-on'))
+    assert.deepEqual(titles(), ['/src/a.ts', '/var/many.log', 'solo.md', '/src/', '/shots/ui.png'])
     await click(sortBtns[0])
     assert.ok(sortBtns[0].className.includes('lc-gran-on'))
     assert.deepEqual(titles(), ['/var/many.log', '/src/a.ts', '/shots/ui.png', 'solo.md', '/src/'])
+    await m.unmount()
+  })
+
+  test('the name sort leads with the last segment and breaks ties on the full path', async () => {
+    const readOne = (seq: number, path: string): FileEntry => entry(path, { reads: 1, ops: [fileOp(seq, 'read', 'read')] })
+    const activity: FileActivity = {
+      entries: [
+        readOne(4, '/b/x.ts'),
+        readOne(3, '/d/x.ts'),
+        readOne(2, '/a/x.ts'),
+        readOne(1, '/a/z.ts'),
+        readOne(5, 'C:\\repo\\x.ts'),
+      ],
+      totals: { read: { files: 5, ops: 5 }, write: { files: 0, ops: 0 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
+    }
+    const m = await mount(h(FileCard, { activity }))
+    const sortBtns = queryAll(m.container, '.lc-fa-sort .lc-gran-btn')
+    await click(sortBtns[3])
+    // x.ts groups ahead of z.ts by leaf (backslash leaves count); within one leaf, the full path ascends.
+    assert.deepEqual(queryAll(m.container, '.lc-fa-row').map(r => r.title), ['/a/x.ts', '/b/x.ts', '/d/x.ts', 'C:\\repo\\x.ts', '/a/z.ts'])
     await m.unmount()
   })
 
@@ -256,20 +282,26 @@ describe('FileCard — header, rows, and filters', () => {
     const sortBtns = (container: ParentNode) => queryAll(container, '.lc-fa-sort .lc-gran-btn')
 
     settings.set('defaultFileSort', 'latest')
-    let m = await mount(h(FileCard, { activity: richActivity(), scope: 'live' }))
+    let m = await mount(h(FileCard, { activity: richActivity() }))
     assert.ok(sortBtns(m.container)[1].className.includes('lc-gran-on'))
     assert.deepEqual(titles(m.container), ['/var/many.log', '/shots/ui.png', 'solo.md', '/src/a.ts', '/src/'])
     await m.unmount()
 
     settings.set('defaultFileSort', 'path')
-    m = await mount(h(FileCard, { activity: richActivity(), scope: 'live' }))
+    m = await mount(h(FileCard, { activity: richActivity() }))
     assert.ok(sortBtns(m.container)[2].className.includes('lc-gran-on'))
     assert.deepEqual(titles(m.container), ['/shots/ui.png', '/src/', '/src/a.ts', '/var/many.log', 'solo.md'])
     await m.unmount()
 
+    settings.set('defaultFileSort', 'name')
+    m = await mount(h(FileCard, { activity: richActivity() }))
+    assert.ok(sortBtns(m.container)[3].className.includes('lc-gran-on'))
+    assert.deepEqual(titles(m.container), ['/src/a.ts', '/var/many.log', 'solo.md', '/src/', '/shots/ui.png'])
+    await m.unmount()
+
     // The stored preference resets the default; in-card toggling never writes back.
     settings.set('defaultFileSort', 'count')
-    m = await mount(h(FileCard, { activity: richActivity(), scope: 'live' }))
+    m = await mount(h(FileCard, { activity: richActivity() }))
     assert.ok(sortBtns(m.container)[0].className.includes('lc-gran-on'))
     assert.deepEqual(titles(m.container), ['/var/many.log', '/src/a.ts', '/shots/ui.png', 'solo.md', '/src/'])
     await click(sortBtns(m.container)[1])
@@ -283,7 +315,6 @@ describe('FileCard — expansion and locate', () => {
     const located: number[] = []
     const m = await mount(h(FileCard, {
       activity: richActivity(),
-      scope: 'live',
       onLocate: op => { located.push(op.seq) },
     }))
     const row = rowByTitle(m.container, '/src/a.ts')
@@ -306,8 +337,35 @@ describe('FileCard — expansion and locate', () => {
     await m.unmount()
   })
 
+  test('expanded ops hold their values and step stamp on the right edge', async () => {
+    const m = await mount(h(FileCard, {
+      activity: richActivity(),
+      // Two a.ts reads carry stamps: the seq-7 one and the seq-3 timeless one.
+      stampOf: seq => (seq === 7 ? { turn: 2, step: 1 } : seq === 3 ? { turn: 3, step: 4 } : null),
+    }))
+    await click(rowByTitle(m.container, '/src/a.ts'))
+    const ops = queryAll(m.container, '.lc-fa-op')
+    // Every row ends in one meta group: the values, the failure dot and the stamp+time.
+    for (const op of ops) assert.equal(op.lastElementChild, query(op, '.lc-fa-op-meta'))
+    const stamped = ops[0] // the seq-7 read
+    assert.ok(text(stamped).includes('T2 S1'))
+    assert.ok(text(stamped).includes(':')) // the stamp prefixes, never replaces, the time
+    assert.equal(
+      query(stamped, '.lc-fa-op-time').getAttribute('title'),
+      'First carried by the Turn 2 · Step 1 request',
+    )
+    assert.ok(query(stamped, '.lc-fa-op-meta .lc-fa-op-time') !== null)
+    // A stamped op with no time keeps the stamp and drops both the separator and the dash.
+    assert.equal(query(ops[3], '.lc-fa-op-time').textContent, 'T3 S4')
+    const unstamped = ops[1] // the seq-5 edit
+    assert.ok(!text(unstamped).includes('T2 S1'))
+    assert.equal(query(unstamped, '.lc-fa-op-time').getAttribute('title'), null)
+    assert.ok(query(unstamped, '.lc-fa-op-meta .lc-fa-delta') !== null)
+    await m.unmount()
+  })
+
   test('a search op shows its pattern detail; the expanded log lists every op', async () => {
-    const m = await mount(h(FileCard, { activity: richActivity(), scope: 'live' }))
+    const m = await mount(h(FileCard, { activity: richActivity() }))
     // The directory row: one grep op with its searched pattern.
     await click(rowByTitle(m.container, '/src/'))
     assert.ok(text(query(m.container, '.lc-fa-ops')).includes('needle'))
@@ -334,7 +392,6 @@ describe('FileCard — expansion and locate', () => {
         ],
         totals: { read: { files: 1, ops: 2 }, write: { files: 0, ops: 0 }, search: { files: 1, ops: 1 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
       }),
-      scope: 'live',
     }))
     await click(rowByTitle(m.container, '/src/a.ts'))
     assert.ok(text(query(m.container, '.lc-fa-ops')).includes('Read failing test and its fixture'))
@@ -355,7 +412,6 @@ describe('FileCard — expansion and locate', () => {
         ],
         totals: { read: { files: 2, ops: 2 }, write: { files: 0, ops: 0 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
       }),
-      scope: 'live',
     }))
     // The badge: TS label on the language fill, readable text color inline.
     const tsRow = rowByTitle(m.container, '/src/main.ts')
@@ -383,29 +439,28 @@ describe('FileCard — expansion and locate', () => {
         })],
         totals: { read: { files: 1, ops: 2 }, write: { files: 0, ops: 0 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
       }),
-      scope: 'live',
     }))
     await click(rowByTitle(m.container, '/src/a.ts'))
     const ops = queryAll(m.container, '.lc-fa-op')
-    // The exact read: `>> count` with the range as the title.
-    const exact = queryAll(ops[0], '.lc-fa-read')
+    // The exact read rides the row's right-edge group: `>> count` with the range as the title.
+    const exact = queryAll(ops[0], '.lc-fa-op-meta .lc-fa-read')
     assert.equal(exact.length, 1)
     assert.equal(exact[0].textContent, '>>30')
     assert.equal(exact[0].getAttribute('title'), 'Read lines 41–70')
     // The estimate keeps the ≈ form and its own title.
-    const est = queryAll(ops[1], '.lc-fa-read')
+    const est = queryAll(ops[1], '.lc-fa-op-meta .lc-fa-read')
     assert.equal(est.length, 1)
     assert.equal(est[0].textContent, '≈80')
     assert.equal(est[0].getAttribute('title'), 'Lines read, estimated from the limit argument')
-    // The time is the row's last cell, pushed to the right edge (formatted, not the timeless dash).
-    const time = query(ops[1], '.lc-fa-op-time')
+    // The time is the group's last cell, flushed to the card's right edge (formatted, not the timeless dash).
+    const time = query(ops[1], '.lc-fa-op-meta .lc-fa-op-time')
     assert.notEqual(time.textContent, '—')
     assert.ok((time.textContent ?? '').includes(':'))
     await m.unmount()
   })
 
   test('without a locate hook the op lines render inert', async () => {
-    const m = await mount(h(FileCard, { activity: richActivity(), scope: 'live' }))
+    const m = await mount(h(FileCard, { activity: richActivity() }))
     await click(queryAll(m.container, '.lc-fa-row')[0])
     assert.equal(queryAll(m.container, 'button.lc-fa-op').length, 0)
     assert.ok(queryAll(m.container, 'div.lc-fa-op').length > 0)
@@ -418,7 +473,6 @@ describe('FileCard — expansion and locate', () => {
         entries: [entry('/a.ts', { reads: 1, ops: [fileOp(1, 'read', 'read')] })],
         totals: { read: { files: 1, ops: 1 }, write: { files: 0, ops: 0 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
       }),
-      scope: 'live',
     }))
     assert.equal(queryAll(m.container, '.lc-fa-meta-delta').length, 0)
     await m.unmount()
@@ -455,25 +509,24 @@ describe('FileCard — workspace display and system open', () => {
 
   const baseOf = (row: HTMLElement): HTMLElement => query(row, '.lc-fa-path b')
 
-  test('workspace paths display ./-relative; pattern rows and outside paths stay verbatim', async () => {
-    const m = await mount(h(FileCard, { activity: workspaceActivity(), scope: 'live', workspace: '/repo' }))
-    // Inside the workspace: './'-relative dir + base.
+  test('workspace and relative paths display bare-relative; pattern rows and outside paths stay verbatim', async () => {
+    const m = await mount(h(FileCard, { activity: workspaceActivity(), workspace: '/repo' }))
+    // Inside the workspace: bare-relative dir + base, no './' prefix.
     const a = rowOf(m.container, '/repo/src/a.ts')
-    assert.ok(a.querySelector('.lc-fa-path em')?.textContent === './src/')
+    assert.ok(a.querySelector('.lc-fa-path em')?.textContent === 'src/')
     assert.ok(baseOf(a).textContent === 'a.ts')
     // An absolute path outside the workspace keeps its verbatim form.
     const hosts = rowOf(m.container, '/etc/hosts')
     assert.ok(hosts.querySelector('.lc-fa-path em')?.textContent === '/etc/')
-    // A bare-relative path displays './'-prefixed.
     const rel = rowOf(m.container, 'rel/b.md')
-    assert.ok(rel.querySelector('.lc-fa-path em')?.textContent === './rel/')
+    assert.ok(rel.querySelector('.lc-fa-path em')?.textContent === 'rel/')
     // A pattern-as-target search row shows the pattern, never relativized.
     const pat = rowOf(m.container, 'needle')
     assert.equal(pat.querySelector('.lc-fa-path em'), null)
     assert.ok(baseOf(pat).textContent === 'needle')
-    // A './'-prefixed path keeps its form.
+    // A './'-prefixed path drops the prefix.
     const dot = rowOf(m.container, './dot/c.ts')
-    assert.ok(dot.querySelector('.lc-fa-path em')?.textContent === './dot/')
+    assert.ok(dot.querySelector('.lc-fa-path em')?.textContent === 'dot/')
     await m.unmount()
   })
 
@@ -481,7 +534,6 @@ describe('FileCard — workspace display and system open', () => {
     const opened: string[] = []
     const m = await mount(h(FileCard, {
       activity: workspaceActivity(),
-      scope: 'live',
       workspace: '/repo',
       onOpen: p => { opened.push(p) },
     }))
@@ -506,14 +558,13 @@ describe('FileCard — workspace display and system open', () => {
 
   test('without an opener (or without the workspace) the file names render inert', async () => {
     // No onOpen prop: nothing clickable even with the workspace known.
-    const m1 = await mount(h(FileCard, { activity: workspaceActivity(), scope: 'live', workspace: '/repo' }))
+    const m1 = await mount(h(FileCard, { activity: workspaceActivity(), workspace: '/repo' }))
     assert.equal(queryAll(m1.container, '.lc-fa-file').length, 0)
     await m1.unmount()
     // No workspace: only the absolute rows resolve; relative ones stay inert.
     const opened: string[] = []
     const m2 = await mount(h(FileCard, {
       activity: workspaceActivity(),
-      scope: 'live',
       onOpen: p => { opened.push(p) },
     }))
     assert.equal(queryAll(m2.container, '.lc-fa-file').length, 2)
@@ -527,24 +578,20 @@ describe('FileCard — workspace display and system open', () => {
     const opened: string[] = []
     const m = await mount(h(FileCard, {
       activity: workspaceActivity(),
-      scope: 'live',
       workspace: '/repo',
       onPreview: e => { previewed.push(e); return true },
       onOpen: p => { opened.push(p) },
     }))
-    // The preview affordance leads: the title says so, and the click never
-    // reaches the system opener.
+    // The preview affordance leads: the title says so, and the click never reaches the system opener.
     const a = baseOf(rowOf(m.container, '/repo/src/a.ts'))
     assert.equal(a.getAttribute('title'), 'Preview in the sidebar')
     await click(a)
     assert.deepEqual(previewed.map(e => e.path), ['/repo/src/a.ts'])
     assert.equal(opened.length, 0)
-    // A refusal (no preview type claims it, no surface mounted) still opens on
-    // the system rather than becoming an inert click.
+    // A refusal (no preview type claims it, no surface mounted) still opens on the system rather than becoming an inert click.
     await m.unmount()
     const m2 = await mount(h(FileCard, {
       activity: workspaceActivity(),
-      scope: 'live',
       workspace: '/repo',
       onPreview: () => false,
       onOpen: p => { opened.push(p) },
@@ -560,7 +607,6 @@ describe('FileCard — workspace display and system open', () => {
     const previewed: FileEntry[] = []
     const m = await mount(h(FileCard, {
       activity: dirActivity,
-      scope: 'live',
       workspace: '/repo',
       onPreview: e => { previewed.push(e); return true },
     }))
@@ -578,7 +624,6 @@ describe('FileCard — workspace display and system open', () => {
     // only affordance, so a refusal leaves nothing to fall through to.
     const m = await mount(h(FileCard, {
       activity: workspaceActivity(),
-      scope: 'live',
       onPreview: () => false,
     }))
     const name = baseOf(rowOf(m.container, 'rel/b.md'))
@@ -592,7 +637,6 @@ describe('FileCard — the split generation detail states', () => {
   test('a pending detail read shows the loading note instead of the empty claim', async () => {
     const m = await mount(h(FileCard, {
       activity: richActivity({ entries: [] }),
-      scope: 'live',
       state: 'loading',
       onRetry: () => {},
     }))
@@ -605,16 +649,64 @@ describe('FileCard — the split generation detail states', () => {
     let retries = 0
     const m = await mount(h(FileCard, {
       activity: richActivity({ entries: [] }),
-      scope: 'live',
       state: 'failed',
       onRetry: () => { retries++ },
     }))
     await click(query(m.container, '.lc-br-retry'))
     assert.equal(retries, 1)
 
-    const inert = await mount(h(FileCard, { activity: richActivity({ entries: [] }), scope: 'live', state: 'failed' }))
+    const inert = await mount(h(FileCard, { activity: richActivity({ entries: [] }), state: 'failed' }))
     assert.ok(text(inert.container).includes('No file reads'), 'no retry wired — the plain empty state')
     await inert.unmount()
     await m.unmount()
+  })
+})
+
+describe('FileCard — the stats board\'s kind focus', () => {
+  test('a one-shot filter focus picks the kind chip, drops the card\'s own lens, and hands itself back', async () => {
+    const handled: number[] = []
+    const props = (filterFocus: FileFilter) => ({
+      activity: richActivity(),
+      filterFocus,
+      onFilterFocusHandled: () => { handled.push(handled.length + 1) },
+    })
+    const m = await mount(h(FileCard, props('read')))
+    assert.equal(handled.length, 1, 'the request is consumed once')
+    assert.ok(chipByLabel(m.container, 'Read').className.includes('lc-gran-on'))
+    assert.deepEqual(queryAll(m.container, '.lc-fa-row').map(r => r.title), ['/var/many.log', '/src/a.ts', '/shots/ui.png'])
+
+    // The card's own lens and open row survive until the next jump replaces both.
+    await typeSearch(m.container, 'a.ts')
+    await click(rowByTitle(m.container, '/src/a.ts'))
+    assert.equal(queryAll(m.container, '.lc-fa-ops').length, 1)
+    await m.update(h(FileCard, props('image')))
+    assert.equal(handled.length, 2)
+    assert.ok(chipByLabel(m.container, 'Images').className.includes('lc-gran-on'))
+    assert.ok(!chipByLabel(m.container, 'Read').className.includes('lc-gran-on'))
+    assert.deepEqual(queryAll(m.container, '.lc-fa-row').map(r => r.title), ['/shots/ui.png'])
+    assert.equal(query<HTMLInputElement>(m.container, 'input.lc-fa-search').value, '', 'the text lens is dropped')
+    assert.equal(queryAll(m.container, '.lc-fa-ops').length, 0, 'no row stays open across the jump')
+
+    // The caller clears the request after every landing (null), so the SAME kind fires again over a card-local pick.
+    await m.update(h(FileCard, { activity: richActivity(), filterFocus: null, onFilterFocusHandled: () => { handled.push(handled.length + 1) } }))
+    assert.equal(handled.length, 2, 'the cleared request never fires')
+    await click(chipByLabel(m.container, 'All'))
+    assert.ok(chipByLabel(m.container, 'All').className.includes('lc-gran-on'))
+    await m.update(h(FileCard, props('read')))
+    assert.equal(handled.length, 3)
+    assert.ok(chipByLabel(m.container, 'Read').className.includes('lc-gran-on'))
+    await m.unmount()
+  })
+
+  test('without a filter focus the chip band stays the card\'s own; a hand-back-free jump still lands', async () => {
+    const m = await mount(h(FileCard, { activity: richActivity() }))
+    assert.ok(chipByLabel(m.container, 'All').className.includes('lc-gran-on'))
+    await click(chipByLabel(m.container, 'Written'))
+    assert.ok(chipByLabel(m.container, 'Written').className.includes('lc-gran-on'))
+    await m.unmount()
+
+    const solo = await mount(h(FileCard, { activity: richActivity(), filterFocus: 'search' }))
+    assert.ok(chipByLabel(solo.container, 'Searched').className.includes('lc-gran-on'))
+    await solo.unmount()
   })
 })

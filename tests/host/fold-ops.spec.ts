@@ -1,9 +1,6 @@
-// The fold-derived file-op log (src/host/fold.ts + shared/fileOps.ts): ops
-// book at tool/result off the armed call's arguments and the result's
-// presentation meta; Code-Mode sub-dispatches buffer under their run_code
-// root and flush at its result with parent/program stamps; the log trims to
-// maxFileOps with a coverage floor; and the detail builder serves detached
-// copies. Driven through the real projection unit.
+// The fold-derived file-op log (src/host/fold.ts + shared/fileOps.ts): ops book at tool/result off the armed call's arguments and the
+// result's presentation meta; Code-Mode sub-dispatches buffer under their run_code root and flush at its result with parent/program stamps;
+// the log trims to maxFileOps with a coverage floor. Driven through the real projection unit.
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -90,8 +87,7 @@ describe('the file-op log — call/result pairing', () => {
       toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'no' }], error: true }),
       toolCall(3, { callId: 'c2', name: 'read', arguments: JSON.stringify({ file_path: 'b.ts' }) }),
       // A hostile envelope-only mark (the retired pre-V4 spelling): the
-      // admission validation forbids `data.error` without the message mark,
-      // so a row carrying it alone reads as non-error.
+      // admission validation forbids `data.error` without the message mark, so a row carrying it alone reads as non-error.
       {
         type: 'tool/result', seq: 4, time: 4,
         data: {

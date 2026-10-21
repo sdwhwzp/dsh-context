@@ -20,9 +20,19 @@ This `sdwhwzp/dsh-context` fork follows the [DSH fork synchronization rules](../
 
 ## Coding
 - Make the minimal change that fully solves the problem, with the most efficient implementation.
+- User experience, features, and especially the data accuracy and integrity are the top priority. Never sacrifice them for code refactors, performance, or any other reason. Dive deep and run real tests to verify the correctness of every change.
 - Reuse the classes, utilities, styles, style tokens, events, presets, and lifecycles that DeepSeek Harness already provides.
 - Keep code and tests small, loosely coupled, and modular; avoid duplication.
+- After updating tests, firstly run `pnpm exec vitest run tests/<area>/<name>.spec.ts -t "<test case name>"` (regex, use `"a|b"`) to iterate on the touched test cases.
+- Ensure every source code file or test code file has less than 1000 lines.
 - Add comments only for major decisions or significant value, and update or delete outdated ones when modifying the code.
+- Comments guideline:
+  - Cleanup all the unnecessary, unhelpful or deprecated comments
+  - Cleanup all comments that related code already self-explains or self-constructs, even crossing multiple files and modules.
+  - ONLY use necessary comments for critical major decisions or significant value that cannot be self-explained by the code itself or the dsh code
+  - Use precise, clear, and concise language in comments, avoiding vague or ambiguous statements.
+  - Less comments is always better: avoid over-explaining or repeating what the code already expresses.
+  - Always try to cleanup or remove comments
 - Write comments, documentation, PR descriptions, and commit messages in English.
 - Generate one-time temp files in the `.tmp` directory and clean them up right after use.
 
@@ -33,15 +43,18 @@ Complete ALL of these before ANY commit:
 - Close out the to-do list, ensuring every item is completed, cleaned up or explicitly closed.
 - Review the full diff independently: every change necessary, correct, and not over-engineered.
 - Clean up generated temporary files and temporary or unhelpful comments.
-- Run `pnpm run lint:fix && pnpm run test && pnpm run build` as a single command and capture the FULL output.
-  - Example for per-file 100% coverage output:
-    ```
-    % Coverage report from v8
-    -------------------------|---------|----------|---------|---------|-------------------
-    File                     | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
-    -------------------------|---------|----------|---------|---------|-------------------
-    -------------------------|---------|----------|---------|---------|-------------------
-    ```
+- Load the [code-review](https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review) skill, run it to review all the changes, and independently verify or follow each of its suggestions after its multi-axis analysis done.
+- Run `pnpm run check`: it runs `pnpm run lint`, `pnpm run typecheck` and `pnpm run coverage` concurrently, prints each tool's COMPLETE output, and fails when any of them does (the same logs stay in `.tmp/check-logs/`).
+  - Fix every lint and type error, and ensure 100% per-file coverage. Please capture the ALL content of the full output without truncation or tailing.
+    - Example for per-file 100% coverage output:
+      ```
+      % Coverage report from v8
+      -------------------------|---------|----------|---------|---------|-------------------
+      File                     | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+      -------------------------|---------|----------|---------|---------|-------------------
+      -------------------------|---------|----------|---------|---------|-------------------
+      ```
+  - The `pre-commit` hook runs this same gate, and a green run stamps the worktree into `.tmp/check.stamp`, so a commit of unchanged content skips it; `pnpm run check --full` forces a full re-run.
 
 ## Layout & responsive
 
@@ -51,15 +64,15 @@ Complete ALL of these before ANY commit:
 - Verify layout changes visually before shipping: a spread of widths from desktop down to phone (~390px), in both locales (English labels are the truncation stress case), on a long session, including the `/context` modal.
 
 ## Build & run
-- Run `pnpm run build` after code changes applied.
-- Run `pnpm run watch` to keep the local plugin hot-reloaded on dsh while developing in the browser.
-- The dsh web server may already be running at `http://127.0.0.1:3080/`.
-- Run `pnpm run web` to restart it (kills the running `dsh web` first, then starts `dsh web --no-open`).
-- If the browser hits an auth-token issue, kill the dsh process and restart with `dsh web --no-open`, then open the printed `http://127.0.0.1:3080/?token=XXXXXXXXX` URL.
+- **Build**: run `pnpm run build` after applying code changes.
+- **Watch**: run `pnpm run watch` to hot-reload the local plugin in dsh while developing in the browser.
+- **Web server**: it may already be running at `http://127.0.0.1:3080/`. To restart, run `pnpm run web` (kills the running `dsh web`, then starts `dsh web --no-open`).
+- **Tokenized URL**: always open the full URL printed at startup, `http://127.0.0.1:3080/?token=XXXXXXXXX`. Save it to `.tmp/dsh-web-url.txt` and read it from there for later browser runs; each restart prints a new token and the old URL stops working, so overwrite the file every time.
+- **Auth-token errors**: kill the dsh process, restart with `dsh web --no-open`, and open the newly printed tokenized URL.
 
 ## Compatibility - Important!
 - MUST install and work correctly on every supported `@deepseek-ai/dsh` release, with no regressions in runtime dependencies, message parsing, or any user-visible behavior.
-- **`docs/compatibility.md` is the single source of truth** — supported releases, durable-log generations, fold-by-shape and optional-seam rules, parsing resilience for untrusted log/projection data, low-level parity with the harness's own metering, and the baseline gates. Read it BEFORE any compatibility-relevant change, and keep it current whenever the code or the supported set changes.
+- **`docs/compatibility.md` is the single source of truth** — supported set, admission gates, fold rules, metering parity, client seams, projection-cache protocol, packaging pins, and the verification gates. Read it BEFORE any compatibility-relevant change, and keep it current whenever the code or the supported set changes. Keep it minimal — less is always better: record only decisions and declared limitations that no other artifact carries, with evidence pointers into the dsh source tree; never narrate what code, tests, or git history already say.
 - Consider updating dependencies to the latest version where possible — deepseek-harness evolves rapidly.
 
 ## I18n
@@ -80,6 +93,7 @@ Complete ALL of these before ANY commit:
 ## Releasing
 - Version X.Y.Z, 大版本.次版本.小版本。
 - Review all the commits/changes since last tagged release.
+- Review relevant recent issues and PRs; mention them in release notes and close resolved issues.
 - Releases are cut by tagging: `git tag vX.Y.Z && gh release create vX.Y.Z`.
 - A [GitHub Actions workflow](.github/workflows/release.yml) then builds, tests, and publishes the package to npm automatically — no manual action needed.
 - Write the release notes from the [release template](.github/release_template.md)
@@ -89,4 +103,5 @@ Complete ALL of these before ANY commit:
 This repo is indexed by CodeGraph (a `.codegraph/` directory exists at the repo root, if not run `codegraph init` to initialize it).
 - MUST reach for it BEFORE any grep/find or reading files when you need to understand or locate code:
 - **Shell** (always works): ALWAYS run and collect ALL output of `codegraph sync -q && codegraph explore --path /some-path "<symbol names or question>"` without truncating text
+- Queries are fast and cheap — issue several `codegraph explore` calls in one turn, each from a different question or angle, and use them liberally instead of stopping after the first one.
 <!-- CODEGRAPH_END -->

@@ -1,12 +1,7 @@
-// Staging + probe helpers for the compat matrix (matrix.spec.ts): stage the
-// REAL harness sources at a baseline tag, boot the plugin's BUILT host entry
-// on the tag's real registry + vendored cordis, and read the tag's client
-// seams straight from its sources.
-//
-// The registry probe runs as a small spawned driver INSIDE the staging dir,
-// so the bare `@deepseek-ai/cordis` import resolves to the cordis release
-// that harness line vendors (not this repo's) — one process per baseline,
-// reported as one JSON line.
+// Staging + probe helpers for the compat matrix (matrix.spec.ts): stage the REAL harness sources at a baseline tag, boot the plugin's BUILT
+// host entry on the tag's real registry + vendored cordis, and read the tag's client seams straight from its sources. The registry probe
+// runs as a small spawned driver INSIDE the staging dir, so the bare `@deepseek-ai/cordis` import resolves to the cordis release that
+// harness line vendors (not this repo's) — one process per baseline, reported as one JSON line.
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -62,6 +57,16 @@ export function stageFile(baseline: Baseline, tagPath: string, localName: string
   return file
 }
 
+/** Stage one file only when the tag carries it: a line that does not ship the
+ * file stages nothing, and the sibling a staged module imports by relative
+ * path rides along. */
+function stageFileIfPresent(baseline: Baseline, tagPath: string, localName: string): boolean {
+  const run = spawnSync('git', ['-C', DSH_REPO, 'cat-file', '-e', `${baseline.tag}:${tagPath}`], { encoding: 'utf8' })
+  if (run.status !== 0) return false
+  stageFile(baseline, tagPath, localName)
+  return true
+}
+
 /** The host packages the tag's staged sources import at runtime, at this line's own versions. */
 function hostDepsOf(baseline: Baseline): Record<string, string> {
   return {
@@ -90,9 +95,9 @@ export interface DriverReport {
   keys: string[]
   gateOk: boolean
   coldMatches: boolean
-  /** V4 tool-registry changes survive the real registry's cache/read paths. */
   developerTokens: number | null
   developerRequestTokens: number | null
+  /** V4 tool-registry `developer/message` changes survive the real cache/read paths. */
   developerRestoreMatches: boolean
   /** Issue #44: hostile gateway usage keeps the served values schema-valid on the REAL registry. */
   hostileSnapshotOk: boolean
@@ -106,17 +111,14 @@ export interface DriverReport {
   poisonedSnapshotThrows: boolean
 }
 
-/**
- * The staged host driver: runs INSIDE the baseline's staging dir, applies the
+/** The staged host driver: runs INSIDE the baseline's staging dir, applies the
  * plugin's real host entry into the tag's real registry, drives a canonical
- * log through the registry's own snapshot / checkpoint / restore paths, and
- * reports as one JSON line.
- */
+ * log through the registry's own snapshot / checkpoint / restore paths, and reports as one JSON line. */
 function driverSource(pluginUrl: string, developerMessages: boolean): string {
   return `
 import { Context } from '@deepseek-ai/cordis'
 import { SessionProjectionRegistry } from './registry/index.ts'
-import { snapshotJsonValue } from './dsh/json-values.ts'
+import { snapshotJsonValue } from './dsh/index.ts'
 const plugin = await import(${JSON.stringify(pluginUrl)})
 const ctx = new Context()
 const registry = new SessionProjectionRegistry(ctx)
@@ -188,8 +190,7 @@ if (${developerMessages}) {
 // A mis-accounting gateway's figures (negative uncached input from
 // cached_tokens > prompt_tokens, fractional counts, string buckets, a NaN a
 // hostile direct-drive could supply) ride the durable log legally; the
-// plugin's served values must stay schema-valid through the registry's own
-// strict parse on every later delivery.
+// plugin's served values must stay schema-valid through the registry's own strict parse on every later delivery.
 const hostile = [
   ev(12, 'step/start'),
   ev(13, 'assistant/message', { turn: 1, step: 2, message: { content: [{ type: 'text', text: 'h1' }] }, usage: { inputTokens: -80, cacheReadTokens: 150.7, cacheWriteTokens: '10', outputTokens: 22.4 } }),
@@ -277,12 +278,12 @@ export function runDriver(baseline: Baseline): DriverReport {
   ensureHostDeps(baseline)
   stageFile(baseline, 'packages/session/session-projection/src/index.ts', join('registry', 'index.ts'))
   stageFile(baseline, 'packages/session/session-projection/src/types.ts', join('registry', 'types.ts'))
+  // The values package under its own file name: its modules import each other
+  // by relative path, so renaming the entry would break the sibling links.
   stageFile(baseline, 'packages/util/values/src/index.ts', join('dsh', 'index.ts'))
-  if (baseline.id === 'v0.2.1-alpha.1') {
-    stageFile(baseline, 'packages/util/values/src/partial-json.ts', join('dsh', 'partial-json.ts'))
-  }
-  writeFileSync(join(STAGE, baseline.id, 'dsh', 'json-values.ts'), `export * from './index.ts'\n`)
-
+  // The 0.2.1 line's values package grew a sibling module the staged entry
+  // re-exports by relative path, so it rides along where the tag ships it.
+  stageFileIfPresent(baseline, 'packages/util/values/src/partial-json.ts', join('dsh', 'partial-json.ts'))
   const driver = join(STAGE, baseline.id, 'driver.mjs')
   writeFileSync(driver, driverSource(`file://${join(REPO, 'lib', 'index.js')}`, baseline.foldEventTypes.includes('developer/message')))
   const run = spawnSync(process.execPath, [driver], { cwd: STAGE, encoding: 'utf8', timeout: 60_000 })
@@ -299,26 +300,18 @@ export function bundleRequires(): string[] {
   return [...new Set([...source.matchAll(/require\("([^"]+)"\)/g)].map(m => m[1]))]
 }
 
-/**
- * The slot registrations the client half mounts on EVERY baseline (identical
- * spellings in each generation's sources). The preferences card seat and the
- * settings transport are asserted separately, per generation — the matrix
- * spec pins them to the baseline's `settings` seam (`plugins.bundle.config` +
- * `configForms` on every supported line).
- */
+/** The slot registrations the client half mounts on EVERY baseline (identical
+ * spellings in each generation's sources). */
 export const SLOT_SEAMS = [
   'conversation.view',
   'conversation.chat.assistant-actions',
   'conversation.input.overlay',
 ] as const
 
-/**
- * The ui-primitives icon seams the client bundle renders: every supported
+/** The ui-primitives icon seams the client bundle renders: every supported
  * line ships the `…OutlineRegular`/`…OutlineMedium` vocabulary, and a missing
  * name is `undefined` at the browser's runtime — React error #130.
- * `src/client/primitives.ts` resolves each by name; every one must exist per
- * tag.
- */
+ * `src/client/primitives.ts` resolves each by name; every one must exist per tag. */
 export const ICON_SEAMS = [
   'IconBranchOutlineRegular',
   'IconPlusOutlineRegular',
@@ -329,21 +322,18 @@ export const ICON_SEAMS = [
   'IconChevronDownOutlineMedium',
   'IconChevronUpOutlineMedium',
   'IconSearchOutlineRegular',
+  'FileTypeIcon',
 ] as const
 
-/**
- * The event families the host fold switches on (src/host/fold.ts) — the UNION
- * over every supported generation. The per-baseline probe asserts the
- * baseline's own `foldEventTypes` subset, and a matrix test asserts this
- * union equals the baselines' union — a fold case added without a baseline
- * list fails loudly instead of going unprobed.
- */
-export const FOLD_EVENT_TYPES = [
-  'request/header', 'request/context', 'step/start', 'step/end',
-  'user/message', 'developer/message', 'tool/call', 'tool/result', 'assistant/message',
-  'assistant/attempt', 'tool/ptc-dispatch',
-  'plan/mode', 'compaction/summary', 'compaction/prune', 'system/message',
-] as const
+/** The event families the host fold actually switches on, read out of `src/host/fold.ts` so the
+ * matrix can never check a hand-copied list against itself. Throws when the labels are not found,
+ * so a refactor that moves the switch fails loudly instead of going vacuously green. */
+export function foldEventTypesFromSource(): readonly string[] {
+  const source = readFileSync(join(REPO, 'src', 'host', 'fold.ts'), 'utf8')
+  const labels = [...source.matchAll(/^\s*case '([a-z-]+\/[a-z-]+)':/gm)].map(m => m[1])
+  if (labels.length === 0) throw new Error('fold.ts: no event case labels found — the matrix cannot verify the baseline lists')
+  return [...new Set(labels)].sort()
+}
 
 /** The tag's durable-event vocabulary (packages/core/session/src/known-event-types.ts). */
 export async function knownEventTypesOf(baseline: Baseline): Promise<ReadonlySet<string>> {

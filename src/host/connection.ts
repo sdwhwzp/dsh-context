@@ -1,15 +1,9 @@
-/**
- * The host `connection` service seam every one of the plugin's fetch routes
- * (detail, backfill trigger, balance) registers through. One home for the
- * face and the bind-at-extraction guard: an unbound hand-off loses `this`
- * on the real face, and three copies of that incantation is two too many.
- */
+/** The host `connection` service seam every plugin fetch route (detail, backfill trigger, balance,
+ * skills) registers through. One home for the face and the bind-at-extraction guard: an unbound
+ * hand-off loses `this` on the real face. */
 
-/** The host `connection` service, as far as a fetch route consumes it. */
 export interface ConnectionHostFace {
   fetch?: {
-    // The handler's result is awaited by the transport, so sync and async
-    // handlers both register.
     register?(route: {
       path: string
       methods: readonly string[]
@@ -19,9 +13,54 @@ export interface ConnectionHostFace {
   }
 }
 
-/** The route registrar off the face, bound at extraction; undefined when the service serves no fetch routes. */
-export function fetchRouteRegistrar(connection: ConnectionHostFace | undefined) {
+/** The route registrar off the face, bound at extraction. */
+function fetchRouteRegistrar(connection: ConnectionHostFace | undefined) {
   return typeof connection?.fetch?.register === 'function'
     ? connection.fetch.register.bind(connection.fetch)
     : undefined
+}
+
+/** The injected fiber's `effect`, as the route registration uses it. */
+interface EffectScope {
+  effect(effect: () => () => void, hint?: string): unknown
+}
+
+/**
+ * Register one plugin fetch route. Every route is a POST behind the same `/api` fence, so the shape,
+ * the bind-at-extraction guard, and the refuse-quietly catch live here instead of in each watcher.
+ * @returns whether the route is now registered — false when the face is absent or the registry refuses.
+ */
+export function registerPostRoute(
+  c: EffectScope,
+  connection: ConnectionHostFace | undefined,
+  path: string,
+  fetch: (request: Request, principal?: unknown) => Response | Promise<Response>,
+  label: string,
+): boolean {
+  const register = fetchRouteRegistrar(connection)
+  if (register === undefined) return false
+  try {
+    c.effect(() => register({ path, methods: ['POST'], requestBody: 'buffered', fetch }), label)
+  } catch {
+    // A hostile or rejecting registry must not take the plugin down; the route simply stays absent.
+    return false
+  }
+  return true
+}
+
+/** Authenticated deployments require an explicit session grant before plugin-owned reads. */
+export async function canReadAccountSession(
+  ctx: { get(name: string): unknown },
+  principal: unknown,
+  sessionId: string | undefined,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const access = ctx.get('principalAccess') as {
+    resolve(principal: unknown, subjects: { sessionIds: string[] }, signal: AbortSignal):
+    Promise<{ readableSessionIds: ReadonlySet<string> }>
+  } | undefined
+  if (access === undefined && principal === undefined && ctx.get('requestPrincipal') === undefined) return true
+  if (access === undefined || principal === undefined || sessionId === undefined) return false
+  const grant = await access.resolve(principal, { sessionIds: [sessionId] }, signal)
+  return grant.readableSessionIds.has(sessionId)
 }

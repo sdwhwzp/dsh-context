@@ -1,66 +1,85 @@
 /**
- * The `contextActivity` session projection unit — the per-day activity
- * ledger behind the Context Dashboard's heatmap and its last-7-days usage
- * chart.
+ * The `contextActivity` session projection unit — the per-day activity ledger behind the
+ * Context Insights page's range-scoped KPIs, its heatmap, and its last-7-days usage chart.
  *
- * The timeline unit (fold.ts) is a "current snapshot" fold: it prices the
- * context as it stands NOW, which cannot draw a per-day chart. This unit
- * folds the same committed event stream into a ledger keyed by local
- * calendar day (shared/days.ts): every assistant settlement adds one
- * completed request to its day and, when the provider reported a usage
- * object, the day's billed-token figure grows by the disjoint buckets
- * (uncached input + cache read + cache write + output — the same semantics
- * the timeline's request records and the official token meter use). Each
- * metered settlement also books its buckets into the day's per-(provider,
- * model, period) pricing record — the same raw material the timeline's
- * session-cost totals carry (SessionCostUsage), so the client prices every
- * day off the SAME model-price book and estimator it prices the KPI band
- * with. Buckets attribute to the day the open STEP STARTED (the turn's
- * initiation, armed by `step/start` and cleared by `step/end` — the
- * timeline fold's own pending-slot protocol), falling back to the
- * settlement instant when no stamp is armed; the peak/off split prices the
- * same instant, so a fee always lands on one day at one rate.
+ * The timeline unit (fold.ts) prices the context as it stands NOW, which cannot draw a per-day
+ * chart, so this unit folds the committed event stream into a ledger keyed by local calendar day:
+ * an assistant settlement adds one completed request, its billed buckets (uncached input + cache
+ * read + cache write + output), and its per-(provider, model, period) pricing record. Buckets
+ * attribute to the day the open STEP STARTED, falling back to the settlement instant; the
+ * peak/off split prices the same instant. A step's tool runs and wall time attach to that same
+ * initiation day, and a turn books on the day its first settlement lands. Each day also tallies
+ * its skill loads.
  *
- * One wire contract, one small state: a day entry is two integers plus the
- * optional pricing record, the route in force rides the state (last
- * `request/header` wins), and the retention cap keeps at most
- * {@link MAX_KEPT_DAYS} keys, so the value riding every session-list row
- * stays trivial next to the timeline head. Same projection contract as the
- * sibling units: pure init/apply/view, unknown or malformed events return
- * the state unchanged, and no `undefined`-valued property ever materializes
- * (the plain-JSON persisted-state precondition).
+ * The ledger is bounded by {@link MAX_KEPT_DAYS} keys and never materializes an `undefined`-valued
+ * property.
  */
 
 import { z } from 'zod'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ProjectionDefinition } from './compat'
-import { addBilledUsage, tokenCountOf, type BilledUsage, type UsageLike } from './fold'
+import { skillNameOf } from './fold'
+import { addBilledUsage, copyCostUsage, durOf, tokenCountOf } from './foldMetering'
+import type { BilledUsage, UsageLike } from './foldMetering'
 import { costUsageSchema } from './timeline'
 import { dayKeyOf } from '../shared/days'
-import type { ContextActivity, SessionCostUsage } from '../shared/types'
+import type { ActivityDay, ContextActivity } from '../shared/types'
 
-/**
- * Retention cap on ledger days. A little over a year of daily-active
- * sessions; the oldest keys drop first (key order IS chronological order).
- */
+/** Retention cap on ledger days: a little over a year of daily-active sessions. */
 const MAX_KEPT_DAYS = 400
 
-/** The persisted fold state (the registry's `stateSchema` contract). */
+/** Cap on one day's skill-name table; a hostile replay could stuff a name into every injection. */
+const MAX_SKILLS_PER_DAY = 100
+
+/** Bound on the pending `skill`-call id list (see ActivityState.skillCalls). */
+const MAX_PENDING_SKILL_CALLS = 100
+
+/** Bound on the pending tool-call start table (see ActivityState.toolStarts). */
+const MAX_PENDING_TOOL_CALLS = 100
+
+/** A pending tool run's start instant and the step-initiation day it prices. */
+interface ToolStart {
+  start: number
+  day: string
+}
+
 export interface ActivityState {
-  days: Record<string, { tokens: number; requests: number; cost?: SessionCostUsage }>
-  /** The route in force (last `request/header`'s config wins) — prices each settlement. */
+  days: Record<string, ActivityDay>
+  /** The route in force (the last `request/header`'s config wins) — prices each settlement. */
   model?: string
   provider?: string
   /** The open step's start instant (armed by `step/start`, cleared by `step/end`). */
   stepStart?: number
+  /** The last turn whose first settlement was booked, so a multi-step turn counts once. */
+  lastTurn?: number
+  /** Pending tool runs (call id → start + initiation day), consumed by the pairing `tool/result`. */
+  toolStarts?: Record<string, ToolStart | undefined>
+  /** Pending `skill`-tool call ids (armed by `tool/call`, consumed by the pairing `tool/result`):
+   * the wrapper match alone is not trusted, or a `read` of source text quoting
+   * `<skill_content name="…">` would book a load. Bounded at {@link MAX_PENDING_SKILL_CALLS}. */
+  skillCalls?: string[]
 }
+
+const activitySkillSchema = z.object({
+  n: z.number().int().nonnegative(),
+  last: z.number(),
+}).strict()
+
+const toolStartSchema = z.object({
+  start: z.number().nonnegative(),
+  day: z.string(),
+}).strict()
 
 const activityDaySchema = z.object({
   tokens: z.number().int().nonnegative(),
   requests: z.number().int().nonnegative(),
   cost: costUsageSchema.optional(),
+  turns: z.number().int().nonnegative().optional(),
+  toolCalls: z.number().int().nonnegative().optional(),
+  toolsMs: z.number().nonnegative().optional(),
+  wallMs: z.number().nonnegative().optional(),
+  skills: z.record(z.string(), activitySkillSchema).optional(),
 }).strict()
-
 /** Validate the wire payload before it leaves the host (strict: no drift). */
 export const contextActivitySchema = z.object({
   days: z.record(z.string(), activityDaySchema),
@@ -72,15 +91,14 @@ const activityStateSchema = z.object({
   model: z.string().optional(),
   provider: z.string().optional(),
   stepStart: z.number().optional(),
+  lastTurn: z.number().optional(),
+  toolStarts: z.record(z.string(), toolStartSchema).optional(),
+  skillCalls: z.array(z.string()).optional(),
 }) as unknown as z.ZodType<ActivityState>
 
-/**
- * One durable usage object's billed buckets, or null when NO bucket is
- * readable (the same rule the timeline fold bills by: a settlement that
- * carried no usage still counts its request without fabricating tokens).
- * Every bucket passes the shared per-bucket sanitizer ({@link tokenCountOf}
- * — fractions round, negatives clamp, garbage reads absent).
- */
+/** One durable usage object's billed buckets, or null when NO bucket is readable (a settlement
+ * that carried no usage still counts its request without fabricating tokens). Buckets pass the
+ * shared sanitizer {@link tokenCountOf}: fractions round, negatives clamp. */
 function billedBucketsOf(value: unknown): BilledUsage | null {
   if (value === null || typeof value !== 'object') return null
   const usage = value as UsageLike
@@ -89,19 +107,116 @@ function billedBucketsOf(value: unknown): BilledUsage | null {
   const cacheWrite = tokenCountOf(usage.cacheWriteTokens)
   const output = tokenCountOf(usage.outputTokens)
   if (input === null && cacheRead === null && cacheWrite === null && output === null) return null
-  return { input: input ?? 0, cacheRead: cacheRead ?? 0, cacheWrite: cacheWrite ?? 0, output: output ?? 0 }
+  return { uncached: input ?? 0, cacheRead: cacheRead ?? 0, cacheWrite: cacheWrite ?? 0, output: output ?? 0 }
 }
 
-/**
- * Fold one committed event into the ledger. Four event types advance it:
- * `request/header` tracks the route in force (the timeline fold's rule —
- * last header wins), `step/start`/`step/end` maintain the initiation stamp,
- * and `assistant/message` (the step settlement — both supported log
- * generations) books the day. Everything else returns the state reference
- * unchanged, as does a settlement with no attributable instant. The next
- * state is a copy along the mutated path only — the persisted previous
- * state is never mutated in place.
- */
+/** Write one day entry back into the ledger under the retention cap. A dynamic `delete` per
+ * evicted key would deopt the record into dictionary mode, so the kept suffix rebuilds. */
+function withDayEntry(state: ActivityState, key: string, entry: ActivityDay): ActivityState {
+  let days = { ...state.days, [key]: entry }
+  const keys = Object.keys(days)
+  if (keys.length > MAX_KEPT_DAYS) {
+    keys.sort()
+    const drop = new Set(keys.slice(0, keys.length - MAX_KEPT_DAYS))
+    days = Object.fromEntries(Object.entries(days).filter(([k]) => !drop.has(k)))
+  }
+  return { ...state, days }
+}
+
+/** A day entry's existing fields with the required counters filled, ready for a targeted patch.
+ * Nested records ride by reference (the fold never mutates them in place). */
+function copyDay(prev: ActivityDay | undefined): ActivityDay {
+  return {
+    tokens: prev?.tokens ?? 0,
+    requests: prev?.requests ?? 0,
+    ...(prev?.cost !== undefined ? { cost: prev.cost } : {}),
+    ...(prev?.turns !== undefined ? { turns: prev.turns } : {}),
+    ...(prev?.toolCalls !== undefined ? { toolCalls: prev.toolCalls } : {}),
+    ...(prev?.toolsMs !== undefined ? { toolsMs: prev.toolsMs } : {}),
+    ...(prev?.wallMs !== undefined ? { wallMs: prev.wallMs } : {}),
+    ...(prev?.skills !== undefined ? { skills: prev.skills } : {}),
+  }
+}
+
+/** Patch one day entry, preserving every other field. */
+function withDayPatch(state: ActivityState, key: string, patch: Partial<ActivityDay>): ActivityState {
+  return withDayEntry(state, key, { ...copyDay(state.days[key]), ...patch })
+}
+
+/** Remember a tool run under its initiation day; a hostile unsettled stream is bounded like the skill claims. */
+function withToolStart(state: ActivityState, callId: string, start: number): ActivityState {
+  if (!Number.isFinite(start) || start < 0) return state
+  const day = dayKeyOf(state.stepStart ?? start)
+  if (day === null) return state
+  const prev = state.toolStarts?.[callId]
+  if (prev !== undefined && prev.start === start && prev.day === day) return state
+  const starts: Record<string, ToolStart | undefined> = { ...state.toolStarts, [callId]: { start, day } }
+  const entries = Object.entries(starts)
+  const toolStarts = entries.length > MAX_PENDING_TOOL_CALLS
+    ? Object.fromEntries(entries.slice(entries.length - MAX_PENDING_TOOL_CALLS))
+    : starts
+  return { ...state, toolStarts }
+}
+
+/** Price a paired tool run into its step's initiation day, then drain the pending entry. */
+function bookToolResult(state: ActivityState, callId: string, end: number): ActivityState {
+  const starts = state.toolStarts
+  const start = starts?.[callId]
+  if (starts === undefined || start === undefined) return state
+  const byKey: Record<string, ActivityDay | undefined> = state.days
+  const day = byKey[start.day]
+  const timed = withDayPatch(state, start.day, {
+    toolCalls: (day?.toolCalls ?? 0) + 1,
+    toolsMs: (day?.toolsMs ?? 0) + durOf(start.start, end),
+  })
+  const kept = Object.fromEntries(Object.entries(starts).filter(([id]) => id !== callId))
+  const next = { ...timed }
+  if (Object.keys(kept).length > 0) next.toolStarts = kept
+  else delete next.toolStarts
+  return next
+}
+
+/** Book one skill load against its day: the tally grows and `last` takes the max, so a disordered
+ * replay never walks it back. A day at the name cap keeps its booked names and drops the newcomer. */
+function bookSkillLoad(state: ActivityState, name: string, time: number): ActivityState {
+  const key = dayKeyOf(time)
+  if (key === null) return state
+  const byKey: Record<string, ActivityDay | undefined> = state.days
+  const prev = byKey[key]
+  const existing = prev?.skills !== undefined && Object.hasOwn(prev.skills, name) ? prev.skills[name] : undefined
+  if (existing === undefined && prev?.skills !== undefined && Object.keys(prev.skills).length >= MAX_SKILLS_PER_DAY) return state
+  const skills = {
+    ...prev?.skills,
+    [name]: { n: (existing?.n ?? 0) + 1, last: existing === undefined ? time : Math.max(existing.last, time) },
+  }
+  return withDayEntry(state, key, { ...copyDay(prev), skills })
+}
+
+/** The skill name a `user/message` (or `developer/message`) load gesture carries: a user-explicit
+ * `/name` invocation's durable `skill-invocation` envelope. Anything else reads as no load. */
+function invokedSkillOf(event: SessionEvent): string {
+  const data = event.data as { source?: unknown; message?: unknown } | null | undefined
+  const carrier = event.type === 'developer/message' ? data?.message : data
+  const source = carrier !== null && typeof carrier === 'object'
+    ? (carrier as { source?: unknown }).source
+    : undefined
+  if (source === null || typeof source !== 'object') return ''
+  const rec = source as { kind?: unknown; name?: unknown }
+  return rec.kind === 'skill-invocation' && typeof rec.name === 'string' ? rec.name : ''
+}
+
+function toolResultCallIdOf(message: unknown): string | null {
+  if (message === null || typeof message !== 'object') return null
+  const rec = message as { toolCallId?: unknown; source?: unknown }
+  if (typeof rec.toolCallId === 'string' && rec.toolCallId !== '') return rec.toolCallId
+  const source = rec.source
+  if (source === null || typeof source !== 'object') return null
+  const callId = (source as { callId?: unknown }).callId
+  return typeof callId === 'string' && callId !== '' ? callId : null
+}
+/** Fold one committed event into the ledger. Everything else returns the state reference
+ * unchanged, as does a settlement with no attributable instant; the next state is a copy along
+ * the mutated path only — the persisted previous state is never mutated in place. */
 export function applyActivity(state: ActivityState, event: SessionEvent): ActivityState {
   if (event.type === 'request/header') {
     const data = event.data as { header?: { config?: { model?: unknown; provider?: unknown } | null } | null } | undefined
@@ -123,93 +238,124 @@ export function applyActivity(state: ActivityState, event: SessionEvent): Activi
     return state.stepStart === event.time ? state : { ...state, stepStart: event.time }
   }
   if (event.type === 'step/end') {
-    if (state.stepStart === undefined) return state
-    // DELETE the field — assigning `undefined` would break the plain-JSON
-    // persisted-state precondition (see TimelineState.stepStart).
-    const next = { ...state }
+    const start = state.stepStart
+    if (start === undefined) return state
+    // The step's wall time is charged to its START day, so a step crossing midnight keeps its
+    // whole window on the day it began. A zero-length step books no entry.
+    const key = dayKeyOf(start)
+    const dur = durOf(start, event.time)
+    const timed = key === null || dur <= 0
+      ? state
+      : withDayPatch(state, key, { wallMs: (state.days[key]?.wallMs ?? 0) + dur })
+    // DELETE the field — assigning `undefined` would break the plain-JSON precondition.
+    const next = { ...timed }
     delete next.stepStart
     return next
   }
   if (event.type === 'session/end-seed') {
-    // The tagged fork/seed boundary (the cost-semantics decision in
-    // fold.ts): settlements before it are the inherited parent-log prefix —
-    // spend the session it forked from already booked — so the ledger
-    // resets and a seeded session's days count post-seed activity only
-    // (issue #94). The untagged resume marker returns the state unchanged.
-    // `stepStart` dies with the cut: a slot armed by the inherited tail
-    // must not attribute the child's first settlement to a parent-day.
+    // The tagged fork/seed boundary: settlements before it are the inherited parent-log prefix,
+    // already booked to the session it forked from, so the ledger resets. `stepStart` dies with
+    // the cut, so an armed slot from the inherited tail cannot attribute the child's first settlement to a parent day.
     const data = event.data as { inherited?: unknown } | null | undefined
     if (data?.inherited !== true) return state
     return { days: {} }
   }
+  if (event.type === 'user/message' || event.type === 'developer/message') {
+    const name = invokedSkillOf(event)
+    return name === '' ? state : bookSkillLoad(state, name, event.time)
+  }
+  if (event.type === 'tool/call') {
+    const data = event.data as { callId?: unknown; name?: unknown } | null | undefined
+    const callId = data?.callId
+    if (typeof callId !== 'string' || callId === '') return state
+    // Every tool run is timed against its step's initiation day; the skill tool additionally arms
+    // its pairing claim, trusted only when the result carries the matching call id.
+    const next = withToolStart(state, callId, event.time)
+    if (data?.name !== 'skill') return next
+    const pending = next.skillCalls ?? []
+    if (pending.includes(callId)) return next
+    return { ...next, skillCalls: [...pending, callId].slice(-MAX_PENDING_SKILL_CALLS) }
+  }
+  if (event.type === 'tool/result') {
+    // Price the paired run first, then consume the `skill`-tool load claim (if any): the
+    // `<skill_content name="…">` wrapper is trusted only under the matching pending call.
+    const message = (event.data as { message?: unknown } | null | undefined)?.message
+    const callId = toolResultCallIdOf(message)
+    const next = callId === null ? state : bookToolResult(state, callId, event.time)
+    const pending = next.skillCalls
+    if (callId === null || pending === undefined || !pending.includes(callId)) return next
+    const skillCalls = pending.filter(id => id !== callId)
+    const consumed: ActivityState = { ...next }
+    // DELETE the drained field — an undefined-valued property would break the plain-JSON state.
+    if (skillCalls.length > 0) consumed.skillCalls = skillCalls
+    else delete consumed.skillCalls
+    const name = skillNameOf(message)
+    return name === '' ? consumed : bookSkillLoad(consumed, name, event.time)
+  }
   if (event.type !== 'assistant/message') return state
-  // Attribute the settlement to the open step's initiation instant, falling
-  // back to the settlement's own instant (the pending slot stays armed — the
-  // timeline fold's protocol — so a second settlement of the same step still
-  // reads it; `step/end` clears it).
+  // Attribute the settlement to the open step's initiation instant, falling back to its own; the
+  // slot stays armed, so a second settlement of the same step still reads it.
   const initiated = state.stepStart !== undefined ? state.stepStart : event.time
   const key = dayKeyOf(initiated)
   if (key === null) return state
-  const data = event.data as { usage?: unknown } | undefined
+  const data = event.data as { usage?: unknown; turn?: unknown } | undefined
   const buckets = billedBucketsOf(data?.usage)
-  // A Record index read CAN miss at runtime (no noUncheckedIndexedAccess
-  // here), so the value type is widened honestly before the read.
-  const byKey: Record<string, { tokens: number; requests: number; cost?: SessionCostUsage } | undefined> = state.days
+  const byKey: Record<string, ActivityDay | undefined> = state.days
   const prev = byKey[key]
-  // A settlement prices only when a model is in force (the accumulateCost
-  // rule): a model-less or unmetered settlement still counts its tokens and
-  // request, never a fabricated fee. The pricing period splits off the SAME
-  // instant the day bucket does: a fee can never land on one day at the
-  // neighbouring window's rate.
+  // A settlement prices only when a model is in force: a model-less settlement still counts its
+  // tokens and request, never a fabricated fee.
   let cost = prev?.cost
   if (buckets !== null && state.model !== undefined) {
     cost = addBilledUsage(cost, state.provider ?? '', state.model, initiated, buckets)
   }
-  const entry = {
+  // A turn books once, on the initiation day of its FIRST settlement; later steps of the same
+  // turn keep the tally. The cursor survives across steps and dies at a tagged seed cut.
+  const turn = typeof data?.turn === 'number' && Number.isFinite(data.turn) ? data.turn : undefined
+  const newTurn = turn !== undefined && turn !== state.lastTurn
+  const turns = (prev?.turns ?? 0) + (newTurn ? 1 : 0)
+  const entry: ActivityDay = {
     tokens: (prev === undefined ? 0 : prev.tokens)
-      + (buckets === null ? 0 : buckets.input + buckets.cacheRead + buckets.cacheWrite + buckets.output),
+      + (buckets === null ? 0 : buckets.uncached + buckets.cacheRead + buckets.cacheWrite + buckets.output),
     requests: (prev === undefined ? 0 : prev.requests) + 1,
     ...(cost !== undefined ? { cost } : {}),
+    ...(turns > 0 ? { turns } : {}),
+    // Tool runs and wall time already booked to this day ride along by reference; every mutation
+    // clones along its path.
+    ...(prev?.toolCalls !== undefined ? { toolCalls: prev.toolCalls } : {}),
+    ...(prev?.toolsMs !== undefined ? { toolsMs: prev.toolsMs } : {}),
+    ...(prev?.wallMs !== undefined ? { wallMs: prev.wallMs } : {}),
+    ...(prev?.skills !== undefined ? { skills: prev.skills } : {}),
   }
-  let days = { ...state.days, [key]: entry }
-  const keys = Object.keys(days)
-  if (keys.length > MAX_KEPT_DAYS) {
-    keys.sort()
-    // Rebuild over the kept suffix (key order IS chronological) — a dynamic
-    // `delete` per evicted key would deopt the record into dictionary mode.
-    const drop = new Set(keys.slice(0, keys.length - MAX_KEPT_DAYS))
-    days = Object.fromEntries(Object.entries(days).filter(([k]) => !drop.has(k)))
-  }
-  return { ...state, days }
+  const next = withDayEntry(state, key, entry)
+  return newTurn ? { ...next, lastTurn: turn } : next
 }
 
-/**
- * The daily-activity projection unit, registered alongside the timeline and
- * headers units (host/index.ts); the overview reads it through the session
- * list's projection column. `stateVersion` 3: the fold resets the ledger at
- * the tagged fork/seed boundary, so a seeded session's days count post-seed
- * activity only (issue #94) — cached rows for seeded forks read
- * version-stale on upgrade and the dashboard's warm-up cold-refolds them
- * from the durable log, which drops the inherited prefix they booked.
- */
+/** The daily-activity projection unit, registered alongside the timeline and headers units
+ * (host/index.ts). `stateVersion` 5: the day entry gained turns, tool-run timing, and step wall
+ * time, and the state gained the turn cursor and pending tool starts. Later events cannot
+ * backfill those for already-folded days, so cached rows read version-stale on upgrade and the
+ * Context Insights warm-up cold-refolds them. On the wire the day fields are additive-optional. */
 export function createContextActivityDefinition(): ProjectionDefinition<'contextActivity', ActivityState> {
   return {
     key: 'contextActivity',
     stateSchema: activityStateSchema,
     init: (): ActivityState => ({ days: {} }),
     apply: (state: ActivityState, event: SessionEvent) => applyActivity(state, event),
-    // The view copies the ledger (entries included) so the registry, the
-    // cache writer, and the wire can never share — and mutate — the fold's
-    // own record. The nested pricing records ride the entry copy by
-    // reference: every mutation above clones along its path, so a shared
-    // record can never diverge (the same immutability the timeline fold's
-    // shared request/event records rely on).
+    // The view copies the ledger AND each entry's nested records so the registry, the cache writer, and the
+    // wire can never mutate the fold's own record; every mutation above clones along its path.
     wire: {
       viewSchema: contextActivitySchema,
       view: state => ({
-        days: Object.fromEntries(Object.entries(state.days).map(([k, v]) => [k, { ...v }])),
+        days: Object.fromEntries(Object.entries(state.days).map(([k, v]) => [k, {
+          ...v,
+          // Conditional spread: an `undefined`-valued property fails the whole lossless-JSON push.
+          ...(v.cost !== undefined ? { cost: copyCostUsage(v.cost) } : {}),
+          ...(v.skills !== undefined
+            ? { skills: Object.fromEntries(Object.entries(v.skills).map(([n, t]) => [n, { ...t }])) }
+            : {}),
+        }])),
       }),
     },
-    stateVersion: 3,
+    stateVersion: 5,
   }
 }

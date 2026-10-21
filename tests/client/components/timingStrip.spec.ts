@@ -1,18 +1,9 @@
-// TimingStrip (src/client/components/timingStrip.tsx) rendered with real
-// React: the session-time strip packs every span shoulder-to-shoulder in
-// occurrence order on the 0 → cumulative-active-time axis (each band's width
-// is its share of the active time; idle time takes no track), the fixed
-// zero/quartile/full ticks, the kind-keyed hover link (every span of a kind
-// lights together while the tip answers only the strip's OWN pointer), and
-// the hostile-span sanitize — an unknown kind or a NaN/inverted instant drops
-// out whole instead of poisoning the axis.
-
-import { createElement as h } from 'react'
+import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { TimingSpan } from '../../../src/shared/types'
-import { makeTimingStrip } from '../../../src/client/components/timingStrip'
-import { makeKit, mount, query, queryAll, hover, unhover } from '../helpers/kit'
+import { makeTimingStrip, timingGradientOf } from '../../../src/client/components/timingStrip'
+import { flush, makeKit, mount, query, queryAll, hover, unhover } from '../helpers/kit'
 
 const kit = makeKit()
 const kitZh = makeKit('zh')
@@ -22,9 +13,8 @@ const StripZh = makeTimingStrip(kitZh)
 /** Local HH:MM:SS exactly as the kit's fmtTime renders it (a timezone-free assertion). */
 const timeOf = (ms: number): string => new Date(ms).toLocaleTimeString('en-GB', { hour12: false })
 
-// A 50-second session window (epoch 1s → 51s) holding 40s of ACTIVE time: the
-// three decode slices, then tools and overhead — with 5s idle gaps between
-// them (21s → 26s and 41s → 46s) that must take NO track on the strip.
+// A 50-second session window (epoch 1s → 51s) holding 40s of ACTIVE time: the three decode slices, then tools and overhead — with 5s idle
+// gaps between them (21s → 26s and 41s → 46s) that must take NO track on the strip.
 const SPANS: TimingSpan[] = [
   { kind: 'ttft', start: 1_000, end: 6_000 },
   { kind: 'reasoning', start: 6_000, end: 16_000 },
@@ -43,8 +33,7 @@ describe('TimingStrip', () => {
     const segs = segsOf(m.container)
     assert.equal(segs.length, 5)
     // Width reads HOW LONG (5/10/5/15/5s of the 40s active total), position
-    // reads the running share — the idle gaps (21s→26s, 41s→46s) take no
-    // track: tools sits at 50%, not at the wall-clock 62.5%.
+    // reads the running share — the idle gaps (21s→26s, 41s→46s) take no track: tools sits at 50%, not at the wall-clock 62.5%.
     assert.deepEqual(leftsOf(m.container), [0, 12.5, 37.5, 50, 87.5])
     assert.deepEqual(widthsOf(m.container), [12.5, 25, 12.5, 37.5, 12.5])
     assert.deepEqual(segs.map(s => s.style.background), [
@@ -54,17 +43,29 @@ describe('TimingStrip', () => {
       'var(--color-teal-500)',
       'var(--color-slate-400)',
     ])
-    // The axis: zero, the three quartiles, and the full span of the 40s
-    // ACTIVE total (not the 50s wall window).
+    // The axis: zero, the three quartiles, and the full span of the 40s ACTIVE total (not the 50s wall window).
     const ticks = queryAll(m.container, '.lc-tstrip-tick')
     assert.deepEqual(ticks.map(t => t.textContent), ['0', '10.0s', '20.0s', '30.0s', '40.0s'])
     assert.deepEqual(ticks.map(t => (t as HTMLElement).style.left), ['0%', '25%', '50%', '75%', '100%'])
     assert.ok(ticks[0].className.includes('lc-tstrip-tick-first'))
     assert.ok(!ticks[2].className.includes('lc-tstrip-tick-first') && !ticks[2].className.includes('lc-tstrip-tick-last'))
     assert.ok(ticks[4].className.includes('lc-tstrip-tick-last'))
-    // The strip names itself for assistive tech; the tip rests hidden.
     assert.equal(query(m.container, '.lc-tstrip').getAttribute('role'), 'img')
     assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
+    await m.unmount()
+  })
+
+  test('the grow-in rides ONE wrapper, never a per-band animation (a packed strip must not storm the compositor)', async () => {
+    const spans: TimingSpan[] = []
+    for (let i = 0; i < 300; i++) spans.push({ kind: 'tools', start: i * 1_000, end: i * 1_000 + 500 })
+    const m = await mount(h(Strip, { spans }))
+    const wrapper = queryAll(m.container, '.lc-tstrip-fill')
+    assert.equal(wrapper.length, 1)
+    assert.ok(wrapper[0].className.includes('animate-lc-stacked-in'))
+    assert.ok(wrapper[0].className.includes('motion-reduce:animate-none'))
+    // Every band sits INSIDE the wrapper (their percent offsets keep the bar's own box) and carries no animation of its own.
+    assert.equal(wrapper[0].querySelectorAll('.lc-tstrip-seg').length, 300)
+    assert.deepEqual(queryAll(m.container, '.lc-tstrip-seg').filter(s => /animate-/.test(s.className)), [])
     await m.unmount()
   })
 
@@ -98,8 +99,7 @@ describe('TimingStrip', () => {
   })
 
   test('every span of the hovered KIND lights together and dims the rest, WITHOUT floating the tip (the mirror rule)', async () => {
-    // A second ttft span (the next step's wait, sitting inside the wall-clock
-    // idle window — it packs all the same).
+    // A second ttft span (the next step's wait, sitting inside the wall-clock idle window — it packs all the same).
     const spans: TimingSpan[] = [...SPANS, { kind: 'ttft', start: 21_000, end: 26_000 }]
     const m = await mount(h(Strip, { spans, hoverKey: 'ttft' }))
     const on = queryAll(m.container, '.lc-tstrip-seg-on')
@@ -108,6 +108,62 @@ describe('TimingStrip', () => {
     assert.equal(on[1], segsOf(m.container)[5])
     assert.ok(query(m.container, '.lc-tstrip-bar').className.includes('lc-tstrip-dim'))
     assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
+    await m.unmount()
+  })
+
+  test('a packed strip paints gradient layers and hit-tests the full band model', async () => {
+    const spans: TimingSpan[] = []
+    for (let i = 0; i < 700; i++) spans.push({ kind: i % 2 === 0 ? 'ttft' : 'tools', start: i * 1_000, end: i * 1_000 + 500 })
+    let relayed: string | null = 'unset'
+    const m = await mount(h(Strip, { spans, onHoverKey: (k) => { relayed = k } }))
+    // Thousands of sub-pixel divs would be pointless: the dense strip paints two gradients instead.
+    assert.equal(segsOf(m.container).length, 0)
+    const bar = query(m.container, '.lc-tstrip-bar')
+    // A zero-width box cannot answer a hit and keeps the tip closed.
+    await act(async () => { bar.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 10 })) })
+    await flush()
+    assert.equal(queryAll(m.container, '.lc-bar-tip-on').length, 0)
+    Object.defineProperty(bar, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 1_000, height: 12, right: 1_000, bottom: 12 }),
+    })
+    await act(async () => { bar.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 500 })) })
+    await flush()
+    // 700 equal 0.5s bands: half-way is band 350 (even → ttft).
+    assert.equal(relayed, 'ttft')
+    const tip = query(m.container, '.lc-bar-tip')
+    assert.ok(tip.className.includes('lc-bar-tip-on'))
+    assert.ok(tip.textContent?.startsWith('TTFT 500ms'))
+    assert.ok(tip.textContent?.includes(timeOf(350_000)))
+    // Past the right edge clamps to the last band.
+    await act(async () => { bar.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 1_500 })) })
+    await flush()
+    assert.equal(relayed, 'tools')
+    await unhover(bar)
+    assert.equal(relayed, null)
+    await m.unmount()
+  })
+
+  test('gradient stops coalesce contiguous same-kind runs', () => {
+    const bands = [
+      { kind: 'tools' as const, leftPct: 0, widthPct: 10 },
+      { kind: 'tools' as const, leftPct: 10, widthPct: 10 },
+      { kind: 'ttft' as const, leftPct: 20, widthPct: 10 },
+    ]
+    const base = timingGradientOf(bands, null)
+    assert.equal((base.match(/--color-teal-500/g) || []).length, 1)
+    assert.ok(base.includes('var(--color-teal-500) 0.0000% 20.0000%'))
+    const hot = timingGradientOf(bands, 'tools')
+    assert.ok(hot.includes('var(--color-teal-500) 0.0000% 20.0000%, transparent 20.0000% 30.0000%'))
+  })
+
+  test('a dense hover lights its kind through the hot layer', async () => {
+    const spans: TimingSpan[] = []
+    for (let i = 0; i < 700; i++) spans.push({ kind: i % 2 === 0 ? 'ttft' : 'tools', start: i * 1_000, end: i * 1_000 + 500 })
+    const m = await mount(h(Strip, { spans, hoverKey: 'ttft' }))
+    assert.ok(query(m.container, '.lc-tstrip-bar').className.includes('lc-tstrip-dim'))
+    const hot = query<HTMLElement>(m.container, '.lc-tstrip-gradient-hot')
+    assert.ok(hot.style.background.includes('--color-blue-500'))
     await m.unmount()
   })
 

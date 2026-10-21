@@ -1,13 +1,10 @@
-// applyTimeline switch-case paths of the fold (src/host/fold.ts): every
-// durable event type's record-keeping (headers, context, tool calls,
-// injections, skill tagging, request records, plan mode, compaction arming)
-// plus the session-cost accumulation (model family match, Beijing peak
-// windows, per-period running totals). No mocks: the real fold runs.
+// applyTimeline paths of the fold (src/host/fold.ts). No mocks: the real fold runs.
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { TimelineEvent } from '../../src/host/fold'
 import {
+  assistantAttempt,
   assistantMessage,
   at,
   compaction,
@@ -215,8 +212,7 @@ describe('user/message injection records', () => {
 
   test('a hostile form (truthy non-string) degrades to the default inject form', () => {
     // The harness validates a source's `kind` but not its `form`: a durable
-    // number must not ride the record into the strict wire/state schemas
-    // (the permanent per-session freeze class).
+    // number must not ride the record into the strict wire/state schemas (the permanent per-session freeze class).
     const { state } = driveTimeline([
       userMessage(1, text('note'), { kind: 'plugin', plugin: 'dsh-x', form: 123 } as never),
     ])
@@ -403,13 +399,34 @@ describe('assistant/message request records', () => {
   })
 })
 
+describe('the answers tally (assistant messages carrying text)', () => {
+  test('a textual reply tallies one; a tool-only dispatch, an empty projection, and blank text do not', () => {
+    const { state } = driveTimeline([
+      assistantMessage(1, { content: [{ type: 'text', text: 'here is the answer' }] }),
+      assistantMessage(2, { content: [{ type: 'tool-call', name: 'bash' }] }),
+      assistantMessage(3, { content: [] }), // usage-only: projects to no message
+      assistantMessage(4, { content: [{ type: 'text', text: '   ' }] }), // blank text is not a reply
+      assistantAttempt(5, {}), // a committed-no-message attempt is not a reply either
+      assistantMessage(6, { content: [{ type: 'text', text: 'done' }] }),
+    ])
+    assert.equal(state.answers, 2)
+    assertPlainJson(state)
+  })
+
+  test('text beside tool calls still counts — the reply rode the same message', () => {
+    const { state } = driveTimeline([
+      assistantMessage(1, { content: [{ type: 'text', text: 'checking' }, { type: 'tool-call', name: 'bash' }] }),
+    ])
+    assert.equal(state.answers, 1)
+  })
+})
+
 describe('hostile provider usage (issue #44: stats must survive nonconforming figures)', () => {
   // The registry parses every served view (and every cold-restored state)
   // against the unit's strict integer schemas with no containment: one raw
   // nonconforming figure in the state fails the gate on EVERY later delivery
   // and permanently freezes the session's projection feed. The fold therefore
-  // sanitizes each bucket before it touches the state, and the records stay
-  // complete (billed, not dropped).
+  // sanitizes each bucket before it touches the state, and the records stay complete (billed, not dropped).
   test('fractional buckets round to integers', () => {
     const { state } = driveTimeline([
       assistantMessage(1, { usage: { inputTokens: 10.4, cacheReadTokens: 20.6, outputTokens: 3.5 } }),
@@ -753,8 +770,7 @@ describe('hostile events', () => {
   test('null and primitive content blocks price and render as nothing', () => {
     const blocks = [null, 7, 'x', { type: 'text', text: 'hello' }] as never
     // The tool/result has NO preceding tool/call — the unpaired lookup must
-    // not stamp an `undefined`-valued node.tool (it would fail every
-    // projection-cache write for the session).
+    // not stamp an `undefined`-valued node.tool (it would fail every projection-cache write for the session).
     const { state } = driveTimeline([
       userMessage(1, blocks),
       toolResult(2, { callId: 'c1', content: blocks }),

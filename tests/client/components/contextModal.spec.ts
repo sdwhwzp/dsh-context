@@ -1,8 +1,3 @@
-// ContextModal (src/client/components/contextModal.tsx) — the /context
-// dialog rendered through the REGISTERED composition (makeContextModal over
-// a TestClientCtx), with the per-session modal store driving open/close,
-// real sessions faces for the consume-token bail, and real projections.
-
 import { act, createElement as h, useSyncExternalStore } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
@@ -33,7 +28,6 @@ function timeline(over: Record<string, unknown> = {}): ContextTimeline {
   } as ContextTimeline
 }
 
-/** A useContextModal hook really bound to the per-session store. */
 function boundModalHook(sessionId: string) {
   const store = modalStoreOf(sessionId)
   return (sel: (open: boolean) => boolean): boolean =>
@@ -46,8 +40,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   // The cold-start share (timelineSource.ts) is page-lifetime per session:
-  // drop it so one test's cold read never leaks its state into a later test
-  // that reuses the same session id.
+  // drop it so one test's cold read never leaks its state into a later test that reuses the same session id.
   resetTimelineDetailStores()
 })
 
@@ -219,7 +212,6 @@ describe('ContextModal', () => {
     assert.equal(sessions.bails.length, 1)
     assert.equal(sessions.bails[0].event, 'slash/input-consume-token')
     assert.deepEqual(sessions.bails[0].payload, { guard: { kind: 'bare-token', token: '/context' } })
-    // The guard was taken, not left behind.
     assert.equal(takePendingConsume(sid), undefined)
     await m.unmount()
   })
@@ -316,8 +308,7 @@ describe('ContextModal', () => {
     assert.equal(query(document.body, '.lc-modal-backdrop').parentElement, document.body)
     assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
 
-    // A sidebar rewrite while open (the right panel closed here) is followed
-    // through the observer on both edges.
+    // A sidebar rewrite while open (the right panel closed here) is followed through the observer on both edges.
     await act(async () => {
       frame.style.gridTemplateColumns = '56px minmax(0px, 1fr) minmax(0px, 0px)'
     })
@@ -517,8 +508,7 @@ describe('ContextModal — the split generation', () => {
 
     // The face lands mid-open (cordis replays the pending inject): the modal
     // re-renders, the fetcher builds, and the open epoch fetches by itself.
-    // The face rides INSIDE the `remote` facade; the `remote.session` service
-    // key stays hostile, as on the real host.
+    // The face rides INSIDE the `remote` facade; the `remote.session` service key stays hostile, as on the real host.
     await act(async () => {
       ctx.setService('remote.session', { get page() { throw new Error('cannot get property "remote.session" without inject') } })
       ctx.setService('remote', {

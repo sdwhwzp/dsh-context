@@ -1,8 +1,5 @@
-// The timeline source (src/client/timelineSource.ts): the detail payload
-// narrow, the Connection-RPC fetcher, the per-session detail store machine
-// (debounce / single-flight / latest-wins / refold / retry / backoff), and
-// the useTimelineSource hook merging both wire generations into the value
-// the cards render.
+// The timeline source (src/client/timelineSource.ts): the detail store machine and the
+// useTimelineSource hook merging both wire generations into the value the cards render.
 
 import { act, createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
@@ -86,7 +83,6 @@ describe('detailOf', () => {
     assert.equal(narrowed.droppedNodes, 0, 'a wrong-typed scalar zeroes')
     assert.equal(narrowed.surfaceFloor, 7)
     assert.equal(narrowed.archiveFloor, undefined, 'a wrong-typed floor stays absent')
-    // A numeric archiveFloor rides through.
     assert.equal(detailOf(detail(1, { archiveFloor: 9 }))?.archiveFloor, 9)
     // The op log and its floor ride through, per-item guarded.
     const withOps = detailOf(detail(1, {
@@ -160,13 +156,12 @@ describe('makeDetailFetcher', () => {
     })
     const d = await makeDetailFetcher('s1')!()
     assert.equal(d?.rev, 4)
-    assert.equal(seen.url, '/api/dsh-context/detail')
+    assert.equal(seen.url, 'api/dsh-context/detail')
     assert.deepEqual(seen.body, { sessionId: 's1' })
   })
 })
 
 describe('DetailStore', () => {
-  /** A fetcher with a call log and a programmable queue of outcomes. */
   function scriptedFetcher(outcomes: (ContextTimelineDetail | null | Error)[]): { fetcher: () => Promise<ContextTimelineDetail | null>; calls: number[] } {
     const calls: number[] = []
     return {
@@ -198,7 +193,6 @@ describe('DetailStore', () => {
     assert.equal(store.getSnapshot().failed, false)
     assert.equal(calls.length, 1)
     assert.ok(seen.length > 0, 'listeners fired')
-    // The same revision asks for nothing new.
     store.request(1)
     await settle()
     assert.equal(calls.length, 1, 'a covered revision does not refetch')
@@ -213,6 +207,114 @@ describe('DetailStore', () => {
     store.request(1)
     await settle()
     assert.equal(seen.length, 0)
+  })
+
+  test('a parked store arms no read (the last unsubscribe drops the pending window)', async () => {
+    vi.useFakeTimers()
+    const { fetcher, calls } = scriptedFetcher([detail(1)])
+    const store = new DetailStore(fetcher, 10)
+    const off = store.subscribe(() => {})
+    store.request(1)
+    assert.equal(store.getSnapshot().pending, true, 'the debounce window is armed')
+    off()
+    assert.equal(store.getSnapshot().pending, false, 'parking drops the pending window')
+    await vi.advanceTimersByTimeAsync(100)
+    assert.equal(calls.length, 0, 'a parked store never reaches the fetcher')
+    // A further rev while still parked arms nothing either.
+    store.request(2)
+    await vi.advanceTimersByTimeAsync(100)
+    assert.equal(calls.length, 0)
+    vi.useRealTimers()
+  })
+
+  test('a read settling after the last unsubscribe does not re-arm', async () => {
+    vi.useFakeTimers()
+    let reject!: (error: Error) => void
+    let calls = 0
+    const store = new DetailStore(() => {
+      calls++
+      return new Promise<ContextTimelineDetail | null>((_resolve, rej) => { reject = rej })
+    }, 10)
+    const off = store.subscribe(() => {})
+    store.request(1)
+    await vi.advanceTimersByTimeAsync(10)
+    assert.equal(calls, 1, 'the read is in flight')
+    off()
+    reject(new Error('offline'))
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(1000)
+    assert.equal(calls, 1, 'no retry is armed once nobody is subscribed')
+    vi.useRealTimers()
+  })
+
+  test('a store parked without a payload re-reads on the next subscribe', async () => {
+    vi.useFakeTimers()
+    const { fetcher, calls } = scriptedFetcher([new Error('offline'), detail(1)])
+    const store = new DetailStore(fetcher, 10)
+    const off = store.subscribe(() => {})
+    store.request(1)
+    await vi.advanceTimersByTimeAsync(10)
+    assert.equal(calls.length, 1)
+    assert.equal(store.getSnapshot().failed, true)
+    off()
+    await vi.advanceTimersByTimeAsync(1000)
+    assert.equal(calls.length, 1, 'the parked retry is dropped')
+    store.subscribe(() => {})
+    // The SAME head rev must read again: the failed read already marked it
+    // "wanted", which would otherwise swallow the resumed store's request.
+    store.request(1)
+    await vi.advanceTimersByTimeAsync(10)
+    assert.equal(calls.length, 2, 'the resumed store reads instead of sticking on the note')
+    vi.useRealTimers()
+  })
+
+  test('a parked store with a cached payload resumes without a read', async () => {
+    const { fetcher, calls } = scriptedFetcher([detail(1)])
+    const store = new DetailStore(fetcher, 0)
+    const off = store.subscribe(() => {})
+    store.request(1)
+    await until(() => store.getSnapshot().detail?.rev === 1, 'the first read never landed')
+    off()
+    store.subscribe(() => {})
+    store.request(1)
+    await settle()
+    assert.equal(calls.length, 1, 'the cached payload still covers the rev')
+  })
+
+  test('a shared store parks only when its last subscriber leaves', async () => {
+    vi.useFakeTimers()
+    const { fetcher, calls } = scriptedFetcher([detail(1)])
+    const store = new DetailStore(fetcher, 10)
+    // The tab and the /context modal share one store per session.
+    const offTab = store.subscribe(() => {})
+    const offModal = store.subscribe(() => {})
+    store.request(1)
+    offTab()
+    await vi.advanceTimersByTimeAsync(10)
+    assert.equal(calls.length, 1, 'the remaining subscriber still gets its read')
+    offModal()
+    store.request(2)
+    await vi.advanceTimersByTimeAsync(100)
+    assert.equal(calls.length, 1, 'the parked store arms nothing')
+    vi.useRealTimers()
+  })
+
+  test('release drops the cached payload and any armed window', async () => {
+    vi.useFakeTimers()
+    const { fetcher, calls } = scriptedFetcher([detail(1), detail(2)])
+    const store = new DetailStore(fetcher, 10)
+    store.subscribe(() => {})
+    store.request(1)
+    await vi.advanceTimersByTimeAsync(10)
+    assert.equal(store.hasPayload, true)
+    store.request(2)
+    assert.equal(store.getSnapshot().pending, true, 'a second window is armed')
+    store.release()
+    assert.equal(store.hasPayload, false)
+    assert.equal(store.getSnapshot().pending, false)
+    await vi.advanceTimersByTimeAsync(100)
+    assert.equal(calls.length, 1, 'the released store arms nothing')
+    vi.useRealTimers()
   })
 
   test('a rev bump during the in-flight read re-reads after settle (trailing edge)', async () => {
@@ -418,7 +520,6 @@ describe('DetailStore', () => {
     await vi.advanceTimersByTimeAsync(10)
     assert.equal(calls.length, 1, 'the first read fires after the base window')
     assert.equal(store.getSnapshot().failed, true)
-    // The failed read's trailing edge waits out the DOUBLED window.
     await vi.advanceTimersByTimeAsync(19)
     assert.equal(calls.length, 1, 'the trailing read waits out the doubled window')
     await vi.advanceTimersByTimeAsync(1)
@@ -459,6 +560,78 @@ describe('detailStoreOf', () => {
     assert.notEqual(a, detailStoreOf('s2'))
     resetTimelineDetailStores()
     assert.notEqual(detailStoreOf('s1'), a, 'a reset store is a fresh instance')
+  })
+
+  function countingFetch(): Map<string, number> {
+    const calls = new Map<string, number>()
+    vi.stubGlobal('fetch', async (_url: unknown, init?: { body?: string }) => {
+      if (init?.body === undefined) return { ok: false, status: 404, json: async () => null }
+      const id = (JSON.parse(init.body) as { sessionId: string }).sessionId
+      calls.set(id, (calls.get(id) ?? 0) + 1)
+      return { ok: true, status: 200, json: async () => ({ ok: true, value: detail(1) }) }
+    })
+    return calls
+  }
+
+  /** The app's mount path for one session: subscribe, request, land, leave. */
+  async function visitStore(id: string): Promise<DetailStore> {
+    const store = detailStoreOf(id)
+    const off = store.subscribe(() => {})
+    store.request(1)
+    await until(() => store.hasPayload, `store ${id} never landed its read`)
+    off()
+    return store
+  }
+
+  test('the page cache bounds retained payloads; a demoted session reads again', async () => {
+    const calls = countingFetch()
+    const ids = Array.from({ length: 12 }, (_, i) => 'cap-' + i)
+    for (const id of ids) await visitStore(id)
+    assert.equal(detailStoreOf(ids[11]).hasPayload, true, 'the newest visit stays cached')
+    assert.equal(detailStoreOf(ids[0]).hasPayload, false, 'the oldest visit was demoted')
+    // The cached session re-opens without a read; the demoted one reads again.
+    await visitStore(ids[11])
+    assert.equal(calls.get(ids[11]), 1, 'a cached re-open reads nothing')
+    await visitStore(ids[0])
+    assert.equal(calls.get(ids[0]), 2, 'a demoted re-open reads once more')
+  })
+
+  test('a mounted store is never demoted', async () => {
+    countingFetch()
+    const ids = Array.from({ length: 12 }, (_, i) => 'live-' + i)
+    const held = detailStoreOf(ids[0])
+    const off = held.subscribe(() => {})
+    held.request(1)
+    await until(() => held.hasPayload, 'the mounted store never landed')
+    for (const id of ids.slice(1)) await visitStore(id)
+    assert.equal(held.active, true)
+    assert.equal(held.hasPayload, true, 'a mounted store keeps its payload')
+    off()
+  })
+
+  test('a burst of opens is trimmed back to the bound on the next open', async () => {
+    countingFetch()
+    const ids = Array.from({ length: 12 }, (_, i) => 'burst-' + i)
+    // Every store subscribes and requests BEFORE any read lands.
+    const offs: (() => void)[] = []
+    const created = ids.map((id) => {
+      const store = detailStoreOf(id)
+      offs.push(store.subscribe(() => {}))
+      store.request(1)
+      return store
+    })
+    for (const [i, store] of created.entries()) {
+      await until(() => store.hasPayload, 'burst store ' + String(i) + ' never landed')
+    }
+    for (const off of offs) off()
+    // The next open trims the excess, oldest first.
+    await visitStore('burst-extra')
+    assert.equal(created[0].hasPayload, false, 'the oldest burst payload is released')
+    assert.equal(created[11].hasPayload, true, 'the newest burst payload survives')
+    // A later open walks past the already-demoted entries to the next victim.
+    await visitStore('burst-extra-2')
+    assert.equal(created[5].hasPayload, false)
+    assert.equal(created[11].hasPayload, true)
   })
 })
 
@@ -554,8 +727,7 @@ describe('useTimelineSource', () => {
       return { body: { ok: true, value: detail(2, { head: slimHead(2) }) } }
     })
     const m = await mount(h(SourceProbe, { sessionId: 's1', value: undefined }))
-    // The first paint waits on the cold read — then the read's own slim head
-    // stands in for the never-pushed projection value.
+    // The first paint waits on the cold read — then the read's own slim head stands in for the never-pushed projection value.
     assert.equal(probeRead(m.container, 'state'), 'loading')
     await until(() => probeRead(m.container, 'state') === 'ready', 'the cold read never landed')
     assert.equal(probeRead(m.container, 'model'), 'm', 'the read head renders')
@@ -582,8 +754,7 @@ describe('useTimelineSource', () => {
     const m = await mount(h(PushProbe, null))
     await until(() => probeRead(m.container, 'state') === 'ready', 'the cold read never landed')
     assert.equal(probeRead(m.container, 'model'), 'cold-m')
-    // The pushed head outruns the cold read's revision: same per-session
-    // store, one trailing refetch, the pushed value renders.
+    // The pushed head outruns the cold read's revision: same per-session store, one trailing refetch, the pushed value renders.
     servedRev = 2
     pushed = slimHead(2, { model: 'pushed-m' })
     await m.update(h(PushProbe, null))
@@ -672,8 +843,7 @@ describe('useTimelineSource', () => {
     assert.equal(detailStoreOf('s1').getSnapshot().detail?.rev, 3)
     served = 4
     await m.update(h(SourceProbe, { sessionId: 's1', value: slimHead(4) }))
-    // The probe's rev cell reads the HEAD's marker (4 as pushed); the store's
-    // served detail proves the refetch.
+    // The probe's rev cell reads the HEAD's marker (4 as pushed); the store's served detail proves the refetch.
     assert.equal(probeRead(m.container, 'rev'), '4')
     await until(() => detailStoreOf('s1').getSnapshot().detail?.rev === 4, 'the refetch never landed')
     await m.unmount()

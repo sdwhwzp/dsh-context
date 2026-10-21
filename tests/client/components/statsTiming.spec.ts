@@ -1,22 +1,15 @@
-// StatsTiming (src/client/components/statsTiming.tsx) rendered with real
-// React: the active-time donut (TTFT + generation vs tools vs overhead) and
-// the pct-led slice rows with call counts and true durations — plus the
-// bottom session-time strip (the fold's per-step spans packed by their share
-// of the active time in occurrence order, joined into the hover link by
-// KIND), and the empty and hostile-timing degrades.
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { makeDonut } from '../../../src/client/components/donut'
+import { Donut } from '../../../src/client/components/donut'
 import { makeStatsTiming } from '../../../src/client/components/statsTiming'
 import type { TimingSpan, TimingTotals } from '../../../src/shared/types'
 import { makeKit, mount, query, queryAll, text, hover } from '../helpers/kit'
 
 const kit = makeKit()
 const kitZh = makeKit('zh')
-const StatsTiming = makeStatsTiming(kit, makeDonut())
-const StatsTimingZh = makeStatsTiming(kitZh, makeDonut())
+const StatsTiming = makeStatsTiming(kit, Donut)
+const StatsTimingZh = makeStatsTiming(kitZh, Donut)
 
 /** Local HH:MM:SS exactly as the kit's fmtTime renders it (a timezone-free assertion). */
 const timeOf = (ms: number): string => new Date(ms).toLocaleTimeString('en-GB', { hour12: false })
@@ -77,30 +70,36 @@ describe('StatsTiming', () => {
     const m = await mount(h(StatsTiming, { timing }))
     assert.deepEqual(rowOf(m.container, 2), { pct: '100.0%', label: 'Tool runs', count: '3m20s · 9 runs', dim: false })
     // The ring clamps tools into the 40s post-model window; the zero overhead
-    // slice paints no arc AND its legend row is omitted: 3 circles, 3 rows.
+    // slice paints no arc but keeps its dimmed legend slot: 3 circles, 4 rows.
     assert.equal(queryAll(m.container, '.lc-donut circle').length, 3)
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, 3)
-    // The hover link: a painted row dims the ring and lights its own arc.
+    assert.equal(queryAll(m.container, '.lc-sl-row').length, 4)
+    assert.deepEqual(rowOf(m.container, 3), { pct: '0.0%', label: 'Overhead', count: '—', dim: true })
     const rows = queryAll(m.container, '.lc-sl-row')
     await hover(rows[2])
     assert.ok(rows[2].className.includes('lc-sl-row-on'))
     assert.ok(query(m.container, '.lc-donut').className.includes('lc-donut-dim'))
     assert.ok((queryAll(m.container, '.lc-donut-seg')[2]?.getAttribute('class') ?? '').includes('lc-donut-seg-on'))
+    // The zero-overhead row has no arc to light: it tints itself, the ring stays at rest.
+    await hover(rows[3])
+    assert.ok(rows[3].className.includes('lc-sl-row-on'))
+    assert.ok(!query(m.container, '.lc-donut').className.includes('lc-donut-dim'))
     await m.unmount()
   })
 
-  test('a hostile no-wall timing keeps only the non-zero slices', async () => {
+  test('a hostile no-wall timing keeps the painted slices plus the residual slot', async () => {
     const timing: TimingTotals = { wallMs: 0, ttftMs: 5_000, genMs: 0, calls: 3, toolsMs: 0, toolCalls: 1, tools: { bash: { calls: 1, ms: 0 } } }
     const m = await mount(h(StatsTiming, { timing }))
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '—')
     // Only TTFT carries time; the zero slices are omitted whole (their dash
     // has nothing to qualify, and their borrowed call count would mislead).
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, 1)
+    // The residual row still keeps its slot so the card never resizes.
+    assert.equal(queryAll(m.container, '.lc-sl-row').length, 2)
     assert.deepEqual(rowOf(m.container, 0), { pct: '—', label: 'TTFT', count: '5.0s · 3 calls', dim: false })
+    assert.deepEqual(rowOf(m.container, 1), { pct: '—', label: 'Overhead', count: '—', dim: true })
     await m.unmount()
   })
 
-  test('a slice that never happened is omitted, not rendered as a zero row', async () => {
+  test('a zero slice is omitted, but the residual overhead row keeps its slot', async () => {
     // The screenshot case: no reasoning output, no tool calls — the rows that
     // would borrow the session's call count ("0.0% · 3 calls") are dropped.
     const timing: TimingTotals = {
@@ -109,9 +108,31 @@ describe('StatsTiming', () => {
     }
     const m = await mount(h(StatsTiming, { timing }))
     const labels = queryAll(m.container, '.lc-sl-label').map(n => n.textContent)
-    assert.deepEqual(labels, ['TTFT', 'Answer'], 'zero buckets and zero tools are gone')
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, queryAll(m.container, '.lc-donut-seg').length)
+    assert.deepEqual(labels, ['TTFT', 'Answers', 'Overhead'], 'zero buckets and zero tools are gone; overhead stays')
+    // The dimmed residual row paints no arc.
+    assert.equal(queryAll(m.container, '.lc-donut-seg').length, 2)
+    assert.deepEqual(rowOf(m.container, 2), { pct: '0.0%', label: 'Overhead', count: '—', dim: true })
     await m.unmount()
+  })
+
+  test('the overhead row keeps its slot from a mid-step zero to the settled residual', async () => {
+    // Mid-step, an open step's model/tool time is already priced but its wall
+    // time is not, so the residual transiently clamps to zero; step/end settles
+    // it above zero. Both snapshots must render the same row set, or the card
+    // resizes at every step boundary (the reported flicker).
+    const midStep: TimingTotals = {
+      wallMs: 100_000, ttftMs: 90_000, genMs: 40_000, calls: 4, toolsMs: 90_000, toolCalls: 3, tools: {},
+    }
+    const snapshots: [TimingTotals, { pct: string; label: string; count: string; dim: boolean }][] = [
+      [midStep, { pct: '0.0%', label: 'Overhead', count: '—', dim: true }],
+      [{ ...midStep, wallMs: 221_000 }, { pct: '0.5%', label: 'Overhead', count: '1.0s', dim: false }],
+    ]
+    for (const [timing, overhead] of snapshots) {
+      const m = await mount(h(StatsTiming, { timing }))
+      assert.equal(queryAll(m.container, '.lc-sl-row').length, 4)
+      assert.deepEqual(rowOf(m.container, 3), overhead)
+      await m.unmount()
+    }
   })
 
   test('every slice zero with a live call count still renders the empty state', async () => {
@@ -136,7 +157,7 @@ describe('StatsTiming — the generation split', () => {
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 6)
     assert.deepEqual(rowOf(m.container, 0), { pct: '16.7%', label: 'TTFT', count: '1m40s · 10 calls', dim: false })
     assert.deepEqual(rowOf(m.container, 1), { pct: '15.0%', label: 'Thinking', count: '1m30s', dim: false })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '5.0%', label: 'Answer', count: '30.0s', dim: false })
+    assert.deepEqual(rowOf(m.container, 2), { pct: '5.0%', label: 'Answers', count: '30.0s', dim: false })
     assert.deepEqual(rowOf(m.container, 3), { pct: '3.3%', label: 'Tool args', count: '20.0s', dim: false })
     assert.deepEqual(rowOf(m.container, 4), { pct: '50.0%', label: 'Tool runs', count: '5m0s · 25 runs', dim: false })
     assert.deepEqual(rowOf(m.container, 5), { pct: '10.0%', label: 'Overhead', count: '1m0s', dim: false })
@@ -164,7 +185,7 @@ describe('StatsTiming — the generation split', () => {
     const timing: TimingTotals = { ...SPLIT, reasoningBlocks: 14, textBlocks: 5, toolArgBlocks: 26 }
     const m = await mount(h(StatsTiming, { timing }))
     assert.deepEqual(rowOf(m.container, 1), { pct: '15.0%', label: 'Thinking', count: '1m30s · 14 blocks', dim: false })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '5.0%', label: 'Answer', count: '30.0s · 5 blocks', dim: false })
+    assert.deepEqual(rowOf(m.container, 2), { pct: '5.0%', label: 'Answers', count: '30.0s · 5 blocks', dim: false })
     assert.deepEqual(rowOf(m.container, 3), { pct: '3.3%', label: 'Tool args', count: '20.0s · 26 blocks', dim: false })
     await m.unmount()
   })
@@ -183,7 +204,7 @@ describe('StatsTiming — the generation split', () => {
   test('the split labels localize', async () => {
     const m = await mount(h(StatsTimingZh, { timing: SPLIT }))
     assert.equal(rowOf(m.container, 1).label, '模型思考')
-    assert.equal(rowOf(m.container, 2).label, '模型输出')
+    assert.equal(rowOf(m.container, 2).label, '模型回复')
     assert.equal(rowOf(m.container, 3).label, '工具参数')
     await m.unmount()
   })
@@ -208,8 +229,8 @@ describe('StatsTiming — the generation split', () => {
     const timing: TimingTotals = { ...SPLIT, reasoningMs: 400_000, textMs: 100_000, toolArgMs: 0 }
     const m = await mount(h(StatsTiming, { timing }))
     assert.deepEqual(rowOf(m.container, 1), { pct: '66.7%', label: 'Thinking', count: '6m40s', dim: false })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '16.7%', label: 'Answer', count: '1m40s', dim: false })
-    // The zero tool-args bucket is omitted whole, so Tools follows Answer.
+    assert.deepEqual(rowOf(m.container, 2), { pct: '16.7%', label: 'Answers', count: '1m40s', dim: false })
+    // The zero tool-args bucket is omitted whole, so Tools follows Answers.
     assert.equal(rowOf(m.container, 3).label, 'Tool runs')
     await m.unmount()
   })
@@ -255,7 +276,6 @@ describe('StatsTiming — the throughput figure', () => {
 })
 
 describe('StatsTiming — the session-time strip', () => {
-  // The generation-split timing: genMs 140s splits into thinking 90s, answer 30s, tool args 20s.
   const SPLIT: TimingTotals = {
     wallMs: 600_000, ttftMs: 100_000, genMs: 140_000, reasoningMs: 90_000, textMs: 30_000, toolArgMs: 20_000,
     calls: 10, toolsMs: 300_000, toolCalls: 25, tools: { bash: { calls: 15, ms: 200_000 } },

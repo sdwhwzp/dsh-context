@@ -1,17 +1,15 @@
-/**
- * The /context command's centered dialog — the same data as the Context tab (the pushed `contextTimeline` projection) distilled to the
- * current-composition overview and the shared Context browser; rendered from the `conversation.input.overlay` slot and opened/closed
- * through the per-session modal store, so the trigger flips it and no message ever enters session history.
- */
+/** The /context command's centered dialog: the same pushed `contextTimeline` data as the Context tab, distilled to the
+ * current composition and the shared browser. */
 
 import { createElement as h, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
+import { makeAttachmentOpener } from '../attachmentSource'
 import { measureDock } from '../dockMeasure'
 import { headlineOf } from '../headline'
 import { modalStoreOf, takePendingConsume } from '../modalStore'
 import type { ClientCtx, SessionStandardProps, SessionsFace } from '../services'
 import type { ContextSettings } from '../settings'
-import { contextBreakdownOf, contextPressureOf, conversationNodesOf, headersOf, imageLoaderOf, projectionOf } from '../services'
+import { contextBreakdownOf, contextPressureOf, conversationNodesOf, headersOf, imageLoaderOf, projectionOf, workspaceOf } from '../services'
 import { makeContentFetcher, makeHeaderFetcher, useHistoryFace } from '../historyPage'
 import { useTimelineSource } from '../timelineSource'
 import type { ViewKit } from '../viewkit'
@@ -40,19 +38,23 @@ export function makeContextModal(
   const DetailNote = makeDetailNote(kit)
   const ErrorBoundary = makeErrorBoundary(t)
 
+  /** The slot outlet re-renders this body on a locale switch; the browser's memoized labels follow the prop. */
+  function activeLocale(): string {
+    const locale = ctx.locale
+    /* v8 ignore next 1 -- older Host halves may serve no locale service; the live shell always does. */
+    return typeof locale.getLocale === 'function' ? locale.getLocale().active : 'en'
+  }
+
   function ContextModalBody(props: ContextModalProps): ReactElement | null {
     const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
     const open = typeof props.useContextModal === 'function' ? props.useContextModal(s => s) : false
-    // The timeline source (timelineSource.ts) — shares the tab's per-session
-    // detail store, so an open tab's detail serves the modal with no refetch.
+    // Shares the tab's per-session detail store, so an open tab's detail serves the modal with no refetch.
     const source = useTimelineSource(props)
     const data = source.data
     const pressure = projectionOf(props, 'contextPressure', contextPressureOf)
     const breakdown = projectionOf(props, 'contextBreakdown', contextBreakdownOf)
     const headers = projectionOf(props, 'contextHeaders', headersOf)
-    // Conversation-window join for the browser (the seat is a real hook —
-    // read unconditionally here, before the closed early return, so the hook
-    // order stays stable across open/close).
+    // Read unconditionally, before the closed early return, so hook order stays stable across open/close.
     const convNodes = conversationNodesOf(props)
     const [hoverCat, setHoverCat] = useState<string | null>(null)
     // Dock the mask beside the shell sidebar: 0 until the frame measure lands
@@ -65,13 +67,15 @@ export function makeContextModal(
       () => imageLoaderOf(ctx, sessionId !== '' ? sessionId : undefined),
       [ctx, sessionId],
     )
+    const openAttachment = useMemo(
+      () => makeAttachmentOpener(ctx, sessionId !== '' ? sessionId : undefined, workspaceOf(ctx, sessionId !== '' ? sessionId : undefined)),
+      [ctx, sessionId],
+    )
 
-    // The gateway page face, as a React seat: the first render can race the declared inject (a watch rebuild remounts this overlay before
-    // the fiber re-fires), and both fetchers below must rebuild — not stick to the static degradation — when the face lands or is revoked.
+    // The first render can race the declared inject (a watch rebuild remounts this overlay before the fiber re-fires),
+    // so both fetchers below must rebuild when the face lands or is revoked.
     const historyFace = useHistoryFace()
 
-    // Same targeted content fetch the Context tab wires (one seq-anchored history read per expanded row), plus the on-demand header
-    // epoch content read for the browser's system/tools sections.
     const fetchContent = useMemo(
       () => (sessionId !== '' && historyFace !== undefined ? makeContentFetcher(sessionId) : undefined),
       [sessionId, historyFace],
@@ -84,10 +88,7 @@ export function makeContextModal(
     const close = useCallback(() => {
       if (sessionId === '') return
       modalStoreOf(sessionId).set(false)
-      // Consume the `/context` token now (it stayed in the composer while the modal was open) via the scoped input event — a stale guard
-      // (the user typed meanwhile) fails soft inside the shell and leaves the draft untouched. The sessions service is read at CLOSE time:
-      // capturing it at apply would race the finer module composition (`ctx.get` is the inject-free reflect read — undefined, never a
-      // throw, when the service is not composed).
+      // The sessions service is read at CLOSE time because capturing it at apply would race the finer module composition.
       const guard = takePendingConsume(sessionId)
       const sessions = ctx.get('sessions') as SessionsFace | undefined
       if (guard === undefined || sessions === undefined) return
@@ -126,9 +127,9 @@ export function makeContextModal(
         <span ref={anchorRef} hidden />
         {createPortal(
           <div className="lc-modal-backdrop" style={dockInsets} onClick={close}>
-            <div className="lc-modal-card" onClick={(ev) => { ev.stopPropagation() }}>
+            <div className="lc-modal-card lc-modal-fill" onClick={(ev) => { ev.stopPropagation() }}>
               <div className="lc-modal-head">
-                <span className="lc-modal-title">{t('tab')}</span>
+                <span className="lc-modal-title">{t('tab.context')}</span>
                 <button className="lc-modal-close hover:text-(--dsw-alias-label-primary) hover:bg-(--dsw-alias-bg-layer-2)" aria-label={t('cmd.close')} onClick={close}>×</button>
               </div>
 
@@ -139,7 +140,7 @@ export function makeContextModal(
                   <div className="lc-empty">{t('loading')}</div>
                 )
               ) : (
-                <div>
+                <div className="lc-modal-body">
                   <CurrentComposition
                     head={head}
                     subtitle={subtitle}
@@ -153,6 +154,8 @@ export function makeContextModal(
                     fetchContent={fetchContent}
                     fetchHeader={fetchHeader}
                     loadImage={loadImage}
+                    openAttachment={openAttachment}
+                    locale={activeLocale()}
                     hoverKey={hoverCat}
                     onHoverKey={setHoverCat}
                     detailState={source.detailState}

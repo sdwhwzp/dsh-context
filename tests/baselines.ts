@@ -16,7 +16,7 @@
  */
 
 /** The supported dsh tags, in lockstep with the BASELINES entries below. */
-export type BaselineId = 'v0.1.7-rc.2' | 'v0.2.0-rc.2' | 'v0.2.1-alpha.1'
+export type BaselineId = 'v0.1.7-rc.2' | 'v0.2.0-rc.2' | 'v0.2.1-rc.2'
 
 /** The harness web half's client faces, as far as the compat probes consume them. */
 export interface ClientSeam {
@@ -24,15 +24,20 @@ export interface ClientSeam {
   imageFaceMethod: string
   /** MarkdownText's chrome prop the plugin must hand every markdown render. */
   markdownChrome: string
+  /** The JsonTree faces the rich-text JSON body rides (src/client/components/richText.tsx): the expander DOM
+   * the two-level auto-open toggles, the summary/preview/punctuation class locals the expanded-row rule matches
+   * (detailSections.css), and the labels contract. */
+  jsonTree: {
+    /** All needles live in the primitives JsonTree source. */
+    file: string
+    needles: readonly string[]
+  }
   /** The platform module table the shell seeds (client-bundle requires must resolve). */
   platformModules: readonly string[]
-  /**
-   * The faces the split timeline's on-demand detail channel rides
+  /** The faces the split timeline's on-demand detail channel rides
    * (host/detail.ts + client/timelineSource.ts): the host's generic
    * Connection RPC registry, the browser caller, and the projection
-   * registry's `stateOf` read. Each probe is a needle in the named source
-   * file of the baseline tag.
-   */
+   * registry's `stateOf` read. Each probe is a needle in the named source file of the baseline tag. */
   detailChannel: {
     /** `HostConnectionRpc` in the connection package's shared rpc source. */
     hostRpcFile: string
@@ -44,15 +49,13 @@ export interface ClientSeam {
     registryFile: string
     registryNeedle: string
   }
-  /**
-   * The session-jump seam (the Context Dashboard's session cards and the
+  /** The session-jump seam (the Context Dashboard's session cards and the
    * Agent network card's nodes — issue #90). Every supported line selects a
    * session through the view owner's `uiWorkspace.openSession` (the sidebar
    * row click's own verb), re-spelled `openSession(target: SessionTarget)` by
    * the 0.1.6 selection refactor, which also retired the sessions service's
    * own `open(id)` spelling — absent on every supported line, probed so a
-   * resurrection names the seam instead of silently dead-ending the jump.
-   */
+   * resurrection names the seam instead of silently dead-ending the jump. */
   sessionNav: {
     /** The view-owner navigation verb's source, plus this line's signature spelling. */
     workspaceFile: string
@@ -61,14 +64,12 @@ export interface ClientSeam {
     sessionsFile: string
     sessionsOpen: boolean
   }
-  /**
-   * The Context Insights page's first-level panel seam: the layout's keyed
+  /** The Context Insights page's first-level panel seam: the layout's keyed
    * `main` slot (the page's seat — also the conversation panel's own) and
    * the sidebar's `sidebar.panellist` list (the entry's seat), addressed by
    * one shared id. Both spellings shipped with the sidebar/layout split and
    * are present on every supported line; probed presence-as-declared so a
-   * rename names the seam instead of silently orphaning the page.
-   */
+   * rename names the seam instead of silently orphaning the page. */
   insightPage: {
     /** The panellist contract's declaring source, plus the slot's spelling in it. */
     panellistFile: string
@@ -77,12 +78,24 @@ export interface ClientSeam {
     mainFile: string
     mainNeedle: string
   }
-  /**
-   * The right Sidebar's tab seam — every supported generation ships it. The
+  /** The slot-ledger read the client's second-mount guard rides
+   * (`entrySeated` in src/client/services.ts, dsh-context#137): the
+   * `slots` service's raw `entries` view — the same view the session header
+   * renders — present on every supported line under the shared projection-
+   * registry contract; probed on the SERVICE that carries the call (the
+   * renderer's `SlotRegistry`, whose facade can drop it independently of the
+   * core's `SlotCore.entries`) so a rename names the seam instead of silently
+   * disabling the guard. */
+  ledger: {
+    /** The registry source declaring the entries view the plugin calls. */
+    file: string
+    /** The entries view's signature spelling in it. */
+    needle: string
+  }
+  /** The right Sidebar's tab seam — every supported generation ships it. The
    * plugin's registration stays an OPTIONAL deferred inject: a below-baseline
    * host (the gate's fallback composition) may lack the service entirely, and
-   * the client must simply never register the tab there instead of pending.
-   */
+   * the client must simply never register the tab there instead of pending. */
   sidebar: {
     /** The tab-type registry service's providing source. */
     serviceFile: string
@@ -90,33 +103,24 @@ export interface ClientSeam {
     /** The keyed body seat's declaring source. */
     slotFile: string
     slotNeedle: string
-    /**
-     * The keyed chip-title seat the plugin's tab type also registers into
+    /** The keyed chip-title seat the plugin's tab type also registers into
      * (the emblem-beside-label idiom the shipped files type uses). Present
-     * wherever the body seat is; probed separately so a rename names the seam.
-     */
+     * wherever the body seat is; probed separately so a rename names the seam. */
     titleSlotNeedle: string
-    /**
-     * The navigation face the plugin's file-open affordance rides
+    /** The navigation face the plugin's file-open affordance rides
      * (`ctx.sidebarRight.openResource`): the controller's providing source and
      * the needle in it. Same package as the registry, so present wherever the
-     * tab seam is; probed so a rename names the preview seam instead of
-     * silently degrading the affordance.
-     */
+     * tab seam is; probed so a rename names the preview seam instead of silently degrading the affordance. */
     nav: {
       /** The controller source (the public navigation face's implementation). */
       file: string
-      /** The `openResource` verb's declaration/comments marker. */
       needle: string
     }
-    /**
-     * The guide-entry contract the plugin's contribution must satisfy: one
-     * needle per field `SidebarRightGuideEntry` carries on this generation.
-     */
+    /** The guide-entry contract the plugin's contribution must satisfy: one
+     * needle per field `SidebarRightGuideEntry` carries on this generation. */
     guideEntry: {
       /** The declaring source. */
       file: string
-      /** One needle per field the guide entry carries. */
       fields: readonly string[]
     }
   }
@@ -126,101 +130,120 @@ export interface Baseline {
   /** The dsh git tag in deepseek-ai/deepseek-harness (local checkout or CI fetch). */
   id: BaselineId
   tag: string
-  /** The vendored @deepseek-ai/cordis release that harness line ships. */
   cordis: string
-  /**
-   * The @deepseek-ai/dsh-session release that line vendors. The staged
+  /** The @deepseek-ai/dsh-session release that line vendors. The staged
    * session-projection sources import runtime values from it (SessionLogOffset /
-   * SessionSeq), so the compat driver must resolve the specifier to the tag's
-   * own generation.
-   */
+   * SessionSeq), so the compat driver must resolve the specifier to the tag's own generation. */
   session: string
-  /**
-   * The durable-event families THIS line's log carries that the host fold
+  /** The durable-event families THIS line's log carries that the host fold
    * switches on — the probe asserts every one exists in the tag's
    * `KNOWN_SESSION_EVENT_TYPES`. Every supported line is the V4 generation,
-   * so the lists match; the matrix also asserts the union covers the fold's
-   * whole vocabulary, so a fold case added without a baseline list fails
-   * loudly instead of going unprobed.
-   */
+   * so the lists match; the matrix also reads the fold's own `case` labels out
+   * of `src/host/fold.ts` and asserts each is declared here, so a fold case
+   * added without a baseline list fails loudly instead of going unprobed. */
   foldEventTypes: readonly string[]
   client: ClientSeam
-  /**
-   * The step-boundary identity guard's host seam (src/host/stepIdentity.ts):
+  /** The step-boundary identity guard's host seam (src/host/stepIdentity.ts):
    * the agent-loop file that dispatches the `agent/pre-step` waterfall and
    * appends its decision's messages, plus a shipped context plugin proving
-   * the `prepend` listener option this guard rides on that line.
-   */
+   * the `prepend` listener option this guard rides on that line. */
   stepGuard: {
     loopFile: string
     loopNeedles: readonly string[]
     prependProofFile: string
   }
-  /**
-   * The tag's settings-namespace surface. Every supported line is the V4+
+  /** The tag's settings-namespace surface. Every supported line is the V4+
    * Config-form generation: configuration forms derive from each loader
    * entry's own Config schema — the `settings.register` host face is gone
    * (probed absent, so the plugin never calls it), and the browser half rides
-   * the `configForms` service and the Plugins page's keyed
-   * `plugins.bundle.config` seat.
-   */
+   * the `configForms` service and the Plugins page's keyed `plugins.bundle.config` seat. */
   settings: {
-    /** The settings service source missing the register face. */
     serviceFile: string
-    /** Whether this generation serves `settings.register` (none do — asserted absent). */
     register: boolean
     /** The browser slot the preferences card registers on this generation. */
     cardSlot: string
-    /** The sources declaring (or missing) the card slot. */
     cardSlotFiles: readonly string[]
-    /** The browser settings-transport service this generation composes. */
     transport: 'configForms'
     /** The transport's declaring source, plus whether it exists. */
     transportFile: string
     transportPresent: boolean
   }
-  /**
-   * The balance capsule's host seam (src/host/balance.ts). The facts fold
-   * reads the DeepSeek API-key provider's settings row off the Config-form
-   * `describe()` projection — the provider row is the entry whose served
-   * value declares the top-level `apiKeyEnv` credential ref, preferred under
-   * the settings ids the generations have served it as. The retired
-   * registered-section `get(ns)` read is probed absent, so a resurrection
-   * names the seam instead of silently shadowing the projection.
-   */
+  /** The balance capsule's host seam (src/host/balance.ts). The facts fold
+   * reads the DeepSeek platform's settings row off the Config-form
+   * `describe()` projection — the provider directory names the API-key
+   * model's own row, and dsh's stock entry ids are the fallback — and reads
+   * that projection redacted, so a row's literal key never enters the fold.
+   * The retired registered-section `get(ns)` read is probed absent, so a
+   * resurrection names the seam instead of silently shadowing the
+   * projection. */
   balance: {
-    /** The settings service source the face needles are asserted in. */
     settingsFile: string
     /** The retired `get(ns)` section read — absent on every supported line. */
     settingsGetNeedle: string
     settingsGetPresent: boolean
     /** The Config-form projection needle the fold reads. */
     settingsDescribeNeedle: string | undefined
-    /** The provider sources carrying the plugin id and the section shape the fold matches. */
+    /** The projection's redaction option — the fold reads every row redacted. */
+    settingsRedactNeedle: string
+    /** The provider directory: the route key's own settings id, whatever the
+     * entry is called. */
+    providerDirectory: { file: string; needle: string }
+    /** The stock entry ids of the DeepSeek platform's own rows on this line — the
+     * fold's fallback when the provider directory answers nothing. The set grows
+     * with the line, so it is pinned per line. */
+    stockIds: { file: string; ids: readonly string[] }
+    /** The provider sources carrying the route key and the section shape the fold reads. */
     providerFiles: readonly { file: string; needles: readonly string[] }[]
+  }
+  /** The system-prompt injection seam (src/host/promptInjection.ts): the
+   * prompt-registry service must expose the ordered-section face and the
+   * centrally owned order anchors the plugin reads, and the loader must
+   * commit volatile-only config edits into the running references, so a
+   * preference edit applies from the next model step without remounting. */
+  prompt: {
+    serviceFile: string
+    sectionNeedle: string
+    orderAnchors: readonly string[]
+    loaderVolatileFile: string
+    loaderVolatileNeedle: string
+  }
+  /** The sliced cold fold's optional faces (src/host/backfill.ts, issue #145):
+   * `sessionProjections.restore`/`hydrate`, `sessions.prepare`, and
+   * `sessionProjectionCache.write` — any absence keeps the single-shot
+   * coldSnapshot path, so the probes pin presence-as-declared: a removal
+   * names the seam instead of silently degrading the pass back to whole-log blocks. */
+  backfillFold: {
+    /** The registry source declaring `restore` and `hydrate`. */
+    registryFile: string
+    /** The session store source declaring `prepare`. */
+    storeFile: string
+    /** The projection-cache source declaring `write` and `coldSnapshot`. */
+    cacheFile: string
   }
 }
 
-/**
- * One support-matrix entry. Every supported line is the V4 generation, so
- * the seams are spelled once here; a future line that diverges on a needle
- * outgrows the factory (inline its entry instead).
- */
-function baseline(id: BaselineId, tag: string, session: string, cordis: string): Baseline {
+/** One support-matrix entry. Every supported line is the V4 generation, so
+ * the seams are spelled once here; a line that diverges states its divergence here. */
+function baseline(id: BaselineId, tag: string, session: string, line: { cordis?: string; stockIds?: readonly string[] } = {}): Baseline {
   return {
     id,
     tag,
-    cordis,
+    cordis: line.cordis ?? '4.0.4',
     session,
     foldEventTypes: [
       'request/header', 'request/context', 'step/start', 'step/end',
       'user/message', 'developer/message', 'tool/call', 'tool/result', 'assistant/message', 'assistant/attempt',
       'tool/ptc-dispatch',
       'plan/mode', 'compaction/summary', 'compaction/prune', 'system/message',
+      'approval/asked', 'approval/decided', 'session/end-seed',
     ],
     client: {
       imageFaceMethod: 'imageUrl',
       markdownChrome: 'labels',
+      jsonTree: {
+        file: 'packages/client/ui-primitives/src/JsonTree.tsx',
+        needles: ['data-json-expander', 'aria-expanded', 'css.summary', 'css.preview', 'css.punctuation', 'expandTopLevel', 'copyButtonTitle'],
+      },
       platformModules: [
         'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
         '@deepseek-ai/dsh-client-store',
@@ -268,6 +291,12 @@ function baseline(id: BaselineId, tag: string, session: string, cordis: string):
         mainFile: 'packages/client/ui-layout/src/client/index.ts',
         mainNeedle: "'main': { kind: 'keyed'",
       },
+      ledger: {
+        file: 'packages/client/ui-renderer/src/client/registry.ts',
+        // Truncated before the parameter list: the probe greps the tag's
+        // sources as basic regexes, where `(` and `[` open groups/classes.
+        needle: 'entries(key: keyof SlotMap',
+      },
     },
     settings: {
       serviceFile: 'packages/settings/settings/src/index.ts',
@@ -283,10 +312,19 @@ function baseline(id: BaselineId, tag: string, session: string, cordis: string):
       settingsGetNeedle: 'get<const Namespace extends string>(ns:',
       settingsGetPresent: false,
       settingsDescribeNeedle: 'describe(options?: SettingsDescribeOptions)',
+      settingsRedactNeedle: 'redactSecrets?: boolean',
+      providerDirectory: {
+        file: 'packages/llm/llm/src/index.ts',
+        needle: 'listConfigurableProviders(): LlmConfigurableProvider',
+      },
+      stockIds: {
+        file: 'packages/bundle/base/cordis.patch.yml',
+        ids: line.stockIds ?? ['llm-deepseek', 'web-search-deepseek'],
+      },
       providerFiles: [
         {
           file: 'packages/llm/llm-deepseek-api-key/src/index.ts',
-          needles: ["export const name = 'llm-deepseek-api-key'"],
+          needles: ["const PROVIDER = 'deepseek-official'"],
         },
         {
           file: 'packages/llm/llm-deepseek-api-key/src/config.ts',
@@ -303,6 +341,18 @@ function baseline(id: BaselineId, tag: string, session: string, cordis: string):
       loopNeedles: ["'agent/pre-step'", "append('user/message'"],
       prependProofFile: 'packages/context/time-context/src/index.ts',
     },
+    prompt: {
+      serviceFile: 'packages/core/system-prompt/src/index.ts',
+      sectionNeedle: 'section(section: PromptSection)',
+      orderAnchors: ['HARNESS_IDENTITY', 'DEPLOYMENT_PERSONA_SUFFIX'],
+      loaderVolatileFile: 'vendor/loader/src/config/entry.ts',
+      loaderVolatileNeedle: 'updateVolatile(ref, source)',
+    },
+    backfillFold: {
+      registryFile: 'packages/session/session-projection/src/index.ts',
+      storeFile: 'packages/core/session/src/index.ts',
+      cacheFile: 'packages/session/session-projection-cache/src/index.ts',
+    },
   }
 }
 
@@ -317,12 +367,11 @@ export const BASELINES: readonly Baseline[] = [
   // baseline pins `0.1.7-rc.2`, the first release of the line with a
   // complete npm dependency closure; rc.2 adds `startsSeries` to the first
   // `request/header` of a resumed series and the `developer/message`
-  // tool-registry events. startsSeries is inert to the fold; registry
-  // messages contribute to injected context.
+  // tool-registry events. startsSeries is inert to the fold; registry messages contribute to injected context.
   // 0.1.7 enforces plugin dsh-peer compatibility at startup and install
   // (evaluatePluginCompatibility); this plugin's `>=0.1.7-rc.2` dsh peers
   // satisfy every supported line under the gate's includePrerelease check.
-  baseline('v0.1.7-rc.2', 'dsh-v0.1.7-rc.2', '0.1.7-rc.2', '4.0.4'),
+  baseline('v0.1.7-rc.2', 'dsh-v0.1.7-rc.2', '0.1.7-rc.2'),
   // The 0.2.0 line continues the V4 Config-form generation: every seam the
   // plugin rides is spelled exactly as at `0.1.7-rc.2` — the projection
   // registry's register/snapshot/checkpoint/restore contract (drive,
@@ -333,8 +382,14 @@ export const BASELINES: readonly Baseline[] = [
   // `configForms` transport, the balance settings face, the step-boundary
   // guard, and the durable event vocabulary (still the V4 generation — the
   // session-format tree carries no v4-to-v5 migration). Cordis stays 4.0.4,
-  // and the line continues to enforce the plugin dsh-peer gate this
-  // plugin's `>=0.1.7-rc.2` peers satisfy.
-  baseline('v0.2.0-rc.2', 'dsh-v0.2.0-rc.2', '0.2.0-rc.2', '4.0.4'),
-  baseline('v0.2.1-alpha.1', 'dsh-v0.2.1-alpha.1', '0.2.1-alpha.1', '4.0.5-alpha.1'),
+  // and the line continues to enforce the plugin dsh-peer gate this plugin's `>=0.1.7-rc.2` peers satisfy.
+  baseline('v0.2.0-rc.2', 'dsh-v0.2.0-rc.2', '0.2.0-rc.2'),
+  // The 0.2.1 line continues the V4 Config-form generation with every seam the
+  // plugin rides spelled as at `0.2.0-rc.2`. Two facts differ: the line
+  // vendors cordis 4.0.5, and it adds the `web-deepseek-api` entry the
+  // balance fold falls back to.
+  baseline('v0.2.1-rc.2', 'dsh-v0.2.1-rc.2', '0.2.1-rc.2', {
+    cordis: '4.0.5',
+    stockIds: ['llm-deepseek', 'web-search-deepseek', 'web-deepseek-api'],
+  }),
 ]

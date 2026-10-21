@@ -1,23 +1,10 @@
 /**
- * The dashboard's hover tips — one fixed bubble, portaled to <body>, driven
- * by event delegation off the page root.
+ * The Context Insights page's hover tips: one fixed bubble, portaled to <body>, driven by event delegation off the page root.
  *
- * Why not the harness Tooltip: the Insights page is the `lc-ov` query
- * container, and inline-size containment makes the page the containing block
- * for FIXED descendants — an in-tree fixed bubble (the harness Tooltip's
- * unportaled spelling) would paint sidebar-width away from its anchor, while
- * the primitive's `portal` prop exists only on 0.1.7+. The plugin already
- * portals its own fixed overlays for exactly this trap (the image lightbox,
- * base.css), so the page's tips follow that precedent and stay correct on
- * every supported line.
+ * The page is the `lc-ov` query container, and its inline-size containment makes the page the containing block
+ * for FIXED descendants: an in-tree bubble would paint sidebar-width away from its anchor.
  *
- * Anchors carry `data-lc-tip` (the label) and optional `data-lc-tip-side`
- * ('top' default, 'bottom'); the zone delegates `mouseover`/`mouseout` and
- * focus/blur capture, so anchors stay plain elements — no per-cell wrapper
- * components. One bubble at a time: it re-anchors on anchor switch, hides on
- * anchor leave, on any zone scroll, on a viewport resize (every anchor just
- * moved), and on unmount; while shown it sets the anchor's
- * `aria-describedby`.
+ * Anchors carry `data-lc-tip` (the label) and optional `data-lc-tip-side` ('top' default, 'bottom').
  *
  * @module dsh-context/client/components/hoverTip
  */
@@ -25,10 +12,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 
-/** The bubble's identity for the anchor's `aria-describedby` (one live bubble at a time). */
 const TIP_ID = 'lc-hovertip-bubble'
 
-/** Anchor-to-bubble distance and the viewport margin the bubble clamps inside, in px. */
 const GAP = 6
 const VIEWPORT_MARGIN = 8
 
@@ -37,16 +22,15 @@ interface ActiveTip {
   label: string
   side: 'top' | 'bottom'
   rect: { left: number; top: number; width: number; height: number; bottom: number }
+  signature: string
 }
 
-/** The bubble's measured spot for one shown tip. */
 interface Measured {
-  tip: ActiveTip
+  signature: string
   left: number
   top: number
 }
 
-/** The nearest tip anchor of an event target, if any. */
 function anchorOf(target: EventTarget | null): Element | null {
   return target instanceof Element ? target.closest('[data-lc-tip]') : null
 }
@@ -55,16 +39,15 @@ function tipOf(anchor: Element): ActiveTip | null {
   const label = anchor.getAttribute('data-lc-tip')
   if (label === null || label === '') return null
   const r = anchor.getBoundingClientRect()
-  return {
-    anchor,
-    label,
-    side: anchor.getAttribute('data-lc-tip-side') === 'bottom' ? 'bottom' : 'top',
-    rect: { left: r.left, top: r.top, width: r.width, height: r.height, bottom: r.bottom },
-  }
+  const side = anchor.getAttribute('data-lc-tip-side') === 'bottom' ? 'bottom' : 'top'
+  const rect = { left: r.left, top: r.top, width: r.width, height: r.height, bottom: r.bottom }
+  // The pass reads side, the rect edges and the viewport; the label sets the bubble width. Key it on those inputs,
+  // not the tip object: React can replay the show updater, and an equivalent rebuilt tip must not re-measure.
+  const signature = JSON.stringify([side, label, rect.left, rect.top, rect.width, rect.bottom, window.innerWidth, window.innerHeight])
+  return { anchor, label, side, rect, signature }
 }
 
 export interface HoverTipZone {
-  /** Spread onto the zone's root element (the page section). */
   zoneProps: {
     onMouseOver: (ev: React.MouseEvent) => void
     onMouseOut: (ev: React.MouseEvent) => void
@@ -72,15 +55,10 @@ export interface HoverTipZone {
     onBlurCapture: (ev: React.FocusEvent) => void
     onScrollCapture: (ev: React.UIEvent) => void
   }
-  /** The portaled bubble element, or null while nothing is tipped. */
   bubble: ReactElement | null
 }
 
-/**
- * The zone hook: stable delegated handlers plus the portaled bubble. The
- * bubble renders hidden until the layout effect measures it, so it never
- * flashes at an unmeasured spot.
- */
+/** The bubble renders hidden until the layout effect measures it, so it never flashes at an unmeasured spot. */
 export function useHoverTip(): HoverTipZone {
   const [tip, setTip] = useState<ActiveTip | null>(null)
   const [measured, setMeasured] = useState<Measured | null>(null)
@@ -105,8 +83,7 @@ export function useHoverTip(): HoverTipZone {
     })
   }, [])
 
-  // Anchor switching never hides: leaving A for B skips the hide (B's
-  // mouseover re-anchors), and moving inside A's own subtree keeps it.
+  // Anchor switching never hides: leaving A for B skips the hide, since B's mouseover re-anchors.
   const onMouseOver = useCallback((ev: React.MouseEvent): void => {
     const anchor = anchorOf(ev.target)
     if (anchor !== null) show(anchor)
@@ -123,9 +100,7 @@ export function useHoverTip(): HoverTipZone {
   }, [hide])
   const onScrollCapture = useCallback((): void => { hide() }, [hide])
 
-  // A viewport resize moves every anchor (the pane re-solves, the content
-  // column re-centers): the zone's scroll rule extended — retract rather
-  // than float detached off the moved anchor.
+  // A viewport resize moves every anchor: retract rather than float detached.
   useEffect(() => {
     if (tip === null) return undefined
     const retract = (): void => { hide() }
@@ -133,15 +108,10 @@ export function useHoverTip(): HoverTipZone {
     return () => { window.removeEventListener('resize', retract) }
   }, [tip, hide])
 
-  // Measure once per shown tip (the measured record keys on tip identity, so
-  // a same-anchor mousemove never re-hides the bubble): center on the anchor,
-  // clamp inside the viewport, flip sides when the preferred side overflows.
   useLayoutEffect(() => {
-    if (tip === null || measured?.tip === tip) return
+    if (tip === null || measured?.signature === tip.signature) return
     const el = bubbleRef.current
-    /* v8 ignore next -- the portal commits its ref before layout effects run,
-     * so a null ref here is unreachable; kept as a guard so a future portal
-     * change cannot crash the page. */
+    /* v8 ignore next -- unreachable: the portal commits its ref before layout effects run. */
     if (el === null) return
     const w = el.offsetWidth
     const h = el.offsetHeight
@@ -150,10 +120,10 @@ export function useHoverTip(): HoverTipZone {
     let top = tip.side === 'top' ? rect.top - h - GAP : rect.bottom + GAP
     if (tip.side === 'top' && top < VIEWPORT_MARGIN) top = rect.bottom + GAP
     else if (tip.side === 'bottom' && top + h > window.innerHeight - VIEWPORT_MARGIN) top = rect.top - h - GAP
-    setMeasured({ tip, left, top: Math.max(VIEWPORT_MARGIN, top) })
+    setMeasured({ signature: tip.signature, left, top: Math.max(VIEWPORT_MARGIN, top) })
   }, [tip, measured])
 
-  const shown = measured !== null && measured.tip === tip ? measured : null
+  const shown = tip !== null && measured?.signature === tip.signature ? measured : null
   return {
     zoneProps: { onMouseOver, onMouseOut, onFocusCapture, onBlurCapture, onScrollCapture },
     bubble: tip === null ? null : createPortal(
