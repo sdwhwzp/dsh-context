@@ -350,6 +350,12 @@ export function makeContextView(
         : jump === 'answers' ? { cat: 'assistant', kind: 'answer' } : { cat: 'user' })
       revealCard(rootRef.current, '.lc-col-browser')
     }, [])
+    // A band click lands on its category in the browser at that step; the browser's own onOpenCat focuses the
+    // chart on the category, the same chain a category row or a DNA band click runs.
+    const revealCat = useCallback((cat: Category | 'system' | 'tools', seq: number): void => {
+      setCatFocus({ cat, step: seq })
+      revealBrowserIfOffscreen(rootRef.current)
+    }, [])
     // The stats board's family cell names the Agent Network card: its own tab when the preferences serve one,
     // else the right Sidebar panel that keeps the card inline. A deployment serving neither — a stripped
     // harness, or the tab hidden with no Sidebar — leaves the cell a plain figure instead of a dead button.
@@ -755,6 +761,7 @@ export function makeContextView(
                   <TrendOverview
                     key={sessionId}
                     {...trendBase}
+                    onPickCat={revealCat}
                     onPickTurn={(turn) => {
                       setGranularity('turn')
                       // No scroll to center: pin the turn's closing record — the same seq its aggregate keeps.

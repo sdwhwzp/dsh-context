@@ -34,6 +34,7 @@ describe('Config validator (cordis Standard Schema face)', () => {
       insightsEntry: 'show',
       defaultDurationCurve: 'show',
       overviewAutoSteps: '200',
+      defaultOverviewRange: '30d',
       fleetTab: 'show',
       promptPrefix: '',
       promptSuffix: '',
@@ -74,7 +75,7 @@ describe('Config validator (cordis Standard Schema face)', () => {
 describe('preference fields (the Config-form generation surface)', () => {
   test('every preference is volatile-marked; the bounds are not', () => {
     const dict = Config.dict ?? {}
-    for (const pref of ['defaultPlacement', 'defaultGranularity', 'defaultTrendMode', 'defaultDeltaBase', 'defaultToolSort', 'defaultFileSort', 'insightsEntry', 'defaultDurationCurve', 'overviewAutoSteps', 'fleetTab', 'promptPrefix', 'promptSuffix']) {
+    for (const pref of ['defaultPlacement', 'defaultGranularity', 'defaultTrendMode', 'defaultDeltaBase', 'defaultToolSort', 'defaultFileSort', 'insightsEntry', 'defaultDurationCurve', 'overviewAutoSteps', 'defaultOverviewRange', 'fleetTab', 'promptPrefix', 'promptSuffix']) {
       assert.equal((dict[pref] as z['dict'] extends undefined ? never : { meta?: { volatile?: boolean } }).meta?.volatile, true, pref)
     }
     for (const bound of ['maxRequestSteps', 'maxKeptTurns', 'maxEvents', 'maxNodes', 'maxArchiveNodes', 'maxFileOps']) {
@@ -83,7 +84,7 @@ describe('preference fields (the Config-form generation surface)', () => {
   })
 
   test('preferences resolve to schema defaults; a stale value degrades to its default (loose)', () => {
-    const resolved = Config({ defaultGranularity: 'bogus', overviewAutoSteps: '50', promptPrefix: 7, promptSuffix: {} } as unknown as Config)
+    const resolved = Config({ defaultGranularity: 'bogus', overviewAutoSteps: '50', defaultOverviewRange: 'bogus', promptPrefix: 7, promptSuffix: {} } as unknown as Config)
     assert.equal(deref(resolved.defaultPlacement), 'all')
     assert.equal(deref(resolved.defaultGranularity), 'step')
     assert.equal(deref(resolved.defaultTrendMode), 'total')
@@ -93,16 +94,18 @@ describe('preference fields (the Config-form generation surface)', () => {
     assert.equal(deref(resolved.insightsEntry), 'show')
     assert.equal(deref(resolved.defaultDurationCurve), 'show')
     assert.equal(deref(resolved.overviewAutoSteps), '200')
+    assert.equal(deref(resolved.defaultOverviewRange), '30d')
     assert.equal(deref(resolved.fleetTab), 'show')
     assert.equal(deref(resolved.promptPrefix), '', 'a non-string prompt value degrades to the empty default')
     assert.equal(deref(resolved.promptSuffix), '')
   })
 
   test('a stored preference survives the resolve', () => {
-    const resolved = Config({ defaultPlacement: 'sidebar', insightsEntry: 'hide', overviewAutoSteps: 'off', fleetTab: 'hide', promptPrefix: 'Be terse.', promptSuffix: 'Sign as Atlas.' })
+    const resolved = Config({ defaultPlacement: 'sidebar', insightsEntry: 'hide', overviewAutoSteps: 'off', defaultOverviewRange: '7d', fleetTab: 'hide', promptPrefix: 'Be terse.', promptSuffix: 'Sign as Atlas.' })
     assert.equal(deref(resolved.defaultPlacement), 'sidebar')
     assert.equal(deref(resolved.insightsEntry), 'hide')
     assert.equal(deref(resolved.overviewAutoSteps), 'off')
+    assert.equal(deref(resolved.defaultOverviewRange), '7d')
     assert.equal(deref(resolved.fleetTab), 'hide')
     assert.equal(deref(resolved.promptPrefix), 'Be terse.')
     assert.equal(deref(resolved.promptSuffix), 'Sign as Atlas.')

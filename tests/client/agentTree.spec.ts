@@ -4,7 +4,6 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import {
   AGENT_CARD_H,
-  AGENT_TREE_LIMIT,
   agentDurationOf,
   agentForestOf,
   agentIdentityOf,
@@ -422,7 +421,6 @@ describe('agentForestOf', () => {
     assert.equal(forest.nodes[3].depth, 2)
     assert.equal(forest.nodes[1].parentId, 'root')
     assert.equal(forest.solo, false)
-    assert.equal(forest.overflow, 0)
   })
 
   test('subagent flag comes from origin or a descriptor identity', () => {
@@ -448,7 +446,6 @@ describe('agentForestOf', () => {
     assert.ok(forest !== null)
     // a → b → a(chain hit): the walk roots at b, whose subtree holds both.
     assert.deepEqual(forest.nodes.map(n => n.id), ['b', 'a'])
-    assert.equal(forest.overflow, 0)
   })
 
   test('siblings follow the parent catalog spawn order when cached', () => {
@@ -514,14 +511,13 @@ describe('agentForestOf', () => {
     assert.equal(forest.nodes[0].label, 'Fresh')
   })
 
-  test('caps the subtree at AGENT_TREE_LIMIT and reports the exact overflow', () => {
+  test('draws the whole family, however large', () => {
     const byId: Record<string, unknown> = { root: row({}) }
-    for (let i = 0; i < AGENT_TREE_LIMIT + 5; i++) byId['kid' + i] = row({ parentId: 'root', updatedAt: i })
+    for (let i = 0; i < 105; i++) byId['kid' + i] = row({ parentId: 'root', updatedAt: i })
     const forest = agentForestOf(snap(byId), 'root')
     assert.ok(forest !== null)
-    assert.equal(forest.nodes.length, AGENT_TREE_LIMIT)
-    // root + LIMIT+5 kids = LIMIT+6 members; the cap shows LIMIT.
-    assert.equal(forest.overflow, 6)
+    assert.equal(forest.nodes.length, 106)
+    assert.equal(forest.nodes.at(-1)?.id, 'kid0')
   })
 })
 
@@ -676,7 +672,6 @@ describe('layoutForest', () => {
     return {
       nodes,
       edges: ids.filter(pair => pair[1] !== undefined).map(([to, from]) => ({ from: from as string, to })),
-      overflow: 0,
       solo: ids.length === 1,
     }
   }

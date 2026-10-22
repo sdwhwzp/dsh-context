@@ -12,6 +12,8 @@
 
 > Recommended and starred by DeepSeek Harness staff [@tianyicui](https://github.com/tianyicui) and [@turtle1999](https://github.com/turtle1999) — see [this post on X](https://x.com/tianyi/status/2105256532657267119).
 
+> Please thumbs up for the comment for condemning despicable @Kevinzzz6 and its shameless copycat on zcode plugin list! Thanks!https://github.com/zai-org/zcode-plugins/pull/112#issuecomment-6320903135
+
 [`dsh-context`](https://www.npmjs.com/package/dsh-context) provides full context lifecycle management features.
 - **Context Insights page** — the cross-session overview as a first-level sidebar panel (beside Plugins and Automation tasks): KPI band with a 7-day token/cost usage chart, activity heatmap, aggregate composition ring, and filterable session cards that jump straight into any session.
 - **Context tab** — an UI context dashboard for DeepSeek Harness's context stats, composition, trend, events, and messages.
@@ -123,7 +125,7 @@ One stacked bar per model request — finer than per-message — so you watch th
 
 ![Context Trend in Delta mode](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/history-delta.png)
 
-- **Overview** — one toggle squashes the whole session (steps or turns) into the pane's width as a continuous stacked ribbon: every compaction drop and composition shift at a glance, no sideways scrolling, nothing extra to load. Flags mark the quartiles and the full span; hover to scrub, click to pin (exclusive with DNA mode and Adaptive).
+- **Overview** — one toggle squashes the whole session (steps or turns) into the pane's width as a continuous stacked ribbon: every compaction drop and composition shift at a glance, no sideways scrolling, nothing extra to load. Flags mark the quartiles and the full span; hover to scrub, hover a band to light that category across the whole ribbon; click pins the step and opens that band's category in the browser (exclusive with DNA mode and Adaptive).
 - **Hover & pin** — scrub for an instant tooltip; click to pin the full breakdown, with provider-reported **Actual Prompt / Output / Cache** next to the estimates.
 - **Live linkage** — hovering a bar previews that step's assembled context in the Context browser beside the chart; leaving the chart returns to your own pick.
 - **DNA detail** — the shared DNA toggle splits trend bars into individual context items and displays the same item colors in the browser. In Delta mode, additions and removals appear on opposite sides of zero; selecting a band opens its item at that request. Hovering the padding outside a band shows the signed net delta rather than labeling token churn as a total.
@@ -197,11 +199,11 @@ The dialog stays within the window beside the sidebar, including when a skin blu
 
 ## ⚙️ Settings
 
-The **Context** preferences card holds this plugin's per-user settings — default placement (the **Context** and **Fleet** conversation tabs, the right Sidebar panel, or both), the **Fleet** tab's own Show/Hide switch, trend granularity (Step/Turn), trend mode (Total/Delta), automatic Overview after 100, 200 (default), or 300 retained steps (or Off), the trend duration curve (shown by default), tool and File Activity sort, and the sidebar insights entry. It lives on the **Plugins** page: the sidebar **Plugins** entry → the **dsh-context** bundle's page → its **Configuration** section (the card is served by the entry's live Config form).
+The **Context** preferences card holds this plugin's per-user settings — default placement (the **Context** and **Fleet** conversation tabs, the right Sidebar panel, or both), the **Fleet** tab's own Show/Hide switch, the **Context Insights** default range (Today / Last 7 days / Last 30 days / All, Last 30 days unless changed; picking a preset on the page writes it back), trend granularity (Step/Turn), trend mode (Total/Delta), automatic Overview after 100, 200 (default), or 300 retained steps (or Off), the trend duration curve (shown by default), tool and File Activity sort, and the sidebar insights entry. It lives on the **Plugins** page: the sidebar **Plugins** entry → the **dsh-context** bundle's page → its **Configuration** section (the card is served by the entry's live Config form).
 
 The **System Prompt · Prefix / Suffix** rows hold free text joined at the very start / end of every session's system prompt, for all agents (subagents included) — a per-deployment persona or behavioral rule that rides the harness's own prompt assembly. Edits apply from the next turn; leave a row empty to disable it.
 
-In-chart and in-card toggles stay per-view and never overwrite the stored preference.
+The Context Insights preset buttons write the pick back as the stored default; every other in-chart and in-card toggle stays per-view and never overwrites the stored preference.
 
 ![The Context settings card](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/settings.png)
 

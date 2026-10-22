@@ -48,7 +48,7 @@ export function FleetSummary(props: FleetSummaryProps): ReactElement {
   return (
     <div className="lc-card lc-summary">
       <div className="lc-summary-chips">
-        <span className="lc-agents-chip">{t('agents.chip.count', { n: nodes.length + forest.overflow })}</span>
+        <span className="lc-agents-chip">{t('agents.chip.count', { n: nodes.length })}</span>
         <span className={'lc-agents-chip' + (running > 0 ? ' lc-agents-chip-on' : '')}>
           {t('agents.chip.running', { n: running })}
         </span>

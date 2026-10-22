@@ -173,6 +173,9 @@ export type DefaultDurationCurve = 'show' | 'hide'
 /** Retained-step count at which the trend turns its Overview ribbon on; 'off' never auto-switches. */
 export type OverviewAutoSteps = 'off' | '100' | '200' | '300'
 
+/** The Context Insights page's rolling preset; a calendar-picked range replaces it for that visit only. */
+export type DefaultOverviewRange = 'today' | '7d' | '30d' | 'all'
+
 /** Whether the Fleet conversation tab is served. */
 export type FleetTab = 'show' | 'hide'
 
@@ -186,6 +189,7 @@ export interface PluginSettings {
   insightsEntry: InsightsEntry
   defaultDurationCurve: DefaultDurationCurve
   overviewAutoSteps: OverviewAutoSteps
+  defaultOverviewRange: DefaultOverviewRange
   fleetTab: FleetTab
   /** Free text joined ahead of the harness's assembled system prompt; empty disables. */
   promptPrefix: string

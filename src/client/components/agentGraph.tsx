@@ -62,6 +62,8 @@ export interface AgentGraphProps {
 
 /** Entrance stagger cap for the cards and their bar segments (the stackedBar idiom). */
 const STAGGER_CAP = 8
+/** The graph's viewport height, mirrored by `.lc-agents-stage`'s max-height in agentGraph.css. */
+const STAGE_H = 560
 
 /** The link's S-curve: vertical tangents at both card edges, curvature proportional to the drop, clamped to [24, 96]. */
 function linkPath(x1: number, y1: number, x2: number, y2: number): string {
@@ -86,6 +88,9 @@ export function makeAgentGraph(
     const team = props.team !== undefined ? props.team : internal.team
 
     const [internalHover, setInternalHover] = useState<string | null>(null)
+    const [showAll, setShowAll] = useState(false)
+    // A new session starts collapsed; the expanded preference belongs to the family it was set on.
+    useEffect(() => { setShowAll(false) }, [sessionId])
     const hoverId = props.hoverId !== undefined ? props.hoverId : internalHover
     const onHover = props.onHover ?? setInternalHover
     // The shared price book (the stats board's own store): a card's cost estimate
@@ -122,6 +127,7 @@ export function makeAgentGraph(
     const layout = useMemo(() => (forest !== null ? layoutForest(forest, stageWidth) : null), [forest, stageWidth])
 
     if (forest === null || layout === null) return null
+    const overflowsStage = layout.height > STAGE_H
     const byId = new Map(forest.nodes.map(n => [n.id, n]))
     /** v8 ignore next 1 -- agentForestOf anchors the forest at the current session, so a current node always exists. */
     const current = forest.nodes.find(n => n.isCurrent) ?? forest.nodes[0]
@@ -180,7 +186,7 @@ export function makeAgentGraph(
         </div>
 
         <div className="lc-agents-chips">
-          <span className="lc-agents-chip">{t('agents.chip.count', { n: forest.nodes.length + forest.overflow })}</span>
+          <span className="lc-agents-chip">{t('agents.chip.count', { n: forest.nodes.length })}</span>
           <span className={'lc-agents-chip' + (runningCount > 0 ? ' lc-agents-chip-on' : '')}>
             {t('agents.chip.running', { n: runningCount })}
           </span>
@@ -194,8 +200,17 @@ export function makeAgentGraph(
               </span>
             )
             : null}
-          {forest.overflow > 0
-            ? <span className="lc-agents-chip">{t('agents.more', { n: forest.overflow })}</span>
+          {overflowsStage
+            ? (
+              <button
+                type="button"
+                className="lc-agents-chip lc-agents-toggle"
+                aria-expanded={showAll}
+                onClick={() => { setShowAll(v => !v) }}
+              >
+                {t(showAll ? 'agents.showLess' : 'agents.showAll')}
+              </button>
+            )
             : null}
         </div>
 
@@ -218,7 +233,7 @@ export function makeAgentGraph(
 
         <div className="lc-agents-split">
           <div className="lc-agents-main">
-            <div className="lc-agents-stage" ref={stageRef}>
+            <div className={'lc-agents-stage' + (showAll ? ' lc-agents-stage-all' : '')} ref={stageRef}>
               <div
                 className={'lc-agents-canvas' + (lit !== null ? ' lc-agents-focus' : '')}
                 style={{ width: layout.width, height: layout.height }}

@@ -61,7 +61,6 @@ const FOREST: AgentForest = {
     nodeOf('s3', { label: 'idle helper', updatedAt: 4 }),
   ],
   edges: [],
-  overflow: 0,
   solo: false,
 }
 
@@ -476,7 +475,7 @@ describe('TaskBoard — the toolbar and guidance states', () => {
   })
 
   test('empty states: no team and no delegations points ahead; a team with no work says so', async () => {
-    const m = await mount(h(TaskBoard, propsOf({ team: null, forest: { nodes: [nodeOf('root', { isCurrent: true, depth: 0 })], edges: [], overflow: 0, solo: true } })))
+    const m = await mount(h(TaskBoard, propsOf({ team: null, forest: { nodes: [nodeOf('root', { isCurrent: true, depth: 0 })], edges: [], solo: true } })))
     assert.ok(text(m.container).includes(DICT_EN['fleet.tasks.noTeam']))
     assert.equal(queryAll(m.container, '.lc-team-task').length, 0)
     await m.unmount()

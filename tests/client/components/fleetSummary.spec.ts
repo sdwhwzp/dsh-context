@@ -29,7 +29,6 @@ const FOREST: AgentForest = {
     nodeOf('w3', { completed: true }),
   ],
   edges: [],
-  overflow: 0,
   solo: false,
 }
 
@@ -84,7 +83,6 @@ describe('FleetSummary', () => {
     const solo: AgentForest = {
       nodes: [nodeOf('root', { isCurrent: true, running: true })],
       edges: [],
-      overflow: 0,
       solo: true,
     }
     const m = await mount(h(FleetSummary, propsOf({ forest: solo })))
@@ -116,10 +114,10 @@ describe('FleetSummary', () => {
     await m2.unmount()
   })
 
-  test('zh chrome and the overflow count ride along', async () => {
+  test('zh chrome rides along', async () => {
     const zh = makeKit('zh')
-    const m = await mount(h(FleetSummary, propsOf({ forest: { ...FOREST, overflow: 2 }, t: zh.t, fmt: zh.fmt })))
-    assert.ok(text(m.container).includes('6 个 Agent'))
+    const m = await mount(h(FleetSummary, propsOf({ forest: FOREST, t: zh.t, fmt: zh.fmt })))
+    assert.ok(text(m.container).includes('4 个 Agent'))
     await m.unmount()
   })
 })

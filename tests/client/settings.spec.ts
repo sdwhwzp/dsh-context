@@ -53,6 +53,7 @@ describe('createContextSettings defaults', () => {
       insightsEntry: 'show',
       durationCurve: 'show',
       overviewAutoSteps: '200',
+      overviewRange: '30d',
       fleetTab: 'show',
       promptPrefix: '',
       promptSuffix: '',
@@ -67,6 +68,7 @@ describe('createContextSettings defaults', () => {
     assert.equal(s.insightsEntry(), 'show')
     assert.equal(s.defaultDurationCurve(), 'show')
     assert.equal(s.overviewAutoSteps(), '200')
+    assert.equal(s.defaultOverviewRange(), '30d')
     assert.equal(s.fleetTab(), 'show')
   })
 })
@@ -107,6 +109,8 @@ describe('set', () => {
     assert.equal(s.store.getSnapshot().promptPrefix, 'Be terse.')
     s.set('overviewAutoSteps', 'off')
     assert.equal(s.overviewAutoSteps(), 'off')
+    s.set('defaultOverviewRange', 'today')
+    assert.equal(s.defaultOverviewRange(), 'today')
   })
 
   test('an unchanged value does not notify listeners', () => {
@@ -252,6 +256,7 @@ describe('attach', () => {
         insightsEntry: 'hide',
         defaultDurationCurve: 'hide',
         overviewAutoSteps: '300',
+        defaultOverviewRange: '7d',
         fleetTab: 'hide',
         promptPrefix: 'Be terse.',
         promptSuffix: 'Sign as Atlas.',
@@ -270,6 +275,7 @@ describe('attach', () => {
       insightsEntry: 'hide',
       durationCurve: 'hide',
       overviewAutoSteps: '300',
+      overviewRange: '7d',
       fleetTab: 'hide',
       promptPrefix: 'Be terse.',
       promptSuffix: 'Sign as Atlas.',
@@ -306,6 +312,7 @@ describe('attach', () => {
         insightsEntry: 'show',
         durationCurve: 'show',
         overviewAutoSteps: '200',
+        overviewRange: '30d',
         fleetTab: 'show',
         promptPrefix: '',
         promptSuffix: '',
@@ -318,7 +325,7 @@ describe('attach', () => {
     const s = createContextSettings()
     s.attach(new TestSettingsScope({
       status: 'ready',
-      value: { defaultPlacement: 'window', defaultGranularity: 'bogus', defaultTrendMode: 7, defaultDeltaBase: 'bogus', defaultToolSort: 'alpha', defaultFileSort: 'alpha', insightsEntry: 42, defaultDurationCurve: 'always', overviewAutoSteps: 200, fleetTab: 7, promptPrefix: 9, promptSuffix: {} },
+      value: { defaultPlacement: 'window', defaultGranularity: 'bogus', defaultTrendMode: 7, defaultDeltaBase: 'bogus', defaultToolSort: 'alpha', defaultFileSort: 'alpha', insightsEntry: 42, defaultDurationCurve: 'always', overviewAutoSteps: 200, defaultOverviewRange: 'week', fleetTab: 7, promptPrefix: 9, promptSuffix: {} },
       writable: false,
     }))
     assert.equal(s.defaultPlacement(), 'all')
@@ -330,6 +337,7 @@ describe('attach', () => {
     assert.equal(s.insightsEntry(), 'show')
     assert.equal(s.defaultDurationCurve(), 'show')
     assert.equal(s.overviewAutoSteps(), '200')
+    assert.equal(s.defaultOverviewRange(), '30d')
     assert.equal(s.fleetTab(), 'show')
     assert.equal(s.store.getSnapshot().promptPrefix, '', 'a non-string prompt value degrades to the empty default')
     assert.equal(s.store.getSnapshot().promptSuffix, '')
@@ -373,11 +381,20 @@ describe('attach', () => {
     assert.equal(s.overviewAutoSteps(), '200')
   })
 
+  test('an invalid scope overview range degrades to the default instead of keeping the current one', () => {
+    const s = createContextSettings()
+    s.set('defaultOverviewRange', '7d')
+    assert.equal(s.defaultOverviewRange(), '7d')
+    const scope = new TestSettingsScope({ status: 'ready', value: { defaultOverviewRange: 'quarter' }, writable: false })
+    s.attach(scope)
+    assert.equal(s.defaultOverviewRange(), '30d')
+  })
+
   test('explicit schema-default values are accepted', () => {
     const s = createContextSettings()
     s.attach(new TestSettingsScope({
       status: 'ready',
-      value: { defaultPlacement: 'all', defaultGranularity: 'step', defaultTrendMode: 'total', defaultDeltaBase: 'step', defaultToolSort: 'count', defaultFileSort: 'count', insightsEntry: 'show', overviewAutoSteps: '200' },
+      value: { defaultPlacement: 'all', defaultGranularity: 'step', defaultTrendMode: 'total', defaultDeltaBase: 'step', defaultToolSort: 'count', defaultFileSort: 'count', insightsEntry: 'show', overviewAutoSteps: '200', defaultOverviewRange: 'all' },
       writable: false,
     }))
     assert.equal(s.defaultPlacement(), 'all')
@@ -388,6 +405,7 @@ describe('attach', () => {
     assert.equal(s.defaultFileSort(), 'count')
     assert.equal(s.insightsEntry(), 'show')
     assert.equal(s.overviewAutoSteps(), '200')
+    assert.equal(s.defaultOverviewRange(), 'all')
   })
 
   test('missing fields keep the current state', () => {
@@ -397,6 +415,7 @@ describe('attach', () => {
     s.set('insightsEntry', 'hide')
     s.set('defaultDurationCurve', 'hide')
     s.set('overviewAutoSteps', '100')
+    s.set('defaultOverviewRange', 'today')
     s.set('promptPrefix', 'drafted')
     s.attach(new TestSettingsScope({ status: 'ready', value: { defaultFileSort: 'latest' }, writable: false }))
     assert.equal(s.defaultPlacement(), 'tab', 'the in-session choice survives a section without the field')
@@ -407,6 +426,7 @@ describe('attach', () => {
     assert.equal(s.insightsEntry(), 'hide', 'the in-session entry choice survives a section without the field')
     assert.equal(s.defaultDurationCurve(), 'hide', 'the in-session curve choice survives a section without the field')
     assert.equal(s.overviewAutoSteps(), '100', 'the in-session auto-overview choice survives a section without the field')
+    assert.equal(s.defaultOverviewRange(), 'today', 'the in-session overview range survives a section without the field')
     assert.equal(s.store.getSnapshot().promptPrefix, 'drafted', 'the in-session prompt text survives a section without the field')
   })
 
@@ -504,6 +524,7 @@ describe('attach', () => {
       insightsEntry: 'show',
       durationCurve: 'show',
       overviewAutoSteps: '200',
+      overviewRange: '30d',
       fleetTab: 'show',
       promptPrefix: '',
       promptSuffix: '',

@@ -5,6 +5,8 @@ import type { RowKind } from './browserNodes'
 export interface CatFocus {
   cat: string
   kind?: RowKind
+  /** The step to show; absent lands on the live surface. */
+  step?: number
 }
 
 export function countOf(asm: Assembled, byCat: Partial<Record<Category, SurfaceNode[]>>, c: string): number {

@@ -6,7 +6,7 @@ The rules dsh-context must hold on every supported `@deepseek-ai/dsh` release, a
 
 **Law.** Record only what no other artifact carries; delete what code, tests, or git history already say. Verify against the dsh sources before acting — source wins over this page. Less is ALWAYS better.
 
-Last verified: **2026-10-20** (dsh-context `0.73.3`, dsh `0.1.7-rc.2` / `0.2.0-rc.2` / `0.2.1-rc.2` tag trees).
+Last verified: **2026-10-21** (dsh-context `0.74.0`, dsh `0.1.7-rc.2` / `0.2.0-rc.2` / `0.2.1-rc.2` tag trees).
 
 ## 1 · Supported set
 

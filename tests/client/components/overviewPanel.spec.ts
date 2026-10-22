@@ -6,6 +6,8 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, test, vi } from 'vitest'
 import { makeOverviewPanel } from '../../../src/client/components/overviewPanel'
 import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
+import { createContextSettings, type ContextSettings } from '../../../src/client/settings'
+import type { DefaultOverviewRange } from '../../../src/shared/types'
 import { dayKeyOf } from '../../../src/shared/days'
 import { TestClientCtx, asClientCtx } from '../helpers/harness'
 import { click, flush, hover, makeKit, mount, query, queryAll, text, unhover, until, type Mounted } from '../helpers/kit'
@@ -94,6 +96,40 @@ const workspacesSnapshotValue = {
 
 const useHookOf = (snapshot: unknown) => (<T>(sel: (s: unknown) => T): T => sel(snapshot))
 
+/** Mount-time preferences; a range rides a ready scope snapshot, like the Host-served section. */
+function settingsWith(range?: DefaultOverviewRange): ContextSettings {
+  const settings = createContextSettings()
+  if (range !== undefined) {
+    settings.attach({
+      getSnapshot: () => ({ status: 'ready', value: { defaultOverviewRange: range }, writable: true }),
+      subscribe: () => () => {},
+      set: () => Promise.resolve(),
+    })
+  }
+  return settings
+}
+
+/** Settings whose scope keeps each write, like the Host-served form, so a remount reads it back. */
+function writableSettings(range: DefaultOverviewRange = '30d', writable = true): {
+  settings: ContextSettings
+  sets: { field: string; value: unknown }[]
+} {
+  let value: Record<string, unknown> = { defaultOverviewRange: range }
+  const listeners = new Set<() => void>()
+  const sets: { field: string; value: unknown }[] = []
+  const settings = createContextSettings()
+  settings.attach({
+    getSnapshot: () => ({ status: 'ready', value, writable }),
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    set: async (field, next) => {
+      sets.push({ field, value: next })
+      value = { ...value, [field]: next }
+      for (const listener of listeners) listener()
+    },
+  })
+  return { settings, sets }
+}
+
 function makeCtx(sessions: Record<string, unknown> = {}): TestClientCtx {
   return new TestClientCtx({ services: { sessions } })
 }
@@ -101,8 +137,9 @@ function makeCtx(sessions: Record<string, unknown> = {}): TestClientCtx {
 async function openPanel(
   ctx: TestClientCtx,
   props: Record<string, unknown> = {},
+  settings: ContextSettings = settingsWith(),
 ): Promise<{ m: Mounted; Panel: ReturnType<typeof makeOverviewPanel> }> {
-  const Panel = makeOverviewPanel(asClientCtx(ctx), makeKit())
+  const Panel = makeOverviewPanel(asClientCtx(ctx), makeKit(), settings)
   const allProps = {
     useSessions: useHookOf(sessionsSnapshot()),
     useWorkspaces: useHookOf(workspacesSnapshotValue),
@@ -248,6 +285,74 @@ describe('OverviewPanel', () => {
     })
     await click(queryAll<HTMLButtonElement>(m.container, '.lc-ov-grid > .lc-ov-session').find(c => text(c).includes('beta session'))!)
     assert.deepEqual(opened, [], 'the archived card never navigates')
+    await m.unmount()
+  })
+
+  test('the configured default range selects the preset on mount', async () => {
+    const ctx = makeCtx()
+    const { m } = await openPanel(ctx, {}, settingsWith('7d'))
+    const rangeButtons = queryAll<HTMLButtonElement>(m.container, '.lc-ov-range .lc-gran-btn')
+    assert.ok(rangeButtons[1].className.includes('lc-gran-on'), 'the configured 7-day preset opens lit')
+    assert.ok(!rangeButtons[2].className.includes('lc-gran-on'), 'the schema default stands down')
+    assert.deepEqual(
+      queryAll(m.container, '.lc-dp-half').map(el => el.textContent),
+      [dayKeyOf(NOW - 7 * 86_400_000), TODAY],
+      'the page opens on the configured window',
+    )
+    assert.equal(queryAll(m.container, '.lc-ov-grid > .lc-ov-session').length, 2, 'the scope follows the preset')
+    await m.unmount()
+  })
+
+  test('a late-served default range replaces the schema default when the settings section lands', async () => {
+    const settings = createContextSettings()
+    let ready = false
+    let notify: (() => void) | undefined
+    settings.attach({
+      getSnapshot: () => ready
+        ? { status: 'ready', value: { defaultOverviewRange: '7d' }, writable: true }
+        : { status: 'loading', value: {}, writable: false },
+      subscribe: (listener) => { notify = listener; return () => { notify = undefined } },
+      set: () => Promise.resolve(),
+    })
+    const { m } = await openPanel(makeCtx(), {}, settings)
+    const rangeButtons = queryAll<HTMLButtonElement>(m.container, '.lc-ov-range .lc-gran-btn')
+    assert.ok(rangeButtons[2].className.includes('lc-gran-on'), 'the schema default opens while settings load')
+    ready = true
+    await act(async () => { notify?.() })
+    assert.ok(rangeButtons[1].className.includes('lc-gran-on'), 'the served default takes over once it lands')
+    assert.ok(!rangeButtons[2].className.includes('lc-gran-on'))
+    await m.unmount()
+  })
+
+  test('picking a range writes it back as the default, so a remount keeps it', async () => {
+    const { settings, sets } = writableSettings()
+    const first = await openPanel(makeCtx(), {}, settings)
+    const buttons = queryAll<HTMLButtonElement>(first.m.container, '.lc-ov-range .lc-gran-btn')
+    await click(buttons[1])
+    assert.deepEqual(sets, [{ field: 'defaultOverviewRange', value: '7d' }])
+    assert.equal(settings.store.getSnapshot().overviewRange, '7d', 'the settings card reads the written default')
+    assert.ok(buttons[1].className.includes('lc-gran-on'), 'the pick applies immediately')
+    await first.m.unmount()
+
+    const second = await openPanel(makeCtx(), {}, settings)
+    const again = queryAll<HTMLButtonElement>(second.m.container, '.lc-ov-range .lc-gran-btn')
+    assert.ok(again[1].className.includes('lc-gran-on'), 'the remount reads the written default')
+    assert.deepEqual(
+      queryAll(second.m.container, '.lc-dp-half').map(el => el.textContent),
+      [dayKeyOf(NOW - 7 * 86_400_000), TODAY],
+      'the remount opens on the written window',
+    )
+    await second.m.unmount()
+  })
+
+  test('a read-only settings form keeps the pick for the visit without a write', async () => {
+    const { settings, sets } = writableSettings('30d', false)
+    const { m } = await openPanel(makeCtx(), {}, settings)
+    const buttons = queryAll<HTMLButtonElement>(m.container, '.lc-ov-range .lc-gran-btn')
+    await click(buttons[1])
+    assert.deepEqual(sets, [], 'a read-only form is never written')
+    assert.ok(buttons[1].className.includes('lc-gran-on'), 'the pick still applies to this visit')
+    assert.equal(settings.store.getSnapshot().overviewRange, '30d', 'the stored default is untouched')
     await m.unmount()
   })
 
@@ -573,7 +678,7 @@ describe('OverviewPanel', () => {
 
   test('the zh locale renders translated chrome and CNY cost', async () => {
     const ctx = new TestClientCtx({ locale: 'zh' })
-    const Panel = makeOverviewPanel(asClientCtx(ctx), makeKit('zh'))
+    const Panel = makeOverviewPanel(asClientCtx(ctx), makeKit('zh'), settingsWith())
     const m = await mount(h(Panel, {
       useSessions: useHookOf(sessionsSnapshot()),
       useWorkspaces: useHookOf(workspacesSnapshotValue),
@@ -629,7 +734,7 @@ describe('OverviewPanel', () => {
       },
       get: () => undefined,
     }
-    const Panel = makeOverviewPanel(bare as never, makeKit())
+    const Panel = makeOverviewPanel(bare as never, makeKit(), settingsWith())
     const m = await mount(h(Panel, {
       useSessions: useHookOf(sessionsSnapshot()),
       useWorkspaces: useHookOf(workspacesSnapshotValue),

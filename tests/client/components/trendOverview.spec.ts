@@ -35,13 +35,26 @@ function stubSurfaceRect(el: HTMLElement, width = 400): void {
   el.getBoundingClientRect = () => ({ top: 0, left: 0, right: width, bottom: 130, width, height: 130, x: 0, y: 0, toJSON: () => null }) as DOMRect
 }
 
+async function moveXY(el: HTMLElement, clientX: number, clientY: number): Promise<void> {
+  await act(async () => { el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX, clientY })) })
+}
+
 async function moveX(el: HTMLElement, clientX: number): Promise<void> {
-  await act(async () => { el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX })) })
+  await moveXY(el, clientX, 0)
+}
+
+async function clickXY(el: HTMLElement, clientX: number, clientY: number): Promise<void> {
+  await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX, clientY })) })
 }
 
 async function clickX(el: HTMLElement, clientX: number): Promise<void> {
-  await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX })) })
+  await clickXY(el, clientX, 0)
 }
+
+// The delta fixture: the second record grows every category by exactly 8 (up churn 56), and replaying the base gives
+// 56 down, so the 112px area splits evenly and px-per-token is 1.
+const deltaBase = req(1)
+const deltaGrown = req(2, { system: 108, tools: 58, user: 38, inject: 28, skill: 8, assistant: 48, tool: 68, total: 346 })
 
 describe('TrendOverview total-mode ribbon', () => {
   const r1 = req(1, { turn: 1, step: 0 })
@@ -98,19 +111,14 @@ describe('TrendOverview total-mode ribbon', () => {
 })
 
 describe('TrendOverview delta ribbon', () => {
-  const base = req(1, { turn: 1, step: 0 })
-  // r2 grows every category by exactly 8 (up churn 56), r3 replays the base (down churn 56): the 112px area
-  // splits evenly, so px-per-token is 1 and every figure lands on a whole pixel.
-  const grown = req(2, { turn: 1, step: 1, system: 108, tools: 58, user: 38, inject: 28, skill: 8, assistant: 48, tool: 68, total: 346 })
-
   test('splits grow/shrink around the proportional zero line; a lone record paints no bands', async () => {
-    const lone = await mount(h(TrendOverview, propsOf([base], { mode: 'delta' })))
+    const lone = await mount(h(TrendOverview, propsOf([deltaBase], { mode: 'delta' })))
     assert.equal(queryAll(lone.container, '.lc-fit-svg').length, 0)
     assert.equal(query(lone.container, '.lc-axis-top').textContent, '0')
     assert.equal(query(lone.container, '.lc-axis-bot').textContent, '0')
     await lone.unmount()
 
-    const m = await mount(h(TrendOverview, propsOf([base, grown, base], { mode: 'delta' })))
+    const m = await mount(h(TrendOverview, propsOf([deltaBase, deltaGrown, deltaBase], { mode: 'delta' })))
     // The zero label rides the line at 13+56; the quarter marks clear it.
     assert.equal(query(m.container, '.lc-axis-mid').style.top, `${13 + 56}px`)
     assert.equal(query(m.container, '.lc-axis-q3').textContent, '+28')
@@ -366,11 +374,112 @@ describe('TrendOverview pointer interaction', () => {
     await m.unmount()
   })
 
+  test('the band under the pointer lights its whole category and clears on leave', async () => {
+    const spies = { hover: [] as (number | null)[] }
+    const m = await mount(h(TrendOverview, propsOf(reqs, { onHover: (s) => { spies.hover.push(s) } })))
+    const surface = query(m.container, '.lc-chart')
+    stubSurfaceRect(surface)
+    // Plot y = clientY − 18: the default 300-token stack puts tool at 0..22.4 and system at 74.67..112.
+    await moveXY(surface, 200, 30)
+    assert.equal(surface.getAttribute('data-catdim'), 'tool')
+    // The same record, one band down: only the category changes, with no second record relay.
+    await moveXY(surface, 200, 120)
+    assert.equal(surface.getAttribute('data-catdim'), 'system')
+    assert.deepEqual(spies.hover, [3])
+    await unhover(surface)
+    assert.equal(surface.hasAttribute('data-catdim'), false)
+    assert.deepEqual(spies.hover, [3, null])
+    await m.unmount()
+  })
+
+  test('clicking a band opens its category and still pins the record', async () => {
+    const spies = { cat: [] as string[], select: [] as (number | null)[] }
+    const m = await mount(h(TrendOverview, propsOf(reqs, {
+      onPickCat: (c, seq) => { spies.cat.push(`${c}:${seq}`) },
+      onSelect: (s) => { spies.select.push(s) },
+    })))
+    const surface = query(m.container, '.lc-chart')
+    stubSurfaceRect(surface)
+    await clickXY(surface, 200, 30)
+    assert.deepEqual(spies.cat, ['tool:3'])
+    assert.deepEqual(spies.select, [3])
+    // A click above the stack has no category to open: it only pins.
+    await clickXY(surface, 200, 0)
+    assert.deepEqual(spies.cat, ['tool:3'])
+    assert.deepEqual(spies.select, [3, 3])
+    await m.unmount()
+  })
+
+  test('the hit test interpolates the painted bands between records', async () => {
+    // Record 1 is user-heavy, record 2 system-only: the ribbon linearly interpolates between them, while the nearest
+    // record (and its tip) snaps to one end.
+    const r1 = req(1, { user: 200, tools: 0, inject: 0, assistant: 0, tool: 0, total: 300 })
+    const r2 = req(2, { tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 100 })
+    const m = await mount(h(TrendOverview, propsOf([r1, r2])))
+    const surface = query(m.container, '.lc-chart')
+    stubSurfaceRect(surface)
+    // At x 25% the painted stack is 250k tall, so y 10px is above it — though the nearest record's 300k stack is not.
+    await moveXY(surface, 100, 28)
+    assert.equal(surface.hasAttribute('data-catdim'), false)
+    // At x 75% the painted user sliver (y 56..74.67) is under the pointer, though the nearest record has no user band.
+    await moveXY(surface, 300, 78)
+    assert.equal(surface.getAttribute('data-catdim'), 'user')
+    await m.unmount()
+  })
+
+  test('delta arms resolve their categories above and below the zero line', async () => {
+    const m = await mount(h(TrendOverview, propsOf([deltaBase, deltaGrown, deltaBase], { mode: 'delta' })))
+    const surface = query(m.container, '.lc-chart')
+    stubSurfaceRect(surface)
+    // Record 1 grows every band by 8 (up arms 56→0); record 2 shrinks them (down arms 56→112).
+    await moveXY(surface, 200, 22)
+    assert.equal(surface.getAttribute('data-catdim'), 'tool')
+    await moveXY(surface, 400, 128)
+    assert.equal(surface.getAttribute('data-catdim'), 'tool')
+    await moveXY(surface, 200, 70)
+    assert.equal(surface.getAttribute('data-catdim'), 'system')
+    await m.unmount()
+  })
+
+  test('a lit band replaces the other-turn wash; empty space keeps it', async () => {
+    const m = await mount(h(TrendOverview, propsOf(reqs, { activeTurn: 1 })))
+    const surface = query(m.container, '.lc-chart')
+    stubSurfaceRect(surface)
+    assert.equal(queryAll(m.container, '.lc-fit-wash').length, 2)
+    await moveXY(surface, 200, 30)
+    assert.equal(queryAll(m.container, '.lc-fit-wash').length, 0)
+    // Above the stack there is no category to trace: the wash returns.
+    await moveXY(surface, 200, 0)
+    assert.equal(queryAll(m.container, '.lc-fit-wash').length, 2)
+    assert.equal(surface.hasAttribute('data-catdim'), false)
+    // A focused ribbon paints one category; hovering it still keeps the band original (no wash).
+    await m.update(h(TrendOverview, propsOf(reqs, { activeTurn: 1, focusCat: 'tool' })))
+    await moveXY(surface, 200, 30)
+    assert.equal(queryAll(m.container, '.lc-fit-wash').length, 0)
+    assert.equal(surface.getAttribute('data-catdim'), 'tool')
+    await m.unmount()
+  })
+
   test('a zero-width rect picks the first record', async () => {
     const spies = { hover: [] as (number | null)[] }
     const m = await mount(h(TrendOverview, propsOf(reqs, { onHover: (s) => { spies.hover.push(s) } })))
     await moveX(query(m.container, '.lc-chart'), 300)
     assert.deepEqual(spies.hover, [1])
+    await m.unmount()
+  })
+
+  test('a single record keeps the far edge on its only record', async () => {
+    const spies = { hover: [] as (number | null)[], select: [] as (number | null)[] }
+    const m = await mount(h(TrendOverview, propsOf([req(1)], {
+      onHover: (s) => { spies.hover.push(s) },
+      onSelect: (s) => { spies.select.push(s) },
+    })))
+    const surface = query(m.container, '.lc-chart')
+    stubSurfaceRect(surface)
+    await moveX(surface, 400)
+    await clickX(surface, 400)
+    assert.deepEqual(spies.hover, [1])
+    assert.deepEqual(spies.select, [1])
     await m.unmount()
   })
 

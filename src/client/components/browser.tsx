@@ -190,7 +190,8 @@ export function makeContextBrowser(
       if (catFocus === null || catFocus === undefined) return
       // A category jump has no landing spot in the DNA flat feed (no category rows): it drops back to the accordion.
       if (dna) setDna(false)
-      setSel('live')
+      // A band click carries its step so the opened category matches the pinned record; stats jumps stay live.
+      setSel(catFocus.step ?? 'live')
       setCat(catFocus.cat)
       setOpenElem(null)
       setRowQuery('')

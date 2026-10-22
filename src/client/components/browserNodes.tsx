@@ -74,7 +74,6 @@ export function nodeNameOf(n: SurfaceNode): string {
 export function msgKindsOf(n: SurfaceNode, conv: ConversationNodeLike | undefined): { think: boolean; tool: boolean; answer: boolean } {
   let think = false
   let tool = false
-  let answer = false
   for (const blocks of [conv?.blocks, conv?.content]) {
     if (!Array.isArray(blocks)) continue
     for (const b of blocks) {
@@ -84,13 +83,13 @@ export function msgKindsOf(n: SurfaceNode, conv: ConversationNodeLike | undefine
         : ''
       if (k === 'reasoning') think = true
       else if (k === 'tool-call') tool = true
-      else if (k === 'text') answer = true
     }
   }
   return {
     think,
     tool: tool || (Array.isArray(n.calls) && n.calls.length > 0),
-    answer: answer || (typeof n.text === 'string' && n.text !== ''),
+    // The fold stamps `text` exactly for non-blank replies, so the stamp itself is the reply bit.
+    answer: typeof n.text === 'string' && n.text !== '',
   }
 }
 

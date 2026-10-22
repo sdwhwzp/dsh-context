@@ -18,7 +18,7 @@ import { estimateSessionCost, mergeCostUsage } from './cost'
 import type { CostCurrency, ModelBook } from './cost'
 import { agentRowOf } from './agentTree'
 import { activityOf, asRecord, timelineOf, type ClientCtx, type SessionsFace } from './services'
-import type { ActivityDay, ContextActivity, ContextTimeline, SessionCostUsage, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
+import type { ActivityDay, ContextActivity, ContextTimeline, DefaultOverviewRange, SessionCostUsage, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
 
 export interface OverviewRow {
   id: string
@@ -311,7 +311,7 @@ function mergeSkillTallies(a: ActivityDay['skills'], b: NonNullable<ActivityDay[
 }
 
 /** Preset range keys, each a rolling window anchored on `now`. */
-export type OverviewRange = 'today' | '7d' | '30d' | 'all'
+export type OverviewRange = DefaultOverviewRange
 
 /** A resolved scope window: inclusive epoch-ms bounds, each null when that end
  * is open. The presets pin only the start; the calendar picker closes both. */

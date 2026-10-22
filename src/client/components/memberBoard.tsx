@@ -141,7 +141,7 @@ export function MemberBoard(props: MemberBoardProps): ReactElement {
           <IconUsersOutlineRegular size={14} />
           {t('fleet.board.title')}
         </span>
-        <span className="lc-agents-chip">{t('agents.chip.count', { n: forest.nodes.length + forest.overflow })}</span>
+        <span className="lc-agents-chip">{t('agents.chip.count', { n: forest.nodes.length })}</span>
         {team?.failure !== undefined ? (
           <span className="lc-agents-badge lc-agents-badge-err" title={team.failure}>{t('fleet.team.failureShort')}</span>
         ) : null}

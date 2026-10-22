@@ -120,7 +120,7 @@ function apply(ctx: ClientCtx): void {
 
   // Context Insights page: the panel on the keyed `main` slot and its sidebar entry on
   // `sidebar.panellist`, both mounted or unwound by the `insightsEntry` preference (insightPage.ts).
-  const OverviewPanel = makeOverviewPanel(ctx, kit)
+  const OverviewPanel = makeOverviewPanel(ctx, kit, settings)
   ctx.effect(() => watchInsightPage(
     ctx,
     settings,

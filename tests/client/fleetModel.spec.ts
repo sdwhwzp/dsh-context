@@ -30,7 +30,7 @@ describe('teamOfSnapshot', () => {
   const team = { members: [{ id: 'root', name: 'lead', role: 'lead', phase: 'active' }], tasks: [] }
 
   test('the first carrying family row wins — DFS pre-order starts at the root', () => {
-    const forest = { nodes: [nodeOf('root'), nodeOf('kid', { parentId: 'root' })], edges: [], overflow: 0, solo: false }
+    const forest = { nodes: [nodeOf('root'), nodeOf('kid', { parentId: 'root' })], edges: [], solo: false }
     const snapshot = {
       byId: {
         kid: { projectionValues: { agentTeam: { members: [{ id: 'kid', name: 'k', role: 'lead', phase: 'active' }], tasks: [] } } },
@@ -41,7 +41,7 @@ describe('teamOfSnapshot', () => {
   })
 
   test('degrades: no forest, no byId, no carrier row, or a malformed value', () => {
-    const forest = { nodes: [nodeOf('root')], edges: [], overflow: 0, solo: true }
+    const forest = { nodes: [nodeOf('root')], edges: [], solo: true }
     assert.equal(teamOfSnapshot(null, forest), null)
     assert.equal(teamOfSnapshot({}, forest), null)
     assert.equal(teamOfSnapshot({ byId: null }, forest), null)

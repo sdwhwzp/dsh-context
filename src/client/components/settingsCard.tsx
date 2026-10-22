@@ -149,6 +149,18 @@ function PreferenceRows(props: { t: Translate; state: SettingsState; set?: Setti
       </Group>
       <Group title={t('settings.group.view')}>
         <PrefRow
+          label={t('settings.overviewRange')}
+          value={state.overviewRange}
+          disabled={disabled}
+          options={[
+            { id: 'today', label: t('ov.range.today') },
+            { id: '7d', label: t('ov.range.7d') },
+            { id: '30d', label: t('ov.range.30d') },
+            { id: 'all', label: t('ov.range.all') },
+          ]}
+          onPick={(id) => { set?.('defaultOverviewRange', id) }}
+        />
+        <PrefRow
           label={t('settings.gran')}
           value={state.granularity}
           disabled={disabled}

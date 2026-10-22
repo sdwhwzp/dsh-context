@@ -79,12 +79,8 @@ export interface AgentForest {
   /** DFS pre-order (parents ahead of their children). */
   nodes: AgentNode[]
   edges: { from: string; to: string }[]
-  overflow: number
   solo: boolean
 }
-
-/** The card stays readable up to this many nodes; the rest folds into an overflow note. */
-export const AGENT_TREE_LIMIT = 40
 
 /** Fixed card height — mirrored by `.lc-agent-card`'s `height` in agentGraph.css, so a link's
  * exit point (card bottom) and entry point (card top) always land on the card's edge. Three
@@ -302,20 +298,10 @@ export function agentForestOf(
     })
   }
 
-  // Measured before the DFS so the overflow note is exact even when the cap cuts the walk short.
-  const measure = (id: string, seen: Set<string>): number => {
-    if (seen.has(id)) return 0
-    seen.add(id)
-    let total = 1
-    for (const kid of childrenOf.get(id) ?? []) total += measure(kid.id, seen)
-    return total
-  }
-  const total = measure(root, new Set())
-
   const nodes: AgentNode[] = []
   const edges: { from: string; to: string }[] = []
   const visit = (id: string, row: AgentRow, parentId: string | undefined, depth: number, seen: Set<string>, family: number): void => {
-    if (seen.has(id) || nodes.length >= AGENT_TREE_LIMIT) return
+    if (seen.has(id)) return
     seen.add(id)
     const values = row.projections
     const fetchedHead = fetched !== undefined ? fetched.get(id) : undefined
@@ -357,7 +343,7 @@ export function agentForestOf(
   }
   visit(root, rootRow, undefined, 0, new Set(), -1)
 
-  return { nodes, edges, overflow: Math.max(0, total - nodes.length), solo: nodes.length === 1 }
+  return { nodes, edges, solo: nodes.length === 1 }
 }
 
 export interface SubagentCostFold {
@@ -578,6 +564,13 @@ export function lineageOf(forest: AgentForest, id: string | null): Set<string> |
   const byId = new Map(forest.nodes.map(n => [n.id, n]))
   const start = byId.get(id)
   if (start === undefined) return null
+  const childrenOf = new Map<string, string[]>()
+  for (const n of forest.nodes) {
+    if (n.parentId === undefined) continue
+    const kids = childrenOf.get(n.parentId) ?? []
+    kids.push(n.id)
+    childrenOf.set(n.parentId, kids)
+  }
   const lit = new Set<string>()
   let cur: AgentNode | undefined = start
   while (cur !== undefined) {
@@ -585,12 +578,11 @@ export function lineageOf(forest: AgentForest, id: string | null): Set<string> |
     cur = cur.parentId !== undefined ? byId.get(cur.parentId) : undefined
   }
   const queue = [id]
+  // A single-parent tree cannot lead back into the already-lit ancestor chain.
   for (let i = 0; i < queue.length; i++) {
-    for (const n of forest.nodes) {
-      if (n.parentId === queue[i] && !lit.has(n.id)) {
-        lit.add(n.id)
-        queue.push(n.id)
-      }
+    for (const kid of childrenOf.get(queue[i]) ?? []) {
+      lit.add(kid)
+      queue.push(kid)
     }
   }
   return lit

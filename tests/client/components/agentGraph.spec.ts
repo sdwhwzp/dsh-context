@@ -344,6 +344,7 @@ describe('AgentGraph — the family tree', () => {
     assert.equal(queryAll(m.container, '.lc-agent-card').length, 2)
     assert.ok(!text(m.container).includes('No subagents yet'))
     assert.ok(text(m.container).includes('2 agents'))
+    assert.equal(queryAll(m.container, '.lc-agents-toggle').length, 0)
 
     await m.unmount()
   })
@@ -356,13 +357,35 @@ describe('AgentGraph — the family tree', () => {
     await m.unmount()
   })
 
-  test('overflow chip when the family exceeds the cap', async () => {
+  test('a tall family offers Show all until expanded', async () => {
     const byId: Record<string, unknown> = { root: { displayTitle: 'Main', running: false, updatedAt: 1 } }
-    for (let i = 0; i < 45; i++) byId['kid' + i] = { parentId: 'root', updatedAt: i }
+    let parent = 'root'
+    for (let i = 0; i < 4; i++) {
+      byId['level' + i] = { parentId: parent, updatedAt: 10 }
+      parent = 'level' + i
+    }
+    for (let i = 0; i < 45; i++) byId['kid' + i] = { parentId: parent, updatedAt: i }
     const View = makeView(new FakeSessions(byId))
     const m = await mount(h(View, { sessionId: 'root', self: selfStats() }))
-    assert.ok(text(m.container).includes('6 more not shown'))
-    assert.ok(text(m.container).includes('46 agents'))
+    assert.equal(queryAll(m.container, '.lc-agent-card').length, 50)
+    assert.ok(text(m.container).includes('50 agents'))
+    assert.ok(!query<HTMLElement>(m.container, '.lc-agents-stage').className.includes('lc-agents-stage-all'))
+
+    const toggle = query<HTMLElement>(m.container, '.lc-agents-toggle')
+    assert.equal(text(toggle), 'Show all')
+    await click(toggle)
+    assert.ok(query<HTMLElement>(m.container, '.lc-agents-stage').className.includes('lc-agents-stage-all'))
+    assert.equal(text(query(m.container, '.lc-agents-toggle')), 'Show less')
+
+    await click(query<HTMLElement>(m.container, '.lc-agents-toggle'))
+    assert.ok(!query<HTMLElement>(m.container, '.lc-agents-stage').className.includes('lc-agents-stage-all'))
+    assert.equal(text(query(m.container, '.lc-agents-toggle')), 'Show all')
+
+    // The expanded preference does not carry into another session's family.
+    await m.update(h(View, { sessionId: 'other', self: selfStats() }))
+    await flush()
+    assert.equal(queryAll(m.container, '.lc-agents-toggle').length, 0)
+    assert.ok(!query<HTMLElement>(m.container, '.lc-agents-stage').className.includes('lc-agents-stage-all'))
     await m.unmount()
   })
 

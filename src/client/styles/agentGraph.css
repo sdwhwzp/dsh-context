@@ -1,8 +1,15 @@
 .lc-agents-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .lc-agents-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
 .lc-agents-chip-on { color: var(--dsw-alias-state-success-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent); }
-/* With overscroll.ts: a swipe past the stage edge must not chain into browser history navigation. */
-.lc-agents-stage { overflow-x: auto; overscroll-behavior-x: contain; margin: 0 -4px; padding: 0 4px; }
+/* With overscroll.ts: a swipe past the stage edge must not chain into browser history navigation.
+   The card's own viewport (560px, mirrored by STAGE_H in agentGraph.tsx): a long family scrolls
+   here instead of stretching the page, and Show all lifts the cap. */
+.lc-agents-stage { max-height: 560px; overflow: auto; overscroll-behavior-x: contain; margin: 0 -4px; padding: 0 4px; }
+.lc-agents-stage-all { max-height: none; }
+/* The Show all / Show less action rides the chips row; it is a button, not a passive chip. */
+.lc-agents-toggle { font-family: inherit; cursor: pointer; color: var(--dsw-alias-brand-primary, var(--color-blue-500)); border-color: color-mix(in srgb, var(--dsw-alias-brand-primary, var(--color-blue-500)) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-brand-primary, var(--color-blue-500)) 8%, transparent); }
+.lc-agents-toggle:hover { border-color: var(--dsw-alias-brand-primary, var(--color-blue-500)); }
+.lc-agents-toggle:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, var(--color-blue-500)); outline-offset: 1px; }
 .lc-agents-canvas { position: relative; margin: 0 auto; }
 /* The link layer never owns the pointer — the cards above it do. */
 .lc-agents-links { position: absolute; inset: 0; pointer-events: none; }

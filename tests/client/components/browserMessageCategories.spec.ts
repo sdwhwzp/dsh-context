@@ -201,7 +201,7 @@ describe('ContextBrowser message categories', () => {
     const chips = () => queryAll<HTMLButtonElement>(m.container, '.lc-br-toolctl .lc-gran-btn')
     // Counts over ALL of the shown step's rows: thinking rides the join's
     // reasoning block (seq 68), tools the joined calls (62/63/64/68) plus the
-    // unjoined node's `calls` stamp (61), answers the joined text blocks plus the nodes' own text (61/66/67/68).
+    // unjoined node's `calls` stamp (61), answers the nodes' own `text` stamps (61/66/67/68).
     assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools5', 'Answer4'])
     const previews = () => elemRows(m).map(r => text(query(r, '.lc-br-preview')))
     assert.equal(elemRows(m).length, 8)
@@ -235,6 +235,31 @@ describe('ContextBrowser message categories', () => {
     assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools5', 'Answer4'])
     assert.ok(chips().every(c => !c.className.includes('lc-gran-on')))
     assert.equal(elemRows(m).length, 8)
+    await m.unmount()
+  })
+
+  test('the Answer kind follows the fold-stamped reply text, never a blank join text block', async () => {
+    const data = tl({
+      current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 16, tool: 0, total: 16 },
+      nodes: [
+        // A tool-dispatching message whose only text block is blank: the fold stamps no text, so no answer.
+        surfaceNode({ seq: 2, cat: 'assistant', tokens: 8, calls: ['bash'] }),
+        surfaceNode({ seq: 3, cat: 'assistant', tokens: 8, text: 'real reply' }),
+      ],
+    })
+    const blankTextConvNodes: ConversationNodeLike[] = [
+      { kind: 'assistant', seq: 2, blocks: [
+        { kind: 'text', text: '\n\n' },
+        { kind: 'tool-call', name: 'bash', argsRaw: '{}' },
+      ] },
+      { kind: 'assistant', seq: 3, blocks: [{ kind: 'text', text: 'real reply' }] },
+    ]
+    const m = await mount(h(Browser, props({ data, convNodes: blankTextConvNodes })))
+    await click(catRow(m, 'assistant'))
+    const chips = () => queryAll<HTMLButtonElement>(m.container, '.lc-br-toolctl .lc-gran-btn')
+    assert.deepEqual(chips().map(c => text(c)), ['Thinking0', 'Tools1', 'Answer1'])
+    await click(chips()[2])
+    assert.deepEqual(elemRows(m).map(r => text(query(r, '.lc-br-preview'))), ['real reply'])
     await m.unmount()
   })
 

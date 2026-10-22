@@ -49,7 +49,6 @@ const FOREST: AgentForest = {
     nodeOf('s3', { label: 'lounger', updatedAt: 4 }),
   ],
   edges: [],
-  overflow: 0,
   solo: false,
 }
 
@@ -230,7 +229,7 @@ describe('MemberBoard — team cards', () => {
     const details = new Map<string, { detail: FleetDetail | null }>([
       ['w1', { detail: { descriptor: { mode: 'continuable', label: 'w', agentModel: 'flash-lite' }, messages: [], truncated: false } }],
     ])
-    const forest: AgentForest = { nodes: [nodeOf('root', { isCurrent: true })], edges: [], overflow: 0, solo: false }
+    const forest: AgentForest = { nodes: [nodeOf('root', { isCurrent: true })], edges: [], solo: false }
     const m = await mount(h(MemberBoard, propsOf({
       forest,
       detailOf: id => details.get(id),
@@ -381,7 +380,7 @@ describe('MemberBoard — guidance states', () => {
   })
 
   test('solo without a team: the panel points at the subagent tool and skips the toolbar', async () => {
-    const solo: AgentForest = { nodes: [nodeOf('root', { isCurrent: true })], edges: [], overflow: 0, solo: true }
+    const solo: AgentForest = { nodes: [nodeOf('root', { isCurrent: true })], edges: [], solo: true }
     const m = await mount(h(MemberBoard, propsOf({ team: null, forest: solo })))
     assert.ok(text(m.container).includes(DICT_EN['fleet.board.solo']))
     assert.equal(queryAll(m.container, '.lc-fleet-toolbar').length, 0)
@@ -390,7 +389,7 @@ describe('MemberBoard — guidance states', () => {
   })
 
   test('a one-member team over a solo forest skips the toolbar too', async () => {
-    const solo: AgentForest = { nodes: [nodeOf('root', { isCurrent: true })], edges: [], overflow: 0, solo: true }
+    const solo: AgentForest = { nodes: [nodeOf('root', { isCurrent: true })], edges: [], solo: true }
     const team: FleetTeam = { members: [{ id: 'root', name: 'lead', role: 'lead', phase: 'active' }], tasks: [] }
     const m = await mount(h(MemberBoard, propsOf({ team, forest: solo })))
     assert.equal(queryAll(m.container, '.lc-member-card').length, 1, 'the lead card stands')

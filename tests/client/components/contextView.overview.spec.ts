@@ -3,11 +3,11 @@
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { createElement as h } from 'react'
+import { act, createElement as h } from 'react'
 import { DICT_EN } from '../../../src/client/i18n'
 import type { OverviewAutoSteps } from '../../../src/shared/types'
 import { TestClientCtx } from '../helpers/harness'
-import { click, mount, query, queryAll, text } from '../helpers/kit'
+import { click, flush, mount, pinRect, query, queryAll, text } from '../helpers/kit'
 import { buttonByText, makeView, mountRich, projectionsFor, settingsWith, T0, timeline } from './contextViewHarness'
 
 /** A session with `n` retained request steps, one per column. */
@@ -85,6 +85,29 @@ describe('ContextView — overview face', () => {
     assert.ok(buttonByText(m.container, DICT_EN['gran.turn']).className.includes('lc-gran-on'))
     assert.match(query(m.container, '.lc-fit-cursor').className, /lc-fit-pin/)
     assert.ok(text(m.container).includes(DICT_EN['detail.turn'].replace('{t}', '1').replace('{n}', '2')))
+    await m.unmount()
+  })
+
+  test('clicking a ribbon band opens that category in the browser and focuses the chart on it', async () => {
+    const m = await mountRich('sv-overview-band-open')
+    await click(buttonByText(m.container, DICT_EN['trend.overview']))
+    const surface = query(m.container, '.lc-chart')
+    pinRect(surface, 400, 130)
+    // Plot y 42 (clientY 60) is the tools band in every record: 100..300 tokens of the 420 max.
+    await act(async () => {
+      surface.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 200, clientY: 60 }))
+    })
+    await flush()
+    const open = queryAll(m.container, '.lc-br-cat-row.lc-br-cat-open')
+    assert.equal(open.length, 1)
+    assert.ok(text(open[0]).includes(DICT_EN['cat.tools']), 'the tools category opens')
+    // The browser's own onOpenCat focuses the chart: only that category is painted now.
+    const polys = queryAll(m.container, '.lc-fit-svg polygon')
+    assert.equal(polys.length, 1)
+    assert.equal(polys[0].getAttribute('data-cat'), 'tools')
+    // The click still pins the nearest record (the middle one), and the browser shows that step, not live.
+    assert.equal(query(m.container, '.lc-fit-pin').style.left, '50%')
+    assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, '4')
     await m.unmount()
   })
 
