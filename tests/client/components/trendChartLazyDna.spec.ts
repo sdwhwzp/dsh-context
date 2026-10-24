@@ -141,6 +141,35 @@ describe('TrendChart lazy DNA bands', () => {
       // Exact churn bounds need every bar's key changes, so there is no totals shortcut.
       assert.ok(lazy.calls.size <= reqs.length * 2, `bounded per-seq lookups (${lazy.calls.size})`)
       assert.ok(bars(m.container).length > 0)
+
+      // The whole-log axis walk is memoized: a hover re-render must not re-read one step per bar.
+      const afterMount = lazy.calls.size
+      const firstBar = queryAll(m.container, '.lc-bar')[0]
+      await act(async () => {
+        firstBar.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+      })
+      await flush()
+      assert.equal(lazy.calls.size, afterMount, 'a hover re-render re-walks no step')
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  test('a delta axis walk stays out of the band cache, and a re-render re-reads only the window', async () => {
+    const reqs = requestList(600)
+    const lazy = lazyBands()
+    viewport.clientW = 400
+    const total = (): number => [...lazy.calls.values()].reduce((a, b) => a + b, 0)
+    const m = await mount(h(TrendChart, propsOf(reqs, { dnaAt: lazy.at, mode: 'delta' })))
+    try {
+      assert.equal(lazy.calls.size, reqs.length, 'the axis walk read every step')
+      const afterMount = total()
+      // A props change re-renders the card: the memoized walk keeps its answer, so only the painted window re-reads.
+      await m.update(h(TrendChart, propsOf(reqs, { dnaAt: lazy.at, mode: 'delta', markers: [] })))
+      await flush()
+      const reread = total() - afterMount
+      assert.ok(reread <= 400, `a re-render re-reads at most the window (${reread} of ${reqs.length})`)
+      assert.ok(reread < reqs.length, 'the whole-log walk never re-runs on a hover/scroll re-render')
     } finally {
       await m.unmount()
     }

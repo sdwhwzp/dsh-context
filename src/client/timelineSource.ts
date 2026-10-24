@@ -216,6 +216,11 @@ export class DetailStore {
  * page-lifetime map, so older idle stores are demoted and read again. */
 const DETAIL_STORES_MAX = 8
 
+/** Cap on the page-lifetime store map itself: a payload-free store is small, but a page that touches hundreds of
+ * sessions (a Fleet scan, the modal across a long list) would otherwise pin one fetcher closure and listener set
+ * per id forever. */
+const DETAIL_STORE_ENTRIES_MAX = 64
+
 /** Page-lifetime per-session stores (the tab and the modal share one). */
 const stores = new Map<string, DetailStore>()
 
@@ -238,6 +243,16 @@ export function detailStoreOf(sessionId: string): DetailStore {
     if (candidate.active || !candidate.hasPayload) continue
     candidate.release()
     excess--
+  }
+  // Trim the map's least recently opened entries, never an ACTIVE store: a mounted view holds its store by closure,
+  // but dropping it would fork the session's ledger (the next mount would build a second one) and double its reads.
+  if (stores.size > DETAIL_STORE_ENTRIES_MAX) {
+    for (const id of stores.keys()) {
+      if (stores.size <= DETAIL_STORE_ENTRIES_MAX) break
+      const candidate = stores.get(id)
+      if (candidate === undefined || candidate === store || candidate.active) continue
+      stores.delete(id)
+    }
   }
   return store
 }

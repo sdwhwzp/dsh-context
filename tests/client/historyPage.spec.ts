@@ -198,6 +198,24 @@ describe('makeContentFetcher — the per-session targeted read', () => {
     assert.equal(makeContentFetcher(plainOf('sess-1')), undefined, 'the unloaded slot leaves no face behind')
   })
 
+  test('the landed cache stays bounded; the least recently read seq drops first', async () => {
+    const calls: unknown[] = []
+    const events = Array.from({ length: 200 }, (_, i) => ev('user/message', i + 1, { content: [{ type: 'text', text: `m${i}` }] }))
+    const ctx = armHistoryFaces({ session: pageFace(events, calls) })
+    const fetch = makeContentFetcher(plainOf('cap'))!
+    for (let seq = 1; seq <= 200; seq++) await fetch(seq)
+    assert.equal(calls.length, 200)
+    // Reading the oldest survivor refreshes its recency; the truly oldest id was evicted by the cap.
+    await fetch(130)
+    assert.equal(calls.length, 200, 'seq 130 survived the cap')
+    await fetch(1)
+    assert.equal(calls.length, 201, 'seq 1 was evicted and refetched')
+    await fetch(130)
+    await fetch(200)
+    assert.equal(calls.length, 201, 'refreshed and newest entries still replay')
+    ctx.dispose()
+  })
+
   test('a page without the seq resolves null; an empty records page too', async () => {
     const calls: unknown[] = []
     const ctx = armHistoryFaces({ session: pageFace([ev('user/message', 9, {})], calls) })

@@ -8,7 +8,8 @@ import { type ColdReadGate, makeColdReadGate } from './coldRead'
 import { canReadAccountSession, type ConnectionHostFace, registerPostRoute } from './connection'
 import { applyTimeline } from './fold'
 import { type TimelineState, createTimelineState } from './foldState'
-import { buildTimelineDetail } from './foldWire'
+import { buildTimelineDetail, buildTimelineHead } from './foldWire'
+import type { ContextTimelineDetail, Snapshot } from '../shared/types'
 
 export const DETAIL_ROUTE = '/api/dsh-context/detail'
 
@@ -24,13 +25,23 @@ const PAYLOAD_CACHE_MAX = 4
 interface ColdPayload {
   persistence: unknown
   revision: string
-  value: unknown
+  value: ContextTimelineDetail
 }
 
 /** The durable change token; absent on a live observation, a moving target that must never key the cache. */
 function revisionOf(observation: unknown): string | undefined {
   const revision = (observation as { revision?: unknown } | null)?.revision
   return typeof revision === 'string' && revision !== '' ? revision : undefined
+}
+
+/** The head-only wire value of a built detail. An absent head rides as `undefined`: the JSON reply drops it, and the
+ * client's re-proof answers the typed malformed failure. */
+function headOfDetail(detail: { rev: number; head?: unknown }): { rev: number; head?: unknown } {
+  return { rev: detail.rev, head: detail.head }
+}
+
+function headPayloadOf(state: TimelineState): { rev: number; head: Snapshot } {
+  return { rev: state.detailRev ?? 0, head: buildTimelineHead(state) }
 }
 
 export interface DetailChannelGate {
@@ -67,11 +78,13 @@ export function watchDetailChannel(ctx: Context, bounds: FoldBounds, coldReads: 
 
     const handler = async (request: Request, principal?: unknown): Promise<Response> => {
       let sessionId: unknown
+      let headOnly = false
       try {
         const body: unknown = await request.json()
         sessionId = body !== null && typeof body === 'object'
           ? (body as { sessionId?: unknown }).sessionId
           : undefined
+        headOnly = body !== null && typeof body === 'object' && (body as { head?: unknown }).head === true
       } catch {
         return failure('dsh-context/bad-request', 'body is not JSON')
       }
@@ -88,7 +101,8 @@ export function watchDetailChannel(ctx: Context, bounds: FoldBounds, coldReads: 
           const state = projections.stateOf(session as never, 'contextTimeline')
           if (state === undefined) return reply({ ok: true, value: null })
           // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- rc.3 erases keyed reads; rc.2 types them.
-          return reply({ ok: true, value: buildTimelineDetail(state as TimelineState, bounds) })
+          const ownedState = state as TimelineState
+          return reply({ ok: true, value: headOnly ? headPayloadOf(ownedState) : buildTimelineDetail(ownedState, bounds) })
         }
         // Cold session: observe it and fold from its immutable log through the shared cold-read gate; a skip under heap
         // pressure resolves to the same typed null, and an unchanged durable revision re-serves the cached payload.
@@ -107,7 +121,7 @@ export function watchDetailChannel(ctx: Context, bounds: FoldBounds, coldReads: 
               if (hit !== undefined && hit.revision === revision && hit.persistence === persistence) {
                 payloads.delete(sessionId)
                 payloads.set(sessionId, hit)
-                return hit.value
+                return headOnly ? headOfDetail(hit.value) : hit.value
               }
             }
             const events = (observation as { events?: unknown } | null)?.events
@@ -118,16 +132,20 @@ export function watchDetailChannel(ctx: Context, bounds: FoldBounds, coldReads: 
               state = applyTimeline(state, ev as never, bounds)
               if (++folded % FOLD_YIELD_EVENTS === 0) await new Promise(resolve => setTimeout(resolve, 0))
             }
-            const detail = buildTimelineDetail(state, bounds)
+            // The full detail is built (and cached) whenever the durable revision can key it, so a later full read
+            // re-serves; only an unkeyable read skips the collections build when just the head was asked.
             if (revision !== undefined) {
+              const detail = buildTimelineDetail(state, bounds)
               payloads.delete(sessionId)
               payloads.set(sessionId, { persistence, revision, value: detail })
               for (const oldest of payloads.keys()) {
                 if (payloads.size <= PAYLOAD_CACHE_MAX) break
                 payloads.delete(oldest)
               }
+              return headOnly ? headOfDetail(detail) : detail
             }
-            return detail
+            if (headOnly) return headPayloadOf(state)
+            return buildTimelineDetail(state, bounds)
           } finally {
             const dispose = (observation as { [Symbol.dispose]?: unknown } | null)?.[Symbol.dispose]
             if (typeof dispose === 'function') dispose.call(observation)

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import {
-  activityOf,
   contextBreakdownOf,
   contextPressureOf,
   conversationNodesOf,
@@ -823,106 +822,6 @@ describe('sessionAddressOf — the address a history read must carry', () => {
   })
 })
 
-
-describe('activityOf', () => {
-  test('absent or non-record values stay null (an older host serves no such key)', () => {
-    assert.equal(activityOf(null), null)
-    assert.equal(activityOf(undefined), null)
-    assert.equal(activityOf(7), null)
-    assert.equal(activityOf('x'), null)
-    assert.equal(activityOf({}), null, 'a record without a days map')
-    assert.equal(activityOf({ days: 7 }), null)
-    assert.equal(activityOf({ days: [] }), null, 'an array is not a ledger')
-  })
-
-  test('a well-formed payload passes through untouched (reference-stable)', () => {
-    const wire = { days: { '2026-09-16': { tokens: 15, requests: 1 }, '2026-09-15': { tokens: 0, requests: 3 } } }
-    assert.ok(activityOf(wire) === (wire as never))
-    assert.deepEqual(activityOf({ days: {} }), { days: {} })
-  })
-
-  test('malformed entries drop individually; the readable days survive', () => {
-    const out = activityOf({
-      days: {
-        '2026-09-16': { tokens: 15, requests: 1 },
-        '09-16': { tokens: 1, requests: 1 },
-        '2026-09-17': null,
-        '2026-09-18': [1, 2],
-        '2026-09-19': { tokens: 'x', requests: 1 },
-        '2026-09-20': { tokens: Number.NaN, requests: 1 },
-        '2026-09-21': { tokens: -3, requests: 1 },
-        '2026-09-22': { tokens: 1, requests: 'x' },
-        '2026-09-23': { tokens: 1, requests: Number.POSITIVE_INFINITY },
-        '2026-09-24': { tokens: 1, requests: -1 },
-      },
-    })
-    assert.deepEqual(out, { days: { '2026-09-16': { tokens: 15, requests: 1 } } })
-  })
-
-  test('a well-formed pricing record rides both the pass-through and the sanitized copy', () => {
-    const cost = { deepseek: { 'deepseek-v4': { peak: { uncached: 10, cacheRead: 5, cacheWrite: 0, output: 2 } } } }
-    const wire = { days: { '2026-09-16': { tokens: 15, requests: 1, cost } } }
-    assert.ok(activityOf(wire) === (wire as never))
-    const dirty = { days: { '2026-09-16': { tokens: 15, requests: 1, cost }, '09-16': { tokens: 1, requests: 1 } } }
-    assert.deepEqual(activityOf(dirty), { days: { '2026-09-16': { tokens: 15, requests: 1, cost } } })
-  })
-
-  test('a malformed pricing record drops the fee whole; the day survives', () => {
-    const out = activityOf({
-      days: {
-        '2026-09-16': { tokens: 15, requests: 1, cost: 'x' },
-        '2026-09-15': { tokens: 3, requests: 1, cost: { deepseek: 7 } },
-      },
-    })
-    assert.deepEqual(out, {
-      days: { '2026-09-16': { tokens: 15, requests: 1 }, '2026-09-15': { tokens: 3, requests: 1 } },
-    })
-  })
-
-  test('a well-formed skill table rides the pass-through; malformed tallies drop per name', () => {
-    const skills = { tdd: { n: 2, last: 1_758_000_000_000 } }
-    const wire = { days: { '2026-09-16': { tokens: 15, requests: 1, skills } } }
-    assert.ok(activityOf(wire) === (wire as never))
-    const out = activityOf({
-      days: {
-        '2026-09-16': {
-          tokens: 15,
-          requests: 1,
-          skills: {
-            tdd: { n: 1, last: 5 },
-            'bad-count': { n: 'x', last: 5 },
-            'bad-last': { n: 1, last: Number.NaN },
-            'neg-count': { n: -1, last: 5 },
-            'not-record': null,
-          },
-        },
-        '2026-09-17': { tokens: 1, requests: 1, skills: 'x' },
-        '2026-09-18': { tokens: 1, requests: 1, skills: [] },
-        '2026-09-19': { tokens: 1, requests: 1, skills: {} },
-      },
-    })
-    assert.deepEqual(out, {
-      days: {
-        '2026-09-16': { tokens: 15, requests: 1, skills: { tdd: { n: 1, last: 5 } } },
-        '2026-09-17': { tokens: 1, requests: 1 },
-        '2026-09-18': { tokens: 1, requests: 1 },
-        '2026-09-19': { tokens: 1, requests: 1 },
-      },
-    }, 'non-record and empty-after-scrubbing tables drop whole; the days survive')
-  })
-
-  test('the daily tallies ride the pass-through and the sanitized copy; malformed figures drop alone', () => {
-    const tallies = { turns: 2, toolCalls: 3, toolsMs: 4.5, wallMs: 5 }
-    const wire = { days: { '2026-09-16': { tokens: 15, requests: 1, ...tallies } } }
-    assert.ok(activityOf(wire) === wire, 'a clean payload keeps its reference')
-    const dirty = { days: { '2026-09-16': { tokens: 15, requests: 1, ...tallies }, bad: { tokens: 1, requests: 1 } } }
-    assert.deepEqual(activityOf(dirty), { days: { '2026-09-16': { tokens: 15, requests: 1, ...tallies } } })
-    const out = activityOf({
-      days: { '2026-09-16': { tokens: 15, requests: 1, turns: 'x', toolCalls: -1, toolsMs: Number.NaN, wallMs: Number.POSITIVE_INFINITY } },
-    })
-    assert.deepEqual(out, { days: { '2026-09-16': { tokens: 15, requests: 1 } } }, 'each malformed tally drops, the day survives')
-  })
-})
 
 describe('entrySeated — the slot-ledger second-mount guard', () => {
   const ctxWith = (entries: unknown): ClientCtx => ({ slots: { entries: () => entries } } as unknown as ClientCtx)

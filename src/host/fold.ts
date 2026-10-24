@@ -15,7 +15,7 @@ import {
 } from './pricing'
 import type { ContentBlock, MessageSource } from './pricing'
 import { deriveEventMessage } from '@deepseek-ai/dsh-session'
-import { decodeSpansOfStream, decodeTallyOfStream, firstTokenTimeOfStream, replaceRangeOf } from './logShapes'
+import { firstTokenTimeOfStream, replaceRangeOf, streamTimingOf } from './logShapes'
 import { opBearingTool, opsOfCall, parseCallArgs, rawArgsNeeded } from '../shared/fileOps'
 import { commandArgsOf, commandTool } from '../shared/commands'
 import {
@@ -772,9 +772,11 @@ export function applyTimeline(state: TimelineState, event: TimelineEvent, bounds
         timing.calls += 1
         const stepStart = state.stepStart
         if (stepStart !== undefined) {
-          const firstToken = stepStart.firstToken ?? firstTokenTimeOfStream(data?.stream)
+          // A packed stream carries one record per decoded token, so the three readings come from one walk.
+          const streamTiming = streamTimingOf(data?.stream, event.time)
+          const firstToken = stepStart.firstToken ?? streamTiming.firstToken
           if (firstToken !== undefined) {
-            const decodeBlocks = decodeSpansOfStream(data?.stream, event.time)
+            const decodeBlocks = streamTiming.spans
             let decodeStart = firstToken
             for (const block of decodeBlocks) decodeStart = Math.min(decodeStart, block.start)
             timing.ttftMs += durOf(stepStart.time, decodeStart)
@@ -796,7 +798,7 @@ export function applyTimeline(state: TimelineState, event: TimelineEvent, bounds
             }
             // The buckets tile the generation window; priced ONLY when the window was, so unstamped calls stay
             // unattributed.
-            const tally = decodeTallyOfStream(data?.stream, event.time)
+            const tally = streamTiming.tally
             for (const kind of DECODE_KINDS) addDecode(timing, kind, tally.spans[kind], tally.blocks[kind])
           }
         }

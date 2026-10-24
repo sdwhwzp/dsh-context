@@ -1,5 +1,9 @@
 /** The harness web-half surface this plugin consumes, plus the sanitizers that re-prove every delivered value. */
 
+import { asRecord, costOf, numOf } from './wireValues'
+export { asRecord, numOf } from './wireValues'
+export { activityOf, costFullyQuantified } from './activityLedger'
+
 import type { Context } from '@deepseek-ai/cordis'
 import type { ComponentType } from 'react'
 import type { AttachmentRef } from '../shared/attachment'
@@ -7,7 +11,7 @@ import { estimateSystemTokens } from '../shared/estimate'
 import type { SpendRates } from './spendMoney'
 import { PLUGIN_NAME } from './meta'
 import { commandRecordsOf, isCommandRecord } from './commandRecords'
-import type { ActivityDay, ContextActivity, ContextBreakdown, ContextHeaders, ContextPressure, ContextTimeline, CostModelUsage, HeaderEpochContent, SystemPromptNode, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
+import type { ContextBreakdown, ContextHeaders, ContextPressure, ContextTimeline, HeaderEpochContent, SystemPromptNode, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
 
 export interface LocaleService {
   register(ns: string, dicts: Record<string, Record<string, string>>): () => void
@@ -177,16 +181,6 @@ export type ClientCtx = Context & {
   slots: SlotsService
 }
 
-/** The type is `unknown` on purpose: every field read re-proves itself before borrowing a wire type. */
-export function asRecord(value: unknown): Record<string, unknown> | null {
-  if (value === null || value === undefined || typeof value !== 'object') return null
-  return value as Record<string, unknown>
-}
-
-export function numOf(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
-}
-
 function objectsOf<T>(value: unknown): T[] {
   if (!Array.isArray(value)) return []
   return value.filter((v): v is T => v !== null && typeof v === 'object')
@@ -236,36 +230,6 @@ export function unsupportedOf(value: unknown): { current: string; minimum: strin
   if (data === null) return null
   if (typeof data.current !== 'string' || typeof data.minimum !== 'string') return null
   return { current: data.current, minimum: data.minimum }
-}
-
-/** An unproved branch drops whole and its buckets zero out, so garbage prices as zero, never NaN. */
-function costOf(value: unknown): ContextTimeline['cost'] | undefined {
-  const data = asRecord(value)
-  if (data === null || Array.isArray(data)) return undefined
-  const out: NonNullable<ContextTimeline['cost']> = {}
-  for (const provider of Object.keys(data)) {
-    const models = asRecord(data[provider])
-    if (models === null || Array.isArray(models)) continue
-    const branch: Record<string, CostModelUsage> = {}
-    for (const model of Object.keys(models)) {
-      const periods = asRecord(models[model])
-      if (periods === null || Array.isArray(periods)) continue
-      const copy: CostModelUsage = {}
-      for (const period of ['peak', 'off'] as const) {
-        const b = asRecord(periods[period])
-        if (b === null || Array.isArray(b)) continue
-        copy[period] = {
-          uncached: numOf(b.uncached),
-          cacheRead: numOf(b.cacheRead),
-          cacheWrite: numOf(b.cacheWrite),
-          output: numOf(b.output),
-        }
-      }
-      branch[model] = copy
-    }
-    out[provider] = branch
-  }
-  return out
 }
 
 function costFastOk(value: unknown): boolean {
@@ -535,73 +499,6 @@ export function headersOf(value: unknown): ContextHeaders | null {
       return { ...entry, systemTokens: estimateSystemTokens(entry.system) || undefined }
     }),
   } as unknown as ContextHeaders
-}
-
-/** Absent stays null (an older host serves no such key); per-day re-proof drops just the bad entry or fee. */
-export function activityOf(value: unknown): ContextActivity | null {
-  const data = asRecord(value)
-  if (data === null) return null
-  const rawDays = asRecord(data.days)
-  if (rawDays === null || Array.isArray(rawDays)) return null
-  const days: Record<string, ActivityDay> = {}
-  let dirty = false
-  for (const key of Object.keys(rawDays)) {
-    const entry = asRecord(rawDays[key])
-    const tokens = entry?.tokens
-    const requests = entry?.requests
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)
-      || entry === null || Array.isArray(entry)
-      || typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens < 0
-      || typeof requests !== 'number' || !Number.isFinite(requests) || requests < 0) {
-      dirty = true
-      continue
-    }
-    const proved = costOf(entry.cost)
-    const cost = proved !== undefined && Object.keys(proved).length > 0 ? proved : undefined
-    if (entry.cost !== undefined && cost === undefined) dirty = true
-    const skills = skillTalliesOf(entry.skills)
-    if (entry.skills !== undefined && skills === undefined) dirty = true
-    const turns = nonNegativeOf(entry.turns)
-    const toolCalls = nonNegativeOf(entry.toolCalls)
-    const toolsMs = nonNegativeOf(entry.toolsMs)
-    const wallMs = nonNegativeOf(entry.wallMs)
-    if ((entry.turns !== undefined && turns === undefined)
-      || (entry.toolCalls !== undefined && toolCalls === undefined)
-      || (entry.toolsMs !== undefined && toolsMs === undefined)
-      || (entry.wallMs !== undefined && wallMs === undefined)) dirty = true
-    days[key] = {
-      tokens,
-      requests,
-      ...(cost !== undefined ? { cost } : {}),
-      ...(turns !== undefined ? { turns } : {}),
-      ...(toolCalls !== undefined ? { toolCalls } : {}),
-      ...(toolsMs !== undefined ? { toolsMs } : {}),
-      ...(wallMs !== undefined ? { wallMs } : {}),
-      ...(skills !== undefined ? { skills } : {}),
-    }
-  }
-  return dirty ? { days } : data as unknown as ContextActivity
-}
-
-function nonNegativeOf(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
-}
-
-function skillTalliesOf(value: unknown): ActivityDay['skills'] | undefined {
-  const data = asRecord(value)
-  if (data === null || Array.isArray(data)) return undefined
-  const skills: Record<string, { n: number; last: number }> = {}
-  let any = false
-  for (const name of Object.keys(data)) {
-    const tally = asRecord(data[name])
-    const n = tally?.n
-    const last = tally?.last
-    if (typeof n !== 'number' || !Number.isFinite(n) || n < 0
-      || typeof last !== 'number' || !Number.isFinite(last)) continue
-    skills[name] = { n, last }
-    any = true
-  }
-  return any ? skills : undefined
 }
 
 export interface TriggerCandidate {

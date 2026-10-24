@@ -332,6 +332,32 @@ describe('rowsOfSnapshot: the family fold', () => {
     assert.equal(rows[0].activity, null, 'no member carried a ledger → the family has none')
     assert.equal(billedOf(rows[0]), 200)
   })
+
+  test('a childless family serves its own parts directly (no merge copy)', () => {
+    const activity = { days: { '2026-09-16': { tokens: 15, requests: 1 } } }
+    const timeline = timelineOf({ cost: { deepseek: { 'deepseek-v4': { peak: { uncached: 1, cacheRead: 2, cacheWrite: 3, output: 4 } } } } })
+    const rows = rowsOfSnapshot(snapshotOf([
+      ['solo', { displayTitle: 'solo', projectionValues: { contextTimeline: timeline, contextActivity: activity } }],
+    ]))
+    assert.ok(rows !== null)
+    const row = rows[0]
+    assert.ok(row.family.length === 1 && row.family[0] === row.timeline)
+    const familyActivity = row.familyActivity ?? []
+    assert.ok(familyActivity.length === 1 && familyActivity[0] === row.activity)
+    assert.ok(row.familyCost === row.timeline?.cost, 'a fully quantified fee aliases')
+    assert.ok(row.activity === (activity as never), 'the sanitized ledger keeps its identity')
+  })
+
+  test('a childless family re-merges a sparse fee instead of aliasing it', () => {
+    const timeline = timelineOf({ cost: { deepseek: { 'deepseek-v4': { peak: { uncached: 5 } } } } })
+    const rows = rowsOfSnapshot(snapshotOf([
+      ['solo', { displayTitle: 'solo', projectionValues: { contextTimeline: timeline } }],
+    ]))
+    assert.ok(rows !== null)
+    assert.deepEqual(rows[0].familyCost, {
+      deepseek: { 'deepseek-v4': { peak: { uncached: 5, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+    })
+  })
 })
 
 describe('coveredRowsOf', () => {

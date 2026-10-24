@@ -200,7 +200,7 @@ describe('windowTotalsOf', () => {
   test('folds only admitted days; a cost-less day leaves the usage null', () => {
     const scope = dayRangeWindow({ from: '2026-09-16', to: '2026-09-16' })
     assert.ok(scope !== null)
-    assert.deepEqual(windowTotalsOf(null, scope), { requests: 0, turns: 0, toolCalls: 0, toolsMs: 0, wallMs: 0, usage: null })
+    assert.deepEqual(windowTotalsOf(null, scope), { turns: 0, usage: null })
     assert.deepEqual(
       windowTotalsOf({
         days: {
@@ -208,7 +208,7 @@ describe('windowTotalsOf', () => {
           '2026-09-17': { tokens: 9, requests: 9, cost: COST },
         },
       }, scope),
-      { requests: 1, turns: 1, toolCalls: 2, toolsMs: 3, wallMs: 4, usage: null },
+      { turns: 1, usage: null },
       'the day after the window contributes nothing',
     )
     assert.deepEqual(
@@ -216,12 +216,28 @@ describe('windowTotalsOf', () => {
       COST,
     )
   })
+
+  test('the per-ledger memo returns the same totals for the same boundary day keys, and does not grow per minute', () => {
+    const activity = { days: { '2026-09-16': { tokens: 1, requests: 1, turns: 1 } } }
+    const scope = dayRangeWindow({ from: '2026-09-16', to: '2026-09-16' })
+    assert.ok(scope !== null)
+    const first = windowTotalsOf(activity, scope)
+    assert.ok(windowTotalsOf(activity, scope) === first, 'the same window reuses the cached totals')
+    // A rolling preset's floor drifts per minute; the admitted day set (and therefore the totals) is identical.
+    const drifted = { start: (scope.start ?? 0) + 60_000, end: scope.end }
+    assert.ok(windowTotalsOf(activity, drifted) === first, 'a minute-shifted floor hits the same day-key entry')
+    // A different admitted day set is a different entry.
+    const wider = dayRangeWindow({ from: '2026-09-15', to: '2026-09-16' })
+    assert.ok(wider !== null)
+    assert.notEqual(windowTotalsOf(activity, wider), first)
+    assert.deepEqual(windowTotalsOf(activity, wider), { turns: 1, usage: null })
+  })
 })
 
 describe('kpisOf', () => {
   const prices = { prices: { deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, index: priceIndexOf({ deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, {}) }
 
-  test('aggregates sessions, tokens, turns, cost, cache hit, tools, and time across the range', () => {
+  test('aggregates sessions, tokens, turns, cost, and cache hit across the range', () => {
     const rows = [
       rowOf({
         timeline: {
@@ -248,10 +264,6 @@ describe('kpisOf', () => {
     assert.equal(kpi.cacheHit, '31.25', '50 reads of 160 billed input, truncated')
     assert.equal(kpi.costSessions, 1, 'only the priced session counts toward the cost cell')
     assert.equal(kpi.usageSessions, 1, 'only the billed session feeds the cache-hit rate')
-    assert.equal(kpi.toolCalls, 7, 'tool calls sum across rows')
-    assert.equal(kpi.toolsMs, 20_000)
-    assert.equal(kpi.calls, 6)
-    assert.equal(kpi.wallMs, 120_000)
     assert.equal(kpi.tokenParts?.total, 200)
     assert.deepEqual(kpi.tokenParts?.parts.find(p => p.key === 'system'), { key: 'system', color: 'var(--color-indigo-500)', value: 32 })
     assert.deepEqual(kpi.timing, { wallMs: 120_000, ttftMs: 1_000, genMs: 30_000, calls: 6, toolsMs: 20_000, toolCalls: 7, tools: {} })
@@ -273,21 +285,21 @@ describe('kpisOf', () => {
     })
     const kpi = kpisOf([row], prices, 'usd')
     assert.equal(kpi.turns, 5)
-    assert.equal(kpi.calls, 6)
-    assert.equal(kpi.wallMs, 120_000)
-    assert.equal(kpi.toolCalls, 7)
-    assert.equal(kpi.toolsMs, 20_000)
     assert.equal(kpi.tokens, 200, 'usage rides familyCost without a scope and the ledger under the All preset')
     assert.deepEqual(kpi.timing, { wallMs: 120_000, ttftMs: 1_000, genMs: 30_000, calls: 6, toolsMs: 20_000, toolCalls: 7, tools: {} })
     assert.deepEqual(kpisOf([row], prices, 'usd', { start: null, end: null }), kpi, 'the All preset reads the same family timing')
   })
 
-  test('a bounded scope folds only the daily ledger days inside the window', () => {
+  test('a bounded scope scopes the volume by day but keeps the timing on the family heads', () => {
     const member = {
       cost: COST,
       counts: { turns: 9 },
       current: { system: 100, tools: 50, user: 30, inject: 10, skill: 10, assistant: 200, tool: 100, total: 500 },
       requests: [],
+      timing: { wallMs: 120_000, ttftMs: 1_000, genMs: 30_000, calls: 5, toolsMs: 40_000, toolCalls: 6, tools: {} },
+    } as unknown as ContextTimeline
+    const kid = {
+      timing: { wallMs: 30_000, ttftMs: 0, genMs: 0, calls: 2, toolsMs: 5_000, toolCalls: 2, tools: {} },
     } as unknown as ContextTimeline
     const activity: ContextActivity = {
       days: {
@@ -295,7 +307,7 @@ describe('kpisOf', () => {
         '2026-09-17': { tokens: 7, requests: 3, cost: COST, turns: 1, toolCalls: 4, toolsMs: 50, wallMs: 300 },
       },
     }
-    const row = rowOf({ timeline: member, family: [member], familyActivity: [activity], activity, familyCost: COST })
+    const row = rowOf({ timeline: member, family: [member, kid], familyActivity: [activity, null], activity, familyCost: COST })
     const bare = rowOf({ activity: { days: { '2026-09-16': { tokens: 1, requests: 1 } } } })
     const scope = dayRangeWindow({ from: '2026-09-16', to: '2026-09-16' })
     assert.ok(scope !== null)
@@ -305,11 +317,12 @@ describe('kpisOf', () => {
     assert.equal(kpi.costSessions, 1)
     assert.equal(kpi.usageSessions, 1)
     assert.equal(kpi.turns, 1, 'the out-of-window turn is not counted')
-    assert.equal(kpi.toolCalls, 2)
-    assert.equal(kpi.toolsMs, 30)
-    assert.equal(kpi.calls, 2, 'settled model calls follow the admitted days')
-    assert.equal(kpi.wallMs, 100)
     assert.equal(kpi.tokenParts?.total, 200)
+    // The timing cells mirror the card beside the band: self + subagent, whole lifetime, never the window.
+    assert.equal(kpi.timing?.wallMs, 150_000)
+    assert.equal(kpi.timing?.calls, 7)
+    assert.equal(kpi.timing?.toolsMs, 45_000)
+    assert.equal(kpi.timing?.toolCalls, 8)
   })
 
   test('a session with usage the book cannot price feeds the cache-hit rate but prices to nothing', () => {
@@ -341,12 +354,8 @@ describe('kpisOf', () => {
     assert.equal(kpi.cacheHit, null)
     assert.equal(kpi.costSessions, 0)
     assert.equal(kpi.usageSessions, 0)
-    assert.equal(kpi.toolCalls, 0, 'no timing folds to zeroed tools and time')
-    assert.equal(kpi.toolsMs, 0)
-    assert.equal(kpi.calls, 0)
-    assert.equal(kpi.wallMs, 0)
     assert.equal(kpi.tokenParts, null)
-    assert.equal(kpi.timing, null)
+    assert.equal(kpi.timing, null, 'no timing aggregates to null, so the band dashes and the card shows its empty state')
   })
 })
 

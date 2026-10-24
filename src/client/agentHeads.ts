@@ -1,21 +1,51 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import type { ContextTimeline } from '../shared/types'
 import type { SessionsFaceLike } from './agentTree'
-import { makeDetailFetcher } from './timelineSource'
+import { DETAIL_ROUTE } from './apiRoutes'
+import { lruTouch, lruTrim } from './lru'
+import { asRecord, timelineOf } from './services'
 
 export interface AgentHeads {
   headOf(id: string): Promise<ContextTimeline | null>
 }
+
+/** One relative-agent head read: the detail route's `head: true` body serves the slim envelope (~1KB) instead of the
+ * ~200× larger full detail the reader would discard. */
+export function makeHeadFetcher(sessionId: string): (() => Promise<ContextTimeline | null>) | undefined {
+  if (sessionId === '') return undefined
+  return async () => {
+    const response = await fetch(DETAIL_ROUTE, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId, head: true }),
+    })
+    if (!response.ok) throw new Error(`dsh-context: head route HTTP ${response.status}`)
+    const r = asRecord(await response.json())
+    if (r === null || r.ok !== true) throw new Error('dsh-context: head read failed')
+    if (r.value === null) return null
+    const head = timelineOf(asRecord(r.value)?.head)
+    if (head === null) throw new Error('dsh-context: head read malformed')
+    return head
+  }
+}
+
+/** Page-scope head cache bound: heads are ~1KB each, but an unbounded page-lifetime map still accumulates one entry
+ * per session the Fleet/agent views ever touched; the least-recently-read entry is dropped at the cap. */
+const HEADS_MAX = 128
 
 export function makeAgentHeads(): AgentHeads {
   const heads = new Map<string, Promise<ContextTimeline | null>>()
   return {
     headOf(id: string): Promise<ContextTimeline | null> {
       const cached = heads.get(id)
-      if (cached !== undefined) return cached
-      const fetcher = makeDetailFetcher(id)
-      const pending = fetcher !== undefined ? fetcher().then(d => d?.head ?? null) : Promise.resolve(null)
+      if (cached !== undefined) {
+        lruTouch(heads, id)
+        return cached
+      }
+      const fetcher = makeHeadFetcher(id)
+      const pending = fetcher !== undefined ? fetcher() : Promise.resolve(null)
       heads.set(id, pending)
+      lruTrim(heads, HEADS_MAX)
       return pending
     },
   }

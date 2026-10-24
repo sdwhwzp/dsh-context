@@ -304,6 +304,74 @@ describe('the detail route', () => {
     assert.ok(result.value.head.current.total > 0, 'the slim head rides the live read too')
   })
 
+  test('a head read serves the envelope only, live and cold', async () => {
+    const { state } = driveTimeline([
+      header(1, { model: 'deepseek-v4-flash', provider: 'deepseek' }),
+      userMessage(2, [{ type: 'text', text: 'hi' }], { kind: 'user' }),
+      assistantMessage(3, { turn: 1, step: 0, usage: { inputTokens: 10, outputTokens: 5 } }),
+    ])
+    const live = liveCtx(state)
+    watchDetailChannel(live.ctx, BOUNDS)
+    const liveHead = await call(live.captured, { sessionId: 's1', head: true }) as { ok: true; value: { rev: number; head: { current: { total: number } }; requests?: unknown } }
+    assert.equal(liveHead.ok, true)
+    assert.equal(liveHead.value.rev, 2)
+    assert.ok(liveHead.value.head.current.total > 0)
+    assert.equal(liveHead.value.requests, undefined, 'the collections never ride a head read')
+
+    // A state that never bumped the detail revision (a header alone) serves the zero rev.
+    const fresh = liveCtx(driveTimeline([header(1, { model: 'deepseek-v4-flash', provider: 'deepseek' })]).state)
+    watchDetailChannel(fresh.ctx, BOUNDS)
+    const freshHead = await call(fresh.captured, { sessionId: 's1', head: true }) as { ok: true; value: { rev: number; head: { model?: unknown } } }
+    assert.equal(freshHead.value.rev, 0)
+    assert.equal(freshHead.value.head.model, 'deepseek-v4-flash')
+
+    const cold = ctxOf({
+      connection: { fetch: { register: () => () => {} } },
+      sessions: sessionsWith(okSession()),
+      stateOf: () => undefined,
+      sessionQuery: { observeSession: () => Promise.resolve({
+        revision: 'rev-1',
+        events: [
+          header(1, { model: 'deepseek-v4-flash', provider: 'deepseek' }),
+          userMessage(2, [{ type: 'text', text: 'hi' }], { kind: 'user' }),
+          assistantMessage(3, { turn: 1, step: 0, usage: { inputTokens: 10, outputTokens: 5 } }),
+        ],
+        [Symbol.dispose]: () => {},
+      }) },
+      sessionPersistence: { backend: 'default' },
+    })
+    watchDetailChannel(cold.ctx, BOUNDS)
+    const coldHead = await call(cold.captured, { sessionId: 'cold1', head: true }) as { ok: true; value: { rev: number; head: { model?: unknown }; requests?: unknown } }
+    assert.equal(coldHead.ok, true)
+    assert.ok(coldHead.value.head !== undefined)
+    assert.equal(coldHead.value.requests, undefined, 'the cold head read serves the envelope only')
+    // The cold read still caches the FULL payload at its revision, so a later full read re-serves it.
+    const full = await call(cold.captured, { sessionId: 'cold1' }) as { ok: true; value: { requests: unknown[] } }
+    assert.equal(full.ok, true)
+    assert.ok(Array.isArray(full.value.requests))
+    // The cached payload answers a repeat head read at the same revision.
+    const cachedHead = await call(cold.captured, { sessionId: 'cold1', head: true }) as { ok: true; value: { rev: number; head?: unknown } }
+    assert.equal(cachedHead.ok, true)
+    assert.ok(cachedHead.value.head !== undefined)
+
+    // A head read whose observation carries no durable revision folds and serves the head without caching.
+    const unkeyed = ctxOf({
+      connection: { fetch: { register: () => () => {} } },
+      sessions: sessionsWith(okSession()),
+      stateOf: () => undefined,
+      sessionQuery: { observeSession: () => Promise.resolve({
+        // A header alone never bumps the detail revision, so the unkeyed head path reads the zero rev.
+        events: [header(1, { model: 'deepseek-v4-flash', provider: 'deepseek' })],
+        [Symbol.dispose]: () => {},
+      }) },
+      sessionPersistence: { backend: 'default' },
+    })
+    watchDetailChannel(unkeyed.ctx, BOUNDS)
+    const unkeyedHead = await call(unkeyed.captured, { sessionId: 'cold2', head: true }) as { ok: true; value: { rev: number; head: { model?: unknown } } }
+    assert.equal(unkeyedHead.ok, true)
+    assert.equal(unkeyedHead.value.head.model, 'deepseek-v4-flash')
+  })
+
   test('hostile reads degrade to the failure envelope, never a throw', async () => {
     const throwingGet = ctxOf({
       connection: { fetch: { register: () => () => {} } },

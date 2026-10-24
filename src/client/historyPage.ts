@@ -2,6 +2,7 @@
  * resolves through the DECLARED inject that `remote` and `remote.session` must share. */
 
 import { useSyncExternalStore } from 'react'
+import { lruTouch, lruTrim } from './lru'
 import type {
   ClientCtx, ContentFetcher, ConversationNodeLike, HeaderFetcher,
   HistoryEntryLike, SessionAddressLike, SessionPageFace,
@@ -219,6 +220,10 @@ function pageReaderOf(addressOf: () => SessionAddressLike): ((seq: number) => Pr
   }
 }
 
+/** Landed message cap for one mounted view's content cache: each entry holds a whole message (the largest are code
+ * blocks or transcripts), so an unbounded page-lifetime map would grow with every hovered and located step. */
+const CONTENT_CACHE_MAX = 128
+
 /** Per-session fetcher over the gateway history face; undefined when no face resolved at build time. */
 export function makeContentFetcher(
   addressOf: () => SessionAddressLike,
@@ -228,9 +233,15 @@ export function makeContentFetcher(
   const cache = new Map<number, ConversationNodeLike>()
   return async (seq) => {
     const hit = cache.get(seq)
-    if (hit !== undefined) return hit
+    if (hit !== undefined) {
+      lruTouch(cache, seq)
+      return hit
+    }
     const node = pageNodesOf(rowsOf(await read(seq))).get(seq) ?? null
-    if (node !== null) cache.set(seq, node)
+    if (node !== null) {
+      cache.set(seq, node)
+      lruTrim(cache, CONTENT_CACHE_MAX)
+    }
     return node
   }
 }
@@ -264,6 +275,10 @@ function headerContentOf(event: { type: string; data: Record<string, unknown> })
   return { tools }
 }
 
+/** Landed epoch cap for one mounted view's header cache: an entry carries the epoch's full tool schemas and prompt
+ * text (tens of KB each), so a session whose tools change per turn would otherwise pin every epoch it displayed. */
+const HEADER_CACHE_MAX = 12
+
 /** On-demand System/Tools content: landed pages cache per seq, so stepping back through epochs reuses them. */
 export function makeHeaderFetcher(
   addressOf: () => SessionAddressLike,
@@ -273,7 +288,10 @@ export function makeHeaderFetcher(
   const cache = new Map<number, HeaderEpochContent>()
   return async (seq) => {
     const hit = cache.get(seq)
-    if (hit !== undefined) return hit
+    if (hit !== undefined) {
+      lruTouch(cache, seq)
+      return hit
+    }
     const rows = rowsOf(await read(seq))
     let picked: HeaderEpochContent | null = null
     for (const entry of rows) {
@@ -285,6 +303,7 @@ export function makeHeaderFetcher(
       cache.set(ev.seq, content)
       if (ev.seq === seq) picked = content
     }
+    lruTrim(cache, HEADER_CACHE_MAX)
     return picked
   }
 }

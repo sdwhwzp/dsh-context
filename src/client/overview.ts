@@ -9,7 +9,7 @@ import { cacheHitPercent } from './format'
 import { estimateSessionCost, mergeCostUsage } from './cost'
 import type { CostCurrency, ModelBook } from './cost'
 import { agentRowOf, familyChildrenOf, type AgentRow } from './agentTree'
-import { activityOf, asRecord, timelineOf, type ClientCtx, type SessionsFace } from './services'
+import { activityOf, asRecord, costFullyQuantified, timelineOf, type ClientCtx, type SessionsFace } from './services'
 import type { ActivityDay, ContextActivity, ContextTimeline, DefaultOverviewRange, SessionCostUsage, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
 
 export interface OverviewRow {
@@ -194,6 +194,17 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
   }
   const childrenOf = familyChildrenOf(sessionRows)
   for (const row of rows) {
+    const kids = childrenOf.get(row.id) ?? []
+    // The childless family (the overwhelmingly common session) IS its own sole member: the merge walks would copy the
+    // whole ledger and cost tree to reproduce it, so the sanitized parts serve directly — the cost aliased only when
+    // it is already in the merged shape, re-merged otherwise (a sparse bucket must zero-fill like a merge output).
+    if (kids.length === 0) {
+      const cost = row.timeline?.cost
+      row.family = [row.timeline]
+      row.familyActivity = [row.activity]
+      row.familyCost = cost !== undefined && costFullyQuantified(cost) ? cost : mergeCostUsage(cost)
+      continue
+    }
     const timelines: (ContextTimeline | null)[] = [row.timeline]
     const activities: (ContextActivity | null)[] = [row.activity]
     const queue = [row.id]
@@ -515,36 +526,38 @@ export function usageTotalsOf(usage: SessionCostUsage | null | undefined): Usage
 }
 
 export interface WindowTotals {
-  requests: number
   turns: number
-  toolCalls: number
-  toolsMs: number
-  wallMs: number
   usage: SessionCostUsage | null
 }
 
+/** Per-ledger window sums, weakly keyed so a superseded projection dies with its entries. The admitted days depend
+ * only on the scope's boundary DAY KEYS (dayInScope compares day keys), so the key is those two keys: a rolling
+ * preset's minute-drifting floor cannot accumulate one entry per minute against an unchanged ledger. */
+const windowTotals = new WeakMap<ContextActivity, Map<string, WindowTotals>>()
+
 export function windowTotalsOf(activity: ContextActivity | null, scope: RangeWindow): WindowTotals {
-  let requests = 0
-  let turns = 0
-  let toolCalls = 0
-  let toolsMs = 0
-  let wallMs = 0
-  let usage: SessionCostUsage | null = null
-  if (activity !== null) {
-    for (const [key, day] of Object.entries(activity.days)) {
-      if (!dayInScope(key, scope)) continue
-      requests += day.requests
-      turns += day.turns ?? 0
-      toolCalls += day.toolCalls ?? 0
-      toolsMs += day.toolsMs ?? 0
-      wallMs += day.wallMs ?? 0
-      if (day.cost !== undefined) usage = mergeCostUsage(usage, day.cost)
-    }
+  if (activity === null) return { turns: 0, usage: null }
+  const key = `${scope.start === null ? 'open' : dayKeyOf(scope.start)}:${scope.end === null ? 'open' : dayKeyOf(scope.end)}`
+  let byScope = windowTotals.get(activity)
+  if (byScope === undefined) {
+    byScope = new Map()
+    windowTotals.set(activity, byScope)
   }
-  return { requests, turns, toolCalls, toolsMs, wallMs, usage }
+  const hit = byScope.get(key)
+  if (hit !== undefined) return hit
+  let turns = 0
+  let usage: SessionCostUsage | null = null
+  for (const [dayKey, day] of Object.entries(activity.days)) {
+    if (!dayInScope(dayKey, scope)) continue
+    turns += day.turns ?? 0
+    if (day.cost !== undefined) usage = mergeCostUsage(usage, day.cost)
+  }
+  const totals = { turns, usage }
+  byScope.set(key, totals)
+  return totals
 }
 
-/** The rows' team merge of lifetime timing totals — the same scope the KPI band's ledger merges. */
+/** The rows' team merge of lifetime timing totals. */
 export function timingSumOf(rows: readonly OverviewRow[]): TimingTotals | null {
   let out: TimingTotals | null = null
   for (const row of rows) {
@@ -646,11 +659,9 @@ export interface OverviewKpis {
   costSessions: number
   cacheHit: string | null
   usageSessions: number
-  toolCalls: number
-  toolsMs: number
-  calls: number
-  wallMs: number
   tokenParts: { parts: TokenPartTotal[]; total: number } | null
+  /** The timing card's own aggregate (the scoped rows' family lifetime); the band's time, model-call and
+   *  tool-run cells print it, so they can never disagree with that card. */
   timing: TimingTotals | null
 }
 
@@ -660,14 +671,8 @@ export function kpisOf(
   currency: CostCurrency,
   scope?: RangeWindow,
 ): OverviewKpis {
-  // Every figure folds the SAME daily ledger over the window; an unbounded scope (the All preset) reads the family's
-  // lifetime heads instead, so the band's active-time and call cells equal the team timing card beside them.
   let usage: SessionCostUsage | null = null
   let turns = 0
-  let toolCalls = 0
-  let toolsMs = 0
-  let calls = 0
-  let wallMs = 0
   let costSessions = 0
   let usageSessions = 0
   const open = scope === undefined || (scope.start === null && scope.end === null)
@@ -675,21 +680,9 @@ export function kpisOf(
     const windowTotals = scope !== undefined && row.activity !== null ? windowTotalsOf(row.activity, scope) : null
     const rowUsage = windowTotals !== null ? windowTotals.usage : open ? row.familyCost : null
     usage = mergeCostUsage(usage, rowUsage)
-    if (windowTotals !== null && !open) {
-      turns += windowTotals.turns
-      toolCalls += windowTotals.toolCalls
-      toolsMs += windowTotals.toolsMs
-      calls += windowTotals.requests
-      wallMs += windowTotals.wallMs
-    } else if (open) {
-      for (const member of row.family) {
-        turns += turnsOf(member)
-        const timing = member?.timing
-        toolCalls += timing?.toolCalls ?? 0
-        toolsMs += timing?.toolsMs ?? 0
-        calls += timing?.calls ?? 0
-        wallMs += timing?.wallMs ?? 0
-      }
+    if (windowTotals !== null && !open) turns += windowTotals.turns
+    else if (open) {
+      for (const member of row.family) turns += turnsOf(member)
     }
     // Each sub-line counts the sessions its own figure covers: a session with usage but no book rates feeds the cache-hit rate.
     if (estimateSessionCost(rowUsage, book, currency) !== null) costSessions++
@@ -704,10 +697,6 @@ export function kpisOf(
     costSessions,
     cacheHit: totals === null ? null : cacheHitPercent(totals.cacheRead, totals.input + totals.cacheRead + totals.cacheWrite),
     usageSessions,
-    toolCalls,
-    toolsMs,
-    calls,
-    wallMs,
     tokenParts: tokenPartsOf(rows, scope),
     timing: timingSumOf(rows),
   }

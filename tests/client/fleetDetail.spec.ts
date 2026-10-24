@@ -138,6 +138,21 @@ describe('FleetDetailCache', () => {
     assert.equal(reads, 2)
   })
 
+  test('the ledger stays bounded; the least recently read member drops first', async () => {
+    const reads: string[] = []
+    vi.stubGlobal('fetch', (_url: unknown, init: { body: string }) => {
+      reads.push(String((JSON.parse(init.body) as { sessionId: string }).sessionId))
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, value: null }) } as Response)
+    })
+    const cache = new FleetDetailCache()
+    for (let i = 0; i < 80; i++) await cache.fetch(`s${i}`, 1)
+    assert.equal(reads.length, 80)
+    await cache.fetch('s79', 1)
+    assert.equal(reads.length, 80, 'the newest member still replays')
+    await cache.fetch('s0', 1)
+    assert.equal(reads.length, 81, 'the evicted oldest member refetches')
+  })
+
   test('a settled failure caches as null, and invalidate forces a fresh read', async () => {
     let reads = 0
     vi.stubGlobal('fetch', () => {

@@ -55,7 +55,7 @@ describe('ContextView lazy DNA bands', () => {
     }
   })
 
-  test('delta mode on a long log keeps every band so its axis stays exact', async () => {
+  test('delta mode on a long log reads the axis sequentially and paints only the window', async () => {
     const View = makeViewNoAutoOverview()
     const m = await mount(h(View, {
       sessionId: 'sv-lazy-dna-delta',
@@ -66,7 +66,10 @@ describe('ContextView lazy DNA bands', () => {
       await act(async () => { buttonByText(m.container, kit.t('trend.dna')).click() })
       await act(async () => { buttonByText(m.container, kit.t('gran.delta')).click() })
       await flush()
-      assert.ok(queryAll(m.container, '.lc-bar-dna').length > 0)
+      const bars = queryAll(m.container, '.lc-bar-dna')
+      assert.ok(bars.length > 0)
+      // The whole-log axis walk must not turn into whole-log DOM: only the rendered window carries bands.
+      assert.ok(bars.length < 600, `only the window paints a band (${bars.length})`)
     } finally {
       await m.unmount()
     }

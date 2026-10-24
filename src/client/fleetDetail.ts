@@ -1,6 +1,7 @@
 import type { FleetDetail, FleetDescriptor, FleetMemberInfo, FleetMessage } from '../shared/types'
 import { FLEET_ROUTE } from './apiRoutes'
 import { asRecord, numOf } from './services'
+import { lruTouch, lruTrim } from './lru'
 
 function strings(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
@@ -108,6 +109,10 @@ interface FleetDetailEntry {
   pending: Promise<FleetDetail | null>
 }
 
+/** Page-scope ledger bounds: one FleetDetail holds up to 40 clipped messages, so an unbounded map would pin every
+ * member the comms panels ever scanned for the page's whole life. */
+const FLEET_LEDGER_MAX = 64
+
 /** Reads dedupe per (id, `updatedAt`): a NEWER stamp refetches once, and a settled failure stays cached so a
  * broken session never hammers the route; the `full` ledger runs beside the excerpt one. */
 export class FleetDetailCache {
@@ -117,12 +122,16 @@ export class FleetDetailCache {
   fetch(id: string, updatedAt: number, full = false): Promise<FleetDetail | null> {
     const ledger = full ? this.fullEntries : this.entries
     const known = ledger.get(id)
-    if (known !== undefined && known.updatedAt >= updatedAt) return known.pending
+    if (known !== undefined && known.updatedAt >= updatedAt) {
+      lruTouch(ledger, id)
+      return known.pending
+    }
     const fetcher = makeFleetDetailFetcher(id, full)
     const pending = fetcher !== undefined
       ? fetcher().catch((): FleetDetail | null => null)
       : Promise.resolve(null)
     ledger.set(id, { updatedAt, pending })
+    lruTrim(ledger, FLEET_LEDGER_MAX)
     return pending
   }
 

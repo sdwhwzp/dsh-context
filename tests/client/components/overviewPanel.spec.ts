@@ -71,7 +71,9 @@ function sessionsSnapshot(): { ids: string[]; byId: Record<string, Record<string
         updatedAt: NOW - 10 * 86_400_000,
         projectionValues: {
           contextTimeline: timeline({ current: { system: 10, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 10 }, cost: undefined }),
-          contextActivity: { days: { [YESTERDAY]: { tokens: 25, requests: 1, turns: 1, toolCalls: 7, toolsMs: 20_000, wallMs: 90_000 } } },
+          // b's windowed ledger (60s wall, 3 tool runs / 5s) deliberately differs from its lifetime head (90s,
+          // 7 runs / 20s): only a band reading the same heads as the timing card can print the card's figures.
+          contextActivity: { days: { [YESTERDAY]: { tokens: 25, requests: 1, turns: 1, toolCalls: 3, toolsMs: 5_000, wallMs: 60_000 } } },
         },
       },
       c: {
@@ -199,7 +201,7 @@ describe('OverviewPanel', () => {
     assert.equal(values[4], '14')
     assert.equal(values[5], '3m0s')
     assert.ok(text(m.container).includes('tool runs 40.0s'), 'the tool calls cell qualifies with the summed run time')
-    assert.ok(text(m.container).includes('4 model calls'), 'the active-time cell qualifies with the settled model-call count')
+    assert.ok(text(m.container).includes('8 model calls'), 'the active-time cell qualifies with the family lifetime calls the timing card reads')
     const subs = queryAll(m.container, '.lc-stat-sub').map(el => el.textContent)
     assert.deepEqual(subs.slice(2, 4), ['1 of 2 sessions priced', 'across 1 sessions'])
     const statsCards = queryAll(m.container, '.lc-ov-stats > .lc-card')
@@ -210,6 +212,8 @@ describe('OverviewPanel', () => {
       'Skill Injections', 'Assistant Messages', 'Tool Results', 'Output',
     ])
     assert.equal(query(statsCards[1], '.lc-donut-center b').textContent, '3m0s')
+    assert.equal(values[5], query(statsCards[1], '.lc-donut-center b').textContent, 'the band and the card share one active-time figure')
+    assert.ok(text(statsCards[1]).includes('14 runs'), 'the card’s tool row carries the same lifetime tally the band’s tool cells print')
     assert.ok(text(statsCards[1]).includes('LLM Gen'))
     assert.ok(queryAll(m.container, 'button.lc-heat-cell').length >= 2)
     const cards = queryAll(m.container, '.lc-ov-grid > .lc-ov-session')
@@ -356,6 +360,32 @@ describe('OverviewPanel', () => {
     assert.equal(queryAll(m.container, '.lc-ov-grid > .lc-ov-session').length, 2)
     await m.unmount()
   })
+
+  for (const days of [7, 30] as const) {
+    test(`the ${days}-day range excludes a session one millisecond beyond the exact cutoff`, async () => {
+      const now = new Date('2026-10-24T12:00:45Z').getTime()
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+      try {
+        const cutoff = now - days * 86_400_000
+        const snapshot = {
+          ids: ['expired', 'current'],
+          byId: {
+            expired: { displayTitle: 'expired session', updatedAt: cutoff - 1, projectionValues: { contextTimeline: timeline() } },
+            current: { displayTitle: 'current session', updatedAt: cutoff, projectionValues: { contextTimeline: timeline() } },
+          },
+          current: 'current', phase: 'ready',
+        }
+        const { m } = await openPanel(makeCtx(), { useSessions: useHookOf(snapshot) }, settingsWith(`${days}d`))
+        const cards = queryAll(m.container, '.lc-ov-grid > .lc-ov-session')
+        assert.equal(cards.length, 1)
+        assert.ok(text(cards[0]).includes('current session'))
+        assert.equal(queryAll(m.container, '.lc-stat-value')[0].textContent, '1')
+        await m.unmount()
+      } finally {
+        clock.mockRestore()
+      }
+    })
+  }
 
   test('a picked calendar range scopes the page and hands the presets back', async () => {
     const ctx = makeCtx()

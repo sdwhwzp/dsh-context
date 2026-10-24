@@ -63,6 +63,28 @@ export interface DnaDelta {
   down: DeltaBand[]
 }
 
+/** The churn TOTALS of one step against its predecessor — what an axis scale needs. Same pairing as
+ * {@link deltaBandsOf}, without materializing the bands. */
+export function deltaTotalsOf(bands: readonly TrendBand[], prev: readonly TrendBand[] | null): { up: number; down: number } {
+  if (prev === null) return { up: 0, down: 0 }
+  const before = new Map<string, number>()
+  for (const b of prev) before.set(b.key, b.tokens)
+  let up = 0
+  let down = 0
+  for (const b of bands) {
+    const d = b.tokens - (before.get(b.key) ?? 0)
+    if (d > 0) up += d
+    else if (d < 0) down -= d
+    before.delete(b.key)
+  }
+  // Keys the step dropped fall to zero.
+  for (const tokens of before.values()) {
+    if (tokens > 0) down += tokens
+    else if (tokens < 0) up -= tokens
+  }
+  return { up, down }
+}
+
 export function deltaBandsOf(bands: TrendBand[], prev: TrendBand[] | null): DnaDelta {
   // A null predecessor is no baseline: the scale stays change-driven rather than pinned by the opening bulk.
   if (prev === null) return { up: [], down: [] }

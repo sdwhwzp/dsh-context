@@ -17,6 +17,14 @@ function serveCommand(rec: CommandStateRecord): CommandRecord {
  * one `undefined`-valued property can fail the whole lossless-JSON push. */
 function headFieldsOf(state: TimelineState): Snapshot {
   const surfaceTotal = state.sums.user + state.sums.inject + state.sums.skill + state.sums.assistant + state.sums.tool
+  // One walk for both surface tallies: this builds on every push.
+  let images = 0
+  let toolCalls = 0
+  for (const node of state.surface) {
+    if (node.imgs !== undefined) images += node.imgs
+    // A skill-tool load reclassifies its node into `skill` but keeps its tool identity, so it still counts.
+    if (node.cat === 'tool' || (node.cat === 'skill' && node.tool !== undefined)) toolCalls++
+  }
   // Provider-anchored occupancy is NOT folded here: the Client reads token-meter's own `contextPressure` key.
   const result: Snapshot = {
     ok: true,
@@ -35,10 +43,9 @@ function headFieldsOf(state: TimelineState): Snapshot {
       tool: state.sums.tool,
       total: surfaceTotal + state.systemTokens + state.toolsTokens,
     },
-    images: state.surface.reduce((n, node) => n + (node.imgs ?? 0), 0),
-    // Calls still in flight (no result yet) and results compacted or pruned out of the surface are both excluded; a
-    // skill-tool load reclassifies its node into `skill` but keeps its tool identity, so it still counts.
-    toolCalls: state.surface.reduce((n, node) => node.cat === 'tool' || (node.cat === 'skill' && node.tool !== undefined) ? n + 1 : n, 0),
+    images,
+    // Calls still in flight (no result yet) and results compacted or pruned out of the surface are both excluded.
+    toolCalls,
     humanInputs: state.humanInputs ?? 0,
     answers: state.answers ?? 0,
     ...(state.lastUser !== undefined ? { lastUser: state.lastUser } : {}),
