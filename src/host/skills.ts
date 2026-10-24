@@ -1,16 +1,7 @@
 import type { ColdReadGate } from './coldRead'
-/**
- * The skill-catalog route — the metadata behind the Insights page's skill card (client/skills.ts):
- * what each loaded skill IS (description, origin bucket, on-disk path), joined by name onto the
- * activity ledger's tallies.
- *
- * The harness's own `skills/list` Remote strips the origin from its wire shape, so the plugin
- * reads the host-side registry itself. Session addressing is the mechanism: web compositions
- * mount skill discovery on agent presets, so the global registry alone lists nothing — the
- * resolution the harness's own catalog (session-controller's skill-catalog.ts) mirrors.
- *
- * The transport is Connection's fetch-route registry through a deferred inject.
- */
+/** The skill-catalog route: metadata behind the Insights page's skill card (description, origin bucket, on-disk path), joined by name
+ * onto the activity ledger's tallies. The harness's `skills/list` Remote strips the origin, so the plugin reads the host-side registry
+ * through the session — web compositions mount discovery on agent presets, so the global registry alone lists nothing. */
 
 import { asRecord } from './record'
 import type { Context } from '@deepseek-ai/cordis'
@@ -19,7 +10,7 @@ import { canReadAccountSession, type ConnectionHostFace, registerPostRoute } fro
 
 export const SKILLS_ROUTE = '/api/dsh-context/skills'
 
-/** The render bound on served entries: a registry serving a generated skill per directory could otherwise answer megabytes. */
+/** The render bound on served entries; a generated-skill-per-directory registry could otherwise answer megabytes. */
 const MAX_SKILLS = 500
 
 interface SkillRegistryLike {
@@ -30,7 +21,6 @@ function stringOf(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
-/** Dispose a re-proved observation/lease without throwing into the route. */
 async function disposeOf(resource: unknown): Promise<void> {
   if (resource === null || (typeof resource !== 'object' && typeof resource !== 'function')) return
   try {
@@ -46,8 +36,8 @@ async function disposeOf(resource: unknown): Promise<void> {
   }
 }
 
-/** Narrow one registry summary to the wire entry: the name is the join key and must prove itself,
- * or the entry drops whole while valid siblings keep serving. */
+/** Narrow one registry summary to the wire entry: the name is the join key and must prove itself, or the entry drops whole while valid
+ * siblings keep serving. */
 function skillInfoOf(value: unknown): SkillInfo | null {
   const record = asRecord(value)
   if (record === null || typeof record.name !== 'string' || record.name === '') return null
@@ -59,8 +49,8 @@ function skillInfoOf(value: unknown): SkillInfo | null {
   }
 }
 
-/** The session's catalog view: its workspace and recorded preset off a sessionQuery observation;
- * an unknown session leaves the request's cwd as the only selector. */
+/** The session's catalog view: its workspace and recorded preset off a sessionQuery observation; an unknown session leaves the request's
+ * cwd as the only selector. */
 async function sessionViewOf(
   ctx: Context, sessionId: string | undefined, signal: AbortSignal, coldReads: ColdReadGate,
 ): Promise<{ cwd?: string; agentPreset?: string } | null> {
@@ -96,9 +86,8 @@ async function sessionViewOf(
   }) ?? null
 }
 
-/** The registry and scope one catalog read resolves to (mirroring the harness's skill-catalog.ts):
- * a live agent's preset-scoped registry wins, a cold session's preset rides a standing scope
- * lease on the global registry, and neither leaves it unscoped — where the card renders unenriched. */
+/** The registry and scope one catalog read resolves to (mirroring the harness's skill-catalog.ts): a live agent's preset-scoped registry
+ * wins, a cold session's preset rides a standing scope lease, and neither leaves it unscoped. */
 async function resolveRegistry(
   ctx: Context,
   sessionId: string | undefined,
@@ -138,8 +127,7 @@ async function resolveRegistry(
   return { registry: registry as unknown as SkillRegistryLike, scope, lease }
 }
 
-/** Serve the catalog route whenever the connection service composes; every harness face is read
- * through request-time re-proved `ctx.get`s, so a missing subsystem answers `null`. */
+/** Serve whenever `connection` composes; every harness face is re-proved per request, so a missing subsystem answers null. */
 export function watchSkillCatalog(ctx: Context, coldReads: ColdReadGate): void {
   ctx.inject(['connection'], (c) => {
 

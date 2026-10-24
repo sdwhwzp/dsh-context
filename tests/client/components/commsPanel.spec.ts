@@ -1,6 +1,3 @@
-// CommsPanel — the on-demand cross-session message scan: the trigger, progress, staleness,
-// per-agent filtering, and the merged timeline.
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test, vi, expect } from 'vitest'
@@ -150,9 +147,7 @@ describe('CommsPanel — the timeline', () => {
     })))
     assert.ok(text(odd.container).includes('a brand-new phrasing'))
     await odd.unmount()
-    // The mailbox row names its sender.
     assert.ok(text(rows[2]).includes('lead'))
-    // The truncation note rides any landed detail's flag.
     assert.ok(text(m.container).includes(DICT_EN['fleet.comms.truncated']))
 
     const peers = queryAll(rows[0], '.lc-comms-peer')
@@ -165,7 +160,6 @@ describe('CommsPanel — the timeline', () => {
   test('the agent filter narrows the rows', async () => {
     const m = await mount(h(CommsPanel, propsOf({ details: detailsOf({ landed: landedAll, scanned: scannedAll }) })))
     const select = query(m.container, 'select') as HTMLSelectElement
-    // The filter lists every involved agent plus the all entry.
     assert.ok(text(select).includes('Main Agent'))
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, 'root')
@@ -198,7 +192,6 @@ describe('CommsPanel — the timeline', () => {
       pickId: 'root',
       onPickClear: () => { clears.push(true) },
     })))
-    // The pick governs: the dropdown steps aside, the chip names the label.
     assert.equal(queryAll(m.container, 'select').length, 0)
     assert.equal(queryAll(m.container, '.lc-comms-row').length, 3)
     assert.ok(text(query(m.container, '.lc-tasks-filter')).includes('Main Agent'))

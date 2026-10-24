@@ -1,12 +1,8 @@
-// Placement gating (src/client/placement.ts): the mounts follow the `defaultPlacement` preference — both, the tab
-// only, or the sidebar only — and a flip disposes exactly what the new value drops.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { createContextSettings } from '../../src/client/settings'
 import { watchPlacement } from '../../src/client/placement'
 
-/** A mount factory counting its mounts and the disposer calls it received. */
 function mountSpy(): { factory: () => () => void; mounted: () => number; disposed: () => number } {
   let mountedCount = 0
   let disposedCount = 0
@@ -41,6 +37,29 @@ describe('watchPlacement', () => {
     assert.equal(tab.mounted(), 2, 'the tab comes back')
     assert.equal(tab.disposed(), 1)
     dispose()
+  })
+
+  test("'hide' unwinds both surfaces without remount churn; flipping back mounts both", () => {
+    const settings = createContextSettings()
+    const tab = mountSpy()
+    const sidebar = mountSpy()
+    const dispose = watchPlacement(settings, { tab: tab.factory, sidebar: sidebar.factory })
+    assert.equal(tab.mounted(), 1)
+    assert.equal(sidebar.mounted(), 1)
+
+    settings.set('defaultPlacement', 'hide')
+    assert.equal(tab.disposed(), 1)
+    assert.equal(sidebar.disposed(), 1)
+    settings.set('defaultPlacement', 'hide')
+    assert.equal(tab.mounted(), 1, 'a hidden panel entry never churns')
+    assert.equal(sidebar.mounted(), 1)
+
+    settings.set('defaultPlacement', 'all')
+    assert.equal(tab.mounted(), 2)
+    assert.equal(sidebar.mounted(), 2)
+    dispose()
+    assert.equal(tab.disposed(), 2)
+    assert.equal(sidebar.disposed(), 2)
   })
 
   test("'all' restores both; unrelated preference changes never remount", () => {
@@ -91,11 +110,9 @@ describe('watchPlacement', () => {
     dispose()
     assert.equal(tab.disposed(), 1)
     assert.equal(sidebar.disposed(), 1)
-    // The store subscription is gone: a later flip reaches no mount.
     settings.set('defaultPlacement', 'sidebar')
     assert.equal(tab.mounted(), 1)
     assert.equal(sidebar.mounted(), 1)
-    // The disposer is safe to repeat.
     assert.doesNotThrow(dispose)
     assert.equal(tab.disposed(), 1, 'no double unwind')
   })
@@ -115,18 +132,15 @@ describe('watchPlacement', () => {
     let tabs = 0
     let sidebars = 0
     watchPlacement(settings, {
-      // A face that seats the seat but hands back no disposer (a stripped or foreign `slots`).
       tab: () => { tabs += 1; return undefined },
       sidebar: () => { sidebars += 1; return undefined },
     })
     assert.equal(tabs, 1)
     assert.equal(sidebars, 1)
-    // Unrelated preference publishes leave the mounted sides alone.
     settings.set('defaultGranularity', 'turn')
     settings.set('defaultPlacement', 'tab')
     assert.equal(tabs, 1, 'the tab is never mounted twice')
     assert.equal(sidebars, 1, 'the sidebar unwound once and does not come back on its own')
-    // The dropped side can come back, and comes back exactly once.
     settings.set('defaultPlacement', 'all')
     assert.equal(tabs, 1)
     assert.equal(sidebars, 2)

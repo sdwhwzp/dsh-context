@@ -1,6 +1,3 @@
-// host/toolSources.ts — best-effort tool-to-plugin attribution: MCP server recovery from the `mcp__`
-// prefix and the pinned first-party map. (A logged `plugin` field passes through headers.ts first.)
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import {

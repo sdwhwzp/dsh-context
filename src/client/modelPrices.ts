@@ -1,11 +1,3 @@
-/**
- * The client's model-price book: the models.dev registry through the official
- * @opencode-ai/models SDK. The payload is untrusted wire input, so
- * `pricesBookOf` re-proves every field and a non-conforming entry drops whole.
- * One fetch per page load, kicked on first subscribe; a failure shows a visible
- * state with a backed-off retry, never a spinner or an unhandled rejection.
- */
-
 import { Models } from '@opencode-ai/models'
 import { useSyncExternalStore } from 'react'
 import { asRecord } from './services'
@@ -16,9 +8,7 @@ function rateOf(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
 }
 
-/** Extract the registry's per-model USD rates from a delivered providers payload
- * (`/api.json`) and build the resolution index over it. Any shape failure skips
- * that entry; a payload that is not a record returns null (a failed fetch). */
+/** Extract the registry's per-model USD rates and build the resolution index; a non-record payload returns null (a failed fetch). */
 export function pricesBookOf(value: unknown): ModelBook | null {
   const data = asRecord(value)
   if (data === null || Array.isArray(data)) return null
@@ -70,14 +60,12 @@ let timer: ReturnType<typeof setTimeout> | null = null
 const listeners = new Set<() => void>()
 
 function fail(): void {
-  // fail() runs exactly once per fetch cycle (only fire() calls it, and both
-  // fire() callers are blocked while a timer is armed), so re-arming cannot leak.
+  // Runs once per fetch cycle: both fire() callers are blocked while a timer is armed, so re-arming cannot leak.
   snap = { ...snap, failed: true }
   failures++
   timer = setTimeout(() => {
     timer = null
-    // Nobody reads the book anymore (the panel that subscribed is gone): end the
-    // cycle instead of polling an unreachable registry for the page's whole life.
+    // Nobody reads the book anymore: end the cycle instead of polling for the page's whole life.
     if (listeners.size === 0) return
     void fire()
   }, RETRY_BASE_MS * 2 ** Math.min(failures - 1, 3))
@@ -115,7 +103,6 @@ export const subscribeModelPrices = (fn: () => void): (() => void) => {
 
 export const getModelPricesSnap = (): ModelPricesSnap => snap
 
-/** The stats board's read of the price book. */
 export function useModelPrices(): ModelPricesSnap {
   return useSyncExternalStore(subscribeModelPrices, getModelPricesSnap)
 }

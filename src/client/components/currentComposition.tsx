@@ -37,7 +37,6 @@ export function makeCurrentComposition(
           </span>
           {head.pct !== null ? (
             <span className="lc-overview-pct">
-              {/* One decimal: the card's reading of the kernel's occupancy percent (headline.ts). */}
               <b>{`${head.pct.toFixed(1)}%`}</b>
               {t('overview.used')}
             </span>

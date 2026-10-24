@@ -61,7 +61,6 @@ describe('ContextBrowser block map', () => {
     assert.equal(btn.getAttribute('aria-pressed'), 'true')
     assert.ok(btn.className.includes('lc-br-map-btn-on'))
     assert.ok(query(m.container, '.lc-map') !== null)
-    // Regions in size order: tool results, the system prompt, tool schemas, assistant, user, injections.
     assert.deepEqual(regions(m).map(r => queryAll(r, '.lc-map-cat-label')[0]?.textContent ?? '(no head)'), [
       'Tool Results', 'System Prompt', 'Tool Schemas', 'Assistant Messages', 'User Messages', '(no head)',
     ])
@@ -82,7 +81,6 @@ describe('ContextBrowser block map', () => {
     // The injections region is too shallow for its figure: label only, no token line.
     const notice = blockByText(m, 'Notice')
     assert.equal(queryAll(notice, '.lc-map-num').length, 0)
-    // The system region holds one block naming the prompt itself.
     assert.equal(text(blockByText(m, 'System Prompt')).includes('≈100'), true)
     await m.unmount()
   })
@@ -94,7 +92,6 @@ describe('ContextBrowser block map', () => {
     assert.ok(catRow(m, 'tool').className.includes('lc-br-cat-open'))
     assert.equal(query<HTMLInputElement>(m.container, '.lc-br-tool-search').value, 'bash')
     assert.equal(elemRows(m).length, 2)
-    // The block's own category region stays framed while the category is open.
     assert.ok(regionByHead(m, 'Tool Results').className.includes('lc-map-cat-open'))
     await m.unmount()
   })
@@ -153,13 +150,11 @@ describe('ContextBrowser block map', () => {
     assert.ok(bash.className.includes('lc-map-block-on'))
     assert.deepEqual(hovers, ['tool'])
 
-    // Moving to a region head switches the bubble to the whole category.
     const sysHead = query(regionByHead(m, 'System Prompt'), '.lc-map-cat-head')
     await hover(sysHead)
     assert.deepEqual(tipRows(query(m.container, '.lc-map-tip')), ['System Prompt', '≈100 · 18% of used context', '1 Items'])
     assert.deepEqual(hovers, ['tool', 'system'])
 
-    // The incoming shared hover lights the matching region.
     assert.ok(regionByHead(m, 'System Prompt').className.includes('lc-map-cat-on'))
     await unhover(query(m.container, '.lc-map'))
     assert.ok(!query(m.container, '.lc-map-tip').className.includes('lc-map-tip-on'))
@@ -175,7 +170,6 @@ describe('ContextBrowser block map', () => {
     assert.ok(query(m.container, '.lc-map-tip').className.includes('lc-map-tip-on'))
     await unhover(query(m.container, '.lc-map'))
     assert.ok(!query(m.container, '.lc-map-tip').className.includes('lc-map-tip-on'))
-    // A region head hover works standalone as well.
     await hover(query(regionByHead(m, 'System Prompt'), '.lc-map-cat-head'))
     assert.deepEqual(tipRows(query(m.container, '.lc-map-tip'))[0], 'System Prompt')
     await unhover(query(m.container, '.lc-map'))
@@ -198,7 +192,6 @@ describe('ContextBrowser block map', () => {
     assert.ok(query(m.container, '.lc-map-tip').className.includes('lc-map-tip-on'), 'the local bubble still works')
     await hover(blockByText(m, '#2'))
     assert.deepEqual(hovers, [])
-    // The incoming category mirror still lights the matching region's frame.
     await m.update(wired({ hoverKey: 'tool' }))
     assert.ok(regionByHead(m, 'Tool Results').className.includes('lc-map-cat-on'))
     await m.unmount()
@@ -228,17 +221,13 @@ describe('ContextBrowser block map', () => {
     pinRect(tip, 300)
     await m.update(h(Browser, props({ data: mapData(), headers: mapHeaders })))
 
-    // Leftmost block: the bubble overhangs the left edge and is shifted right.
     await hover(blockByText(m, 'bash'))
     assert.ok(/translateX\(calc\(-50% \+ \d+px\)\)/.test(tip.style.transform), `left-clamped: ${tip.style.transform}`)
-    // The rightmost region's block (too small for text): shifted left instead.
     const rightmost = regions(m).reduce((a, b) => (parseFloat(a.style.left) > parseFloat(b.style.left) ? a : b))
     await hover(query(rightmost, '.lc-map-block'))
     assert.ok(/translateX\(calc\(-50% - \d+px\)\)/.test(tip.style.transform), `right-clamped: ${tip.style.transform}`)
-    // Dropping the hover while shifted resets the shift along with the bubble.
     await unhover(wrap)
     assert.equal(tip.style.transform, '')
-    // A mid-panel block with a narrower bubble fits: no shift, and far enough from the top to hang ABOVE its block.
     pinRect(tip, 60)
     await hover(blockByText(m, '#5'))
     assert.equal(tip.style.transform, 'translateX(-50%) translateY(-100%)')

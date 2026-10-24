@@ -1,6 +1,3 @@
-// The supported log dialect (dsh 0.1.7-rc.2+, session format V4) read by the real fold: the seam each
-// event family carries, plus the hostile shapes a durable log may hold. No mocks.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { estimateSystemContent } from '../../src/shared/estimate'
@@ -99,9 +96,8 @@ describe('system/message — the system prompt as a surface node', () => {
   })
 
   test('a system/message expires an armed shadow claim (the shadow-price protocol)', () => {
-    // The claim is armed by the metering event and consumed by the NEXT surface
-    // event: a system node settling in between must expire it, so a later
-    // APPEND does not silently remove the seqs the claim named.
+    // The claim is armed by the metering event and consumed by the NEXT surface event: a system node settling
+    // in between must expire it, so a later APPEND does not silently remove the seqs the claim named.
     const { state } = driveTimeline([
       userMessage(1, text('a'), { kind: 'user' }),
       { type: 'compaction/summary', seq: 2, time: 2000, data: { shadowedSeqs: [1], shadowedTokenCount: 9 } },
@@ -191,12 +187,9 @@ describe('embedded assistant stream — the first-token source', () => {
 
   test('an attempt without a token, without a slot, or over a stamped slot is uninteresting', () => {
     const def = timelineDef()
-    // No slot armed.
     assertStable(def.init(), assistantAttempt(1, { turn: 1, step: 1, stream: [token(100)] }), def)
-    // Slot armed but the stream carries no token.
     const armed = def.apply(def.init(), stepStart(1, { time: 1000 }))
     assertStable(armed, assistantAttempt(2, { turn: 1, step: 1, stream: [{ type: 'chunk', time: 1, chunk: { type: 'finish' } }] }), def)
-    // Slot already stamped (the step's earlier attempt got there first).
     const stamped = def.apply(armed, assistantAttempt(2, { turn: 1, step: 1, stream: [token(1200)] }))
     assertStable(stamped, assistantAttempt(3, { turn: 1, step: 1, stream: [token(1100)] }), def)
   })

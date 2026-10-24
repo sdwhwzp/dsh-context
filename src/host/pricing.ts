@@ -1,10 +1,6 @@
-/**
- * Token pricing — the harness token-meter's fixed-density heuristic
- * (`dsh-token-meter/estimate.ts`): 4 chars ≈ 1 token, +4 per content block, +4 role framing.
- *
- * One divergence: `image` blocks price by pixel dimensions through the vision docs calculator
- * (shared/imageTokens.ts), falling back to the meter's JSON price.
- */
+/** Token pricing: the harness token-meter's fixed-density heuristic (`dsh-token-meter/estimate.ts`) — 4 chars ≈ 1
+ * token, +4 per content block, +4 role framing. One divergence: `image` blocks price by pixel dimensions through the
+ * vision docs calculator (shared/imageTokens.ts), falling back to the meter's JSON price. */
 
 import { estimateTextTokens } from '../shared/estimate'
 import { estimateImageTokens } from '../shared/imageTokens'
@@ -65,8 +61,8 @@ function estimateBlocks(blocks: unknown): number {
   return tokens
 }
 
-/** Price one surface message exactly like dsh's meter: an empty-content assistant/developer event
- * projects to NO message, so it prices 0. */
+/** Price one surface message exactly like dsh's meter: an empty-content assistant/developer event projects to NO message, so it prices 0.
+ */
 export function estimateMessage(message: { content?: ContentBlock[] } | undefined | null, emptyIsZero = false): number {
   if (emptyIsZero && (message === null || message === undefined
     || !Array.isArray(message.content) || message.content.length === 0)) {
@@ -80,8 +76,7 @@ export function estimateToolSchema(tool: unknown): number {
   return Math.ceil(JSON.stringify(tool).length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
 }
 
-/** Count image blocks recursively; seeds each node's `imgs`, which the stats board sums over the
- * LIVE surface (compacted messages stop counting). */
+/** Count image blocks recursively; seeds each node's `imgs`, summed over the LIVE surface only. */
 export function imageCountOf(blocks: unknown): number {
   let count = 0
   if (!Array.isArray(blocks)) return 0
@@ -128,8 +123,8 @@ export interface MessageSource {
   changes?: ({ path?: string } | null)[]
 }
 
-/** Producer label for an injection event, mirroring the dsh transcript's context provenance:
- * workspace instructions name their reconciled files, a plugin source its id, any other producer its durable kind. */
+/** Producer label for an injection event, mirroring the dsh transcript's context provenance: workspace instructions name their reconciled
+ * files, a plugin source its id, any other producer its durable kind. */
 export function injectionSourceName(source: MessageSource | null | undefined): string {
   if (source?.kind === 'agent-instructions' && Array.isArray(source.changes)) {
     const paths: string[] = []
@@ -146,9 +141,8 @@ export function injectionSourceName(source: MessageSource | null | undefined): s
 }
 
 export function isInjection(source: MessageSource | null | undefined): source is MessageSource {
-  // Mirrors the dsh transcript's classification (conversation-nodes/message.ts): a user/message
-  // is injected context when its durable source kind is anything but 'user' ('user-rpc' keeps
-  // kind 'user'); the form check covers a foreign source with no readable kind.
+  // Mirrors the dsh transcript's classification (conversation-nodes/message.ts): injected context is any durable source kind but 'user'
+  // ('user-rpc' keeps kind 'user'); the form check covers a foreign source with no kind.
   return source !== null && source !== undefined
     && ((typeof source.kind === 'string' && source.kind !== '' && source.kind !== 'user')
       || typeof source.form === 'string')

@@ -1,5 +1,3 @@
-// fleetModel.ts — the shared family model seat and the fleet-detail read ledger.
-
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test, vi } from 'vitest'
@@ -64,7 +62,6 @@ describe('commsStaleOf', () => {
   })
 })
 
-/** A probe component exposing the hook's value to the test. */
 describe('useFleetModel', () => {
   function sessionsFace(byId: Record<string, unknown>, refreshed: string[]) {
     // The snapshot object must stay reference-stable across reads: useSyncExternalStore loops on a fresh one.
@@ -171,10 +168,8 @@ describe('useFleetDetails', () => {
     assert.equal(box.current?.pending.size, 0)
     assert.equal(box.current?.landed.get('a')?.detail?.initialPrompt, 'prompt of a')
 
-    // Same or older stamp: no new read.
     act(() => { state.request('a', 1) })
     assert.equal(box.current?.pending.size, 0)
-    // A newer stamp refetches.
     act(() => { state.request('a', 2) })
     await act(async () => {})
     assert.equal(box.current?.landed.get('a')?.updatedAt, 2)
@@ -189,12 +184,9 @@ describe('useFleetDetails', () => {
     const m = await mount(h(Probe))
     const state = box.current as FleetDetailState
 
-    // A fresher stamp mid-flight re-reads but never double-marks pending.
     act(() => { state.request('a', 1) })
     act(() => { state.request('a', 2) })
     assert.equal(box.current?.pending.size, 1)
-    // The older read lands first: pending drains (the newer read is untracked by design — its
-    // landing settles the ledger line), then the newer read's landing takes the newer stamp.
     await act(async () => { releases[0](null) })
     assert.equal(box.current?.pending.size, 0)
     assert.equal(box.current?.landed.get('a')?.updatedAt, 1)
@@ -274,7 +266,6 @@ describe('useFleetDetails', () => {
 
     act(() => { state.requestFull('a') })
     assert.equal(box.current?.fullPending.has('a'), true)
-    // A second ask is deduped to the same single read.
     act(() => { state.requestFull('a') })
     await act(async () => {})
     assert.equal(fullReads, 1)
@@ -290,8 +281,6 @@ describe('useFleetDetails', () => {
     vi.spyOn(cache, 'fetch').mockImplementation((_id: string, _stamp: number, full?: boolean) => {
       if (full !== true) return Promise.resolve(null)
       fullReads += 1
-      // A transport failure settles as null inside the cache (its own catch); the hook's
-      // contract is a total promise.
       return Promise.resolve(null)
     })
     const { box, Probe } = probeDetails(cache)
@@ -318,19 +307,15 @@ describe('useFleetDetails', () => {
     const m = await mount(h(Probe))
     const state = box.current as FleetDetailState
 
-    // The excerpt arms the stamp the full read rides; the fold's read spells from it.
     act(() => { state.request('a', 5) })
     await act(async () => {})
     act(() => { state.requestFull('a') })
-    // A refresh released the ledger line mid-flight; the next unfold asks again — two reads
-    // in flight, one pending mark.
     act(() => { state.refresh([nodeOf('a', { updatedAt: 5 })]) })
     act(() => { state.requestFull('a') })
     assert.equal(releases.length, 2)
     assert.equal(box.current?.fullPending.size, 1)
 
-    // Both flights settle on the SAME value (a cache-hit replay): the first landing writes the
-    // map; the second's identity bail-out writes nothing new.
+    // Both flights settle on the SAME value (a cache-hit replay): the second landing's identity bail-out writes nothing.
     const landed: FleetDetail = { messages: [], truncated: false, lastReply: { time: 1, text: 'first' } }
     await act(async () => { releases[0]!(landed) })
     assert.equal(box.current?.fullLanded.get('a')?.lastReply?.text, 'first')

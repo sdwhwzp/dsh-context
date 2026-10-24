@@ -1,6 +1,3 @@
-/** The dsh-context preference card, keyed on the Host-served `dsh-context` namespace: while that namespace is
- * unavailable (a deployment without the Host half, or a remote browser) the card renders nothing. */
-
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import { IconChevronDown } from '../primitives'
@@ -62,15 +59,13 @@ interface PromptTextRowProps {
   onCommit: (text: string) => void
 }
 
-/** One free-text preference row: a local draft committed on blur (and on an
- *  unmount without a prior blur), so typing never writes the wire per keystroke. */
+/** Local draft committed on blur (and on unmount without a prior blur), so typing never writes the wire per keystroke. */
 function PromptTextRow(props: PromptTextRowProps): ReactElement {
   const [draft, setDraft] = useState(props.value)
   const [focused, setFocused] = useState(false)
   const latest = useRef({ draft: props.value, value: props.value, commit: props.onCommit })
   latest.current = { draft, value: props.value, commit: props.onCommit }
-  // Follow the served value only while the row is idle: a host push (or the
-  // optimistic echo) must never clobber in-progress typing.
+  // Follow the served value only while the row is idle: a host push must never clobber in-progress typing.
   if (!focused && draft !== props.value) setDraft(props.value)
   useEffect(() => () => {
     const { draft: text, value, commit } = latest.current
@@ -97,7 +92,6 @@ function PromptTextRow(props: PromptTextRowProps): ReactElement {
   )
 }
 
-/** The three on/off gates (entry visibility, the Fleet tab, the trend duration curve) share one row shape. */
 function ShowHideRow(props: { t: Translate; label: string; value: string; disabled: boolean; onPick: (id: string) => void }): ReactElement {
   return (
     <PrefRow
@@ -113,9 +107,7 @@ function ShowHideRow(props: { t: Translate; label: string; value: string; disabl
   )
 }
 
-/** One titled preference group: the harness projects no group chrome into the
- *  `plugins.bundle.config` slot, so the card draws its own — a small heading over
- *  its rows, a hairline separating the groups. */
+/** The harness projects no group chrome into `plugins.bundle.config`, so the card draws its own group head. */
 function Group(props: { title: string; children: ReactNode }): ReactElement {
   return (
     <div className="lc-settings-group" role="group" aria-label={props.title}>
@@ -139,6 +131,7 @@ function PreferenceRows(props: { t: Translate; state: SettingsState; set?: Setti
             { id: 'all', label: t('placement.all') },
             { id: 'tab', label: t('placement.tab') },
             { id: 'sidebar', label: t('placement.sidebar') },
+            { id: 'hide', label: t('placement.hide') },
           ]}
           onPick={(id) => { set?.('defaultPlacement', id) }}
         />
@@ -221,6 +214,7 @@ function PreferenceRows(props: { t: Translate; state: SettingsState; set?: Setti
           disabled={disabled}
           options={[
             { id: 'count', label: t('files.sort.count') },
+            { id: 'lines', label: t('files.sort.lines') },
             { id: 'latest', label: t('files.sort.latest') },
             { id: 'path', label: t('files.sort.path') },
             { id: 'name', label: t('files.sort.name') },
@@ -249,7 +243,7 @@ function PreferenceRows(props: { t: Translate; state: SettingsState; set?: Setti
   )
 }
 
-/** The Plugins page owns the bundle's page and section chrome, so the rows render flat; unserved or absent degrades to nothing. */
+/** The Plugins page owns the page/section chrome, so rows render flat; unserved or absent degrades to nothing. */
 export function makePluginConfigCard(kit: ViewKit): (props: SettingsCardProps) => ReactElement | null {
   const { t } = kit
   return function PluginConfigCard(props: SettingsCardProps): ReactElement | null {

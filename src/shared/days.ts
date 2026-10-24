@@ -1,14 +1,12 @@
-/** The local-day key (`YYYY-MM-DD`) shared by the activity fold (host) and the overview heatmap
- * (client): both halves bucket by the machine's OWN local day, so folded keys and browser cells
- * speak the same calendar. Lexicographic order on the key IS chronological order — the fold's
- * retention cap and the heatmap's week math ride that. */
+/** The local-day key (`YYYY-MM-DD`) both halves bucket by; lexicographic order on it IS chronological order (the retention cap and week
+ * math ride that). */
 
 export const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
 
 export const MONTH_KEY_RE = /^\d{4}-\d{2}$/
 
-/** The local day key of an epoch-ms instant; null outside the finite/representable range —
- * untrusted log data cannot produce a garbage key. */
+/** The local day key of an epoch-ms instant; null outside the finite/representable range, so untrusted log data cannot produce a garbage
+ * key. */
 export function dayKeyOf(time: number): string | null {
   if (!Number.isFinite(time)) return null
   const d = new Date(time)
@@ -28,8 +26,8 @@ function dateOfDayKey(key: string): Date | null {
   return date
 }
 
-/** Advance a day key by `delta` local days; date-field arithmetic keeps DST-short/long days
- * exact (an epoch-ms add would drift an hour across the day boundary). */
+/** Advance a day key by `delta` local days; date-field arithmetic keeps DST-short/long days exact (an epoch-ms add would drift across the
+ * boundary). */
 export function shiftDayKey(key: string, delta: number): string | null {
   const date = dateOfDayKey(key)
   if (date === null) return null
@@ -62,7 +60,6 @@ export function endOfDayKey(key: string): number | null {
   return date.getTime()
 }
 
-/** Shift a month key by `delta` months (local); null on a malformed key or a target outside 1970-9999. */
 export function shiftMonthKey(month: string, delta: number): string | null {
   if (!MONTH_KEY_RE.test(month)) return null
   const year = Number(month.slice(0, 4))
@@ -74,7 +71,6 @@ export function shiftMonthKey(month: string, delta: number): string | null {
   return `${String(y).padStart(4, '0')}-${String(total - y * 12 + 1).padStart(2, '0')}`
 }
 
-/** One month as Sunday-first weeks of day keys, null-padded to seven cells per week; null for a malformed key. */
 export function monthGridOf(month: string): (string | null)[][] | null {
   const first = `${month}-01`
   const lead = weekdayOf(first)

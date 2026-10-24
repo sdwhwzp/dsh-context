@@ -1,8 +1,5 @@
-/**
- * The Fleet tab's overview strip — family-wide stats (agents, running, done, context tokens, cost
- * estimate) with one progress bar whose semantics follow the session shape: the team's shared
- * tasks when they exist, else the subagents' completion, and no bar at all for a solo session.
- */
+/** Fleet overview strip: family-wide stats; the progress bar follows the team's shared tasks when present, else
+ * subagent completion, and stays absent for a solo session. */
 
 import type { ReactElement } from 'react'
 import type { AgentForest } from '../agentTree'

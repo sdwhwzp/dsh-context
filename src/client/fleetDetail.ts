@@ -1,13 +1,3 @@
-/**
- * The client half of the Fleet detail route (`/api/dsh-context/fleet`, host/fleet.ts): a
- * sanitizing fetcher, a page-scope promise ledger keyed by session id, and the cross-session
- * merge that turns per-session message lists into the comms panel's timeline.
- *
- * One in-flight-or-settled read per session at the row's latest `updatedAt`: a session that
- * moved since its read landed refetches once, so a pinned agent's inspector tracks its live log
- * without polling, and a broken session never retries per render.
- */
-
 import type { FleetDetail, FleetDescriptor, FleetMemberInfo, FleetMessage } from '../shared/types'
 import { FLEET_ROUTE } from './apiRoutes'
 import { asRecord, numOf } from './services'
@@ -21,7 +11,7 @@ function descriptorOf(value: unknown): FleetDescriptor | undefined {
   if (rec === null) return undefined
   if (rec.mode !== 'one-shot' && rec.mode !== 'continuable') return undefined
   const out: FleetDescriptor = { mode: rec.mode }
-  for (const key of ['label', 'provider', 'agentProvider', 'agentModel', 'persona'] as const) {
+  for (const key of ['label', 'provider', 'agentProvider', 'agentModel', 'agentReasoningEffort', 'persona'] as const) {
     const v = strings(rec[key])
     if (v !== undefined) out[key] = v
   }
@@ -60,8 +50,6 @@ function rosterMemberOf(value: unknown): FleetMemberInfo | null {
   }
 }
 
-/** Narrow the route's payload; a record failing the wire shape degrades to null (the caller's
- * absence path), and malformed entries drop alone. */
 export function fleetDetailOf(value: unknown): FleetDetail | null {
   const rec = asRecord(value)
   if (rec === null) return null
@@ -93,8 +81,7 @@ export function fleetDetailOf(value: unknown): FleetDetail | null {
   }
 }
 
-/** The route reader; failures and malformed payloads reject so the caller arms its retry.
- * `full` requests the unclipped prompt/reply (the task card's opened read). */
+/** Failures reject so the caller arms its retry; `full` asks for the unclipped prompt/reply. */
 export function makeFleetDetailFetcher(
   sessionId: string,
   full = false,
@@ -121,10 +108,8 @@ interface FleetDetailEntry {
   pending: Promise<FleetDetail | null>
 }
 
-/** The page-scope read ledger. `fetch` dedupes per (id, updatedAt): same stamp returns the same
- * promise, a NEWER stamp refetches once, and a settled failure stays cached so a broken session
- * never hammers the route per render. The `full` ledger runs beside the excerpt one — the task
- * board's opened card fetches unclipped prompt/reply on demand, and the scan never pays for it. */
+/** Reads dedupe per (id, `updatedAt`): a NEWER stamp refetches once, and a settled failure stays cached so a
+ * broken session never hammers the route; the `full` ledger runs beside the excerpt one. */
 export class FleetDetailCache {
   private readonly entries = new Map<string, FleetDetailEntry>()
   private readonly fullEntries = new Map<string, FleetDetailEntry>()
@@ -141,7 +126,6 @@ export class FleetDetailCache {
     return pending
   }
 
-  /** Drop one session's ledger line so the next `fetch` reads again (the comms panel's refresh). */
   invalidate(id: string): void {
     this.entries.delete(id)
     this.fullEntries.delete(id)
@@ -174,7 +158,6 @@ export function settledVariantOf(text: string): SettledVariant | null {
   return null
 }
 
-/** Merge every landed session detail's messages into one newest-first timeline. */
 export function mergeComms(details: ReadonlyMap<string, FleetDetail>): CommsRow[] {
   const rows: CommsRow[] = []
   for (const [to, detail] of details) {

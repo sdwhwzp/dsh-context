@@ -1,6 +1,3 @@
-// The attachment-location route (src/host/attachment.ts): session-authorized named-path resolution
-// for verbatim file attachments, plus the route's gating/transport behavior.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
@@ -83,7 +80,6 @@ const BARE_IMAGE_EVENT = {
   data: { content: [{ type: 'image', attachment: { attachmentId: 'sha256:i2' } }] },
 }
 
-/** The screenshot session's own content: three verbatim files, then an image, then the text. */
 const USER_EVENT = {
   type: 'user/message',
   seq: 9,
@@ -121,7 +117,6 @@ describe('referencedAttachmentOf', () => {
       referencedAttachmentOf([USER_EVENT], 'sha256:f1'),
       { kind: 'file', attachmentId: 'sha256:f1', name: 'report.md', bytes: 47320 },
     )
-    // A tool result's own content, and a nested block inside it.
     assert.deepEqual(
       referencedAttachmentOf([
         { type: 'tool/result', seq: 2, time: 2, data: { message: { content: [{ type: 'image', attachment: { attachmentId: 'sha256:i9', width: 1, height: 1 } }] } } },
@@ -139,7 +134,6 @@ describe('referencedAttachmentOf', () => {
       ], 'sha256:i10'),
       { kind: 'image', attachmentId: 'sha256:i10', width: 2, height: 2 },
     )
-    // A spliced inbox delivery, before its user/message materializes.
     assert.deepEqual(
       referencedAttachmentOf([
         { type: 'agent/inbox/spliced', seq: 4, time: 4, data: { target: 'next-turn', inserted: [{ content: [{ type: 'file', attachment: { attachmentId: 'sha256:f9', name: 'delivered.md', bytes: 7 } }] }] } },
@@ -153,7 +147,6 @@ describe('referencedAttachmentOf', () => {
     let deep: Record<string, unknown> = { type: 'file', attachment: { attachmentId: 'sha256:deep', name: 'x.md', bytes: 1 } }
     for (let i = 0; i < 10; i++) deep = { nest: deep }
     assert.equal(referencedAttachmentOf([{ type: 'user/message', data: deep }], 'sha256:deep'), null)
-    // An object that throws on the walk drops that event, and the next one still serves.
     const hostile = new Proxy({}, { ownKeys() { throw new Error('hostile payload') } })
     assert.equal(referencedAttachmentOf([{ type: 'x', data: hostile }], 'sha256:f1'), null)
     assert.deepEqual(

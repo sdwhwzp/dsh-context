@@ -1,11 +1,8 @@
-// Per-baseline harness client faces (tests/baselines.ts): the in-memory service implementations a given dsh
-// generation actually serves, so the always-on suite can drive the plugin's client half through each baseline's
-// seams. The real-code complement runs in the `compat` vitest project.
+// Per-baseline client faces: the in-memory services a dsh generation serves, driving the plugin's client half.
 
 import { TestClientCtx } from '../helpers/harness'
 import type { ConversationNodeLike, UseChatLike } from '../../../src/client/services'
 
-/** A finalized conversation-node window (the seats' currency). */
 export function convNodes(): ConversationNodeLike[] {
   return [
     { kind: 'user', seq: 4, content: [{ type: 'text', text: 'window node hello' }] },
@@ -13,12 +10,10 @@ export function convNodes(): ConversationNodeLike[] {
   ]
 }
 
-/** A `useChat`-shaped hook over a ChatSnapshot (`legacy.nodes`). */
 export function chatSeat(nodes: readonly ConversationNodeLike[] | undefined): UseChatLike {
   return selector => selector({ legacy: { nodes } })
 }
 
-/** The durable log events the history page builders map (one user message). */
 function historyEvents(): unknown[] {
   return [
     {
@@ -32,11 +27,7 @@ function historyEvents(): unknown[] {
   ]
 }
 
-/** Arm a test ctx with the harness service faces the way the generation
- * composes them: the gateway remotes (the traced `remote` facade carrying
- * the session page, plus the direct `remote.session` service whose
- * undeclared reads throw) and the durable-image loader service. Arm the
- * plugin's declared inject (`watchHistoryFaces`) to resolve the page face. */
+/** Arm the ctx with the generation's faces: `remote` page facade, throwing `remote.session`, image loader. */
 export function baselineCtx(): { ctx: TestClientCtx; calls: { page: unknown[]; image: { sessionId: string; attachment: unknown }[] } } {
   const ctx = new TestClientCtx()
   const calls: { page: unknown[]; image: { sessionId: string; attachment: unknown }[] } = { page: [], image: [] }

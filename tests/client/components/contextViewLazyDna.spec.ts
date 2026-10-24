@@ -9,7 +9,7 @@ import { buttonByText, makeView, projectionsFor, settingsWith, T0, timeline } fr
 
 const kit = makeKit()
 
-/** The view with the auto-overview threshold off, so a 600-step log stays on the bars face from the first commit. */
+/** Auto-overview off, so the 600-step log stays on the bars face. */
 function makeViewNoAutoOverview() {
   return makeView(new TestClientCtx(), settingsWith({ overviewAutoSteps: 'off' }))
 }
@@ -66,7 +66,6 @@ describe('ContextView lazy DNA bands', () => {
       await act(async () => { buttonByText(m.container, kit.t('trend.dna')).click() })
       await act(async () => { buttonByText(m.container, kit.t('gran.delta')).click() })
       await flush()
-      // Eager bands plus delta mode still render the windowed DNA bars (correct axis needs the full model).
       assert.ok(queryAll(m.container, '.lc-bar-dna').length > 0)
     } finally {
       await m.unmount()

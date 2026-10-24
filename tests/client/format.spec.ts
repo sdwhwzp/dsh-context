@@ -1,5 +1,3 @@
-// Display formatting (src/client/format.ts): the k/M/B suffix style, byte sizes, and locale-safe time/duration/share formatting.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { cacheHitPercent, fmt, fmtBytes, fmtDuration, fmtShare, fmtTime } from '../../src/client/format'

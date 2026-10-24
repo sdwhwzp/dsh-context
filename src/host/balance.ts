@@ -1,50 +1,29 @@
-/**
- * The DeepSeek open-platform BALANCE route — the data behind the Context Insights page's header
- * capsule (client/balance.ts).
- *
- * Reaching the platform's one account endpoint (`GET /user/balance`) needs the API key, which by
- * design never rides to the browser, so the HOST reads it and serves the redacted figures. The
- * credential comes from a DEEPSEEK platform settings row and from no other: the provider
- * directory names the API-key model's own row (so a renamed entry still answers), the platform's
- * web rows are the fallback. The endpoint is the platform ROOT — the account route sits at the
- * API root while the endpoints these rows carry live under a path (`/v1/tools`, `/anthropic`),
- * so only the origin counts, and that origin is the DeepSeek endpoint the deployment already
- * talks to. Any missing fact answers a typed `null`, as does a failed or malformed platform
- * read — the capsule renders nothing rather than a stale figure. Identical reads share one
- * outbound fetch while in flight, and nothing outlives it.
- *
- * The transport is Connection's fetch-route registry through a deferred inject, so load order
- * never matters and a harness without the registry simply never arms the route.
- */
+/** The DeepSeek open-platform balance route: the API key never rides to the browser, so the host reads `GET /user/balance` from the
+ * platform ROOT and serves only redacted figures. Any missing fact answers a typed `null`, and identical in-flight reads share one
+ * outbound fetch. */
 
 import { asRecord } from './record'
 import type { Context } from '@deepseek-ai/cordis'
 import type { PlatformBalance, PlatformBalanceEntry } from '../shared/types'
 import { type ConnectionHostFace, registerPostRoute } from './connection'
 
-/** The plugin's balance route, under the authenticated `/api` fence. */
 export const BALANCE_ROUTE = '/api/dsh-context/balance'
 
-/** The DeepSeek platform's API-key provider route key. The account route registers
- * `deepseek-account` and holds no API key, so it never serves the balance. */
+/** The API-key provider route key: the `deepseek-account` route holds no key and never serves the balance. */
 const DEEPSEEK_PROVIDER = 'deepseek-official'
 
-/** The stock entry ids of the DeepSeek platform's own settings rows: the API-key model row,
- * and the two web rows that carry the same platform credential. */
+/** Stock entry ids of the platform's own settings rows, including the two web rows carrying the same credential. */
 const DEEPSEEK_SETTINGS_IDS = ['llm-deepseek', 'web-deepseek-api', 'web-search-deepseek']
 
-/** The DeepSeek platform's public API root (`GET /user/balance`). */
 const PUBLIC_BASE_URL = 'https://api.deepseek.com'
 
 const FETCH_TIMEOUT_MS = 10_000
 
-/** The harness `settings` service: the Config-form `describe()` projection is the only face served. */
 interface SettingsHostFace {
   describe?(options?: { redactSecrets?: boolean }): unknown
 }
 
-/** The harness `llm` service: the provider directory names the DeepSeek row, so a renamed
- * entry still answers. */
+/** The provider directory names the DeepSeek row, so a renamed entry still answers. */
 interface LlmHostFace {
   listConfigurableProviders?(): unknown
 }
@@ -60,16 +39,12 @@ function amountOf(value: unknown): number | null {
 
 interface DeepSeekFacts { baseUrl: string; apiKey: string }
 
-/** One DeepSeek platform settings row: the credential ref it names, and the endpoint override
- * it carries. */
 interface DeepSeekRow {
   apiKeyEnv: string
   baseURL?: string
 }
 
-/** The settings ids that may serve the platform credential, in the order the facts fold prefers
- * them: the row the provider directory names — the authoritative answer, whatever the entry is
- * called — then the stock ids of the DeepSeek platform's own rows. */
+/** Candidate settings ids in fold order: the row the provider directory names, then the stock ids. */
 function deepseekSettingsIds(ctx: Context): string[] {
   const ids: string[] = []
   const llm = ctx.get('llm') as LlmHostFace | undefined
@@ -96,17 +71,14 @@ function deepseekSettingsIds(ctx: Context): string[] {
   return ids
 }
 
-/** The DeepSeek platform's settings rows, folded from the Config-form `describe()` projection:
- * the credential ref and the endpoint override live at the section root, and only a DeepSeek
- * platform row may serve them. Rows fold in isolation — a hostile row drops whole, valid
- * siblings serve. */
+/** Fold the DeepSeek platform rows from the redacted Config-form `describe()` projection: the credential ref and endpoint override live
+ * at the section root, and a hostile row drops whole while valid siblings serve. */
 function deepseekRowsOf(ctx: Context): DeepSeekRow[] {
   const settings = ctx.get('settings') as SettingsHostFace | undefined
   if (typeof settings?.describe !== 'function') return []
   let rows: unknown
   try {
-    // The projection is read redacted: a row's literal key is a secret this fold has no
-    // use for, and the credential ref it does read is not one.
+    // Read redacted: a row's literal key is a secret this fold has no use for.
     rows = settings.describe({ redactSecrets: true })
   } catch {
     return []
@@ -140,8 +112,7 @@ function deepseekRowsOf(ctx: Context): DeepSeekRow[] {
   return deepseekRows
 }
 
-/** The platform's account root, read off a row's endpoint override: only the origin counts,
- * because the account route sits at the API root while the endpoints carry their own paths. */
+/** Only the ORIGIN counts: the account route sits at the API root while row endpoints carry paths. */
 function platformRootOf(baseURL: string | undefined): string {
   if (baseURL === undefined) return PUBLIC_BASE_URL
   try {
@@ -153,9 +124,7 @@ function platformRootOf(baseURL: string | undefined): string {
   }
 }
 
-/** Resolve the connection facts the platform itself serves requests with; `null` whenever any
- * fact is missing. Each DeepSeek row is tried in turn and the first whose credential resolves
- * serves, so a row without a key never sends a request. */
+/** The first DeepSeek row whose credential resolves serves; `null` when any fact is missing. */
 async function resolveFacts(ctx: Context): Promise<DeepSeekFacts | null> {
   const credentials = ctx.get('credentials') as CredentialsHostFace | undefined
   const resolve = typeof credentials?.resolve === 'function' ? credentials.resolve.bind(credentials) : undefined
@@ -177,9 +146,8 @@ async function resolveFacts(ctx: Context): Promise<DeepSeekFacts | null> {
   return null
 }
 
-/** Narrow the platform's payload to the wire value: the total is the two re-proved parts summed,
- * so the viewer's arithmetic is the authority. An entry failing the shape drops whole, and a
- * payload with no valid entry is no balance at all. */
+/** The total is the two re-proved parts summed, so the viewer's arithmetic is the authority; an entry failing the shape drops whole, and
+ * a payload with no valid entry is no balance at all. */
 export function balanceOfPayload(value: unknown): PlatformBalance | null {
   const data = asRecord(value)
   if (data === null) return null
@@ -221,9 +189,8 @@ export function resetBalance(): void {
   inFlight = null
 }
 
-/** One platform read for these facts, shared by identical reads already in flight; nothing is
- * remembered, since the balance moves with every billed request. Every failure path — transport,
- * timeout, non-ok status, malformed payload — resolves `null`. */
+/** One platform read shared by identical reads already in flight; nothing is remembered, since the balance moves with every billed
+ * request. Every failure path — transport, timeout, non-ok status, malformed payload — resolves `null`. */
 async function readBalance(facts: DeepSeekFacts): Promise<PlatformBalance | null> {
   if (inFlight !== null) return inFlight
   inFlight = (async () => {
@@ -243,13 +210,12 @@ async function readBalance(facts: DeepSeekFacts): Promise<PlatformBalance | null
   try {
     return await settled
   } finally {
-    // The `inFlight !== null` guard makes the settled read's own clear the current value's.
+    // Clear the shared slot so the next read fetches fresh figures.
     inFlight = null
   }
 }
 
-/** Serve the balance route whenever the connection service composes; the registration rides the
- * injected fiber, so unloading withdraws it. */
+/** The registration rides the injected fiber, so unloading withdraws it. */
 export function watchBalanceChannel(ctx: Context): void {
   ctx.inject(['connection'], (c) => {
 

@@ -90,7 +90,6 @@ describe('RequestDetail header', () => {
     assert.ok(!head2.includes('Last Step'))
     await m2.unmount()
 
-    // Requests without turn/step stamps degrade to zeroes.
     const bare: RequestRecord = {
       time: 1_700_000_000_000, seq: 3,
       system: 1, tools: 1, user: 1, inject: 0, assistant: 1, tool: 0, total: 4,
@@ -121,7 +120,6 @@ describe('RequestDetail header', () => {
     assert.ok(text(query(m2.container, '.lc-detail-marker')).includes('T2 S8 → T3 S1'))
     await m2.unmount()
 
-    // Same-request boundary (no from-stamps).
     const m3 = await mount(h(RequestDetail, {
       request: req({}),
       marker: { seq: 9, time: 1, kind: 'compaction', count: 2, turn: 4, step: 2 },
@@ -129,7 +127,6 @@ describe('RequestDetail header', () => {
     assert.ok(text(query(m3.container, '.lc-detail-marker')).includes('✂ T4 S2'))
     await m3.unmount()
 
-    // No turn/step stamps (event in flight) → no marker chip.
     const m4 = await mount(h(RequestDetail, {
       request: req({}),
       marker: { seq: 9, time: 1, kind: 'prune' },
@@ -152,7 +149,6 @@ describe('RequestDetail delta mode', () => {
     assert.ok(head.includes('Delta'), 'delta tag shown')
     assert.ok(!head.includes('Actual'), 'usage chips drop out in delta mode')
     const metric = query(m.container, '.lc-detail-metric')
-    // +50 -50 -100 +100 → net 0 → neutral chip.
     assert.ok(text(metric).includes('Δ 0'))
     assert.ok(!metric.className.includes('lc-detail-metric-up'))
     assert.ok(!metric.className.includes('lc-detail-metric-down'))
@@ -324,27 +320,16 @@ describe('RequestDetail brief section', () => {
 
   test('chipParts cascade: tool/assistant/inject/user kinds and the skill-inject fallback', async () => {
     const inputs: SurfaceNode[] = [
-      // skill: a `skill`-tool load — name tag wins, call summary through the join.
       surfaceNode({ seq: 30, cat: 'skill', skill: 'code-review', tool: 'skill' }),
-      // tool: name tag, no join → no text.
       surfaceNode({ seq: 31, cat: 'tool', tool: 'read' }),
-      // tool: no name, no join → untagged Tool Result placeholder.
       surfaceNode({ seq: 32, cat: 'tool' }),
-      // assistant: text + call list breadcrumb.
       surfaceNode({ seq: 33, cat: 'assistant', calls: ['bash'], text: 'looking' }),
-      // assistant: textless, block summary through the join.
       surfaceNode({ seq: 34, cat: 'assistant', calls: ['write'] }),
-      // assistant: no own calls; the breadcrumb is recovered from the join.
       surfaceNode({ seq: 35, cat: 'assistant' }),
-      // assistant: truly empty reply.
       surfaceNode({ seq: 36, cat: 'assistant', calls: [] }),
-      // inject: plain form with text.
       surfaceNode({ seq: 37, cat: 'inject', form: 'relay', text: 'from agent' }),
-      // inject: form absent → Context Injection.
       surfaceNode({ seq: 38, cat: 'inject', text: 'plain' }),
-      // user: single image, no text.
       surfaceNode({ seq: 39, cat: 'user', imgs: 1 }),
-      // user: plain text.
       surfaceNode({ seq: 40, cat: 'user', text: 'hi' }),
     ]
     const convs: Record<number, ConversationNodeLike> = {

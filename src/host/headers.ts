@@ -1,28 +1,20 @@
 /**
- * The `contextHeaders` session projection unit — the request-header EPOCH METADATA behind the
- * timeline's envelope figures.
- *
- * The epoch CONTENT (full system prompt, full tool schemas) deliberately does NOT ride the
- * projection value: projections are served whole in every `session.list` row, baseline, push
- * frame, and change notification, so content here would be multiplied by sessions × epochs. The
- * client fetches one epoch's `request/header` on demand through the session history.
- *
- * `stateVersion` stays 1 by decision (the #37 regression): a bump invalidates every cached row
- * and, for an idle session with no projection refresh channel, orphans the key until it goes
- * live. The state therefore still ACCEPTS the v1 content-bearing record shape, and the view
- * normalizes both generations to the metadata-only wire form.
+ * The `contextHeaders` projection unit: request-header epoch METADATA behind the timeline's envelope figures — the
+ * epoch CONTENT (system prompt, tool schemas) would ride every `session.list` row and push frame whole. `stateVersion`
+ * stays 1: a bump invalidates every cached row and orphans an idle session's key until it goes live, so the view
+ * normalizes both record generations to the metadata-only wire form and the client fetches one epoch on demand.
  */
 
 import { z } from 'zod'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { ProjectionDefinition } from './compat'
+import type { WiredProjection } from './projection'
 import type { ContextHeaders, HeaderRecord, HeaderTool } from '../shared/types'
 import { estimateToolSchema } from './pricing'
 import { estimateSystemTokens } from '../shared/estimate'
 
 const HEADERS_MAX = 50
 
-/** One stored tool: v1 rows carried the producer description and raw schema; later folds append metadata-only. */
+/** v1 rows carried the producer description and raw schema; later folds append metadata-only. */
 interface StoredHeaderTool {
   name: string
   tokens: number
@@ -31,7 +23,7 @@ interface StoredHeaderTool {
   schema?: unknown
 }
 
-/** One stored epoch: v1 rows carried `system`; later folds carry `systemTokens`. */
+/** v1 rows carried `system`; later folds carry `systemTokens`. */
 interface StoredHeaderRecord {
   seq: number
   time: number
@@ -44,7 +36,7 @@ export interface HeadersState {
   headers: StoredHeaderRecord[]
 }
 
-/** The persisted-state schemas: the superset of both record generations, so a cached v1 row (content-bearing) still seeds a fold. */
+/** The superset of both record generations, so a cached content-bearing v1 row still seeds a fold. */
 const storedToolSchema = z.object({
   name: z.string(),
   tokens: z.number().int().nonnegative(),
@@ -83,12 +75,11 @@ export const contextHeadersSchema = z.object({
 
 function recordOf(event: SessionEvent): StoredHeaderRecord | null {
   if (event.type !== 'request/header') return null
-  // This unit has no try/catch, so an impossible shape must degrade to "not an epoch" instead of
-  // throwing out of the registry's drive loop.
+  // This unit has no try/catch, so an impossible shape must degrade to "not an epoch" instead of throwing out of the registry's drive loop.
   const rawHeader = (event.data as { header?: unknown } | undefined)?.header
   if (rawHeader === null || rawHeader === undefined || typeof rawHeader !== 'object') return null
-  // A supported epoch header never carries a system prompt (`EpochHeader.system` is `never`), so
-  // epochs fold metadata-only; the stored `system` field exists for cached v1 rows.
+  // A supported epoch header never carries a system prompt, so epochs fold metadata-only; the stored `system` field exists for cached v1
+  // rows.
   const header = rawHeader as { tools?: unknown[] }
   const tools = Array.isArray(header.tools) ? header.tools : []
   const record: StoredHeaderRecord = {
@@ -101,8 +92,7 @@ function recordOf(event: SessionEvent): StoredHeaderRecord | null {
         name: typeof tool.name === 'string' ? tool.name : '?',
         tokens: estimateToolSchema(t),
       }
-      // Kept verbatim so the view-time resolver never overrides an attribution the producer
-      // wrote; no supported-baseline path writes one (ToolSchema has no plugin field).
+      // Kept verbatim so the view-time resolver never overrides an attribution the producer wrote; no supported-baseline path writes one.
       if (typeof tool.plugin === 'string' && tool.plugin !== '') {
         entry.plugin = tool.plugin
       }
@@ -112,16 +102,11 @@ function recordOf(event: SessionEvent): StoredHeaderRecord | null {
   return record
 }
 
-/**
- * The context-headers projection unit, registered alongside the timeline unit (host/index.ts).
- * @param resolve - best-effort tool-to-plugin attribution (see toolSources.ts); fills a missing
- * `plugin` at view time so epochs folded without attribution still render a tag.
- */
+/** @param resolve - best-effort tool-to-plugin attribution; fills a missing `plugin` at view time. */
 export function createContextHeadersDefinition(
   resolve?: (name: string) => string | undefined,
-): ProjectionDefinition<'contextHeaders', HeadersState> {
-  // The view normalizes both stored generations to the metadata-only wire shape: legacy v1
-  // epochs are stripped of their content here (the system text is priced once per read).
+): WiredProjection<'contextHeaders', HeadersState> {
+  // The view strips legacy v1 content here; the system text is priced once per read.
   const view = (state: HeadersState): ContextHeaders => ({
     headers: state.headers.map((h): HeaderRecord => {
       const record: HeaderRecord = {
@@ -140,7 +125,7 @@ export function createContextHeadersDefinition(
       return record
     }),
   })
-  const definition: ProjectionDefinition<'contextHeaders', HeadersState> = {
+  const definition: WiredProjection<'contextHeaders', HeadersState> = {
     key: 'contextHeaders',
     stateSchema: contextHeadersStateSchema,
     wire: { viewSchema: contextHeadersSchema, view },
@@ -154,7 +139,6 @@ export function createContextHeadersDefinition(
       const headers = [...state.headers, record]
       return { headers: headers.length > HEADERS_MAX ? headers.slice(-HEADERS_MAX) : headers }
     },
-    // Pinned at 1 on purpose (see the module header's read-compat note).
     stateVersion: 1,
   }
   return definition

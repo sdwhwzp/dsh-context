@@ -1,6 +1,3 @@
-// The fleet route (src/host/fleet.ts): the per-session agent color extraction (descriptor,
-// delegation prompt, inter-agent traffic) and the route's gating/transport behavior.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
@@ -16,8 +13,8 @@ interface CtxSpec {
   sessionQuery?: unknown
 }
 
-/** A minimal host ctx double with cordis inject semantics (the detail route spec's own shape):
- * the callback fires once its dependency list completes, and disposers are collected. */
+/** A minimal host ctx double with cordis inject semantics (the detail route spec's own shape): the callback fires
+ * once its dependency list completes, and disposers are collected. */
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?: RouteFetch }; disposers: (() => void)[] } {
   const captured: { path?: string; fetch?: RouteFetch } = {}
   const disposers: (() => void)[] = []
@@ -159,7 +156,6 @@ describe('watchFleetChannel gating', () => {
     const full = await call(captured, { sessionId: 's1', full: true }) as typeof excerpt
     assert.equal(full.value.lastReply.text.length, 400)
     assert.equal(full.value.truncated, false)
-    // A junk flag and an excerpt-mode read agree.
     const junk = await call(captured, { sessionId: 's1', full: 42 }) as typeof excerpt
     assert.equal(junk.value.lastReply.text.length, 301)
   })
@@ -199,11 +195,11 @@ describe('fleetDetailOfEvents — the descriptor', () => {
         type: 'subagent/descriptor',
         seq: 2,
         time: 2,
-        data: { version: 3, mode: 'continuable', provider: 'fork', label: 'worker', agentProvider: 'deepseek', agentModel: 'v4', persona: 'reviewer' },
+        data: { version: 3, mode: 'continuable', provider: 'fork', label: 'worker', agentProvider: 'deepseek', agentModel: 'v4', agentReasoningEffort: 'max', persona: 'reviewer' },
       },
     ])
     assert.deepEqual(detail.descriptor, {
-      mode: 'continuable', provider: 'fork', label: 'worker', agentProvider: 'deepseek', agentModel: 'v4', persona: 'reviewer',
+      mode: 'continuable', provider: 'fork', label: 'worker', agentProvider: 'deepseek', agentModel: 'v4', agentReasoningEffort: 'max', persona: 'reviewer',
     })
   })
 
@@ -217,7 +213,6 @@ describe('fleetDetailOfEvents — the descriptor', () => {
       42,
       { seq: 5, time: 5, data: {} },
       { type: 9, seq: 6, data: {} },
-      // A real but irrelevant event type folds to nothing.
       { type: 'assistant/message', seq: 7, time: 7, data: { message: { content: [{ type: 'text', text: 'hi' }] } } },
     ])
     assert.deepEqual(detail.descriptor, { mode: 'one-shot' })

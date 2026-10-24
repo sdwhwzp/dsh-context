@@ -1,18 +1,3 @@
-/** The Token card: the session's whole billed token usage — the SAME total
- * the harness chat stats line shows under the composer (uncached input +
- * cache read + cache write + output off the official `tokenUsage`
- * projection) — split by WHAT the tokens are, not by how the provider
- * cached them. The six composition categories share the provider-reported
- * prompt-side total by the composition card's own estimated ratios
- * (billedParts), and the provider's exact output count is its own slice, so
- * the ring and the center figure always equal the chat line's figure by
- * construction. The estimated category counts carry the ≈ marker (the
- * composition card's convention); the center total and the output count are
- * exact. Zero parts stay hidden once any usage is reported; the empty state
- * (no provider report yet) keeps all seven rows behind a dash center. The
- * title row's right corner carries the session's cache-hit share — the harness
- * chat line's own reads-over-billed formula — hidden until something was billed. */
-
 import { useState, type ReactElement } from 'react'
 import type { ContextBreakdown, Snapshot, TokenUsage } from '../../shared/types'
 import { billedParts } from '../categories'
@@ -37,20 +22,17 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
     current: Snapshot['current']
     breakdown: ContextBreakdown | null
   }): ReactElement {
-    // The legend row ↔ donut segment hover link (shared key, set from either side).
     const [hoverKey, setHoverKey] = useState<string | null>(null)
     const input = props.usage !== null
       ? numOf(props.usage.uncachedInputTokens) + numOf(props.usage.cacheReadTokens) + numOf(props.usage.cacheWriteTokens)
       : 0
     const output = props.usage !== null ? numOf(props.usage.outputTokens) : 0
     const total = input + output
-    // The title row's corner figure: cache reads over billed prompt-side input,
-    // the harness chat line's own formula (statsContext's cell shares it).
+    // Cache-hit share: cache reads over billed prompt-side input (the harness chat line's own formula).
     const hit = props.usage === null
       ? null
       : cacheHitPercent(numOf(props.usage.cacheReadTokens), input)
-    // Null usage (no provider report — the chat line shows no pill either)
-    // takes the same zeroed split billedParts produces for a zero report.
+    // Null usage (no provider report) takes the same zeroed split billedParts produces for a zero report.
     const parts = billedParts(props.current, props.breakdown, props.usage ?? NO_USAGE)
     const shown = total > 0 ? parts.filter(p => p.value > 0) : parts
     const rows: SliceRow[] = shown.map(p => ({
@@ -58,7 +40,7 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
       color: p.color,
       label: p.key === 'output' ? t('tokens.output') : catLabel(p.key),
       pct: fmtShare(p.value, total),
-      // The six prompt-side shares are ratio estimates (≈, the composition card's convention); output alone is provider-exact.
+      // Prompt-side shares are ratio estimates (≈, the composition card's convention); output alone is provider-exact.
       count: p.key === 'output' ? `${fmt(p.value)} · ${t('tokens.outputNote')}` : '≈' + fmt(p.value),
     }))
     return (
@@ -69,8 +51,6 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
             <span className="lc-card-rate" title={t('stats.cacheHitTip')}>{t('stats.cacheHit')} {hit}%</span>
           )}
         </div>
-        {/* donut + legend row: the gap folds at a 320px card, below 240px the row wraps
-            and the ring centers over the full-width legend (all keyed to the lc-card container). */}
         <div className="lc-donut-row flex items-center justify-start gap-3 min-w-0 @max-[320px]/lc-card:gap-2 @max-[240px]/lc-card:flex-wrap">
           <Donut
             segments={shown}

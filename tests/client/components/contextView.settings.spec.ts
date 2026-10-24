@@ -10,8 +10,7 @@ import { click, flush, mount, query, queryAll, silenceWindowErrors, text } from 
 import { buttonByText, makeView, projectionsFor, richTimeline, settingsWith, T0, timeline } from './contextViewHarness'
 
 describe('ContextView — locale and settings', () => {
-  // A real-shaped models.dev slice: the cost cell prices against the injected
-  // book (1M uncached input at the $0.15 miss rate → $0.15 / ¥1).
+  // A models.dev-shaped book: 1M uncached input at $0.15 prices to $0.15 / ¥1.
   const costed = timeline({
     cost: { 'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1000000, output: 500000, cacheRead: 0, cacheWrite: 0 } } } },
   })
@@ -59,7 +58,7 @@ describe('ContextView — locale and settings', () => {
   test('mount-time granularity/trend/file-sort defaults come from the bound settings scope', async () => {
     const settings = settingsWith({ defaultGranularity: 'turn', defaultTrendMode: 'delta', defaultFileSort: 'path', defaultDurationCurve: 'hide' })
     const View = makeView(new TestClientCtx(), settings)
-    // Two file reads (the 2-op path sorts AFTER the 1-op one under 'count' but BEFORE it under 'path').
+    // `path` sort puts the 2-read /z.ts after the 1-read /a.ts (`count` reverses that).
     const m = await mount(h(View, {
       sessionId: 'sv-settings',
       useProjection: projectionsFor(richTimeline({
@@ -80,9 +79,9 @@ describe('ContextView — locale and settings', () => {
     }))
     assert.ok(buttonByText(m.container, DICT_EN['gran.turn']).className.includes('lc-gran-on'))
     assert.ok(buttonByText(m.container, DICT_EN['gran.delta']).className.includes('lc-gran-on'))
-    // The 'hide' curve preference mounts the Duration toggle off (the schema default mounts it on).
+    // The 'hide' preference mounts Duration off (the schema default is on).
     assert.ok(!buttonByText(m.container, DICT_EN['trend.duration']).className.includes('lc-gran-on'))
-    // Turn aggregation applies at mount: two bars (turn 1 aggregate + turn-less).
+    // Turn aggregation applies at mount: turn 1 aggregates, the turn-less nodes form the second bar.
     assert.equal(queryAll(m.container, '.lc-bar').length, 2)
     assert.deepEqual(queryAll(m.container, '.lc-fa-row').map(r => r.title), ['/a.ts', '/z.ts'])
     await m.unmount()
@@ -91,16 +90,14 @@ describe('ContextView — locale and settings', () => {
 
 describe('ContextView — error boundary', () => {
   test('a render failure degrades to the error card and Retry recovers', async () => {
-    // React 18 dev replays the failed render through a fake DOM event (loud
-    // stderr via jsdom/vitest) and logs the boundary message to console —
-    // both silenced so the deliberate throw stays inside this test.
+    // React 18 dev replays the failed render through a fake DOM event (loud stderr via jsdom/vitest)
+    // and logs the boundary message to console — both silenced so the deliberate throw stays here.
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const silenceErrors = silenceWindowErrors()
     try {
       const real = createContextSettings()
-      // Flag-driven (not call-counted): React 18 dev replays a failed unit of
-      // work and retries an errored concurrent pass synchronously, so the
-      // failure must persist until the boundary catches, then clear for Retry.
+      // Flag-driven, not call-counted: React 18 dev replays the failed unit of work and retries an
+      // errored concurrent pass synchronously, so it must fail until the boundary catches, then clear.
       let fail = true
       const flaky = {
         ...real,

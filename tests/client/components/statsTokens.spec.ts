@@ -10,7 +10,7 @@ const kit = makeKit()
 const StatsTokens = makeStatsTokens(kit, Donut)
 
 const CURRENT: Snapshot['current'] = { system: 200, tools: 100, user: 300, inject: 100, skill: 0, assistant: 200, tool: 100, total: 1000 }
-// Billed input 400 (300 uncached + 100 read), output 50 → the chat line's 450.
+// Billed input 400 (300 uncached + 100 read) + output 50 = the chat line's 450.
 const USAGE: TokenUsage = { uncachedInputTokens: 300, outputTokens: 50, cacheReadTokens: 100, cacheWriteTokens: 0 }
 
 function rowOf(container: HTMLElement, i: number): { pct: string; label: string; count: string } {
@@ -27,8 +27,7 @@ describe('StatsTokens', () => {
     const m = await mount(h(StatsTokens, { usage: USAGE, current: CURRENT, breakdown: null }))
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '450')
     assert.equal(query(m.container, '.lc-donut-center span').textContent, 'Total')
-    // The estimated composition (sum 1000) scales to the billed input 400;
-    // every row shares the whole 450. All seven parts are non-zero here.
+    // Estimated composition (sum 1000) scales to billed input 400; rows share the whole 450.
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 7)
     assert.deepEqual(rowOf(m.container, 0), { pct: '17.8%', label: 'System Prompt', count: '≈80' })
     assert.deepEqual(rowOf(m.container, 1), { pct: '8.9%', label: 'Tool Schemas', count: '≈40' })

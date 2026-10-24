@@ -87,8 +87,7 @@ describe('useHoverTip', () => {
     await mouseover(a)
     const shown = bubble()?.style.cssText
 
-    // Moving from the anchor onto its own child, and child events bubbling
-    // up: the same anchor keeps tip and measure (no hidden re-flash).
+    // Moving onto the anchor's own child, with events bubbling up: same anchor, same measured spot.
     await mouseover(query(m.container, '#a-child'))
     assert.equal(bubble()?.style.cssText, shown, 'same anchor keeps the measured spot')
     assert.equal(a.getAttribute('aria-describedby'), 'lc-hovertip-bubble')
@@ -174,8 +173,8 @@ describe('useHoverTip', () => {
   })
 
   test('a re-shown tip reuses its measurement while the inputs hold', async () => {
-    // A touch tap can hide then re-show the same anchor, rebuilding the tip object; keying the measure pass on
-    // identity would commit once per replay until React throws #185 (dsh-context#162).
+    // A touch tap can hide then re-show the same anchor with a new tip object: identity-keying the measure
+    // pass would commit once per replay and loop renders (React #185).
     let renders = 0
     const m = await mount(h(CountingZone, { onRender: () => { renders += 1 } }))
     const a = query(m.container, '#a')
@@ -195,7 +194,6 @@ describe('useHoverTip', () => {
     assert.equal(bubble()?.style.left, '120px', 'the measured spot is reused')
     assert.equal(renders, 1, 'an equivalent tip does not re-measure')
 
-    // A genuinely moved anchor still measures again.
     pinRect(a, { left: 300, top: 100, width: 40, height: 20 })
     await mouseout(a, m.container)
     await mouseover(a)

@@ -1,22 +1,28 @@
-/**
- * The fold's served values — the slim wire head, the on-demand detail payload, and the inline view.
- * Every field is a copy, so a served value never aliases persisted state.
- */
+/** The fold's served values — the slim wire head, the on-demand detail payload, and the inline view. Every field is a copy, so a served
+ * value never aliases persisted state. */
 
-import type { ContextTimelineDetail, Snapshot, ToolTimingTotals } from '../shared/types'
+import type { CommandRecord, ContextTimelineDetail, Snapshot, ToolTimingTotals } from '../shared/types'
 import { copyCostUsage } from './foldMetering'
 import type { FoldBounds } from './config'
-import type { TimelineState } from './foldState'
+import type { CommandStateRecord, TimelineState } from './foldState'
 
-/** Served value fields are COPIES — the served value must never alias persisted state. Optional scalars use
- * conditional spread, because one `undefined`-valued property can fail the whole lossless-JSON push. */
+/** The served command record: the fold's pairing key (`call`) never crosses the wire. */
+function serveCommand(rec: CommandStateRecord): CommandRecord {
+  const copy: CommandStateRecord = { ...rec }
+  delete copy.call
+  return copy
+}
+
+/** Served value fields are COPIES — the served value must never alias persisted state. Optional scalars use conditional spread, because
+ * one `undefined`-valued property can fail the whole lossless-JSON push. */
 function headFieldsOf(state: TimelineState): Snapshot {
   const surfaceTotal = state.sums.user + state.sums.inject + state.sums.skill + state.sums.assistant + state.sums.tool
-  // Provider-anchored occupancy is NOT folded here: the Client reads token-meter's own `contextPressure` key for it.
+  // Provider-anchored occupancy is NOT folded here: the Client reads token-meter's own `contextPressure` key.
   const result: Snapshot = {
     ok: true,
     ...(state.model !== undefined ? { model: state.model } : {}),
     ...(state.provider !== undefined ? { provider: state.provider } : {}),
+    ...(state.reasoningEffort !== undefined ? { reasoningEffort: state.reasoningEffort } : {}),
     ...(state.contextWindow !== undefined ? { contextWindow: state.contextWindow } : {}),
     ...(state.maxOutputTokens !== undefined ? { maxOutputTokens: state.maxOutputTokens } : {}),
     current: {
@@ -30,8 +36,8 @@ function headFieldsOf(state: TimelineState): Snapshot {
       total: surfaceTotal + state.systemTokens + state.toolsTokens,
     },
     images: state.surface.reduce((n, node) => n + (node.imgs ?? 0), 0),
-    // Calls still in flight (no result yet) and results compacted or pruned out of the surface are both excluded.
-    // A skill-tool load reclassifies its node into the `skill` bucket but keeps its tool identity, so it still counts.
+    // Calls still in flight (no result yet) and results compacted or pruned out of the surface are both excluded; a
+    // skill-tool load reclassifies its node into `skill` but keeps its tool identity, so it still counts.
     toolCalls: state.surface.reduce((n, node) => node.cat === 'tool' || (node.cat === 'skill' && node.tool !== undefined) ? n + 1 : n, 0),
     humanInputs: state.humanInputs ?? 0,
     answers: state.answers ?? 0,
@@ -42,11 +48,9 @@ function headFieldsOf(state: TimelineState): Snapshot {
     droppedNodes: 0,
     archive: [],
   }
-  // The cost totals ride the wire as COPIES, like the collections.
   if (state.cost !== undefined) {
     result.cost = copyCostUsage(state.cost)
   }
-  // The timing totals ride the wire as COPIES too (per-name rows included).
   if (state.timing !== undefined) {
     const tools: Record<string, ToolTimingTotals> = {}
     for (const k in state.timing.tools) tools[k] = { ...state.timing.tools[k] }
@@ -69,13 +73,14 @@ function detailCollectionsOf(state: TimelineState, bounds: FoldBounds): Omit<Con
     archive: state.archived.map(n => ({ ...n })),
     fileOps: state.fileOps.map(o => ({ ...o })),
     ...(state.fileOpsFloor !== undefined ? { fileOpsFloor: state.fileOpsFloor } : {}),
+    commands: state.commands.map(serveCommand),
+    ...(state.commandsFloor !== undefined ? { commandsFloor: state.commandsFloor } : {}),
+    ...(state.commandStats !== undefined ? { commandStats: { ...state.commandStats } } : {}),
     spans: state.spans.map(s => ({ ...s })),
   }
-  // Injections land on the surface FIRST, so in a long session the plain tail would drop their identity while
-  // their tokens keep counting (sums cover the full surface), leaving the browser with a token sum and no
-  // listable items; skill content behaves the same way (the digest is injected at session start, loads pile up
-  // early). Pin both categories into the served list.
-  // The overflow slice precedes the tail by position, so the concatenation stays seq-ordered.
+  // Injections land on the surface FIRST, so a plain tail would drop their identity while their tokens keep counting;
+  // skill content behaves the same — pin both categories into the served list. The overflow slice precedes the tail by
+  // position, so the concatenation stays seq-ordered.
   const overflowCount = Math.max(0, state.surface.length - bounds.maxNodes)
   const overflow = state.surface.slice(0, overflowCount)
   const tail = state.surface.slice(overflowCount)
@@ -97,7 +102,6 @@ function detailCollectionsOf(state: TimelineState, bounds: FoldBounds): Omit<Con
   let ri = 0
   for (const ev of events) {
     while (ri < requests.length && requests[ri].seq <= ev.seq) ri++
-    // .at() keeps the past-the-end case visible to the type system.
     const next = requests.at(ri)
     const prev = ri > 0 ? requests.at(ri - 1) : undefined
     if (next !== undefined && typeof next.turn === 'number' && typeof next.step === 'number') {
@@ -112,8 +116,6 @@ function detailCollectionsOf(state: TimelineState, bounds: FoldBounds): Omit<Con
   return result
 }
 
-/** The split generation's SLIM wire head: the envelope scalars, the precomputed count figures, the newest
- * request's billing summary, and the detail revision marker — small enough to ride every delivery channel whole. */
 export function buildTimelineHead(state: TimelineState): Snapshot {
   const result = headFieldsOf(state)
   // Over the RETAINED records, the same set the detail serves.

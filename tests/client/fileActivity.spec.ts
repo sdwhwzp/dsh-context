@@ -1,5 +1,3 @@
-// File activity derivation (src/client/fileActivity.ts) — the pure fold behind the File Activity card.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { absPathOf, activityOf, activityOfOps, displayPathOf, formOf, glyphOf, locateStepOf, previewAddressOf } from '../../src/client/fileActivity'
@@ -10,7 +8,6 @@ import type { RequestRecord, SurfaceNode } from '../../src/shared/types'
 
 const T0 = 1700000000000
 
-/** A tool-result surface node plus its conversation join carrying the call args. */
 function op(
   seq: number,
   tool: string,
@@ -99,7 +96,6 @@ describe('activityOf', () => {
       op(13, 'glob', { pattern: '**/*.md' }),
     ])
     assert.equal(a.entries.length, 4)
-    // Most-recently-touched first: **/*.md (seq 13) leads, /src/b.ts (9) follows.
     assert.deepEqual(a.entries.map(e => e.path), ['**/*.md', '/src', '/src/b.ts', '/src/a.ts'])
 
     const file = a.entries[3]
@@ -108,7 +104,6 @@ describe('activityOf', () => {
     assert.equal(file.searches, 0)
     assert.equal(file.added, 2) // edit new_string: 'x\nq'
     assert.equal(file.removed, 3) // edit old_string: 'x\ny\nz'
-    // Ops newest first inside the entry.
     assert.deepEqual(file.ops.map(o => o.seq), [7, 5, 3])
     assert.equal(file.ops[0].kind, 'read')
     assert.equal(file.ops[0].time, T0 + 7)
@@ -117,11 +112,9 @@ describe('activityOf', () => {
     assert.equal(written.added, 2) // write content: 'one\ntwo\n'
     assert.equal(written.removed, 0)
 
-    // A search naming both a path and a pattern keeps the pattern as the op detail.
     const searched = a.entries[1]
     assert.equal(searched.searches, 1)
     assert.equal(searched.ops[0].detail, 'needle')
-    // A pattern-only search's target IS the pattern, with no separate detail.
     assert.equal(a.entries[0].form, 'text')
     assert.equal(a.entries[0].ops[0].detail, undefined)
 
@@ -200,8 +193,7 @@ describe('activityOf', () => {
   })
 
   test('a file-kind node the join lost entirely skips without throwing', () => {
-    // The regression this locks: with the conv node gone (aged window), the
-    // fold must skip the node — not dereference it and take the tab down.
+    // Regression: an aged window must make the fold skip the node, never dereference it and take the tab down.
     const a = activityOf(
       [
         { seq: 3, cat: 'tool', tokens: 5, tool: 'read', time: T0 },
@@ -226,7 +218,6 @@ describe('activityOf', () => {
       seq => bySeq.get(seq),
       null,
     )
-    // The throwing node drops; the walk carries on with the next node.
     assert.deepEqual(a.entries.map(e => e.path), ['/a.ts'])
     assert.equal(a.totals.read.ops, 1)
   })
@@ -256,7 +247,6 @@ describe('activityOf', () => {
       op(15, 'read', { file_path: '/g.ts', limit: 80 }, {}, { meta: { path: '/g.ts', offset: 1, lines: [] } }),
       op(17, 'read', { file_path: '/h.ts', limit: 80 }, {}, { meta: { path: '/h.ts', offset: 0, lines: window } }),
     ])
-    // Entries are newest-first: h(17) g(15) f(13) e(11) d(9) c(7) b(5) a(3).
     assert.deepEqual(a.entries[7].ops[0].read, { start: 41, count: 30 })
     for (const i of [0, 1, 2, 6]) assert.deepEqual(a.entries[i].ops[0].read, { count: 80, est: true })
     for (const i of [3, 4, 5]) assert.equal(a.entries[i].ops[0].read, undefined)
@@ -273,7 +263,6 @@ describe('activityOf', () => {
   test('a search with a path but no pattern carries no detail', () => {
     const a = run([
       op(3, 'grep', { path: '/src' }),
-      // An empty path narrows nothing: the target falls back to the pattern.
       op(5, 'grep', { pattern: 'y', path: '' }),
     ])
     assert.equal(a.entries[1].path, '/src')
@@ -289,7 +278,6 @@ describe('locateStepOf', () => {
   test('the first request dispatched after the op — while alive — shows it', () => {
     assert.equal(locateStepOf(requests, 5, undefined), 10)
     assert.equal(locateStepOf(requests, 15, 25), 20)
-    // Removed before a step's dispatch: that step's surface never held it.
     assert.equal(locateStepOf(requests, 5, 10), null)
     assert.equal(locateStepOf(requests, 5, 8), null)
   })
@@ -304,7 +292,6 @@ describe('locateStepOf', () => {
   })
 })
 
-/** One settled nested sub-call block, as the conversation join delivers it. */
 function sub(seq: number, name: string, args: Record<string, unknown> | string, over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     kind: 'tool-result',
@@ -347,7 +334,6 @@ describe('activityOf — str_replace_editor', () => {
     assert.equal(a.entries[2].reads, 1)
     assert.equal(a.entries[0].added, 2) // insert 'x\ny'
     assert.deepEqual(a.totals.read, { files: 1, ops: 1 })
-    // Writes: /b.py (create + str_replace) and /c.py (insert).
     assert.deepEqual(a.totals.write, { files: 2, ops: 3 })
   })
 
@@ -375,7 +361,6 @@ describe('activityOf — nested Code-Mode (PTC) calls', () => {
         ],
       }),
     ])
-    // /src/a.ts leads: its newest op is the minimal read at seq 27.
     assert.deepEqual(a.entries.map(e => e.path), ['/src/a.ts', '/src', '/src/b.ts'])
     const file = a.entries[0]
     assert.equal(file.reads, 2)
@@ -463,13 +448,11 @@ describe('activityOf — nested Code-Mode (PTC) calls', () => {
   })
 
   test('the depth cap and the cycle guard bound defensive trees', () => {
-    // A 10-deep chain books only the first eight levels.
     let chain = sub(99, 'read', { file_path: '/deep.ts' })
     for (let s = 98; s >= 90; s--) chain = { ...sub(s, 'read', { file_path: '/deep.ts' }), subCalls: [chain] }
     const deep = run([op(100, 'run_code', null, {}, { subCalls: [chain] })])
     assert.equal(deep.entries[0].reads, 8)
 
-    // A cyclic join terminates and books each block once.
     const x = sub(80, 'read', { file_path: '/cyc.ts' })
     const y = sub(81, 'read', { file_path: '/cyc.ts' })
     y.subCalls = [x]
@@ -493,16 +476,13 @@ describe('activityOf — search meta attribution', () => {
           { path: '/src/b.ts', matches: [{ lineNumber: 5, line: 'needle' }] },
         ] },
       }),
-      // A capped meta names a partial file set: the call falls back to its own target.
       op(12, 'grep', { pattern: 'broad' }, {}, {
         meta: { shape: 'matches', truncated: true, total: 500, files: [{ path: '/src/a.ts', matches: [{ lineNumber: 1, line: 'x' }] }] },
       }),
-      // An archived, timeless search still stamps its meta rows with the parent's removal.
       op(14, 'grep', { pattern: 'old' }, { gone: 20, time: undefined }, {
         meta: { shape: 'paths', truncated: false, total: 1, paths: ['/old.ts'] },
       }),
     ])
-    // The searched target rows too: '/src' (the narrowed path) and the two pathless patterns ride ahead of their hit files.
     assert.deepEqual(a.entries.map(e => e.path), ['old', '/old.ts', 'broad', '/src', '/src/a.ts', '/src/b.ts'])
     const byPath = new Map(a.entries.map(e => [e.path, e]))
     const srcA = byPath.get('/src/a.ts')!
@@ -510,9 +490,7 @@ describe('activityOf — search meta attribution', () => {
     assert.equal(srcA.ops[0].hits, 2)
     assert.equal(srcA.ops[0].detail, 'needle')
     assert.equal(byPath.get('/src/b.ts')!.ops[0].hits, 1)
-    // The searched directory's row carries the pattern detail.
     assert.equal(byPath.get('/src')!.ops[0].detail, 'needle')
-    // The archived, timeless meta row carries the node's stamp (and no time).
     assert.equal(byPath.get('/old.ts')!.ops[0].gone, 20)
     assert.equal(byPath.get('/old.ts')!.ops[0].time, undefined)
     assert.deepEqual(a.totals.search, { files: 6, ops: 6 })
@@ -527,7 +505,6 @@ describe('activityOf — search meta attribution', () => {
         meta: { shape: 'paths', truncated: false, total: 2, paths: ['/r.md', '/o.md'] },
       }),
     ])
-    // Each call rows its target (the pattern) plus the hit files.
     assert.deepEqual(a.entries.map(e => e.path), ['**/*.md', '/r.md', '/o.md', 'needle', '/a.ts'])
     const byPath = new Map(a.entries.map(e => [e.path, e]))
     assert.equal(byPath.get('/a.ts')!.ops[0].detail, 'needle (*.ts)')
@@ -559,7 +536,6 @@ describe('activityOf — search meta attribution', () => {
     const a = run([op(10, 'grep', { pattern: 'needle', path: '/src' }, {}, {
       meta: { shape: 'paths', truncated: false, total: 2, paths: ['/a.ts', ''] },
     })])
-    // The valid sibling attributes; the searched path rows as the call's target.
     assert.deepEqual(a.entries.map(e => e.path), ['/src', '/a.ts'])
   })
 
@@ -678,14 +654,11 @@ describe('glyphOf', () => {
       assert.equal(g.color, color, base)
       assert.ok(g.text !== undefined, `badge text color missing for ${base}`)
     }
-    // The text color contrasts with the fill: near-black on light shades (the
-    // JS yellow, shell green, rust peach), white on dark ones (including the kotlin lilac, just under the threshold).
     assert.equal(glyphOf('/x/index.js', 'text').text, '#1f2328')
     assert.equal(glyphOf('/x/deploy.sh', 'text').text, '#1f2328')
     assert.equal(glyphOf('/x/lib.rs', 'text').text, '#1f2328')
     assert.equal(glyphOf('/x/Main.kt', 'text').text, '#ffffff')
     assert.equal(glyphOf('/x/main.ts', 'text').text, '#ffffff')
-    // An extension outside the badge table is not a known language: plain fallback.
     assert.deepEqual(glyphOf('/x/build.zig', 'text'), { glyph: '📄', tip: 'files.form.text' })
   })
 
@@ -702,12 +675,10 @@ describe('displayPathOf', () => {
 
   test('workspace and relative paths display bare-relative; the workspace root itself keeps ./', () => {
     assert.equal(displayPathOf(ws + '/src/client/a.ts', ws), 'src/client/a.ts')
-    // The workspace root has no relative remainder: the bare dot form stays.
     assert.equal(displayPathOf(ws, ws), './')
     assert.equal(displayPathOf(ws + '/', ws), './')
     assert.equal(displayPathOf('tests/client/a.spec.ts', ws), 'tests/client/a.spec.ts')
     assert.equal(displayPathOf('./tests/a.ts', ws), 'tests/a.ts')
-    // A recorded absolute path carrying an embedded `./` relativizes through it too.
     assert.equal(displayPathOf('/repo/./a.ts', '/repo'), 'a.ts')
   })
 
@@ -717,10 +688,8 @@ describe('displayPathOf', () => {
     assert.equal(displayPathOf('C:\\repo\\a.ts', ws), 'C:\\repo\\a.ts')
     assert.equal(displayPathOf('needle', ws), 'needle')
     assert.equal(displayPathOf(ws + '/a.ts', undefined), ws + '/a.ts')
-    // Without a known workspace a relative path is still workspace-relative by definition.
     assert.equal(displayPathOf('needle', undefined), 'needle')
     assert.equal(displayPathOf('./needle', undefined), 'needle')
-    // A raw all-`./` degenerate leaves nothing to display: the raw form stays.
     assert.equal(displayPathOf('./', ws), './')
     assert.equal(displayPathOf('././', ws), '././')
   })
@@ -732,7 +701,6 @@ describe('activityOf — pattern rows', () => {
       op(3, 'grep', { pattern: 'needle' }),
       op(5, 'grep', { pattern: 'needle', path: '/src' }),
     ])
-    // Newest first: /src (5) leads, the pattern row (3) follows.
     assert.equal(a.entries[0].pattern, undefined)
     assert.equal(a.entries[1].pattern, true)
   })
@@ -742,7 +710,6 @@ describe('activityOf — pattern rows', () => {
       sub(20, 'grep', { pattern: 'needle' }),
       sub(22, 'grep', { pattern: 'needle', path: '/src' }),
     ] })])
-    // Newest first: /src (22) leads, the pattern row (20) follows.
     assert.equal(a.entries[0].pattern, undefined)
     assert.equal(a.entries[1].pattern, true)
   })
@@ -767,23 +734,18 @@ describe('previewAddressOf', () => {
       previewAddressOf('src/a.ts', 'text', undefined, 's1', ws),
       'dsh-resource://file/session/s1/src/a.ts',
     )
-    // An absolute path inside the workspace collapses to the same address as
-    // its workspace-relative spelling (one file, one tab).
     assert.equal(
       previewAddressOf('/repo/src/a.ts', 'text', undefined, 's1', ws),
       'dsh-resource://file/session/s1/src/a.ts',
     )
-    // Outside the root the absolute path rides through unchanged.
     assert.equal(
       previewAddressOf('/etc/hosts', 'text', undefined, 's1', ws),
       'dsh-resource://file/session/s1//etc/hosts',
     )
-    // A missing workspace still names a session-scoped address.
     assert.equal(
       previewAddressOf('rel/b.md', 'text', undefined, 's1', undefined),
       'dsh-resource://file/session/s1/rel/b.md',
     )
-    // An image is a real file like any other.
     assert.equal(
       previewAddressOf('/shots/ui.png', 'image', undefined, 's1', ws),
       'dsh-resource://file/session/s1//shots/ui.png',
@@ -825,7 +787,6 @@ describe('activityOfOps — the fold-derived op log', () => {
     const a = all.entries[1]
     assert.deepEqual(a.ops.map(o => o.seq), [3, 1], 'ops newest first within the file')
     assert.deepEqual([a.added, a.removed], [1, 2])
-    // Scope: before = 3 drops seq 3+ (a nested op keys on its parent result).
     const scoped = activityOfOps(ops, [], 3)
     assert.deepEqual(scoped.entries.map(e => e.path).sort(), ['a.ts', 'b.ts'])
     assert.deepEqual([scoped.totals.read.ops, scoped.totals.write.ops, scoped.totals.search.ops], [1, 1, 0])
@@ -836,7 +797,6 @@ describe('activityOfOps — the fold-derived op log', () => {
       op({ seq: 2, path: 'a.ts', parent: 5, program: 'p' }),
       op({ seq: 3, path: 'b.ts' }),
     ]
-    // before = 5: the parent-keyed op (key 5) is out, the plain seq-3 op is in.
     const scoped = activityOfOps(ops, [], 5)
     assert.deepEqual(scoped.entries.map(e => e.path), ['b.ts'])
   })

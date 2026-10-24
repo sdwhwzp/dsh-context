@@ -1,6 +1,3 @@
-// The attachment plumbing (src/client/attachmentSource.ts): the location route read behind one
-// click, its cache, and the preview-column opener the File Activity card also rides.
-
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
 import {
@@ -20,7 +17,6 @@ interface Call {
   body: unknown
 }
 
-/** Stub the global fetch with per-call answers; returns the recorded calls. */
 function stubFetch(answer: (call: Call) => unknown): Call[] {
   const calls: Call[] = []
   vi.stubGlobal('fetch', async (url: string, init: { body?: string }) => {
@@ -103,7 +99,6 @@ describe('makeAttachmentLocator', () => {
       await locate({ kind: 'file', attachmentId: `sha256:f${String(i)}`, name: 'x.md' })
     }
     assert.equal(calls.length, 33)
-    // The first id fell out of the 32-entry cache, so it reads again; the newest stays cached.
     await locate({ kind: 'file', attachmentId: 'sha256:f0', name: 'x.md' })
     assert.equal(calls.length, 34)
     await locate({ kind: 'file', attachmentId: 'sha256:f32', name: 'x.md' })

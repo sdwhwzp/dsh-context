@@ -1,12 +1,7 @@
-/**
- * The Fleet comms panel — the family's inter-agent traffic in one timeline. The harness attests
- * it in three durable shapes, each lifted from the log it landed in by the fleet-detail route: a
- * team relay sits in the RECIPIENT's log (`agent-message`, sender id attested), a historical
- * mailbox delivery likewise (`team-message`, sender name attested), and a child's settling account
- * sits in the PARENT's log (`subagent-settled`). Reading N session logs is the expensive part, so
- * the scan runs on demand, reports its progress, and flags itself stale once a scanned session
- * moves on.
- */
+/** Fleet comms timeline. The harness attests traffic in three durable shapes the fleet-detail route lifts: a team relay
+ * in the RECIPIENT's log (`agent-message`, sender id attested), a mailbox delivery (`team-message`, sender name
+ * attested), and a child's settling account in the PARENT's log (`subagent-settled`). Scans run on demand (the N-log
+ * read is expensive) and flag themselves stale once a scanned session moves on. */
 
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { IconSendOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -20,19 +15,17 @@ import type { ViewKit } from '../viewkit'
 export interface CommsPanelProps {
   nodes: readonly AgentNode[]
   details: FleetDetailState
-  /** Merged comms rows over the landed details (newest first). */
+  /** Merged comms rows, newest first. */
   comms: CommsRow[]
   labelOf: (id: string) => string
   onPin: (id: string | null) => void
-  /** The picked agent's session id (the graph's and members board's own pick): the timeline
-   * narrows to their traffic, and the pick chip in the toolbar clears it. */
+  /** The shared agent pick (graph/members board): narrows the timeline; the toolbar's chip clears it. */
   pickId: string | null
   onPickClear: () => void
   t: ViewKit['t']
   fmt: ViewKit['fmt']
 }
 
-/** HH:MM:SS for the row's instant (the shared locale-free formatter). */
 function clockOf(time: number): string {
   return time <= 0 ? '—' : fmtTime(time)
 }
@@ -41,14 +34,12 @@ export function CommsPanel(props: CommsPanelProps): ReactElement {
   const { nodes, details, comms, pickId, t } = props
   const [agentFilter, setAgentFilter] = useState<string | null>(null)
 
-  // A pick governs while it stands: the dropdown's own choice yields on landing and never
-  // resurrects stale once the pick clears.
+  // A pick governs while it stands; the dropdown yields on landing and never resurrects after the pick clears.
   useEffect(() => {
     if (pickId !== null) setAgentFilter(null)
   }, [pickId])
 
-  // Only scan-claimed sessions drive the panel's state: the inspector's own focus reads never
-  // flip it past the collapsed state.
+  // Only scan-claimed sessions drive the panel: the inspector's own focus reads never flip it past collapsed.
   const scannedNodes = useMemo(() => nodes.filter(n => details.scanned.has(n.id)), [nodes, details.scanned])
   const done = scannedNodes.filter(n => details.landed.has(n.id)).length
   const scanning = scannedNodes.some(n => details.pending.has(n.id))
@@ -63,7 +54,7 @@ export function CommsPanel(props: CommsPanelProps): ReactElement {
     return [...ids]
   }, [comms])
 
-  // The pick narrows first; the dropdown's own choice only ever governs without one.
+  // The pick narrows first; the dropdown governs only without one.
   const rows = pickId !== null
     ? comms.filter(row => row.from === pickId || row.to === pickId)
     : agentFilter !== null

@@ -17,9 +17,9 @@ let wrapRows = false
 let originals: [string, PropertyDescriptor | undefined][] = []
 
 /** jsdom lays nothing out: give the list a 500×320 box and the rows a fixed 41px pitch so the card's own
- *  windowing path (wide + unexpanded) runs for real: measure → window → scroll. */
+ *  windowing path runs for real: measure → window → scroll. */
 beforeAll(() => {
-  // A no-op observer covers the card's ResizeObserver path; the list is measured on mount anyway.
+  // No-op ResizeObserver: the list is measured on mount anyway.
   vi.stubGlobal('ResizeObserver', class {
     observe = (): void => {}
     disconnect = (): void => {}
@@ -108,7 +108,7 @@ describe('FileCard row windowing', () => {
       await until(() => queryAll<HTMLElement>(m.container, '.lc-row-pad').length === 2, 'a top pad appears after scrolling')
       const afterScroll = queryAll(m.container, '.lc-fa-item').length
       assert.ok(afterScroll < 60 && afterScroll >= 8)
-      // Pads reproduce the skipped rows' pitch, letting the flex gap supply one slot between pad and row.
+      // Pads carry the skipped rows' pitch minus the flex gap between pad and row.
       const [topPad, bottomPad] = queryAll<HTMLElement>(m.container, '.lc-row-pad')
       assert.equal(topPad.style.height, `${13 * PITCH - GAP}px`)
       assert.equal(bottomPad.style.height, `${21 * PITCH - GAP}px`)

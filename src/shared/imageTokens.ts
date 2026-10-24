@@ -1,11 +1,5 @@
-/**
- * Per-image token estimate for DeepSeek's vision model — a port of the official image-token
- * calculator on the DeepSeek API docs
- * (https://api-docs.deepseek.com/zh-cn/quick_start/token_usage): aspect-preserved rescale, then
- * the 14px patch grid with 3:1 downsampling, capped at 384 tokens per image.
- *
- * Pure math shared by the Host fold (message pricing) and the Client (attachment card badges).
- */
+/** A port of the official DeepSeek image-token calculator
+ * (https://api-docs.deepseek.com/zh-cn/quick_start/token_usage), shared by the Host fold and the Client. */
 
 const PATCH_SIZE = 14
 const DOWNSAMPLE_RATIO = 3
@@ -106,8 +100,7 @@ function calcResizeInner(width: number, height: number): ResizeSolution {
   return safeResize(h, w, paddedHeight, paddedWidth)
 }
 
-/** Estimate one image's DeepSeek vision tokens; null for degenerate dimensions or a
- * non-converging solve, where callers fall back to the structural price. */
+/** Null for degenerate dimensions or a non-converging solve: callers fall back to the structural price. */
 export function estimateImageTokens(width: number, height: number): number | null {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null
   try {

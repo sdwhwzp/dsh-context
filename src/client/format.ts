@@ -15,9 +15,7 @@ export function fmtBytes(n: number | null | undefined): string {
   return String(Math.round(n)) + ' B'
 }
 
-/** Cache-hit share of billed prompt input, TRUNCATED to two decimals (the figure
- * the harness chat stats line and the token card's corner show); the epsilon
- * absorbs float noise only. Null when nothing was billed. */
+/** Cache-hit share of billed prompt input, TRUNCATED to two decimals; the epsilon absorbs float noise only. */
 export function cacheHitPercent(reads: number, billed: number): string | null {
   if (!(billed > 0)) return null
   const scaled = Math.trunc((reads / billed) * 100 * 100 + 1e-9)
@@ -43,7 +41,6 @@ export function fmtShare(part: number, total: number): string {
   return `${pct.toFixed(1)}%`
 }
 
-/** Whole-session durations in locale-free compact units; non-positive input shows the dash. */
 export function fmtDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '—'
   if (ms < 1000) return `${Math.round(ms)}ms`

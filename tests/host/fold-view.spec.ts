@@ -1,5 +1,3 @@
-// buildTimelineView (src/host/foldWire.ts) driven through the real projection unit (driveTimeline / def.wire.view).
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { createTimelineState } from '../../src/host/fold'
@@ -12,18 +10,19 @@ const bucket = (uncached: number, cacheRead: number, cacheWrite: number, output:
 
 describe('buildTimelineView unknown-model shape', () => {
   test('optional scalars stay ABSENT keys until known — never undefined-valued (issue #29)', () => {
-    // A fold over events that name no model/provider/capacity: the served
-    // view must not carry `undefined`-valued properties, which fail the harness's lossless-JSON push pipeline whole.
+    // A fold over events naming no model/provider/capacity: undefined-valued properties would fail the lossless-JSON push pipeline.
     const { view } = driveTimeline([
       userMessage(1, [{ type: 'text', text: 'aaaa' }]),
       assistantMessage(2, { turn: 1, step: 1 }),
     ])
     assert.equal(view.model, undefined)
     assert.equal(view.provider, undefined)
+    assert.equal(view.reasoningEffort, undefined)
     assert.equal(view.contextWindow, undefined)
     assert.equal(view.maxOutputTokens, undefined)
     assert.ok(!('model' in view), 'no own `model` key')
     assert.ok(!('provider' in view), 'no own `provider` key')
+    assert.ok(!('reasoningEffort' in view), 'no own `reasoningEffort` key')
     assert.ok(!('contextWindow' in view), 'no own `contextWindow` key')
     assert.ok(!('maxOutputTokens' in view), 'no own `maxOutputTokens` key')
     assertPlainJson(view)
@@ -31,20 +30,38 @@ describe('buildTimelineView unknown-model shape', () => {
 
   test('known scalars ride their own keys once a request names them', () => {
     const { view } = driveTimeline([
-      header(1, { config: { model: 'deepseek-v4-flash', provider: 'deepseek', maxTokens: 256000 } }),
+      header(1, { config: { model: 'deepseek-v4-flash', provider: 'deepseek', reasoningEffort: 'max', maxTokens: 256000 } }),
       requestContext(2, { provider: 'deepseek', model: 'deepseek-v4-flash', contextWindow: 128000 }),
       userMessage(3, [{ type: 'text', text: 'hi' }]),
     ])
     assert.equal(view.model, 'deepseek-v4-flash')
     assert.equal(view.provider, 'deepseek')
+    assert.equal(view.reasoningEffort, 'max')
     assert.equal(view.contextWindow, 128000)
     assert.equal(view.maxOutputTokens, 256000)
     assertPlainJson(view)
   })
 
+  test('the materialized reasoning effort is LAST-WINS across headers, like the output cap', () => {
+    // A later header without an effort clears it.
+    const cleared = driveTimeline([
+      header(1, { config: { model: 'm', reasoningEffort: 'max' } }),
+      header(2, { config: { model: 'm' }, reason: 'change' }),
+    ])
+    assert.equal(cleared.view.reasoningEffort, undefined)
+    for (const effort of ['', 42, null, false] as const) {
+      const { view } = driveTimeline([header(1, { config: { model: 'm', reasoningEffort: effort } })])
+      assert.equal(view.reasoningEffort, undefined, String(effort))
+    }
+    const kept = driveTimeline([
+      header(1, { config: { model: 'm', reasoningEffort: 'low' } }),
+      header(2, { config: { model: 'm', reasoningEffort: 'max' }, reason: 'change' }),
+    ])
+    assert.equal(kept.view.reasoningEffort, 'max')
+  })
+
   test('the routed output cap is LAST-WINS across headers, exactly as the compaction backend reads it', () => {
-    // A later header without a cap clears it (dsh's `reservedCompletionTokens` falls back to zero, not
-    // to the previous envelope), and a hostile cap never lands in the persisted state.
+    // A later header without a cap clears it (dsh's `reservedCompletionTokens` falls back to zero, not the old envelope).
     const cleared = driveTimeline([
       header(1, { config: { model: 'm', provider: 'p', maxTokens: 256000 } }),
       header(2, { config: { model: 'm', provider: 'p' }, reason: 'change' }),
@@ -179,10 +196,8 @@ describe('buildTimelineView copies', () => {
     ])
     assert.notEqual(view.requests[0], state.requests[0])
     assert.deepEqual(view.requests[0], state.requests[0])
-    // Event copies are stamped with request attribution, so they differ by
-    // value — what matters is that they never alias the persisted records.
+    // Event copies are stamped with request attribution, so they differ by value — they must never alias.
     assert.notEqual(view.events[0], state.events[0])
-    // Mutating the served view must not leak into the persisted state.
     view.requests[0].total = -1
     view.events[0].name = 'mutated'
     assert.notEqual(state.requests[0].total, -1)
@@ -292,9 +307,7 @@ describe('buildTimelineView serving window', () => {
       toolCall(4, { callId: 'c1', name: 'skill' }),
       toolResult(5, { callId: 'c1', content: [{ type: 'text', text: '<skill_content name="pdf">body</skill_content>' }] }),
     ], { maxNodes: 2 })
-    // Surface nodes are 1 (catalog), 2, 3 (plain user) and 5 (the skill load —
-    // the tool/call at seq 4 carries no surface node). The catalog pins ahead
-    // of the tail; the single dropped plain message sets the floor.
+    // Surface nodes are 1, 2, 3 and 5 (the tool/call at 4 carries none); the catalog pins ahead, the dropped message sets the floor.
     assert.deepEqual((view.nodes as SurfaceNode[]).map(n => n.seq), [1, 3, 5])
     assert.equal(view.droppedNodes, 1)
     assert.equal(view.surfaceFloor, 2, 'the floor is the newest unserved non-skill seq')

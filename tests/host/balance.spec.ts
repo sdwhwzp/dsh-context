@@ -1,8 +1,3 @@
-// The DeepSeek balance route (src/host/balance.ts): deferred-inject gating on the connection face,
-// per-request resolution of the DeepSeek platform connection facts (the provider directory's row
-// + the credentials service), and the typed `null` for every not-configured or failed read — never
-// a throw into the transport.
-
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, test, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
@@ -19,9 +14,7 @@ interface CtxSpec {
   llm?: unknown
 }
 
-/** A minimal host ctx double with cordis inject semantics: the callback runs
- * once its dependency list completes (here: immediately when the services
- * map has them, never otherwise), and its returned disposer is collected. */
+/** A minimal host ctx double with cordis inject semantics (fires when the service map completes) and a collected disposer. */
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?: RouteFetch }; disposers: (() => void)[] } {
   const captured: { path?: string; fetch?: RouteFetch } = {}
   const disposers: (() => void)[] = []
@@ -46,8 +39,7 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?
     const conn = spec.connection as { fetch?: { register?: unknown } }
     if (typeof conn.fetch?.register === 'function') {
       const original = conn.fetch.register as (route: { path: string; fetch: RouteFetch }) => (() => void)
-      // Delegate to the spec's own register (a hostile one still throws), so
-      // the capture only lands when the registration actually mounted.
+      // Delegate to the spec's own register (a hostile one still throws), so the capture only lands when mounted.
       conn.fetch.register = (route: { path: string; fetch: RouteFetch }) => {
         const dispose = original(route)
         captured.path = route.path
@@ -62,9 +54,8 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?
   return { ctx: ctx as unknown as Context, captured, disposers }
 }
 
-/** The harness settings face projecting one row per configurable entry (`throws` fails the read).
- * The options each read was called with are recorded, so the redaction the fold asks for is
- * provable rather than assumed. */
+/** The harness settings face projecting one row per configurable entry (`throws` fails the read); the read
+ * options are recorded, so the redaction the fold asks for is provable. */
 function settingsDescribeOf(rows: unknown, throws = false): { describe(options?: { redactSecrets?: boolean }): unknown; options: unknown[] } {
   const options: unknown[] = []
   return {
@@ -82,7 +73,6 @@ function settingsOf(section: unknown): { describe(options?: { redactSecrets?: bo
   return settingsDescribeOf([{ ns: 'llm-deepseek', value: section }])
 }
 
-/** The harness `llm` service's provider directory, naming the DeepSeek API-key route's row. */
 function llmDirectoryOf(settingsNs: string, extra: unknown[] = []): { listConfigurableProviders(): unknown } {
   return {
     listConfigurableProviders: () => [
@@ -591,8 +581,8 @@ describe('balanceOfPayload (direct)', () => {
       ],
     })
     assert.deepEqual(balance?.balances, [{ currency: 'CNY', total: 940.66, granted: 920.85, toppedUp: 19.81 }])
-    // The parts are what prove the entry, so a total the platform gets wrong
-    // (or omits) never drops it: total_balance is not read at all.
+    // The parts are what prove the entry, so a total the platform gets wrong (or omits) never drops it:
+    // total_balance is not read at all.
     for (const totalField of [{}, { total_balance: 'abc' }, { total_balance: '-1' }, { total_balance: null }]) {
       assert.deepEqual(balanceOfPayload({
         is_available: true,

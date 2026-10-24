@@ -1,6 +1,3 @@
-// The cold-read governor (src/host/coldRead.ts, issue #121): FIFO exclusion across concurrent admits and
-// the two-thirds high-water skip, checked when the read reaches the FRONT of the queue — not when queued.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { type HeapReading, makeColdReadGate } from '../../src/host/coldRead'
@@ -67,7 +64,7 @@ describe('makeColdReadGate', () => {
       ran++
       return 'b'
     })
-    // Let the first read actually START (its check passed), then let pressure rise while the second read waits behind it.
+    // Let the first read actually START (its check passed), then let pressure rise while the second read waits.
     await new Promise(resolve => setTimeout(resolve, 10))
     assert.ok(started, 'the front read started under the low reading')
     reading = HIGH
@@ -75,7 +72,6 @@ describe('makeColdReadGate', () => {
     assert.equal(await first, 'a', 'the running read settles normally')
     assert.equal(await second, undefined, 'the queued read meets the hot heap at its turn')
     assert.equal(ran, 0)
-    // And pressure falling again admits the next read.
     reading = LOW
     assert.equal(await gate.admit(async () => 'c'), 'c')
   })

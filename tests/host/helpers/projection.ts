@@ -1,5 +1,5 @@
-// Fold drivers for the host specs: run event envelopes through the REAL projection units the plugin registers (no harness plumbing — the
-// units are pure init/apply/view), pinning the state's plain-JSON rule on every intermediate state (see assertNoAbsentMembers).
+// Fold drivers for the host specs: run event envelopes through the REAL projection units and pin the plain-JSON
+// rule on every intermediate state (see assertNoAbsentMembers).
 
 import assert from 'node:assert/strict'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -11,9 +11,7 @@ import { createContextTimelineDefinition } from '../../../src/host/timeline'
 import { createContextHeadersDefinition } from '../../../src/host/headers'
 
 /** The fold's contract takes the core `SessionEvent` union, but the log also carries declaration-merged
- * plugin events (compaction/*), so it widens to TimelineEvent (src/host/foldState.ts). These faces mirror the
- * supported registry contract (src/host/compat.ts: stateSchema + required `wire`, zero-arg `init` — see
- * ProjectionDefinition) and perform the ONE documented cast here, keeping every spec call site clean. */
+ * `compaction/*` events, so it widens to `TimelineEvent`; these faces mirror the supported registry contract via the ONE cast. */
 export interface TimelineDefLike {
   key: string
   /** The persisted-state gate the projection cache's cold path parses rows with. */
@@ -42,9 +40,8 @@ export function headersDef(): HeadersDefLike {
   return createContextHeadersDefinition() as unknown as HeadersDefLike
 }
 
-/** Lossless-JSON probe and detach, inlined with the dsh `snapshotJsonValue` semantics (the export lives in
- * `@deepseek-ai/dsh-util-values`; the test fixtures must track no single dsh face). Returns undefined when the
- * value is not losslessly JSON-serializable. Shared with the compat matrix's registry driver (tests/host/compat/registryDriver.ts). */
+/** Lossless-JSON probe and detach, inlined with dsh `snapshotJsonValue` semantics (lives in
+ * `@deepseek-ai/dsh-util-values`; fixtures must track no single dsh face). Returns undefined when not losslessly serializable. */
 export function snapshotJson(value: unknown, ancestors: Set<object> = new Set()): unknown {
   switch (typeof value) {
     case 'string': case 'boolean': return value
@@ -80,23 +77,15 @@ export function snapshotJson(value: unknown, ancestors: Set<object> = new Set())
   }
 }
 
-/** The projection-cache precondition: every state the fold produces must be
- * losslessly JSON-serializable (a single undefined property fails EVERY cache
- * write for the session — see TimelineState). Returns the detached copy. */
+/** The projection-cache precondition: every folded state must be losslessly JSON-serializable. Returns the detached copy. */
 export function assertPlainJson<T>(state: T): T {
   const copy = snapshotJson(state)
   assert.ok(copy !== undefined, 'fold state must be losslessly JSON-serializable')
   return copy as T
 }
 
-/**
- * The one plain-JSON rule a DURABLE log can break (see TimelineState): no own `undefined`-valued property
- * may enter a folded state — one such property fails EVERY projection-cache write for that session from
- * then on. The rest of the lossless contract cannot arrive through a real log (the durable vocabulary is
- * JSON, and dsh validates every payload before appending), so `assertPlainJson` stays the explicit
- * whole-contract check for specs that mean to assert it. Applied to every state the fold PRODUCES, not
- * only the last: a mid-log violation sticks even when a later event overwrites the key.
- */
+/** The one plain-JSON rule a DURABLE log can break: no own `undefined`-valued property may enter a folded state —
+ * one fails EVERY projection-cache write for that session. Checked on every state the fold PRODUCES (a mid-log violation sticks). */
 function assertNoAbsentMembers(value: unknown, path = '$', seen = new Set<object>()): void {
   if (value === null || typeof value !== 'object' || seen.has(value)) return
   seen.add(value)

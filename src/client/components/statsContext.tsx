@@ -47,16 +47,14 @@ function priceRowsOf(usage: SessionCostUsage | undefined, book: ModelBook | null
   return rows
 }
 
-/** The inline generation's counter derivation; the host's split-generation counts
- * match it by construction (fold.ts buildTimelineHead). */
+/** Inline counter derivation; the host's split-generation counts match it by construction (fold.ts buildTimelineHead). */
 export function countsOfRecords(requests: readonly RequestRecord[], events: readonly ContextEventRecord[]): TimelineCounts {
   const turns = new Set<number>()
   for (const req of requests) turns.add(req.turn ?? 0)
   let injects = 0
   let compactions = 0
   let prunes = 0
-  // Loaded skills: the distinct names among the skill-tagged inject events — the host fold's exact tag set
-  // (`sub: 'skill'` on `/name` invocations and `skill`-tool loads; the catalog digest rides an untagged event).
+  // Loaded skills: distinct names among skill-tagged injects — the host fold's tag set (`sub: 'skill'`).
   const skills = new Set<string>()
   for (const ev of events) {
     if (ev.kind === 'inject') injects++
@@ -105,14 +103,13 @@ interface FlowBox { x: number; y: number; w: number; h: number }
 
 interface FlowLink { d: string; color: string }
 
-/** A box-edge anchor: the point plus the outward normal (the curve's tangent direction). */
 interface Anchor { x: number; y: number; dx: number; dy: number }
 
-/** Must match the `@container lc-card (max-width: …)` rule in stats.css: the flow root fills the card's
- * content box, so the `clientWidth` read and the CSS query can never disagree about the fold mode. */
+/** Must match the `@container lc-card (max-width: …)` rule in stats.css, so the `clientWidth` read and the
+ * CSS query can never disagree about the fold mode. */
 const FLOW_FOLD_PX = 559
 
-/** The flow topology; non-conservative by design — every ribbon is the same width whatever the tally behind it. */
+/** Topology; non-conservative by design — every ribbon is the same width whatever the tally behind it. */
 const FLOW_LINKS: readonly { from: FlowNodeKey; to: FlowNodeKey; fromAt: number; toAt: number; color: string }[] = [
   { from: 'inputs', to: 'session', fromAt: 0.5, toAt: 1 / 3, color: 'var(--color-green-500)' },
   { from: 'events', to: 'session', fromAt: 0.5, toAt: 2 / 3, color: 'var(--color-purple-500)' },
@@ -126,8 +123,8 @@ const EVENT_PILLS: readonly { kind: 'inject' | 'compaction' | 'prune'; tally: 'i
   { kind: 'prune', tally: 'prunes', cls: 'lc-kind-prune' },
 ]
 
-/** Folded over the LIVE surface with the host's own predicate (fold.ts `toolCalls`), so the pills sum to
- * the head's `toolCalls` figure by construction, minus any result the fold stamped no name on. */
+/** The LIVE surface folded with the host's own predicate (fold.ts `toolCalls`), so the pills sum to the head's
+ * `toolCalls` figure by construction, minus any result the fold stamped no name on. */
 export function toolTallyOf(nodes: readonly SurfaceNode[]): [string, number][] {
   const tally = new Map<string, number>()
   for (const n of nodes) {
@@ -138,11 +135,8 @@ export function toolTallyOf(nodes: readonly SurfaceNode[]): [string, number][] {
   return [...tally].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
 }
 
-/** Every jump the board offers, resolved by the caller (contextView.tsx owns both bridges): the session figures and
- *  the user-input pill open a Context Browser category, the file pills land on the File Activity card's own chips. */
 export type StatsJump = 'skills' | 'answers' | 'inputs' | 'read' | 'write' | 'search' | 'image'
 
-/** Each jump's action tip — the fired cell's `title`, phrased as what the click does. */
 const JUMP_TIPS: Record<StatsJump, string> = {
   skills: 'stats.skillsJump',
   answers: 'stats.answersJump',
@@ -166,7 +160,6 @@ interface StatsContextProps {
   humanInputs?: number
   answers?: number
   onJump?: (jump: StatsJump) => void
-  /** The family card's own view, wherever the caller serves it (contextView.tsx owns the jump). */
   onTeamClick?: () => void
   toolCalls?: number
   files: { reads: number; writes: number; searches: number; images: number }
@@ -187,14 +180,13 @@ function flowAnchor(box: FlowBox, side: 'left' | 'right' | 'top' | 'bottom', at:
   }
 }
 
-/** Cubic whose end control point sits at `b + normal·k`, so the path arrives moving INTO the node. */
 export function flowCurve(a: Anchor, b: Anchor): string {
   const k = Math.max(18, (a.dx !== 0 ? Math.abs(b.x - a.x) : Math.abs(b.y - a.y)) / 2)
   return `M ${a.x} ${a.y} C ${a.x + a.dx * k} ${a.y + a.dy * k} ${b.x + b.dx * k} ${b.y + b.dy * k} ${b.x} ${b.y}`
 }
 
-/** Sources attach on their trailing edge and targets on their leading one: the session node is a target of
- * the left/top pair and the source of the right/bottom pair, so one orientation pair serves both modes. */
+/** Sources attach on their trailing edge, targets on their leading one: the session node is a target of the left/top
+ * pair and the source of the right/bottom pair, so one orientation pair serves both modes. */
 export function measureFlow(boxes: Record<FlowNodeKey, FlowBox>, horizontal: boolean): FlowLink[] {
   const fromSide = horizontal ? 'right' as const : 'bottom' as const
   const toSide = horizontal ? 'left' as const : 'top' as const
@@ -207,15 +199,8 @@ export function measureFlow(boxes: Record<FlowNodeKey, FlowBox>, horizontal: boo
 /** The row's own gap, mirrored from `.lc-flow-pills` in stats.css so the fit arithmetic matches the rendered box. */
 const PILL_GAP = 4
 
-/** The tool tally on ONE line, exactly like the Input/Output row above it: every tool the card has room for, spelled
- *  out in full, and the rest folded into a trailing "其他 +N" — so a session that used five tools shows five rather than
- *  an arbitrary top three.
- *
- *  The visible row renders ONLY what fits, so nothing is ever clipped or overlapped. The fit is measured off a hidden
- *  gauge that carries every pill at its natural width — a pill's width does not depend on whether its neighbours are on
- *  screen, so the gauge answers for the tail the row is not showing. Because the row never wraps, the node's height is
- *  a property of the card's width alone: it stops resizing as a session's tool mix changes. With no tally (the split
- *  generation's head carries none) the row holds a lone "其他 +0". */
+/** The tool tally on ONE line: every tool the card has room for, the rest folded into the trailing overflow label
+ *  (`stats.toolsMore`). The row renders only what fits, measured off a hidden gauge; with no tally the pill reports zero. */
 function ToolPills(props: {
   tools: readonly (readonly [string, number])[]
   t: Translate
@@ -248,9 +233,7 @@ function ToolPills(props: {
     }
     const widths = Array.from(gauge.children, el => el.getBoundingClientRect().width)
     const chips = Array.from(chipGauge.children, el => el.getBoundingClientRect().width)
-    // The widest set that fits WITH the chip it would actually carry, found in one pass from the top down. Measuring
-    // the live chip instead would feed this pass's own output back into its input; measuring only the widest chip
-    // would cost a pill to digits the chip never shows.
+    // Widest set that fits WITH the chip it would carry, top down: measuring the live chip would feed the pass its own output.
     let pills = 0
     for (let n = Math.min(widths.length, chips.length - 1); n >= 0; n--) {
       let total = chips[tools.length - n] + n * PILL_GAP
@@ -283,8 +266,6 @@ function ToolPills(props: {
           <span className="lc-flow-pill-label">{t('stats.toolsMore', { n: tools.length - shown })}</span>
         </span>
       </div>
-      {/* Off-flow gauges: every pill and every chip width the fit may weigh, so the row can measure the tail it is
-          not showing without rendering it. */}
       <span className="lc-flow-pill-gauge" aria-hidden="true">
         <div className="lc-flow-pills" ref={gaugeRef}>{tools.map(([name, n]) => pill(name, n))}</div>
         <div className="lc-flow-pills" ref={chipGaugeRef}>
@@ -387,8 +368,6 @@ export function makeStatsContext(
       ...notes(subDeepseek),
       subUnpriced ? <span key="unavailable">{t('stats.costUnavailable')}</span> : null,
     ]
-    // Re-measures when the values that move the flow change (the same-string bail-out keeps it loopless); the
-    // ResizeObserver tick covers pane drags, which change no prop.
     const flowRef = useRef<HTMLDivElement | null>(null)
     const nodeEls = useRef(new Map<FlowNodeKey, HTMLDivElement>())
     const [links, setLinks] = useState<FlowLink[]>([])
@@ -502,7 +481,6 @@ export function makeStatsContext(
     const costText = cost === null ? '—' : formatCost(cost, currency)
     const ownText = ownCost === null ? '—' : formatCost(ownCost, currency)
     const subText = subCost === null ? '—' : formatCost(subCost, currency)
-    // The card this cell tallies lives on its own view, and only the caller knows where it serves it.
     const openTeam = props.onTeamClick
     const onTeamClick = (ev: MouseEvent): void => {
       if ((ev.target as HTMLElement).closest('a') !== null) return
@@ -522,7 +500,6 @@ export function makeStatsContext(
           <span className="lc-card-title-text">{t('stats.title')}</span>
         </div>
         <div className="lc-stats lc-flow" ref={flowRef}>
-          {/* Under the nodes; ordered left→right / top→bottom so the traveling dashes read in flow order. */}
           <svg className="lc-flow-svg" aria-hidden="true">
             {links.map((l, i) => (
               // Fixed four-link set in fixed order: the index IS the identity (zero-measured boxes produce identical d strings).

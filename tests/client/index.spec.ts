@@ -1,5 +1,3 @@
-// Client entry (src/client/index.ts): the plugin's apply() wiring through the faithful harness-context seams.
-
 import { createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -9,7 +7,6 @@ import type { SettingsField, SettingsScopeLike, SettingsState } from '../../src/
 import { TestClientCtx, TestSessions, asClientCtx } from './helpers/harness'
 import { mount, query, queryAll, text } from './helpers/kit'
 
-// The entry ships via `module.exports` (bundle handoff shape); its runtime exports are the plugin triple, opaque to the static import type.
 const { name, inject, apply } = (await import('../../src/client/index')) as unknown as {
   name: string
   inject: string[]
@@ -39,7 +36,6 @@ function makeScope(snapshot: { status: string; value: unknown; writable: boolean
   return rec
 }
 
-/** A configForms face serving the given form (the card seat's transport). */
 function formsServing(form: SettingsScopeLike): {
   get(namespace: string): SettingsScopeLike
   whileServed(namespaces: readonly string[], register: () => () => void): () => void
@@ -50,7 +46,6 @@ function formsServing(form: SettingsScopeLike): {
   }
 }
 
-/** A settings form whose snapshot the test drives (the emit path). */
 function scopeWith(snapshot: { status: string; value: unknown; writable: boolean }): SettingsScopeLike & {
   emit(next: { status: string; value: unknown; writable: boolean }): void
 } {
@@ -85,7 +80,6 @@ describe('client entry: dictionaries', () => {
     assert.ok(dicts)
     assert.equal(dicts.zh, DICT_ZH)
     assert.equal(dicts.en, DICT_EN)
-    // The bound translate resolves through the active-locale → en chain.
     assert.equal(ctx.locale.bind('dsh-context')('tab.context'), 'Context')
     ctx.dispose()
     assert.equal(ctx.locale.namespaces.has('dsh-context'), false)
@@ -179,7 +173,6 @@ describe('client entry: assistant-actions seat', () => {
     assert.equal(query(m.container, 'button.lc-jump').getAttribute('aria-label'), 'View this turn in the Context view')
     await m.unmount()
 
-    // Interruption-frozen partials address no durable message: nothing renders.
     const nil = await mount(component({ messageId: 7 }) as ReactElement)
     assert.equal(queryAll(nil.container, 'button').length, 0)
     await nil.unmount()
@@ -306,7 +299,6 @@ describe('client entry: Context Insights page seats', () => {
 })
 
 describe('client entry: configForms inject', () => {
-  /** A configForms stand-in capturing the whileServed registration. */
   function fakeConfigForms(form: SettingsScopeLike): {
     gets: string[]
     whileServedCalls: string[][]
@@ -356,13 +348,10 @@ describe('client entry: configForms inject', () => {
     const scope = makeScope({ status: 'ready', value: { defaultTrendMode: 'delta' }, writable: true })
     const forms = fakeConfigForms(scope)
     ctx.setService('configForms', forms)
-    // The namespace is the entry id.
     assert.deepEqual(forms.gets, ['dsh-context'])
     assert.equal(scope.subscribes, 1, 'the settings store attached to the form')
     assert.deepEqual(forms.whileServedCalls, [['dsh-context']])
-    // Nothing registers until the Host serves the namespace.
     assert.equal(ctx.slots.of('plugins.bundle.config').length, 0)
-    // The Host serves: the register claims the keyed seat.
     const disposeRegistration = forms.register()
     const entries = ctx.slots.of('plugins.bundle.config')
     assert.equal(entries.length, 1)
@@ -382,7 +371,6 @@ describe('client entry: configForms inject', () => {
     assert.equal(face.hooks.contextSettings.getSnapshot().mode, 'delta', 'the card reads the form snapshot')
     face.set('defaultToolSort', 'name')
     assert.deepEqual(scope.sets, [{ field: 'defaultToolSort', value: 'name' }])
-    // The seat's component renders the flat Plugins-page card.
     const el = entries[0].component({}) as ReactElement
     assert.equal((el.type as { name: string }).name, 'PluginConfigCard')
     const store = face.hooks.contextSettings
@@ -429,7 +417,6 @@ describe('client entry: right Sidebar Context tab', () => {
 })
 
 describe('client entry: placement gating', () => {
-  /** The sidebar registry stand-in counting registrations and disposer calls. */
   function registry(): { definitions: unknown[]; disposed: number; register(d: unknown): () => void } {
     const rec = {
       definitions: [] as unknown[],
@@ -444,25 +431,41 @@ describe('client entry: placement gating', () => {
 
   test('a registry that hands back no disposer unwinds the tab mount without a throw', () => {
     const ctx = new TestClientCtx()
-    // A foreign/hostile registry: the registration contract's disposer is absent, so the mount's own
-    // disposer must skip it rather than call a non-function on the placement flip.
+    // A registry whose registration disposer is absent: the mount's own disposer must skip it.
     ;(ctx.slots as unknown as { register: () => unknown }).register = () => undefined
     applyTo(ctx)
     ctx.dispose()
     assert.deepEqual(ctx.slots.of('conversation.view'), [])
   })
 
-  test("the persisted 'sidebar' placement skips the conversation tab and keeps the sidebar", () => {
+  test("the persisted 'sidebar' placement skips the Context tab and keeps the sidebar", () => {
     const scope = scopeWith({ status: 'ready', value: { defaultPlacement: 'sidebar' }, writable: true })
     const ctx = new TestClientCtx({ services: { configForms: formsServing(scope) } })
     applyTo(ctx)
-    assert.deepEqual(ctx.slots.of('conversation.view'), [], 'the dropped tabs never registered')
+    assert.deepEqual(ctx.slots.of('conversation.view').map(e => e.registration.id), ['fleet'], 'the Context tab is dropped; the Fleet tab is not')
     const tabs = registry()
     ctx.setService('sidebarRightTabs', tabs)
     assert.equal(tabs.definitions.length, 1, 'the kept sidebar still registers')
     assert.equal(ctx.slots.of('sidebar.right.pane.tab').length, 1)
     ctx.dispose()
     assert.equal(tabs.disposed, 1)
+    assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab'), [])
+  })
+
+  test("the persisted 'hide' placement registers neither surface; the Fleet tab still serves and a flip back mounts both", () => {
+    const scope = scopeWith({ status: 'ready', value: { defaultPlacement: 'hide' }, writable: true })
+    const ctx = new TestClientCtx({ services: { configForms: formsServing(scope) } })
+    applyTo(ctx)
+    assert.deepEqual(ctx.slots.of('conversation.view').map(e => e.registration.id), ['fleet'], 'only the independent Fleet tab is served')
+    const tabs = registry()
+    ctx.setService('sidebarRightTabs', tabs)
+    assert.equal(tabs.definitions.length, 0, 'the sidebar never registers')
+
+    scope.emit({ status: 'ready', value: { defaultPlacement: 'all' }, writable: true })
+    assert.equal(tabs.definitions.length, 1, 'the sidebar joins live')
+    assert.equal(ctx.slots.of('conversation.view').length, 2, 'the Context tab joins live')
+    ctx.dispose()
+    assert.deepEqual(ctx.slots.of('conversation.view'), [])
     assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab'), [])
   })
 

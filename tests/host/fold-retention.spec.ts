@@ -1,7 +1,3 @@
-// Retention in the timeline fold (src/host/foldState.ts): trimToLastTurns plus trimState's turn-run / step / event / archive bounds, driven
-// through the real projection unit with tiny config bounds. The restored-state defenses (a cache restore can carry archived entries without
-// `gone` — the state schema leaves it optional) are exercised by feeding hand-crafted states through def.apply.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { createTimelineState, trimToLastTurns } from '../../src/host/fold'
@@ -75,7 +71,6 @@ describe('trimState request/event bounds', () => {
       [1, 2, 3, 4, 5].map(i => assistantMessage(i, { turn: 1, step: i })),
       { maxKeptTurns: 10, maxRequestSteps: 3 },
     )
-    // One turn-run: the turn trim cannot cut mid-turn, so the step backstop slices the newest tail.
     assert.deepEqual(drive.state.requests.map(r => r.seq), [3, 4, 5])
   })
 
@@ -111,10 +106,8 @@ describe('the incremental turnRuns ledger', () => {
     state = def.apply(state, assistantMessage(2, { turn: 1, step: 2 }))
     // A cached row from an older build carries no `turnRuns` (additive-optional).
     delete (state as { turnRuns?: unknown }).turnRuns
-    // A request push recomputes the base incrementally (1 retained run + the new turn).
     const pushed = def.apply(state, assistantMessage(3, { turn: 2, step: 1 }))
     assert.equal(pushed.turnRuns, 2)
-    // A non-request change recomputes in the trim pass instead.
     const trimmed = def.apply(state, planMode(4, { active: true }))
     assert.equal(trimmed.turnRuns, 1)
   })

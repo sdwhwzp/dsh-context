@@ -1,7 +1,8 @@
-import { createElement as h } from 'react'
+import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { makeContextJumpButton } from '../../../src/client/components/contextJump'
+import { createContextSettings } from '../../../src/client/settings'
 import type { ConversationNodeLike, UseChatLike } from '../../../src/client/services'
 import { takeContextFocus } from '../../../src/client/viewFocus'
 import { DICT_EN } from '../../../src/client/i18n'
@@ -9,11 +10,11 @@ import { asClientCtx, TestClientCtx } from '../helpers/harness'
 import { click, makeKit, mount, query, queryAll } from '../helpers/kit'
 
 const kit = makeKit()
-const Jump = makeContextJumpButton(asClientCtx(new TestClientCtx()), kit)
+const Jump = makeContextJumpButton(asClientCtx(new TestClientCtx()), kit, createContextSettings())
 
 const SESSION = 'sv-jump'
 
-/** The chat node seat: the ChatSnapshot arm carrying assistant nodes with message ids (hostile shapes forced past the seat type). */
+/** The chat node seat; `nodes` is cast past the seat type so hostile shapes reach the guards. */
 function chatWith(nodes: unknown): { useChat?: UseChatLike } {
   return { useChat: (sel => sel({ legacy: { nodes: nodes as readonly ConversationNodeLike[] } })) as UseChatLike }
 }
@@ -146,11 +147,24 @@ describe('ContextJump — click flow', () => {
   })
 })
 
+describe('ContextJump — hidden panel entry', () => {
+  test("the 'hide' placement renders no jump; a flip back to 'all' brings it in", async () => {
+    const settings = createContextSettings()
+    settings.set('defaultPlacement', 'hide')
+    const HiddenJump = makeContextJumpButton(asClientCtx(new TestClientCtx()), kit, settings)
+    const m = await mount(h(HiddenJump, { messageId: 'msg-4' }))
+    assert.equal(queryAll(m.container, 'button').length, 0, 'no Context surface is left to jump to')
+    await act(async () => { settings.set('defaultPlacement', 'all') })
+    assert.equal(queryAll(m.container, 'button').length, 1, 'the jump follows the entry live')
+    await m.unmount()
+  })
+})
+
 describe('ContextJump — sidebar landing', () => {
   test('a served sidebarRight face opens the Context tab there, leaving the conversation tab alone', async () => {
     const opened: string[] = []
     const ctx = new TestClientCtx({ services: { sidebarRight: { openTab: (kind: string) => { opened.push(kind) } } } })
-    const SidebarJump = makeContextJumpButton(asClientCtx(ctx), kit)
+    const SidebarJump = makeContextJumpButton(asClientCtx(ctx), kit, createContextSettings())
     const bar = document.createElement('div')
     const context = document.createElement('button')
     context.setAttribute('role', 'tab')
@@ -173,7 +187,7 @@ describe('ContextJump — sidebar landing', () => {
 
   test('an openTab that refuses (no mounted surface, unregistered kind) falls back to the tab', async () => {
     const ctx = new TestClientCtx({ services: { sidebarRight: { openTab: () => { throw new Error('refused') } } } })
-    const SidebarJump = makeContextJumpButton(asClientCtx(ctx), kit)
+    const SidebarJump = makeContextJumpButton(asClientCtx(ctx), kit, createContextSettings())
     const bar = document.createElement('div')
     const context = document.createElement('button')
     context.setAttribute('role', 'tab')

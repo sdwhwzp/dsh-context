@@ -49,7 +49,6 @@ describe('ContextView — projection guards', () => {
       sessionId: 'sv-garbage',
       useProjection: projectionsFor(timeline(), {}),
     }))
-    // Well-formed-but-empty: every section renders its empty state.
     assert.ok(text(m.container).includes(DICT_EN['overview.title']))
     assert.ok(text(m.container).includes(DICT_EN['stats.title']))
     assert.ok(text(m.container).includes(DICT_EN['trend.empty']))
@@ -74,11 +73,9 @@ describe('ContextView — projection guards', () => {
         contextHeaders: { headers: [{ seq: 1, time: T0, system: 'SYS', tools: [{ name: 'bash', tokens: 12 }] }] },
       }),
     }))
-    // Anchored headline: projected 100 of a 128k window.
+    // Anchored headline, then the Token card off the official tokenUsage projection: billed total
+    // 100+200+0+50 = 350, cache-hit rate 200/300 truncated to two decimals.
     assert.ok(text(m.container).includes(DICT_EN['overview.used']))
-    // The Token card's center is the chat stats line's whole-session billed
-    // total off the official tokenUsage projection (100 + 200 + 0 + 50), and
-    // its corner shows the line's own cache-hit rate two decimals deep (200 / 300, truncated).
     const tokensCard = queryAll(m.container, '.lc-head > .lc-col-donut')[0]
     assert.equal(query(tokensCard, '.lc-donut-center b').textContent, '350')
     assert.equal(query(tokensCard, '.lc-card-rate').textContent, 'Cache Hit 66.66%')
@@ -126,13 +123,13 @@ describe('ContextView — baseline gate', () => {
     const View = makeView(new TestClientCtx())
     const m = await mount(h(View, {
       sessionId: 'sv-gated',
-      useProjection: projectionsFor(timeline({ unsupported: { current: '0.1.1-rc.2', minimum: '0.1.7-rc.2' } })),
+      useProjection: projectionsFor(timeline({ unsupported: { current: '0.1.1-rc.2', minimum: '0.2.0-rc.2' } })),
     }))
     assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null)
     const card = query(m.container, '.lc-gate-card')
     assert.ok(text(card).includes(DICT_EN['gate.title']))
     assert.ok(text(card).includes('v0.1.1-rc.2'))
-    assert.ok(text(card).includes('v0.1.7-rc.2'))
+    assert.ok(text(card).includes('v0.2.0-rc.2'))
     // The cards keep rendering the fallback's zeroed data behind it.
     assert.ok(text(m.container).includes(DICT_EN['overview.title']))
     assert.ok(text(m.container).includes(DICT_EN['trend.empty']))

@@ -1,6 +1,3 @@
-// The per-file attachment price (src/shared/fileTokens.ts): what a durable file costs in a request,
-// which is the harness's model-facing handle and never the file's bytes.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { estimateFileTokens } from '../../src/shared/fileTokens'

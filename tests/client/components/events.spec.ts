@@ -88,27 +88,22 @@ describe('EventList', () => {
     const rows = queryAll(m.container, '.lc-event')
     assert.equal(rows.length, 5)
 
-    // Newest first: seq 5 leads. tokens 0 renders no token span.
     assert.ok(text(rows[0]).includes('Context Injection'))
     assert.equal(queryAll(rows[0], '.lc-event-tokens').length, 0)
 
-    // Foreign kind: EVENT_ICONS miss → '•' fallback, and the kind label resolves through the locale chain to the key itself.
     assert.equal(query(rows[1], '.lc-event-icon').textContent, '•')
     assert.equal(query(rows[1], '.lc-kind').textContent, 'kind.mystery')
 
-    // Compaction: ✂ glyph, negative token delta, no position (no turn/step).
     assert.equal(query(rows[2], '.lc-event-icon').textContent, '✂')
     const down = query(rows[2], '.lc-event-tokens')
     assert.ok(down.className.includes('lc-down'))
     assert.equal(down.textContent, '−100')
     assert.equal(queryAll(rows[2], '.lc-event-at').length, 0)
 
-    // Model switch: real IconBranchOutlineRegular svg.
     assert.ok(query(rows[3], '.lc-event-icon svg') instanceof SVGElement)
     assert.ok(text(rows[3]).includes('Model switched: a → b'))
     assert.equal(query(rows[3], '.lc-kind').textContent, 'Switch')
 
-    // Inject: real IconPlusOutlineRegular svg, positive token delta, position, time.
     assert.ok(query(rows[4], '.lc-event-icon svg') instanceof SVGElement)
     const up = query(rows[4], '.lc-event-tokens')
     assert.ok(up.className.includes('lc-up'))
@@ -128,8 +123,7 @@ describe('EventList', () => {
     assert.equal(labels[0].getAttribute('title'), '')
     assert.equal(labels[1].getAttribute('title'), '')
 
-    // Newest first: labels[0] is the prune, labels[1] the inject. Force an empty-text overflow on the prune label (the
-    // `el.textContent || ''` fallback arm) and a real overflow on the inject label, then resize.
+    // Newest first: labels[0] is the prune (the empty-text fallback arm), labels[1] the inject.
     Object.defineProperty(labels[0], 'scrollWidth', { value: 100, configurable: true })
     Object.defineProperty(labels[1], 'scrollWidth', { value: 100, configurable: true })
     labels[0].textContent = ''
@@ -168,7 +162,7 @@ describe('EventList', () => {
     const before = queryAll(m.container, '.lc-event')
     assert.equal(before.length, 2)
 
-    // A new event lands at the log tail → the row list prepends it; every old row must be the SAME DOM node
+    // A new event lands at the log tail, so the row list prepends it; every old row must stay the SAME DOM node
     // (an index-bearing key would shift all keys and remount the whole list on every push).
     await m.update(h(EventList, { events: [...base, ev({ seq: 3, kind: 'model', from: 'a', to: 'b' })] }))
     const after = queryAll(m.container, '.lc-event')
@@ -190,29 +184,57 @@ describe('EventList', () => {
     await m.unmount()
   })
 
-  test('an injection label links into the browser; other kinds and a handler-less list keep plain labels', async () => {
+  test('inject, compaction and prune rows link; other kinds and a handler-less list keep plain labels', async () => {
     const events = [
       ev({ seq: 1, kind: 'inject', form: 'notice', name: 'hook' }),
-      ev({ seq: 2, kind: 'prune' }),
+      ev({ seq: 2, kind: 'compaction', count: 2 }),
+      ev({ seq: 3, kind: 'prune' }),
+      ev({ seq: 4, kind: 'model', from: 'a', to: 'b' }),
     ]
     const focused: ContextEventRecord[] = []
-    const m = await mount(h(EventList, { events, onInjectFocus: e => { focused.push(e) } }))
+    const m = await mount(h(EventList, { events, onEventFocus: e => { focused.push(e) } }))
     const rows = queryAll(m.container, '.lc-event')
-    // Newest first: the prune row leads, and only the injection becomes a link.
     assert.equal(rows[0].querySelector('.lc-event-jump'), null)
     assert.equal(query(rows[0], '.lc-event-label').tagName, 'SPAN')
-    const link = query(rows[1], '.lc-event-jump')
+    const prune = query(rows[1], '.lc-event-jump')
+    assert.equal(prune.tagName, 'BUTTON')
+    assert.equal(prune.textContent, 'Tool output pruned')
+    const compaction = query(rows[2], '.lc-event-jump')
+    assert.equal(compaction.tagName, 'BUTTON')
+    assert.ok(compaction.textContent?.includes('Context compacted'))
+    const link = query(rows[3], '.lc-event-jump')
     assert.equal(link.tagName, 'BUTTON')
     assert.equal(link.textContent, 'Notice · hook')
     await click(link)
-    assert.deepEqual(focused.map(e => e.seq), [1])
+    await click(compaction)
+    await click(prune)
+    assert.deepEqual(focused.map(e => e.seq), [1, 2, 3])
     await m.unmount()
 
-    // No handler (a view with no browser to open): every label stays a plain span.
     const plain = await mount(h(EventList, { events }))
     assert.equal(queryAll(plain.container, '.lc-event-jump').length, 0)
-    assert.equal(queryAll(plain.container, '.lc-event-label').length, 2)
+    assert.equal(queryAll(plain.container, '.lc-event-label').length, 4)
     await plain.unmount()
+  })
+
+  test('a row the view cannot land on stays a plain label', async () => {
+    const events = [
+      ev({ seq: 1, kind: 'inject', form: 'notice', name: 'hook' }),
+      ev({ seq: 2, kind: 'compaction', count: 2 }),
+    ]
+    const focused: ContextEventRecord[] = []
+    const m = await mount(h(EventList, {
+      events,
+      onEventFocus: e => { focused.push(e) },
+      canEventFocus: e => e.kind === 'inject',
+    }))
+    const rows = queryAll(m.container, '.lc-event')
+    assert.equal(rows[0].querySelector('.lc-event-jump'), null, 'the compaction has no landing step')
+    assert.equal(query(rows[0], '.lc-event-label').tagName, 'SPAN')
+    assert.equal(query(rows[1], '.lc-event-jump').tagName, 'BUTTON')
+    await click(query(rows[1], '.lc-event-jump'))
+    assert.deepEqual(focused.map(e => e.seq), [1])
+    await m.unmount()
   })
 })
 

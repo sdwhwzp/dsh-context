@@ -1,7 +1,3 @@
-// The right Sidebar's Context tab (src/client/sidebar.ts): the OPTIONAL three-stage registration — tab type into
-// `sidebarRightTabs`, body into the keyed `sidebar.right.pane.tab` seat, chip title into `sidebar.right.pane.tab.title`
-// — and its silent degrade on every harness that serves no right Sidebar.
-
 import { createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -20,7 +16,6 @@ import { makeKit, mount, query, text } from './helpers/kit'
 
 const NS = 'dsh-context'
 
-/** A registry stand-in recording what it was handed (and its disposer calls). */
 function registry(): { definitions: SidebarTabDefinitionLike[]; disposed: number; register: (d: SidebarTabDefinitionLike) => () => void } {
   const rec = {
     definitions: [] as SidebarTabDefinitionLike[],
@@ -135,8 +130,7 @@ describe('watchSidebarContextTab — the optional registration', () => {
   })
 
   test('the real Context view through this seat keeps the Agent Network card inline', async () => {
-    // The center Context tab hands that card to the Fleet tab; this panel must keep painting it, and only the
-    // real view through the real seat proves it (the host marker alone would keep passing if the view dropped it).
+    // The center Context tab hands that card to the Fleet tab; only the real view through the real seat proves it.
     // One stable snapshot object: the card subscribes through useSyncExternalStore, which loops on a fresh one per read.
     const snapshot = { byId: { 's-1': { displayTitle: 'Main Agent', running: false, blank: false, updatedAt: 1 } } }
     const ctx = new TestClientCtx({
@@ -179,8 +173,7 @@ describe('watchSidebarContextTab — the optional registration', () => {
     const ctx = new TestClientCtx()
     const tabs = registry()
     ctx.setService('sidebarRightTabs', tabs)
-    // The slots face accepts the body seat then throws on the title seat: the
-    // type and body must be rolled back, never half-registered.
+    // The title seat throws after the body seat registered: type and body must be rolled back, never half-registered.
     let calls = 0
     ;(ctx as unknown as { slots: unknown }).slots = {
       inject: (_name: string, callback: () => unknown) => {
@@ -208,8 +201,6 @@ describe('watchSidebarContextTab — the optional registration', () => {
   test('a foreign slots face returning no disposer is tolerated on unload', () => {
     const ctx = new TestClientCtx()
     ctx.setService('sidebarRightTabs', registry())
-    // A slots implementation whose inject() returns nothing (the plugin's face
-    // types the return as unknown): the disposer must guard the call.
     ;(ctx as unknown as { slots: unknown }).slots = {
       inject: () => undefined,
       register: () => () => {},

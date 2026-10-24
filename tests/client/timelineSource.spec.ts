@@ -1,6 +1,3 @@
-// The timeline source (src/client/timelineSource.ts): the detail store machine and the
-// useTimelineSource hook merging both wire generations into the value the cards render.
-
 import { act, createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test, vi, afterEach } from 'vitest'
@@ -22,7 +19,6 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-/** A render-safe detail payload (the shape the host endpoint serves). */
 function detail(rev: number, over: Record<string, unknown> = {}): ContextTimelineDetail {
   return {
     rev,
@@ -35,7 +31,6 @@ function detail(rev: number, over: Record<string, unknown> = {}): ContextTimelin
   }
 }
 
-/** A slim wire head (the split generation's pushed value). */
 function slimHead(rev: number, over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ok: true,
@@ -48,7 +43,6 @@ function slimHead(rev: number, over: Record<string, unknown> = {}): Record<strin
   }
 }
 
-/** Stub the global fetch with a programmable detail reply (the transport the detail reader POSTs). */
 function stubDetailFetch(behavior: () => { status?: number; body?: unknown }): void {
   vi.stubGlobal('fetch', async () => {
     const outcome = await behavior()
@@ -84,35 +78,29 @@ describe('detailOf', () => {
     assert.equal(narrowed.surfaceFloor, 7)
     assert.equal(narrowed.archiveFloor, undefined, 'a wrong-typed floor stays absent')
     assert.equal(detailOf(detail(1, { archiveFloor: 9 }))?.archiveFloor, 9)
-    // The op log and its floor ride through, per-item guarded.
     const withOps = detailOf(detail(1, {
       fileOps: [{ seq: 2, path: 'a.ts', kind: 'read', tool: 'read', err: false, added: 0, removed: 0 }, null],
       fileOpsFloor: 4,
     }))
     assert.equal(withOps?.fileOps?.length, 1, 'junk entries drop')
     assert.equal(withOps?.fileOpsFloor, 4)
-    // The timing strip's painted spans ride through, per-item guarded too.
     const withSpans = detailOf(detail(1, {
       spans: [{ kind: 'ttft', start: 0, end: 100 }, null],
     }))
     assert.equal(withSpans?.spans?.length, 1, 'junk span entries drop')
-    // Absent stays absent (the legacy inline generation's marker).
     assert.equal(detailOf(detail(1))?.fileOps, undefined)
     assert.equal(detailOf(detail(1))?.spans, undefined)
   })
 
   test('the slim head rides through sanitized; a malformed head drops alone', () => {
-    // A well-formed head passes through (the Agent network's cold-ring fetch).
     const served = detailOf(detail(2, { head: slimHead(2) }))
     assert.ok(served?.head !== undefined)
     assert.equal(served.head.current.total, 15)
     assert.equal(served.head.model, 'm')
-    // A non-record head drops without rejecting the payload the cards consume.
     const junkHead = detailOf(detail(2, { head: 'nope' }))
     assert.ok(junkHead !== null)
     assert.equal(junkHead.head, undefined)
     assert.ok(junkHead.requests.length > 0)
-    // Absent stays absent.
     assert.equal(detailOf(detail(2))?.head, undefined)
   })
 })
@@ -141,7 +129,6 @@ describe('makeDetailFetcher', () => {
     const transport = makeDetailFetcher('s1')!
     await assert.rejects(() => transport(), /offline/)
 
-    // A non-200 answer (the route absent on an inline-generation host) rejects.
     stubDetailFetch(() => ({ status: 404, body: 'not found' }))
     const missing = makeDetailFetcher('s1')!
     await assert.rejects(() => missing(), /HTTP 404/)
@@ -220,7 +207,6 @@ describe('DetailStore', () => {
     assert.equal(store.getSnapshot().pending, false, 'parking drops the pending window')
     await vi.advanceTimersByTimeAsync(100)
     assert.equal(calls.length, 0, 'a parked store never reaches the fetcher')
-    // A further rev while still parked arms nothing either.
     store.request(2)
     await vi.advanceTimersByTimeAsync(100)
     assert.equal(calls.length, 0)
@@ -260,8 +246,7 @@ describe('DetailStore', () => {
     await vi.advanceTimersByTimeAsync(1000)
     assert.equal(calls.length, 1, 'the parked retry is dropped')
     store.subscribe(() => {})
-    // The SAME head rev must read again: the failed read already marked it
-    // "wanted", which would otherwise swallow the resumed store's request.
+    // The SAME head rev must read again: the failed read already marked it "wanted".
     store.request(1)
     await vi.advanceTimersByTimeAsync(10)
     assert.equal(calls.length, 2, 'the resumed store reads instead of sticking on the note')
@@ -285,7 +270,6 @@ describe('DetailStore', () => {
     vi.useFakeTimers()
     const { fetcher, calls } = scriptedFetcher([detail(1)])
     const store = new DetailStore(fetcher, 10)
-    // The tab and the /context modal share one store per session.
     const offTab = store.subscribe(() => {})
     const offModal = store.subscribe(() => {})
     store.request(1)
@@ -419,7 +403,6 @@ describe('DetailStore', () => {
     store.request(1)
     await until(() => store.getSnapshot().failed === true, 'the failure never surfaced')
     assert.equal(store.getSnapshot().detail, null)
-    // No manual retry: the trailing edge re-reads after the backoff window.
     await until(() => store.getSnapshot().detail?.rev === 1, 'the trailing recovery never landed')
     assert.equal(store.getSnapshot().failed, false)
     assert.equal(calls.length, 2)
@@ -431,8 +414,6 @@ describe('DetailStore', () => {
     store.request(1)
     await until(() => store.getSnapshot().detail?.rev === 1, 'the first read never landed')
     store.request(2)
-    // Mid-way: the failed read settles with the last good detail still serving
-    // (>=: the zero-debounce trail can land the recovery between two polls).
     await until(() => calls.length >= 2, 'the second read never fired')
     await until(() => store.getSnapshot().detail?.rev === 2, 'the trailing recovery never landed')
     assert.equal(store.getSnapshot().failed, false, 'the failed read never flipped the cards to failed')
@@ -452,7 +433,6 @@ describe('DetailStore', () => {
   })
 
   test('retry with no armed timer refires directly (the stopped-trailing shape)', async () => {
-    // Absence stops the trailing timer; the manual retry must not wait on one.
     const { fetcher, calls } = scriptedFetcher([null, detail(1)])
     const store = new DetailStore(fetcher, 0)
     store.request(1)
@@ -506,7 +486,6 @@ describe('DetailStore', () => {
     store.retry()
     await until(() => store.getSnapshot().detail?.rev === 1, 'the retry never refetched')
     assert.equal(calls.length, 2)
-    // A retry with a served detail is a no-op.
     store.retry()
     await settle()
     assert.equal(calls.length, 2)
@@ -524,7 +503,6 @@ describe('DetailStore', () => {
     assert.equal(calls.length, 1, 'the trailing read waits out the doubled window')
     await vi.advanceTimersByTimeAsync(1)
     assert.equal(calls.length, 2)
-    // Second failure: the window doubles again (40).
     await vi.advanceTimersByTimeAsync(39)
     assert.equal(calls.length, 2)
     await vi.advanceTimersByTimeAsync(1)
@@ -532,8 +510,6 @@ describe('DetailStore', () => {
   })
 
   test('a rev bump arriving while a read is in flight waits out the flight, then trails', async () => {
-    // The in-flight guard: the bumped rev's timer fires DURING the first read
-    // and must not stack a second call; the settle re-arms it.
     let release!: (d: ContextTimelineDetail | null) => void
     let call = 0
     const store = new DetailStore(() => {
@@ -573,7 +549,6 @@ describe('detailStoreOf', () => {
     return calls
   }
 
-  /** The app's mount path for one session: subscribe, request, land, leave. */
   async function visitStore(id: string): Promise<DetailStore> {
     const store = detailStoreOf(id)
     const off = store.subscribe(() => {})
@@ -589,7 +564,6 @@ describe('detailStoreOf', () => {
     for (const id of ids) await visitStore(id)
     assert.equal(detailStoreOf(ids[11]).hasPayload, true, 'the newest visit stays cached')
     assert.equal(detailStoreOf(ids[0]).hasPayload, false, 'the oldest visit was demoted')
-    // The cached session re-opens without a read; the demoted one reads again.
     await visitStore(ids[11])
     assert.equal(calls.get(ids[11]), 1, 'a cached re-open reads nothing')
     await visitStore(ids[0])
@@ -612,7 +586,6 @@ describe('detailStoreOf', () => {
   test('a burst of opens is trimmed back to the bound on the next open', async () => {
     countingFetch()
     const ids = Array.from({ length: 12 }, (_, i) => 'burst-' + i)
-    // Every store subscribes and requests BEFORE any read lands.
     const offs: (() => void)[] = []
     const created = ids.map((id) => {
       const store = detailStoreOf(id)
@@ -624,18 +597,15 @@ describe('detailStoreOf', () => {
       await until(() => store.hasPayload, 'burst store ' + String(i) + ' never landed')
     }
     for (const off of offs) off()
-    // The next open trims the excess, oldest first.
     await visitStore('burst-extra')
     assert.equal(created[0].hasPayload, false, 'the oldest burst payload is released')
     assert.equal(created[11].hasPayload, true, 'the newest burst payload survives')
-    // A later open walks past the already-demoted entries to the next victim.
     await visitStore('burst-extra-2')
     assert.equal(created[5].hasPayload, false)
     assert.equal(created[11].hasPayload, true)
   })
 })
 
-/** A probe component rendering the source's observable surface as text. */
 function SourceProbe(props: { sessionId: string; value?: unknown; useProjection?: (key: string) => unknown }): ReactElement {
   const useProjection = props.useProjection ?? ((key: string) => (key === 'contextTimeline' ? props.value : undefined))
   const source = useTimelineSource({
@@ -713,7 +683,6 @@ describe('useTimelineSource', () => {
     assert.equal(probeRead(m.container, 'steps'), '1')
     assert.equal(probeRead(m.container, 'model'), 'inline-m')
     assert.equal(calls, 0, 'the inline generation never opens the detail channel')
-    // The legacy retry is the inert no-op (the cards show no note).
     await act(async () => {
       ;(m.container.querySelector('[data-k="retry"]') as HTMLElement).click()
     })
@@ -727,7 +696,6 @@ describe('useTimelineSource', () => {
       return { body: { ok: true, value: detail(2, { head: slimHead(2) }) } }
     })
     const m = await mount(h(SourceProbe, { sessionId: 's1', value: undefined }))
-    // The first paint waits on the cold read — then the read's own slim head stands in for the never-pushed projection value.
     assert.equal(probeRead(m.container, 'state'), 'loading')
     await until(() => probeRead(m.container, 'state') === 'ready', 'the cold read never landed')
     assert.equal(probeRead(m.container, 'model'), 'm', 'the read head renders')
@@ -738,12 +706,8 @@ describe('useTimelineSource', () => {
   })
 
   test('a pushed head arriving after the cold read takes the channel back', async () => {
-    // The stub folds the served rev per the latest requested revision — the
-    // production route folds the requested session at its current watermark.
     let servedRev = 1
     vi.stubGlobal('fetch', async () => ({ ok: true, status: 200, json: async () => ({ ok: true, value: detail(servedRev, { head: slimHead(servedRev, { model: servedRev === 1 ? 'cold-m' : 'pushed-m' }) }) }) }))
-    // The probe reads `useProjection` through a mutable capture so an update
-    // rerender sees the freshly pushed head (the real seat reads per render).
     let pushed: unknown = undefined
     function PushProbe(): ReactElement {
       return h(SourceProbe, {
@@ -754,7 +718,6 @@ describe('useTimelineSource', () => {
     const m = await mount(h(PushProbe, null))
     await until(() => probeRead(m.container, 'state') === 'ready', 'the cold read never landed')
     assert.equal(probeRead(m.container, 'model'), 'cold-m')
-    // The pushed head outruns the cold read's revision: same per-session store, one trailing refetch, the pushed value renders.
     servedRev = 2
     pushed = slimHead(2, { model: 'pushed-m' })
     await m.update(h(PushProbe, null))
@@ -820,7 +783,6 @@ describe('useTimelineSource', () => {
       }
     })
     const m = await mount(h(SourceProbe, { sessionId: 's1', value: slimHead(3) }))
-    // The first paint: the head's counters with the detail still pending.
     assert.equal(probeRead(m.container, 'state'), 'loading')
     assert.equal(probeRead(m.container, 'turns'), '1', 'the head counters render before the detail lands')
     assert.equal(probeRead(m.container, 'steps'), '0', 'the collections wait for the channel')
@@ -843,7 +805,6 @@ describe('useTimelineSource', () => {
     assert.equal(detailStoreOf('s1').getSnapshot().detail?.rev, 3)
     served = 4
     await m.update(h(SourceProbe, { sessionId: 's1', value: slimHead(4) }))
-    // The probe's rev cell reads the HEAD's marker (4 as pushed); the store's served detail proves the refetch.
     assert.equal(probeRead(m.container, 'rev'), '4')
     await until(() => detailStoreOf('s1').getSnapshot().detail?.rev === 4, 'the refetch never landed')
     await m.unmount()

@@ -5,7 +5,6 @@ import { mergeCostUsage } from '../../src/client/cost'
 import type { SessionCostUsage } from '../../src/shared/types'
 import { COST } from './overview.fixtures'
 
-/** The minimal wire-valid timeline head, overridable per case. */
 function timelineOf(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ok: true,
@@ -19,7 +18,6 @@ function timelineOf(over: Record<string, unknown> = {}): Record<string, unknown>
   }
 }
 
-/** A session-list snapshot over rows of `{ id, row }` pairs. */
 function snapshotOf(entries: [string, Record<string, unknown>][], current?: string): Record<string, unknown> {
   return {
     ids: entries.map(([id]) => id),
@@ -94,7 +92,6 @@ describe('rowsOfSnapshot', () => {
     assert.equal(rows[1].archived, true, 'the archived id tags its row')
     assert.equal(rows[0].archived, false)
     assert.equal(rows[2].archived, false, 'non-string entries archive nothing')
-    // Fail-open shapes: an absent seat, a bare record, a malformed set, and a throwing accessor all keep the full list.
     assert.equal(rowsOfSnapshot(snap)?.length, 3)
     assert.equal(rowsOfSnapshot(snap, null)?.length, 3)
     assert.equal(rowsOfSnapshot(snap, 7)?.length, 3)
@@ -144,7 +141,6 @@ describe('rowsOfSnapshot: subagent rows', () => {
 
 describe('rowsOfSnapshot: the family fold', () => {
   const COST2: SessionCostUsage = { zhipuai: { m: { peak: { uncached: 300, cacheRead: 0, cacheWrite: 0, output: 0 } } } }
-  /** A minimal head carrying the given billed usage (and a user-only composition). */
   function billedHead(tokens: number, cost?: SessionCostUsage): Record<string, unknown> {
     return timelineOf({
       current: { system: 0, tools: 0, user: tokens, inject: 0, skill: 0, assistant: 0, tool: 0, total: tokens },
@@ -187,10 +183,8 @@ describe('rowsOfSnapshot: the family fold', () => {
     const [root, stranger] = rows
     assert.equal(root.family.length, 3, 'self + kid + grand — all levels')
     assert.equal(root.familyActivity?.length, 3, 'the per-member ledgers align with the family')
-    // COST (200) + COST2 (300) merge; the grandchild carried no cost.
     assert.equal(billedOf(root), 500)
     assert.equal(billedOf(stranger), null)
-    // The daily ledgers merge across the subtree, pricing records included.
     assert.equal(root.activity?.days['2026-09-16'].tokens, 16)
     assert.equal(root.activity?.days['2026-09-16'].requests, 4)
     assert.deepEqual(root.activity?.days['2026-09-16'].cost, mergeCostUsage(COST, COST2))
@@ -204,8 +198,6 @@ describe('rowsOfSnapshot: the family fold', () => {
     assert.equal(root.activity?.days['2026-09-15'].toolsMs, 400)
     assert.equal(root.activity?.days['2026-09-15'].wallMs, 4_000)
     assert.equal(root.activity?.days['2026-09-15'].cost, undefined)
-    // The composed split proportions each member's OWN composition: the root's
-    // all-user 160 billed input + output 40, the kid's all-user 300 — user 460 / output 40.
     const parts = tokenPartsOf([root])
     assert.deepEqual(parts, {
       total: 500,
@@ -278,19 +270,31 @@ describe('rowsOfSnapshot: the family fold', () => {
     assert.equal(billedOf(rows[0]), 200, 'the ghost subtree folds into no row')
   })
 
-  test('a blank placeholder’s subtree stays out, and a lineage cycle cannot loop the walk', () => {
+  test('a blank placeholder’s subtree stays out, and a forked row’s seed lineage is no subtree edge', () => {
     const rows = rowsOfSnapshot(snapshotOf([
-      // The reachable cycle: root points at p and p points back — the walk
-      // must cut at the revisited id (root counts its family, never itself twice).
-      ['root', { displayTitle: 'root', parentId: 'p', projectionValues: { contextTimeline: billedHead(1, COST) } }],
+      ['root', { displayTitle: 'root', parentId: 'source', projectionValues: { contextTimeline: billedHead(1, COST) } }],
       ['p', { origin: 'subagent', parentId: 'root', projectionValues: { contextTimeline: billedHead(2, COST2) } }],
       ['blank', { blank: true, parentId: 'root', projectionValues: { contextTimeline: billedHead(9, COST2) } }],
       ['under-blank', { origin: 'subagent', parentId: 'blank', projectionValues: { contextTimeline: billedHead(9, COST2) } }],
     ]))
     assert.ok(rows !== null)
     assert.equal(rows.length, 1)
-    assert.equal(rows[0].family.length, 2, 'root + p once; the blank is no agent and its child never links through')
-    assert.equal(billedOf(rows[0]), 500, 'COST + COST2 — the cycle’s revisit adds nothing twice')
+    assert.equal(rows[0].family.length, 2, 'root + p; the blank is no agent and its child never links through')
+    assert.equal(billedOf(rows[0]), 500, 'COST + COST2')
+  })
+
+  test('a forked row never folds its source, and the source keeps the fork out of its family', () => {
+    const rows = rowsOfSnapshot(snapshotOf([
+      ['source', { displayTitle: 'source', projectionValues: { contextTimeline: billedHead(1, COST) } }],
+      ['fork', { displayTitle: 'source (1)', parentId: 'source', projectionValues: { contextTimeline: billedHead(10, COST2) } }],
+      ['sub', { origin: 'subagent', parentId: 'source', projectionValues: { contextTimeline: billedHead(100) } }],
+    ]))
+    assert.ok(rows !== null)
+    assert.deepEqual(rows.map(r => r.id), ['source', 'fork'])
+    assert.equal(rows[0].family.length, 2, 'source + its subagent only')
+    assert.equal(billedOf(rows[0]), 200, 'the fork cost (300) never rides the source family')
+    assert.equal(rows[1].family.length, 1, 'the fork is its own family — the source never folds into it')
+    assert.equal(billedOf(rows[1]), 300)
   })
 
   test('the daily ledgers’ skill tables merge name by name (loads sum, last takes the max)', () => {

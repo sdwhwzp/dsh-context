@@ -1,7 +1,3 @@
-// The entry `Config` schema (src/host/config.ts): schemastery serves two consumers — cordis validates the `config:` block through its
-// Standard Schema face before apply, and the harness's Config-form generation derives the Plugins page's live form from it (the
-// volatile-marked preferences). Exercised through the REAL schemastery the tests install.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import z from '@deepseek-ai/schemastery'
@@ -30,7 +26,7 @@ describe('Config validator (cordis Standard Schema face)', () => {
       defaultTrendMode: 'total',
       defaultDeltaBase: 'step',
       defaultToolSort: 'count',
-      defaultFileSort: 'count',
+      defaultFileSort: 'lines',
       insightsEntry: 'show',
       defaultDurationCurve: 'show',
       overviewAutoSteps: '200',
@@ -66,8 +62,7 @@ describe('Config validator (cordis Standard Schema face)', () => {
   })
 
   test('unknown keys merge through (schemastery objects are not key-strict)', () => {
-    // A deliberate relaxation of the zod `.strict()` this schema replaced:
-    // an unrecognized key rides along instead of failing the entry load.
+    // Deliberately not key-strict: an unrecognized key rides along instead of failing the entry load.
     assert.equal(deref(Config({ unknown: 1 } as unknown as Config).maxEvents), DEFAULT_BOUNDS.maxEvents)
   })
 })
@@ -90,7 +85,7 @@ describe('preference fields (the Config-form generation surface)', () => {
     assert.equal(deref(resolved.defaultTrendMode), 'total')
     assert.equal(deref(resolved.defaultDeltaBase), 'step')
     assert.equal(deref(resolved.defaultToolSort), 'count')
-    assert.equal(deref(resolved.defaultFileSort), 'count')
+    assert.equal(deref(resolved.defaultFileSort), 'lines')
     assert.equal(deref(resolved.insightsEntry), 'show')
     assert.equal(deref(resolved.defaultDurationCurve), 'show')
     assert.equal(deref(resolved.overviewAutoSteps), '200')
@@ -101,8 +96,9 @@ describe('preference fields (the Config-form generation surface)', () => {
   })
 
   test('a stored preference survives the resolve', () => {
-    const resolved = Config({ defaultPlacement: 'sidebar', insightsEntry: 'hide', overviewAutoSteps: 'off', defaultOverviewRange: '7d', fleetTab: 'hide', promptPrefix: 'Be terse.', promptSuffix: 'Sign as Atlas.' })
-    assert.equal(deref(resolved.defaultPlacement), 'sidebar')
+    const resolved = Config({ defaultPlacement: 'hide', defaultFileSort: 'count', insightsEntry: 'hide', overviewAutoSteps: 'off', defaultOverviewRange: '7d', fleetTab: 'hide', promptPrefix: 'Be terse.', promptSuffix: 'Sign as Atlas.' })
+    assert.equal(deref(resolved.defaultPlacement), 'hide')
+    assert.equal(deref(resolved.defaultFileSort), 'count')
     assert.equal(deref(resolved.insightsEntry), 'hide')
     assert.equal(deref(resolved.overviewAutoSteps), 'off')
     assert.equal(deref(resolved.defaultOverviewRange), '7d')

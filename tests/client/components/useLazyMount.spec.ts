@@ -88,7 +88,7 @@ describe('useLazyMount', () => {
       assert.equal(idle.length, 1)
       await act(async () => { idle[0]() })
       assert.equal(query(m.container, '[data-mounted]')?.getAttribute('data-mounted'), 'yes')
-      // A second intersection after mounting must not schedule another mount.
+      // Mounted once: a later intersection must not schedule another mount.
       await act(async () => {
         observer.records[0].callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
       })
@@ -107,7 +107,7 @@ describe('useLazyMount', () => {
       await act(async () => {
         observer.records[0].callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
       })
-      // Unmount before the timeout fires: the cleanup clears it (no state update on an unmounted tree).
+      // Unmount before the timeout fires: the cleanup clears it (no state update after unmount).
       await m.unmount()
       assert.ok(observer.records[0].disconnected > 0)
     } finally {

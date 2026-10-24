@@ -27,8 +27,7 @@ export function platformBalanceOf(value: unknown): PlatformBalance | null {
   const infos = Array.isArray(data.balances) ? data.balances : []
   const balances: PlatformBalanceEntry[] = []
   for (const info of infos) {
-    // Bounded catch: a hostile entry may throw on property access — it drops
-    // whole, and the entries that prove their shape keep serving.
+    // A hostile entry may throw on access; it drops whole, the entries that prove their shape serve on.
     try {
       const entry = asRecord(info)
       if (entry === null) continue
@@ -48,11 +47,7 @@ export function platformBalanceOf(value: unknown): PlatformBalance | null {
     : null
 }
 
-/**
- * The entry matching the display currency (zh → CNY, en → USD), falling back
- * to the account's first entry when the platform reports none in it — a
- * number in the account's own currency beats no number.
- */
+/** Falls back to the account's first entry: a figure in another currency beats none. */
 export function balanceEntryOf(
   balance: PlatformBalance | null | undefined,
   currency: 'cny' | 'usd',

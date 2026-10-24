@@ -50,7 +50,6 @@ describe('StatsTiming', () => {
     // The tools row keeps the true 5m sum even though the ring clamps it.
     assert.deepEqual(rowOf(m.container, 2), { pct: '50.0%', label: 'Tool runs', count: '5m0s · 25 runs', dim: false })
     assert.deepEqual(rowOf(m.container, 3), { pct: '10.0%', label: 'Overhead', count: '1m0s', dim: false })
-    // Four ring segments painted (ttft + gen + tools + overhead); four rows.
     assert.equal(queryAll(m.container, '.lc-donut circle').length, 4)
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 4)
     await m.unmount()
@@ -64,13 +63,22 @@ describe('StatsTiming', () => {
     await m.unmount()
   })
 
+  test('the scope subtitle names the session, or the whole team on the overview aggregate', async () => {
+    const own = await mount(h(StatsTiming, { timing: TIMING }))
+    assert.equal(query(own.container, '.lc-card-sub').textContent, 'session lifetime')
+    await own.unmount()
+    const team = await mount(h(StatsTiming, { timing: TIMING, scope: 'team' }))
+    assert.equal(query(team.container, '.lc-card-sub').textContent, 'team lifetime')
+    await team.unmount()
+    const zh = await mount(h(StatsTimingZh, { timing: TIMING, scope: 'team' }))
+    assert.equal(query(zh.container, '.lc-card-sub').textContent, '团队累计')
+    await zh.unmount()
+  })
+
   test('parallel tool overlap: the count keeps the true sum, the share caps at 100%', async () => {
-    // 9 parallel 22s calls inside a 100s wall: tools sum 200s > wall.
     const timing: TimingTotals = { wallMs: 100_000, ttftMs: 25_000, genMs: 35_000, calls: 2, toolsMs: 200_000, toolCalls: 9, tools: { bash: { calls: 9, ms: 200_000 } } }
     const m = await mount(h(StatsTiming, { timing }))
     assert.deepEqual(rowOf(m.container, 2), { pct: '100.0%', label: 'Tool runs', count: '3m20s · 9 runs', dim: false })
-    // The ring clamps tools into the 40s post-model window; the zero overhead
-    // slice paints no arc but keeps its dimmed legend slot: 3 circles, 4 rows.
     assert.equal(queryAll(m.container, '.lc-donut circle').length, 3)
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 4)
     assert.deepEqual(rowOf(m.container, 3), { pct: '0.0%', label: 'Overhead', count: '—', dim: true })
@@ -79,7 +87,6 @@ describe('StatsTiming', () => {
     assert.ok(rows[2].className.includes('lc-sl-row-on'))
     assert.ok(query(m.container, '.lc-donut').className.includes('lc-donut-dim'))
     assert.ok((queryAll(m.container, '.lc-donut-seg')[2]?.getAttribute('class') ?? '').includes('lc-donut-seg-on'))
-    // The zero-overhead row has no arc to light: it tints itself, the ring stays at rest.
     await hover(rows[3])
     assert.ok(rows[3].className.includes('lc-sl-row-on'))
     assert.ok(!query(m.container, '.lc-donut').className.includes('lc-donut-dim'))
@@ -90,9 +97,8 @@ describe('StatsTiming', () => {
     const timing: TimingTotals = { wallMs: 0, ttftMs: 5_000, genMs: 0, calls: 3, toolsMs: 0, toolCalls: 1, tools: { bash: { calls: 1, ms: 0 } } }
     const m = await mount(h(StatsTiming, { timing }))
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '—')
-    // Only TTFT carries time; the zero slices are omitted whole (their dash
-    // has nothing to qualify, and their borrowed call count would mislead).
-    // The residual row still keeps its slot so the card never resizes.
+    // Only TTFT carries time; the zero slices are dropped whole (a dash has nothing to qualify, and
+    // their borrowed call count would mislead). The residual row keeps its slot so the card never resizes.
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 2)
     assert.deepEqual(rowOf(m.container, 0), { pct: '—', label: 'TTFT', count: '5.0s · 3 calls', dim: false })
     assert.deepEqual(rowOf(m.container, 1), { pct: '—', label: 'Overhead', count: '—', dim: true })
@@ -100,8 +106,7 @@ describe('StatsTiming', () => {
   })
 
   test('a zero slice is omitted, but the residual overhead row keeps its slot', async () => {
-    // The screenshot case: no reasoning output, no tool calls — the rows that
-    // would borrow the session's call count ("0.0% · 3 calls") are dropped.
+    // No reasoning output, no tool calls: rows that would borrow the session's call count are dropped.
     const timing: TimingTotals = {
       wallMs: 532, ttftMs: 480, genMs: 52, reasoningMs: 0, textMs: 52, toolArgMs: 0,
       calls: 1, toolsMs: 0, toolCalls: 0, tools: {},
@@ -109,17 +114,14 @@ describe('StatsTiming', () => {
     const m = await mount(h(StatsTiming, { timing }))
     const labels = queryAll(m.container, '.lc-sl-label').map(n => n.textContent)
     assert.deepEqual(labels, ['TTFT', 'Answers', 'Overhead'], 'zero buckets and zero tools are gone; overhead stays')
-    // The dimmed residual row paints no arc.
     assert.equal(queryAll(m.container, '.lc-donut-seg').length, 2)
     assert.deepEqual(rowOf(m.container, 2), { pct: '0.0%', label: 'Overhead', count: '—', dim: true })
     await m.unmount()
   })
 
   test('the overhead row keeps its slot from a mid-step zero to the settled residual', async () => {
-    // Mid-step, an open step's model/tool time is already priced but its wall
-    // time is not, so the residual transiently clamps to zero; step/end settles
-    // it above zero. Both snapshots must render the same row set, or the card
-    // resizes at every step boundary (the reported flicker).
+    // Mid-step the residual transiently clamps to zero and step/end settles it above; both snapshots
+    // must render the same row set, or the card resizes at every step boundary (the flicker).
     const midStep: TimingTotals = {
       wallMs: 100_000, ttftMs: 90_000, genMs: 40_000, calls: 4, toolsMs: 90_000, toolCalls: 3, tools: {},
     }
@@ -136,7 +138,6 @@ describe('StatsTiming', () => {
   })
 
   test('every slice zero with a live call count still renders the empty state', async () => {
-    // calls > 0 opens the card, but nothing was priced: no rows survive.
     const timing: TimingTotals = { wallMs: 0, ttftMs: 0, genMs: 0, calls: 2, toolsMs: 0, toolCalls: 0, tools: {} }
     const m = await mount(h(StatsTiming, { timing }))
     assert.ok(text(m.container).includes('No timing data yet'))
@@ -161,14 +162,13 @@ describe('StatsTiming — the generation split', () => {
     assert.deepEqual(rowOf(m.container, 3), { pct: '3.3%', label: 'Tool args', count: '20.0s', dim: false })
     assert.deepEqual(rowOf(m.container, 4), { pct: '50.0%', label: 'Tool runs', count: '5m0s · 25 runs', dim: false })
     assert.deepEqual(rowOf(m.container, 5), { pct: '10.0%', label: 'Overhead', count: '1m0s', dim: false })
-    // Six ring segments: the three decode buckets replace the single gen arc.
     assert.equal(queryAll(m.container, '.lc-donut circle').length, 6)
     await m.unmount()
   })
 
   test('the decode slices carry NO call count — they count blocks, not calls', async () => {
-    // One model call can emit several tool-call blocks and often emits no
-    // reasoning at all, so a borrowed per-call count would be a false tally.
+    // One model call can emit several tool-call blocks and often no reasoning at all, so a borrowed
+    // per-call count would be a false tally.
     const timing: TimingTotals = { ...SPLIT, calls: 236, toolCalls: 302 }
     const m = await mount(h(StatsTiming, { timing }))
     const sub = (i: number): string => queryAll(m.container, '.lc-sl-sub')[i]?.textContent ?? ''
@@ -224,13 +224,11 @@ describe('StatsTiming — the generation split', () => {
   })
 
   test('a hostile bucket total exceeding the generation window clamps the ring, rows stay true', async () => {
-    // The buckets claim 500s inside a 140s generation window: the ring caps
-    // them to the window while every row keeps its own figure.
+    // The buckets claim 500s inside a 140s window: the ring caps them, every row keeps its own figure.
     const timing: TimingTotals = { ...SPLIT, reasoningMs: 400_000, textMs: 100_000, toolArgMs: 0 }
     const m = await mount(h(StatsTiming, { timing }))
     assert.deepEqual(rowOf(m.container, 1), { pct: '66.7%', label: 'Thinking', count: '6m40s', dim: false })
     assert.deepEqual(rowOf(m.container, 2), { pct: '16.7%', label: 'Answers', count: '1m40s', dim: false })
-    // The zero tool-args bucket is omitted whole, so Tools follows Answers.
     assert.equal(rowOf(m.container, 3).label, 'Tool runs')
     await m.unmount()
   })
@@ -280,9 +278,8 @@ describe('StatsTiming — the session-time strip', () => {
     wallMs: 600_000, ttftMs: 100_000, genMs: 140_000, reasoningMs: 90_000, textMs: 30_000, toolArgMs: 20_000,
     calls: 10, toolsMs: 300_000, toolCalls: 25, tools: { bash: { calls: 15, ms: 200_000 } },
   }
-  // A 50-second session window (epoch 1s → 51s) holding 40s of ACTIVE time:
-  // the decode slices, then tools and overhead — with 5s idle gaps between
-  // them (21s → 26s and 41s → 46s) that take no track on the strip.
+  // A 50-second session window (epoch 1s → 51s) holding 40s of ACTIVE time: the decode slices, then
+  // tools and overhead, with 5s idle gaps (21s → 26s and 41s → 46s) that take no track on the strip.
   const SPANS: TimingSpan[] = [
     { kind: 'ttft', start: 1_000, end: 6_000 },
     { kind: 'reasoning', start: 6_000, end: 16_000 },

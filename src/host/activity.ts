@@ -1,23 +1,9 @@
-/**
- * The `contextActivity` session projection unit — the per-day activity ledger behind the
- * Context Insights page's range-scoped KPIs, its heatmap, and its last-7-days usage chart.
- *
- * The timeline unit (fold.ts) prices the context as it stands NOW, which cannot draw a per-day
- * chart, so this unit folds the committed event stream into a ledger keyed by local calendar day:
- * an assistant settlement adds one completed request, its billed buckets (uncached input + cache
- * read + cache write + output), and its per-(provider, model, period) pricing record. Buckets
- * attribute to the day the open STEP STARTED, falling back to the settlement instant; the
- * peak/off split prices the same instant. A step's tool runs and wall time attach to that same
- * initiation day, and a turn books on the day its first settlement lands. Each day also tallies
- * its skill loads.
- *
- * The ledger is bounded by {@link MAX_KEPT_DAYS} keys and never materializes an `undefined`-valued
- * property.
- */
+/** The `contextActivity` unit: a per-day ledger keyed by local calendar day; billed buckets and tool time attribute to the day the open
+ * step STARTED. Bounded by {@link MAX_KEPT_DAYS}, never materializing `undefined`-valued properties. */
 
 import { z } from 'zod'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { ProjectionDefinition } from './compat'
+import type { WiredProjection } from './projection'
 import { skillNameOf } from './fold'
 import { addBilledUsage, copyCostUsage, durOf, tokenCountOf } from './foldMetering'
 import type { BilledUsage, UsageLike } from './foldMetering'
@@ -25,19 +11,17 @@ import { costUsageSchema } from './timeline'
 import { dayKeyOf } from '../shared/days'
 import type { ActivityDay, ContextActivity } from '../shared/types'
 
-/** Retention cap on ledger days: a little over a year of daily-active sessions. */
 const MAX_KEPT_DAYS = 400
 
 /** Cap on one day's skill-name table; a hostile replay could stuff a name into every injection. */
 const MAX_SKILLS_PER_DAY = 100
 
-/** Bound on the pending `skill`-call id list (see ActivityState.skillCalls). */
+/** Bound on the pending `skill`-call id list. */
 const MAX_PENDING_SKILL_CALLS = 100
 
-/** Bound on the pending tool-call start table (see ActivityState.toolStarts). */
+/** Bound on the pending tool-call start table, which a hostile unsettled stream could otherwise grow. */
 const MAX_PENDING_TOOL_CALLS = 100
 
-/** A pending tool run's start instant and the step-initiation day it prices. */
 interface ToolStart {
   start: number
   day: string
@@ -48,15 +32,11 @@ export interface ActivityState {
   /** The route in force (the last `request/header`'s config wins) — prices each settlement. */
   model?: string
   provider?: string
-  /** The open step's start instant (armed by `step/start`, cleared by `step/end`). */
   stepStart?: number
   /** The last turn whose first settlement was booked, so a multi-step turn counts once. */
   lastTurn?: number
-  /** Pending tool runs (call id → start + initiation day), consumed by the pairing `tool/result`. */
   toolStarts?: Record<string, ToolStart | undefined>
-  /** Pending `skill`-tool call ids (armed by `tool/call`, consumed by the pairing `tool/result`):
-   * the wrapper match alone is not trusted, or a `read` of source text quoting
-   * `<skill_content name="…">` would book a load. Bounded at {@link MAX_PENDING_SKILL_CALLS}. */
+  /** Pending `skill`-tool call ids: the wrapper match alone is not trusted, or a `read` quoting it would book a load. */
   skillCalls?: string[]
 }
 
@@ -80,12 +60,10 @@ const activityDaySchema = z.object({
   wallMs: z.number().nonnegative().optional(),
   skills: z.record(z.string(), activitySkillSchema).optional(),
 }).strict()
-/** Validate the wire payload before it leaves the host (strict: no drift). */
 export const contextActivitySchema = z.object({
   days: z.record(z.string(), activityDaySchema),
 }).strict() as unknown as z.ZodType<ContextActivity>
 
-/** The persisted fold-state schema — validated before a checkpoint row seeds a fold. */
 const activityStateSchema = z.object({
   days: z.record(z.string(), activityDaySchema),
   model: z.string().optional(),
@@ -96,9 +74,7 @@ const activityStateSchema = z.object({
   skillCalls: z.array(z.string()).optional(),
 }) as unknown as z.ZodType<ActivityState>
 
-/** One durable usage object's billed buckets, or null when NO bucket is readable (a settlement
- * that carried no usage still counts its request without fabricating tokens). Buckets pass the
- * shared sanitizer {@link tokenCountOf}: fractions round, negatives clamp. */
+/** A settlement with no readable bucket still counts its request, without fabricating tokens. */
 function billedBucketsOf(value: unknown): BilledUsage | null {
   if (value === null || typeof value !== 'object') return null
   const usage = value as UsageLike
@@ -110,8 +86,7 @@ function billedBucketsOf(value: unknown): BilledUsage | null {
   return { uncached: input ?? 0, cacheRead: cacheRead ?? 0, cacheWrite: cacheWrite ?? 0, output: output ?? 0 }
 }
 
-/** Write one day entry back into the ledger under the retention cap. A dynamic `delete` per
- * evicted key would deopt the record into dictionary mode, so the kept suffix rebuilds. */
+/** A dynamic `delete` per evicted key deopts the record, so the kept suffix rebuilds. */
 function withDayEntry(state: ActivityState, key: string, entry: ActivityDay): ActivityState {
   let days = { ...state.days, [key]: entry }
   const keys = Object.keys(days)
@@ -123,8 +98,7 @@ function withDayEntry(state: ActivityState, key: string, entry: ActivityDay): Ac
   return { ...state, days }
 }
 
-/** A day entry's existing fields with the required counters filled, ready for a targeted patch.
- * Nested records ride by reference (the fold never mutates them in place). */
+/** Nested records ride by reference; the fold never mutates them in place. */
 function copyDay(prev: ActivityDay | undefined): ActivityDay {
   return {
     tokens: prev?.tokens ?? 0,
@@ -138,12 +112,10 @@ function copyDay(prev: ActivityDay | undefined): ActivityDay {
   }
 }
 
-/** Patch one day entry, preserving every other field. */
 function withDayPatch(state: ActivityState, key: string, patch: Partial<ActivityDay>): ActivityState {
   return withDayEntry(state, key, { ...copyDay(state.days[key]), ...patch })
 }
 
-/** Remember a tool run under its initiation day; a hostile unsettled stream is bounded like the skill claims. */
 function withToolStart(state: ActivityState, callId: string, start: number): ActivityState {
   if (!Number.isFinite(start) || start < 0) return state
   const day = dayKeyOf(state.stepStart ?? start)
@@ -158,7 +130,6 @@ function withToolStart(state: ActivityState, callId: string, start: number): Act
   return { ...state, toolStarts }
 }
 
-/** Price a paired tool run into its step's initiation day, then drain the pending entry. */
 function bookToolResult(state: ActivityState, callId: string, end: number): ActivityState {
   const starts = state.toolStarts
   const start = starts?.[callId]
@@ -176,8 +147,7 @@ function bookToolResult(state: ActivityState, callId: string, end: number): Acti
   return next
 }
 
-/** Book one skill load against its day: the tally grows and `last` takes the max, so a disordered
- * replay never walks it back. A day at the name cap keeps its booked names and drops the newcomer. */
+/** The tally never walks back on a disordered replay; a day at the name cap drops the newcomer. */
 function bookSkillLoad(state: ActivityState, name: string, time: number): ActivityState {
   const key = dayKeyOf(time)
   if (key === null) return state
@@ -192,8 +162,7 @@ function bookSkillLoad(state: ActivityState, name: string, time: number): Activi
   return withDayEntry(state, key, { ...copyDay(prev), skills })
 }
 
-/** The skill name a `user/message` (or `developer/message`) load gesture carries: a user-explicit
- * `/name` invocation's durable `skill-invocation` envelope. Anything else reads as no load. */
+/** A user-explicit `/name` invocation's durable `skill-invocation` envelope; anything else is no load. */
 function invokedSkillOf(event: SessionEvent): string {
   const data = event.data as { source?: unknown; message?: unknown } | null | undefined
   const carrier = event.type === 'developer/message' ? data?.message : data
@@ -214,9 +183,7 @@ function toolResultCallIdOf(message: unknown): string | null {
   const callId = (source as { callId?: unknown }).callId
   return typeof callId === 'string' && callId !== '' ? callId : null
 }
-/** Fold one committed event into the ledger. Everything else returns the state reference
- * unchanged, as does a settlement with no attributable instant; the next state is a copy along
- * the mutated path only — the persisted previous state is never mutated in place. */
+/** Reference-equal on no change; every mutation copies along its path, never mutating the persisted previous state. */
 export function applyActivity(state: ActivityState, event: SessionEvent): ActivityState {
   if (event.type === 'request/header') {
     const data = event.data as { header?: { config?: { model?: unknown; provider?: unknown } | null } | null } | undefined
@@ -240,8 +207,7 @@ export function applyActivity(state: ActivityState, event: SessionEvent): Activi
   if (event.type === 'step/end') {
     const start = state.stepStart
     if (start === undefined) return state
-    // The step's wall time is charged to its START day, so a step crossing midnight keeps its
-    // whole window on the day it began. A zero-length step books no entry.
+    // Wall time is charged to the START day, so a step crossing midnight stays on the day it began.
     const key = dayKeyOf(start)
     const dur = durOf(start, event.time)
     const timed = key === null || dur <= 0
@@ -253,9 +219,8 @@ export function applyActivity(state: ActivityState, event: SessionEvent): Activi
     return next
   }
   if (event.type === 'session/end-seed') {
-    // The tagged fork/seed boundary: settlements before it are the inherited parent-log prefix,
-    // already booked to the session it forked from, so the ledger resets. `stepStart` dies with
-    // the cut, so an armed slot from the inherited tail cannot attribute the child's first settlement to a parent day.
+    // The tagged fork/seed boundary: inherited settlements were booked to the parent session, so the ledger resets;
+    // `stepStart` dies with the cut, so an inherited armed slot cannot misattribute the child's first day.
     const data = event.data as { inherited?: unknown } | null | undefined
     if (data?.inherited !== true) return state
     return { days: {} }
@@ -268,8 +233,7 @@ export function applyActivity(state: ActivityState, event: SessionEvent): Activi
     const data = event.data as { callId?: unknown; name?: unknown } | null | undefined
     const callId = data?.callId
     if (typeof callId !== 'string' || callId === '') return state
-    // Every tool run is timed against its step's initiation day; the skill tool additionally arms
-    // its pairing claim, trusted only when the result carries the matching call id.
+    // Every tool run times against its step's initiation day; the skill tool additionally arms a pairing claim.
     const next = withToolStart(state, callId, event.time)
     if (data?.name !== 'skill') return next
     const pending = next.skillCalls ?? []
@@ -277,8 +241,7 @@ export function applyActivity(state: ActivityState, event: SessionEvent): Activi
     return { ...next, skillCalls: [...pending, callId].slice(-MAX_PENDING_SKILL_CALLS) }
   }
   if (event.type === 'tool/result') {
-    // Price the paired run first, then consume the `skill`-tool load claim (if any): the
-    // `<skill_content name="…">` wrapper is trusted only under the matching pending call.
+    // Price the paired run first, then consume the `skill`-tool load claim: the wrapper is trusted only under the matching pending call.
     const message = (event.data as { message?: unknown } | null | undefined)?.message
     const callId = toolResultCallIdOf(message)
     const next = callId === null ? state : bookToolResult(state, callId, event.time)
@@ -286,15 +249,14 @@ export function applyActivity(state: ActivityState, event: SessionEvent): Activi
     if (callId === null || pending === undefined || !pending.includes(callId)) return next
     const skillCalls = pending.filter(id => id !== callId)
     const consumed: ActivityState = { ...next }
-    // DELETE the drained field — an undefined-valued property would break the plain-JSON state.
     if (skillCalls.length > 0) consumed.skillCalls = skillCalls
     else delete consumed.skillCalls
     const name = skillNameOf(message)
     return name === '' ? consumed : bookSkillLoad(consumed, name, event.time)
   }
   if (event.type !== 'assistant/message') return state
-  // Attribute the settlement to the open step's initiation instant, falling back to its own; the
-  // slot stays armed, so a second settlement of the same step still reads it.
+  // The open step's initiation instant, falling back to this settlement's own; the slot stays armed, so a second settlement of the same
+  // step still reads it.
   const initiated = state.stepStart !== undefined ? state.stepStart : event.time
   const key = dayKeyOf(initiated)
   if (key === null) return state
@@ -302,14 +264,12 @@ export function applyActivity(state: ActivityState, event: SessionEvent): Activi
   const buckets = billedBucketsOf(data?.usage)
   const byKey: Record<string, ActivityDay | undefined> = state.days
   const prev = byKey[key]
-  // A settlement prices only when a model is in force: a model-less settlement still counts its
-  // tokens and request, never a fabricated fee.
+  // A settlement prices only with a model in force: a model-less one counts its tokens and request, never a fee.
   let cost = prev?.cost
   if (buckets !== null && state.model !== undefined) {
     cost = addBilledUsage(cost, state.provider ?? '', state.model, initiated, buckets)
   }
-  // A turn books once, on the initiation day of its FIRST settlement; later steps of the same
-  // turn keep the tally. The cursor survives across steps and dies at a tagged seed cut.
+  // A turn books once, on the initiation day of its FIRST settlement; the cursor dies at a tagged seed cut.
   const turn = typeof data?.turn === 'number' && Number.isFinite(data.turn) ? data.turn : undefined
   const newTurn = turn !== undefined && turn !== state.lastTurn
   const turns = (prev?.turns ?? 0) + (newTurn ? 1 : 0)
@@ -319,8 +279,6 @@ export function applyActivity(state: ActivityState, event: SessionEvent): Activi
     requests: (prev === undefined ? 0 : prev.requests) + 1,
     ...(cost !== undefined ? { cost } : {}),
     ...(turns > 0 ? { turns } : {}),
-    // Tool runs and wall time already booked to this day ride along by reference; every mutation
-    // clones along its path.
     ...(prev?.toolCalls !== undefined ? { toolCalls: prev.toolCalls } : {}),
     ...(prev?.toolsMs !== undefined ? { toolsMs: prev.toolsMs } : {}),
     ...(prev?.wallMs !== undefined ? { wallMs: prev.wallMs } : {}),
@@ -330,19 +288,15 @@ export function applyActivity(state: ActivityState, event: SessionEvent): Activi
   return newTurn ? { ...next, lastTurn: turn } : next
 }
 
-/** The daily-activity projection unit, registered alongside the timeline and headers units
- * (host/index.ts). `stateVersion` 5: the day entry gained turns, tool-run timing, and step wall
- * time, and the state gained the turn cursor and pending tool starts. Later events cannot
- * backfill those for already-folded days, so cached rows read version-stale on upgrade and the
- * Context Insights warm-up cold-refolds them. On the wire the day fields are additive-optional. */
-export function createContextActivityDefinition(): ProjectionDefinition<'contextActivity', ActivityState> {
+/** `stateVersion` 5: rows folded before the turn cursor, tool timings and step wall time read version-stale and cold-refold. */
+export function createContextActivityDefinition(): WiredProjection<'contextActivity', ActivityState> {
   return {
     key: 'contextActivity',
     stateSchema: activityStateSchema,
     init: (): ActivityState => ({ days: {} }),
     apply: (state: ActivityState, event: SessionEvent) => applyActivity(state, event),
-    // The view copies the ledger AND each entry's nested records so the registry, the cache writer, and the
-    // wire can never mutate the fold's own record; every mutation above clones along its path.
+    // The view copies the ledger AND each entry's nested records so the registry, the cache writer and the wire can never mutate the fold's
+    // own record.
     wire: {
       viewSchema: contextActivitySchema,
       view: state => ({

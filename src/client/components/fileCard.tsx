@@ -1,9 +1,10 @@
-import { memo, useEffect, useRef, useState, type ChangeEvent, type ComponentType, type MouseEvent, type ReactElement } from 'react'
+import { memo, useEffect, useRef, useState, type ComponentType, type MouseEvent, type ReactElement } from 'react'
 import { absPathOf, baseNameOf, displayPathOf, glyphOf, surfaceSeqOf } from '../fileActivity'
 import type { FileActivity, FileEntry, FileOp, FileOpKind } from '../fileActivity'
 import type { ContextSettings, DefaultFileSort } from '../settings'
 import type { DetailState } from '../timelineSource'
 import type { ViewKit } from '../viewkit'
+import { ClearableInput } from './clearableInput'
 import { makeDetailNote } from './detailNote'
 import { useRowWindow } from './useRowWindow'
 
@@ -16,7 +17,7 @@ export interface FileCardProps {
    *  back via `onFilterFocusHandled` so the same kind can jump again. Absent = the chips stay the card's own state. */
   filterFocus?: FileFilter | null
   onFilterFocusHandled?: () => void
-  /** Returns whether the preview column took the file, so a refusal falls through to the system opener; absent = no preview column. */
+  /** Returns whether the preview column took the file; a refusal falls through to the system opener; absent = no column. */
   onPreview?: (entry: FileEntry) => boolean
   onOpen?: (absPath: string) => void
   onLocate?: (op: FileOp) => void
@@ -52,6 +53,8 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
   // Memoized at the factory level: the parent's activity/onLocate props are reference-stable across hover/select
   // renders (see contextView), so the card skips reconciliation whenever its own inputs did not move.
   return memo(function FileCard(props: FileCardProps): ReactElement {
+    // The memo must not block a locale switch: the tick re-renders on it even when the props are reference-stable.
+    kit.useLocaleTick()
     const { activity } = props
     const [filter, setFilter] = useState<FileFilter>('all')
     // Mount-time default; in-card toggling stays mount-local and never writes back.
@@ -82,24 +85,28 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
     // Display form of an entry's path: bare workspace-relative inside the workspace, verbatim outside — except search rows,
     // whose "path" is a pattern.
     const displayOf = (e: FileEntry): string => (e.pattern === true ? e.path : displayPathOf(e.path, props.workspace))
-    // Count sort magnitude: the selected kind's own ops under a kind chip, else the file's overall op count.
     const countOf = (e: FileEntry): number =>
       filter === 'read' ? e.reads : filter === 'write' ? e.writes : filter === 'search' ? e.searches : e.ops.length
-    // Name sort: the displayed last segment leads, the full path breaks ties between same-named files.
+    const linesOf = (e: FileEntry): number => e.added + e.removed
+    const byLatest = (a: FileEntry, b: FileEntry): number => b.ops[0].seq - a.ops[0].seq
+    const byPath = (a: FileEntry, b: FileEntry): number => (a.path < b.path ? -1 : 1)
+    const byVolume = (keyOf: (e: FileEntry) => number, tie: (a: FileEntry, b: FileEntry) => number) =>
+      (a: FileEntry, b: FileEntry): number => keyOf(b) - keyOf(a) || tie(a, b)
     const byName = (a: FileEntry, b: FileEntry): number => {
       const an = baseNameOf(displayOf(a))
       const bn = baseNameOf(displayOf(b))
-      return an !== bn ? (an < bn ? -1 : 1) : (a.path < b.path ? -1 : 1)
+      return an !== bn ? (an < bn ? -1 : 1) : byPath(a, b)
+    }
+    const comparators: Record<DefaultFileSort, (a: FileEntry, b: FileEntry) => number> = {
+      count: byVolume(countOf, byLatest),
+      lines: byVolume(linesOf, byPath),
+      latest: byLatest,
+      name: byName,
+      path: byPath,
     }
     const shown = activity.entries
       .filter(e => matches(e, filter) && (q === '' || displayOf(e).toLowerCase().includes(q)))
-      .sort((a, b) => sort === 'count'
-        ? (countOf(b) - countOf(a)) || (b.ops[0].seq - a.ops[0].seq)
-        : sort === 'latest'
-          ? b.ops[0].seq - a.ops[0].seq
-          : sort === 'name'
-            ? byName(a, b)
-            : (a.path < b.path ? -1 : 1))
+      .sort(comparators[sort])
 
     useEffect(() => {
       const el = listRef.current
@@ -116,9 +123,8 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
       return () => { observer.disconnect() }
       /* v8 ignore stop */
     }, [shown.length > 0])
-    // Windowed rendering needs UNIFORM row heights. The earlier two-row pitch probe missed wrapped long paths, so a
-    // mixed-height list could get wrong spacer heights (scroll jumps). Measure the FULL list first (the initial
-    // render is unwindowed) and only enable windowing when every collapsed row has the same height.
+    // Windowed rendering needs UNIFORM row heights. Measure the FULL list first (the initial render is unwindowed) and
+    // only enable windowing when every collapsed row has the same height; mixed heights would break the spacers.
     useEffect(() => {
       setRowPitch(0)
       setRowGap(0)
@@ -166,7 +172,6 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
           <span className="lc-fa-op-tool" title={op.tool}>{op.tool}</span>
           {op.detail !== undefined ? <span className="lc-fa-op-detail">{op.detail}</span> : null}
           {op.hits !== undefined ? <span className="lc-fa-op-detail">{t('files.hits', { n: fmt(op.hits) })}</span> : null}
-          {/* A nested PTC op with no other detail still names its program. */}
           {op.detail === undefined && op.hits === undefined && op.program !== undefined
             ? <span className="lc-fa-op-detail">{op.program}</span>
             : null}
@@ -231,14 +236,15 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
             populated one does. */}
         <div>
           <div className="lc-fa-ctl">
-            <input
+            <ClearableInput
               className="lc-fa-search focus:border-(--dsw-alias-label-dimmed)"
               value={query}
               placeholder={t('files.search')}
-              onChange={(ev: ChangeEvent<HTMLInputElement>) => { setQuery(ev.target.value) }}
+              clearLabel={t('field.clear')}
+              onChange={setQuery}
             />
             <span className="lc-gran lc-fa-sort" role="group" title={t('files.sortTip')}>
-              {(['count', 'latest', 'path', 'name'] as const).map(k => (
+              {(['count', 'lines', 'latest', 'path', 'name'] as const).map(k => (
                 <button
                   key={k}
                   type="button"
@@ -289,7 +295,7 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
                           : glyph.glyph}
                       </span>
                       {/* Narrow cards wrap instead of crushing: the path's near-full-width basis keeps line 1 to
-                            chevron + icon + path, badges/delta/time fold onto line 2. The 46px reservation is
+                            chevron + icon + path, with badges/delta/time folded onto line 2. The 46px reservation is
                             chevron (12) + gaps (2×7) + form icon (20). */}
                       <span className="lc-fa-path flex-1 @max-[380px]/lc-card:basis-[calc(100%-46px)]">
                         {dir !== '' ? <em>{dir}</em> : null}

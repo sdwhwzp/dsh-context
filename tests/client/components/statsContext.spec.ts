@@ -1,6 +1,3 @@
-// StatsContext (src/client/components/statsContext.tsx) rendered in both locales against an injected model-price book (the store never
-// reaches the network). Connector geometry is pinned through measureFlow's unit tests (jsdom has no layout); the event rows live on the
-// events card (contextView.spec.ts). `countsOfRecords` and `toolTallyOf` derive the tallies the split generation's slim head carries.
 
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
@@ -49,7 +46,6 @@ function skillEv(name: string): ContextEventRecord {
   return { seq: 0, time: 0, kind: 'inject', form: 'instructions', sub: 'skill', name }
 }
 
-/** The five flow nodes in DOM order: inputs / events / session / tools / cost. */
 function flowNodes(container: HTMLElement): HTMLElement[] {
   return queryAll(container, '.lc-flow-node')
 }
@@ -61,7 +57,6 @@ function pillsOf(node: HTMLElement): string[] {
     .map(el => (el.querySelector('.lc-flow-pill-label')?.textContent ?? '') + (el.querySelector('b')?.textContent ?? ''))
 }
 
-/** The team ledger's rows as 'label+pair' strings (tips excluded). */
 function rowsOf(node: HTMLElement): string[] {
   return queryAll(node, '.lc-flow-row').map(el => (el.querySelector('.lc-flow-row-label')?.textContent ?? '') + (el.querySelector('.lc-flow-pair')?.textContent ?? ''))
 }
@@ -85,7 +80,6 @@ afterEach(() => {
 
 describe('countsOfRecords (the inline generation derivation)', () => {
   test('tallies distinct turns, records, the three priced event kinds, and the distinct loaded skills', () => {
-    // Two steps in turn 1, one in turn 2, one without a turn (folds as turn 0).
     const counts = countsOfRecords(
       [req(1), req(1), req(2), req()],
       [
@@ -94,14 +88,12 @@ describe('countsOfRecords (the inline generation derivation)', () => {
         // available-skills catalog digest rides an untagged inject event and never lands in the tally.
         skillEv('grilling'), skillEv('grilling'), skillEv('ponytail'),
         { ...ev('inject'), name: 'available-skills' },
-        // Hostile shapes skip: a nameless tag and a non-string name.
         { ...ev('inject'), sub: 'skill' },
         { ...ev('inject'), sub: 'skill', name: 5 } as unknown as ContextEventRecord,
       ],
     )
-    // model/mode events do not appear (only the three priced kinds do); every
-    // inject above rides kind 'inject', the catalog digest and hostile shapes
-    // included — only the skills TALLY filters by the tag.
+    // Only the three priced event kinds appear; every inject rides kind 'inject' — only the skills
+    // TALLY filters by the tag (catalog digest and hostile shapes included).
     assert.deepEqual(counts, { turns: 3, steps: 4, injects: 9, compactions: 2, prunes: 1, skills: 2 })
   })
 
@@ -151,13 +143,9 @@ describe('measureFlow (the connector geometry)', () => {
   test('horizontal mode flows left→right, fanning the session edge at ⅓ and ⅔, colored by element', () => {
     const links = measureFlow(boxes, true)
     assert.equal(links.length, 4)
-    // inputs→session: inputs' right-center to the session's left edge at ⅓ (control distance 30 = half the 60px gap).
     assert.equal(links[0].d, `M 100 20 C 130 20 130 ${30 + 80 * (1 / 3)} 160 ${30 + 80 * (1 / 3)}`)
-    // events→session: events' right-center to the session's left edge at ⅔.
     assert.equal(links[1].d, `M 100 100 C 130 100 130 ${30 + 80 * (2 / 3)} 160 ${30 + 80 * (2 / 3)}`)
-    // session→tools: the session's right edge at ⅓ to tools' left-center.
     assert.equal(links[2].d, `M 280 ${30 + 80 * (1 / 3)} C 310 ${30 + 80 * (1 / 3)} 310 20 340 20`)
-    // session→cost: the session's right edge at ⅔ to cost's left-center.
     assert.equal(links[3].d, `M 280 ${30 + 80 * (2 / 3)} C 310 ${30 + 80 * (2 / 3)} 310 100 340 100`)
     assert.deepEqual(links.map(l => l.color), [
       'var(--color-green-500)', 'var(--color-purple-500)', 'var(--color-teal-500)', 'var(--color-pink-500)',
@@ -167,9 +155,7 @@ describe('measureFlow (the connector geometry)', () => {
   test('vertical mode flows top→bottom with the same fan', () => {
     const links = measureFlow(boxes, false)
     assert.equal(links.length, 4)
-    // inputs→session: inputs' bottom-center to the session's top edge at ⅓; the 10px gap floors the control distance at 18.
     assert.equal(links[0].d, `M 50 40 C 50 58 ${160 + 120 * (1 / 3)} 12 ${160 + 120 * (1 / 3)} 30`)
-    // session→cost: the session's bottom edge at ⅔ to cost's top-center; control distance 25 = half the 50px gap.
     assert.equal(links[3].d, `M ${160 + 120 * (2 / 3)} 110 C ${160 + 120 * (2 / 3)} 135 390 35 390 60`)
   })
 
@@ -203,7 +189,6 @@ describe('StatsContext', () => {
   test('the tools row folds the tail into the overflow pill at the width it is measured against', async () => {
     const restore = stubWidths(100, 40, 260)
     try {
-      // 100px pills + a 40px chip + 4px gaps: 260 holds two pills and the chip (248), never three (352).
       const m = await mount(h(StatsContext, {
         counts: NO_COUNTS, files: NO_FILES, tools: [['read', 8], ['bash', 3], ['grep', 2]], locale: 'en',
       }))
@@ -245,26 +230,18 @@ describe('StatsContext', () => {
     const nodes = flowNodes(m.container)
     const { labels, totals } = headsOf(m.container)
     assert.deepEqual(labels, ['Input / Output', 'Context Events', 'Tool Calls', 'Agent Network?'])
-    // I/O totals the inputs plus every file op (7 + 9 + 2 + 4 + 1); the family's 1M
-    // uncached input bills the doubled peak rate — the team's header pairs its tokens with it.
     assert.deepEqual(totals, ['23', '6', '12', '1.0M/$0.30'])
     assert.deepEqual(pillsOf(nodes[0]), ['Human Inputs?7', 'Read9', 'Written2', 'Searched4', 'Images1'])
     assert.deepEqual(pillsOf(nodes[1]), ['Inject3', 'Compact2', 'Prune1'])
-    // Every tool the row can hold pills out in full (jsdom reports no width, so nothing is folded away here); the
-    // overflow pill reads zero. The real fit is measured in the browser, where the card has a width.
     assert.deepEqual(pillsOf(nodes[3]), ['read8', 'bash3', 'grep2', 'edit1', 'glob1', '+0 more'])
     assert.deepEqual(rowsOf(nodes[4]), ['Current Agent1.0M/$0.30', 'Subagents × 0?0/—'])
-    // The session node carries two figure rows under its label — turns/steps
-    // above skill loads/answers (two skills, three answers above).
     assert.equal(nodes[2].querySelector('.lc-flow-label')?.textContent, 'Current Session')
     const selfRows = queryAll(nodes[2], '.lc-flow-self-stats')
     assert.deepEqual(selfRows.map(row => queryAll(row, '.lc-flow-kv b').map(el => el.textContent)), [['3', '4'], ['2', '3']])
     assert.deepEqual(selfRows.map(row => queryAll(row, '.lc-flow-kv i').map(el => el.textContent)), [['Turns', 'Steps'], ['Skill Loads', 'Answers']])
-    // The event pills tint by the events card's own kind classes.
     assert.ok(nodes[1].querySelector('.lc-flow-pill.lc-kind-inject') !== null)
     assert.ok(nodes[1].querySelector('.lc-flow-pill.lc-kind-prune') !== null)
     assert.equal(queryAll(m.container, '.lc-stat-tip').length, 3, 'the inputs-pill, family, and sub-row tips')
-    // The four connectors, two layers each (jsdom measures zeroed boxes — the geometry itself is measureFlow's pin).
     assert.equal(queryAll(m.container, '.lc-flow-ribbon').length, 4)
     assert.equal(queryAll(m.container, '.lc-flow-dash').length, 4)
     await m.unmount()
@@ -319,7 +296,6 @@ describe('StatsContext', () => {
     assert.ok(costTip.includes('billed total'), 'the tip glosses the token face too')
     assert.ok(costTip.includes('Per-1M-token rates:'))
     assert.ok(costTip.includes('Priced as listed on models.dev for deepseek · deepseek-v4-flash.'), 'the listing line names the resolved registry face')
-    // The table lists the book's own rates (the footnotes carry the peak scheme).
     assert.ok(costTip.includes('Cache input $0.00'))
     assert.ok(costTip.includes('Uncached input $0.15'))
     assert.ok(costTip.includes('Cache write $0.15'))
@@ -343,7 +319,6 @@ describe('StatsContext', () => {
     const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
     assert.ok(costTip.includes('Priced as listed on models.dev for zhipuai · glm-5.3-flash.'))
     assert.ok(!costTip.includes('DeepSeek'), 'the DeepSeek scheme note stays out of other providers’ bubbles')
-    // glm-5.3-flash lists cache_write at 0 — the zero band drops from the table.
     assert.ok(costTip.includes('Uncached input $0.07'))
     assert.ok(!costTip.includes('Cache write'))
     await m.unmount()
@@ -400,7 +375,6 @@ describe('StatsContext', () => {
     const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
     assert.ok(costTip.includes('for deepseek · deepseek-v4-flash.'))
     assert.ok(costTip.includes('for zhipuai · glm-5.3-flash.'))
-    // 1M × $0.15 × 2 (the DeepSeek peak) + 2M × $0.075 = $0.45; the tokens total too.
     assert.ok(headsOf(m.container).totals[3] === '3.0M/$0.45')
     await m.unmount()
   })
@@ -419,7 +393,6 @@ describe('StatsContext', () => {
     const nodes = flowNodes(m.container)
     const { labels, totals } = headsOf(m.container)
     assert.deepEqual(labels, ['输入输出', '上下文事件', '工具调用', 'Agent 网络?'])
-    // $0.30 / 0.15 = ¥2; the rates convert through the same fixed rate.
     assert.deepEqual(totals, ['3', '1', '2', '1.0M/¥2.00'])
     assert.deepEqual(pillsOf(nodes[0]), ['用户输入?0', '读取2', '写入1'])
     assert.deepEqual(pillsOf(nodes[1]), ['注入0', '压缩1', '剪枝0'])
@@ -492,7 +465,6 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    // 1M at the doubled $0.3 peak miss rate + 2M at the $0.15 off-peak (book) rate.
     assert.ok(headsOf(m.container).totals[3] === '3.0M/$0.60')
     const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
     assert.ok(costTip.includes('Cache input $0.00'), 'the table lists the book rates once, whatever the billed buckets')
@@ -537,16 +509,13 @@ describe('StatsContext', () => {
     const costTip = text(queryAll(m.container, '.lc-stat-tip')[1])
     assert.ok(costTip.includes('glm-5.3-flash'))
     assert.ok(!costTip.includes('junk'))
-    // No row may show the peak|off-peak pair — that is DeepSeek's alone.
     const rows = queryAll(m.container, '.lc-stat-tip-row').map(el => text(el))
     assert.ok(rows.every(r => !r.includes('|')))
-    // Both buckets bill at list price (only DeepSeek's peak doubles): 2M × $0.075.
     assert.ok(headsOf(m.container).totals[3] === '2.0M/$0.15')
     await m.unmount()
   })
 
   test('the team card hands its jump to the caller; the price link stays out of it', async () => {
-    // The card this cell tallies lives on another view, and only the caller knows where it serves it.
     let opened = 0
     const m = await mount(h(StatsContext, {
       counts: NO_COUNTS, files: NO_FILES, tools: [], cost: COST, locale: 'en',
@@ -557,10 +526,8 @@ describe('StatsContext', () => {
     assert.equal(team.getAttribute('role'), 'button')
     await click(team)
     assert.equal(opened, 1)
-    // The price link inside the same cell is a navigation, never a view switch.
     await click(query(m.container, 'a.lc-flow-head'))
     assert.equal(opened, 1)
-    // Keyboard parity: Enter/Space open, anything else stays quiet.
     team.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     assert.equal(opened, 2)
     team.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }))
@@ -613,9 +580,7 @@ describe('StatsContext', () => {
       onJump: (j) => { calls.push(j) },
     }))
     await flush()
-    // The inputs node's pills in render order, each a jump button carrying its own action tip.
     const pills = queryAll(flowNodes(m.container)[0], '.lc-flow-pill')
-    // The ? bubble is the inputs pill's own hover hint, so only the file pills carry the native action title.
     assert.deepEqual(pills.map(el => el.getAttribute('title')),
       [null, DICT_EN['stats.filesJump'], DICT_EN['stats.filesJump'], DICT_EN['stats.filesJump'], DICT_EN['stats.filesJump']])
     assert.ok(text(pills[0]).includes(DICT_EN['stats.humanInputsTip']), 'the metric bubble stays')
@@ -658,7 +623,6 @@ describe('StatsContext — the subagent split (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    // Family total: 1M × $0.30 (the doubled peak) + 2M × $0.075; own share $0.30, the subagents' $0.15.
     assert.equal(headsOf(m.container).totals[3], '3.0M/$0.45')
     assert.deepEqual(rowsOf(flowNodes(m.container)[4]), ['Current Agent1.0M/$0.30', 'Subagents × 2?2.0M/$0.15'])
     assert.deepEqual(queryAll(flowNodes(m.container)[4], '.lc-flow-row-label').map(el => el.textContent), ['Current Agent', 'Subagents × 2?'])
@@ -697,7 +661,6 @@ describe('StatsContext — the subagent split (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    // The off bucket bills at book: 1M × $0.15.
     assert.equal(headsOf(m.container).totals[3], '1.0M/$0.15')
     const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
     assert.ok(tips[1].includes('peak windows'))
@@ -715,9 +678,6 @@ describe('StatsContext — the subagent split (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    // The family's own model still prices: $0.30 (the doubled peak). The
-    // unpriceable sub branch merges in (pricing zero) but cannot lift the
-    // total — the sub cost dashes; its single token still reads.
     assert.equal(headsOf(m.container).totals[3], '1.0M/$0.30')
     assert.deepEqual(rowsOf(flowNodes(m.container)[4]), ['Current Agent1.0M/$0.30', 'Subagents × 1?1/—'])
     const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
@@ -741,7 +701,6 @@ describe('StatsContext — the subagent split (injected seat)', () => {
 })
 
 describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () => {
-  /** A well-formed slim head with (or without) a cost usage. */
   function head(cost?: SessionCostUsage): ContextTimeline {
     return {
       ok: true,
@@ -791,7 +750,6 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     let release: ((value: unknown) => void) | undefined
     vi.stubGlobal('fetch', async (_url: unknown, init: { body: string }) => {
       calls.push(String((JSON.parse(String(init?.body)) as { sessionId?: unknown }).sessionId))
-      // Hold the read until the warm-only paint is asserted.
       return await new Promise((resolve) => { release = resolve })
     })
     const SUB_WARM: SessionCostUsage = {
@@ -799,8 +757,8 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     }
     const { seat, face } = makeSeat({
       root: { running: false, updatedAt: 1 },
-      warm: { parentId: 'root', updatedAt: 2, projectionValues: { contextTimeline: head(SUB_WARM) } },
-      cold: { parentId: 'root', updatedAt: 3 },
+      warm: { parentId: 'root', origin: 'subagent', updatedAt: 2, projectionValues: { contextTimeline: head(SUB_WARM) } },
+      cold: { parentId: 'root', origin: 'subagent', updatedAt: 3 },
     })
     const Stats = makeStatsContext(kit, seat)
     const m = await mount(h(Stats, {
@@ -811,23 +769,18 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       sessionId: 'root',
     }))
     await flush()
-    // The warm row's usage prices while the cold read is still in flight.
     assert.equal(headsOf(m.container).totals[3], '2.0M/$0.15')
     assert.deepEqual(rowsOf(flowNodes(m.container)[4]), ['Current Agent0/—', 'Subagents × 2?2.0M/$0.15'])
     assert.deepEqual(calls, ['cold'], 'only the timeline-less relative fetched')
-    // Both descendants count in the ledger's subtree row, cold included.
     assert.deepEqual(queryAll(flowNodes(m.container)[4], '.lc-flow-row-label').map(el => el.textContent), ['Current Agent', 'Subagents × 2?'])
-    // A snapshot tick while the read is in flight re-attaches the SAME
-    // pending read; when it lands, the duplicate settle bails on identity.
     await act(async () => {
       face.setState({
         root: { running: false, updatedAt: 1 },
-        warm: { parentId: 'root', updatedAt: 2, projectionValues: { contextTimeline: head(SUB_WARM) } },
-        cold: { parentId: 'root', updatedAt: 3 },
+        warm: { parentId: 'root', origin: 'subagent', updatedAt: 2, projectionValues: { contextTimeline: head(SUB_WARM) } },
+        cold: { parentId: 'root', origin: 'subagent', updatedAt: 3 },
       })
     })
     await flush()
-    // The cold read lands: its $0.15 merges into the family and the sub share.
     await act(async () => {
       release?.({
         ok: true,
@@ -859,7 +812,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     })
     const { seat, face } = makeSeat({
       root: { running: false, updatedAt: 1 },
-      cold: { parentId: 'root', updatedAt: 2 },
+      cold: { parentId: 'root', origin: 'subagent', updatedAt: 2 },
     })
     const Stats = makeStatsContext(kit, seat)
     const m = await mount(h(Stats, {
@@ -873,11 +826,9 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     assert.deepEqual(calls, ['cold'])
     assert.equal(headsOf(m.container).totals[3], '0/—')
     assert.deepEqual(rowsOf(flowNodes(m.container)[4]), ['Current Agent0/—', 'Subagents × 1?0/—'])
-    // The cold descendant still counts in the ledger's subtree row — a subagent is one whether or not its usage priced.
     assert.deepEqual(queryAll(flowNodes(m.container)[4], '.lc-flow-row-label').map(el => el.textContent), ['Current Agent', 'Subagents × 1?'])
-    // A later snapshot tick re-folds the subtree; the sticky failure never re-fetches.
     await act(async () => {
-      face.setState({ root: { running: false, updatedAt: 1 }, cold: { parentId: 'root', updatedAt: 2 } })
+      face.setState({ root: { running: false, updatedAt: 1 }, cold: { parentId: 'root', origin: 'subagent', updatedAt: 2 } })
     })
     await flush()
     assert.deepEqual(calls, ['cold'])
@@ -898,8 +849,8 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     })
     const { seat, face } = makeSeat({
       root: { running: false, updatedAt: 1 },
-      headless: { parentId: 'root', updatedAt: 2 },
-      absent: { parentId: 'root', updatedAt: 3 },
+      headless: { parentId: 'root', origin: 'subagent', updatedAt: 2 },
+      absent: { parentId: 'root', origin: 'subagent', updatedAt: 3 },
     })
     const Stats = makeStatsContext(kit, seat)
     const m = await mount(h(Stats, {
@@ -911,15 +862,14 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     }))
     await flush()
     assert.deepEqual(calls, ['headless', 'absent'])
-    // Neither read carried a head: nothing lands, the figures stay zeroed, no throw.
     assert.equal(headsOf(m.container).totals[3], '0/—')
     assert.deepEqual(rowsOf(flowNodes(m.container)[4]), ['Current Agent0/—', 'Subagents × 2?0/—'])
     // A later tick re-attaches to the settled nulls without re-fetching.
     await act(async () => {
       face.setState({
         root: { running: false, updatedAt: 1 },
-        headless: { parentId: 'root', updatedAt: 2 },
-        absent: { parentId: 'root', updatedAt: 3 },
+        headless: { parentId: 'root', origin: 'subagent', updatedAt: 2 },
+        absent: { parentId: 'root', origin: 'subagent', updatedAt: 3 },
       })
     })
     await flush()
@@ -949,7 +899,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       calls.push(String((JSON.parse(String(init?.body)) as { sessionId?: unknown }).sessionId))
       throw new Error('must not fetch')
     })
-    const face = new FakeSessions({ root: { running: false, updatedAt: 1 }, kid: { parentId: 'root', updatedAt: 2 } })
+    const face = new FakeSessions({ root: { running: false, updatedAt: 1 }, kid: { parentId: 'root', origin: 'subagent', updatedAt: 2 } })
     const ctx = new TestClientCtx({ services: { sessions: face } })
     const Stats = makeStatsContext(kit, makeSubagentCost(asClientCtx(ctx), makeAgentHeads()))
     const m = await mount(h(Stats, {

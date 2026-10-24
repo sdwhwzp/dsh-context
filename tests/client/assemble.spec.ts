@@ -1,5 +1,3 @@
-// Context assembly (src/client/assemble.ts): the header epoch lookup and the per-step surface reconstruction with its coverage flags.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { assemble, headerAt, systemAt } from '../../src/client/assemble'
@@ -138,7 +136,6 @@ describe('systemAt — the system prompt in force', () => {
   test('the last nonempty live node wins, dormant empties are skipped', () => {
     const data = timeline({ systems: [sys(3, 10), sys(8, 0), sys(12, 20)] })
     assert.deepEqual(systemAt(data, null, null), sys(12, 20))
-    // Only a dormant node after the last live one: the earlier prompt stands.
     assert.deepEqual(systemAt(timeline({ systems: [sys(3, 10), sys(8, 0)] }), null, null), sys(3, 10))
   })
 

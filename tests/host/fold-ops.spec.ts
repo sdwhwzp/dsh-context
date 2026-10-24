@@ -1,7 +1,3 @@
-// The fold-derived file-op log (src/host/fold.ts + shared/fileOps.ts): ops book at tool/result off the armed call's arguments and the
-// result's presentation meta; Code-Mode sub-dispatches buffer under their run_code root and flush at its result with parent/program stamps;
-// the log trims to maxFileOps with a coverage floor. Driven through the real projection unit.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { TimelineEvent } from '../../src/host/fold'
@@ -40,7 +36,6 @@ describe('the file-op log — call/result pairing', () => {
     ])
     assert.deepEqual(state.fileOps.map(o => [o.kind, o.path, o.added, o.removed, o.hits ?? 0]), [
       ['write', 'a.ts', 1, 2, 0],
-      // The searched target (the pathless pattern) rows too, then the hit file.
       ['search', 'TODO', 0, 0, 0],
       ['search', 'a.ts', 0, 0, 2],
     ])
@@ -61,14 +56,12 @@ describe('the file-op log — call/result pairing', () => {
     state = def.apply(state, toolCall(2, {
       callId: 's1', name: 'str_replace_editor', arguments: JSON.stringify({ command: 'view', path: 'a.ts', view_range: [1, 3] }),
     }))
-    // The args serialization is gated on tools that can row an op: bash never
-    // does, str_replace_editor's op derives from the arguments.
+    // The args serialization is gated on tools that can row an op; str_replace_editor's op derives from the arguments.
     assert.equal(state.callNames.b1?.name, 'bash')
     assert.ok(!('argsRaw' in (state.callNames.b1 ?? {})), 'a non-file call saves no raw arguments')
     assert.equal(state.callNames.s1?.argsRaw, JSON.stringify({ command: 'view', path: 'a.ts', view_range: [1, 3] }))
     state = def.apply(state, toolResult(3, { callId: 'b1', content: [{ type: 'text', text: 'ok' }] }))
     state = def.apply(state, toolResult(4, { callId: 's1', content: [{ type: 'text', text: 'ok' }] }))
-    // A `view` command reads; the op rows off the parsed arguments.
     assert.deepEqual(state.fileOps.map(o => [o.kind, o.path, o.tool]), [['read', 'a.ts', 'str_replace_editor']])
   })
 
@@ -86,8 +79,8 @@ describe('the file-op log — call/result pairing', () => {
       toolCall(1, { callId: 'c1', name: 'read', arguments: JSON.stringify({ file_path: 'a.ts' }) }),
       toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'no' }], error: true }),
       toolCall(3, { callId: 'c2', name: 'read', arguments: JSON.stringify({ file_path: 'b.ts' }) }),
-      // A hostile envelope-only mark (the retired pre-V4 spelling): the
-      // admission validation forbids `data.error` without the message mark, so a row carrying it alone reads as non-error.
+      // A hostile envelope-only mark (the retired pre-V4 spelling): admission forbids `data.error` without the
+      // message mark, so a row carrying it alone reads as non-error.
       {
         type: 'tool/result', seq: 4, time: 4,
         data: {
@@ -104,8 +97,8 @@ describe('the file-op log — call/result pairing', () => {
       { type: 'tool/call', seq: 1, time: 1, data: { callId: 'c1', name: 'read', arguments: { file_path: 'a.ts' } } } as unknown as TimelineEvent,
       toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'ok' }] }),
     ])
-    // The durable vocabulary strings the arguments; an object form (foreign
-    // producer) is normalized through the same JSON.stringify guard.
+    // The durable vocabulary strings the arguments; an object form (foreign producer) is normalized through the
+    // same JSON.stringify guard.
     assert.deepEqual(state.fileOps.map(o => [o.kind, o.path]), [['read', 'a.ts']])
   })
 })

@@ -191,7 +191,6 @@ describe('squarify', () => {
   })
 
   test('a new strip starts when the next item would worsen the strip’s worst aspect ratio', () => {
-    // 40/30/20/10 in a square: 20 breaks the first strip, 10 breaks the second (worked example from the algorithm).
     const out = squarify([sized(40, 'a'), sized(30, 'b'), sized(20, 'c'), sized(10, 'd')], { x: 0, y: 0, w: 100, h: 100 })
     assert.ok(Math.abs(out[0].rect.w - 70) < 1e-9 && Math.abs(out[0].rect.x) < 1e-9)
     assert.ok(Math.abs(out[1].rect.y - out[0].rect.h) < 1e-9, 'b stacks under a in the first strip')

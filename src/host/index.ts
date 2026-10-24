@@ -1,15 +1,6 @@
-/**
- * dsh-context — Host half (installed package entry).
- *
- * A plain Cordis plugin module (ESM) loaded by the harness as the `dsh-context` loader row.
- * The projection units (`timeline.ts`, `headers.ts`, `activity.ts`) register on
- * `ctx.sessionProjections`, fold the durable event log, and let the harness stream the finished
- * values to the browser; the one exception is the on-demand detail channel (detail.ts), which
- * serves the heavy collections per VIEWING client so the wire value stays a slim head.
- *
- * The session-projection registry is required: Cordis keeps this plugin PENDING until it
- * exists, and each registration is an effect whose disposer rides the calling fiber.
- */
+/** Host-half package entry: a plain Cordis plugin module loaded as the `dsh-context` loader row. The projection units
+ * register on `ctx.sessionProjections` (REQUIRED — Cordis keeps this plugin pending until it exists); the detail
+ * channel serves the heavy collections per viewing client, keeping the wire value a slim head. */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { createContextActivityDefinition } from './activity'
@@ -36,25 +27,20 @@ export const inject = ['sessionProjections']
 
 /** Re-exported as both value (the cordis validator) and type (the resolved config shape). */
 export { Config } from './config'
-
 export function apply(ctx: Context, config: Config): void {
-  // The host-wide cold-read gate (issue #121): every on-demand log read — detail, fleet, the
-  // warm-up — shares one FIFO admission, so a viewing client can never stack decoded logs.
-  // Routes read only runtime-proved faces and work on either side of the baseline gate, so they
-  // MUST arm before the gate's early return below.
+  // One host-wide cold-read gate: every on-demand log read shares one FIFO admission. Routes MUST arm before the baseline gate's early
+  // return below — they work on either side of it.
   const coldReads = makeColdReadGate()
   watchBalanceChannel(ctx)
   watchSkillCatalog(ctx, coldReads)
   watchFleetChannel(ctx, coldReads)
-  // Attachment previews (one click = one authorized log read) ride the same gate as every other read.
   watchAttachmentChannel(ctx, coldReads)
-  // A harness BELOW the baseline never gets the real folds (its log shapes and seam faces are
-  // outside the compat matrix); fallback units serve zeroed data plus the gate record. An
-  // undetectable version fails open into the normal composition below.
+  // Below the baseline: fallback units serve zeroed data plus the gate record, never the real folds; an undetectable version fails open
+  // into the normal composition below (docs/compatibility.md §2).
   const harnessVersion = detectHarnessVersion(ctx)
   if (harnessVersion !== undefined && !meetsBaseline(harnessVersion)) {
-    // register() constrains state to the declared SessionProjectionStateMap entry; the gate's
-    // opaque empty state is deliberately neither (nothing is folded) — cast through.
+    // register() constrains state to the declared SessionProjectionStateMap entry; the gate's opaque empty state is deliberately neither
+    // (nothing is folded) — cast through.
     ctx.sessionProjections.register(createFallbackTimelineDefinition(harnessVersion) as never)
     ctx.sessionProjections.register(createFallbackHeadersDefinition() as never)
     ctx.sessionProjections.register(createFallbackActivityDefinition() as never)

@@ -1,7 +1,3 @@
-// The shape-driven readers (src/host/logShapes.ts): the embedded assistant stream's first token, the
-// replacement op's endpoints, and the raw chunk token test. Hostile shapes are pinned beside the happy
-// paths — a malformed record reads as "nothing here", never throws (the registry drives the fold with no error boundary).
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { decodeKindOfBlock, decodeSpansOfStream, decodeTallyOfStream, firstTokenTimeOfStream, isTokenChunk, replaceRangeOf } from '../../src/host/logShapes'
@@ -25,7 +21,6 @@ describe('decodeTallyOfStream', () => {
   const tally = { reasoning: 0, text: 0, toolarg: 0 }
 
   test('tiles [first marker, endTime] by block, in marker order, counting each marker', () => {
-    // reasoning 1000→1300, text 1300→1500, tool args 1500→2000 (endTime).
     assert.deepEqual(decodeTallyOfStream([
       chunk(1000, 'reasoning'),
       { type: 'reasoning-chunks', time0: 1010, index: 0, dt: [], texts: ['think'] },
@@ -79,7 +74,6 @@ describe('decodeTallyOfStream', () => {
   })
 
   test('a backwards marker clamps to a zero span instead of a negative one', () => {
-    // The text block's interval is negative → 0; the reasoning block is last, so it owns the tail to endTime.
     assert.deepEqual(decodeTallyOfStream([chunk(1000, 'text'), chunk(900, 'reasoning')], 950), {
       spans: { reasoning: 50, text: 0, toolarg: 0 },
       blocks: { reasoning: 1, text: 1, toolarg: 0 },
@@ -242,8 +236,7 @@ describe('replaceRangeOf', () => {
     assert.equal(replaceRangeOf(null), null)
     assert.equal(replaceRangeOf(undefined), null)
     assert.equal(replaceRangeOf({ op: 'insert', startSeq: 1, endSeq: 2 }), null)
-    // A pre-V3 spelling (`start`/`end`) is not an endpoint this dialect
-    // carries: an op offering only those reads as malformed → append.
+    // A pre-V3 spelling (`start`/`end`) is not an endpoint this dialect carries: it reads as malformed → append.
     assert.equal(replaceRangeOf({ op: 'replace', start: 3, end: 7 }), null)
     assert.equal(replaceRangeOf({ op: 'replace', startSeq: 1 }), null)
     assert.equal(replaceRangeOf({ op: 'replace', startSeq: Number.NaN, endSeq: 2 }), null)

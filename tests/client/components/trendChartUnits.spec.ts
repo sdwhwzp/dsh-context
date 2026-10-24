@@ -41,7 +41,7 @@ describe('aggregateByTurn', () => {
     assert.equal(agg[0].activeMs, 3500, 'the turn bar carries its steps\' summed active time')
     assert.equal(agg[1].activeMs, 800, 'a single-step turn keeps its own figure')
 
-    // A step without a stamp contributes nothing but does not hide the run's known share.
+    // A step without a stamp contributes nothing but keeps the run's known share.
     const partial = aggregateByTurn([req(1, { turn: 1, activeMs: 1000 }), req(2, { turn: 1 })])
     assert.equal(partial[0].activeMs, 1000)
     const none = aggregateByTurn([req(1, { turn: 1 }), req(2, { turn: 1 })])
@@ -108,11 +108,10 @@ describe('TrendChart entrance rise', () => {
   })
 
   test('switching granularity remounts every bar so the entrance rise replays', async () => {
-    // A turn aggregate IS its last step's record (the same seq): without the granularity-keyed remount,
-    // a turn → step switch would reuse that bar's DOM node and its turn-final step bars would not rise.
+    // A turn aggregate is its last step's record (same seq): without the granularity-keyed remount,
+    // the step bars would reuse the aggregate's DOM node and not rise.
     function GranularityHarness(props: { requests: RequestRecord[] }) {
       const [granularity, setGranularity] = useState<'step' | 'turn'>('turn')
-      // The parent (ContextView) aggregates for turn granularity; TrendChart renders what it is given.
       const display = granularity === 'turn' ? aggregateByTurn(props.requests) : props.requests
       return h('div', null,
         h('button', { onClick: () => { setGranularity('step') } }, 'to-step'),
@@ -120,11 +119,9 @@ describe('TrendChart entrance rise', () => {
     }
     const reqs = [req(1, { turn: 1, step: 0 }), req(2, { turn: 1, step: 1 }), req(3, { turn: 2, step: 0 })]
     const m = await mount(h(GranularityHarness, { requests: reqs }))
-    // Turn mode: one aggregate per turn, each keyed by its LAST step's seq.
     assert.deepEqual(bars(m.container).map(b => b.getAttribute('data-seq')), ['2', '3'])
     const reusedSeq = query(m.container, '.lc-bar[data-seq="2"]')
     await click(query(m.container, 'button'))
-    // Step mode renders every step; even the seq the aggregate reused must be a FRESH node.
     assert.deepEqual(bars(m.container).map(b => b.getAttribute('data-seq')), ['1', '2', '3'])
     assert.notEqual(query(m.container, '.lc-bar[data-seq="2"]'), reusedSeq)
     await m.unmount()

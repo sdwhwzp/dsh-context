@@ -1,11 +1,6 @@
-/**
- * The Insights page's date-range picker: one pill carries both ends of the LIVE window, so the picker and the preset
- * group never disagree. Two clicks make the range in any order — the pair is SORTED, so every reader downstream (the
- * scope window, the ledger-day predicate, the chip) only ever sees `from <= to`.
- *
- * The panel portals to <body> and fixes off its trigger's rect: the page is the `lc-ov` query container, whose scroller
- * would clip an in-tree popover. Any scroll, resize, outside press, or Escape closes it rather than float a detached anchor.
- */
+/** The date-range picker: one pill carries both ends of the LIVE window, and two clicks make the range in any order —
+ * the pair is SORTED, so every reader downstream only ever sees `from <= to`. The panel portals to <body> and fixes off
+ * its trigger's rect (the `lc-ov` scroller would clip it); scroll, resize, outside press or Escape closes it. */
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
@@ -16,8 +11,7 @@ import { useEscapeClose } from './escapeClose'
 import { IconChevronDown } from '../primitives'
 
 export interface DateRangeProps {
-  /** The scope's day span: the picked range, else the preset's own window read as days (its open end is today);
-   * null when the scope is unbounded. */
+  /** The scope's day span: the picked range, else the preset's window as days (open end = today); null = unbounded. */
   value: DayRange | null
   picked: boolean
   onChange: (range: DayRange | null) => void
@@ -25,7 +19,6 @@ export interface DateRangeProps {
   locale: string
 }
 
-/** Trigger-to-panel distance and the viewport margin the panel clamps inside, in px. */
 const GAP = 6
 const MARGIN = 8
 
@@ -79,9 +72,8 @@ export function makeDateRange(kit: ViewKit): (props: DateRangeProps) => ReactEle
       }
     }, [open])
 
-    // Re-seat the panel after every commit; the comparison makes a re-measure landing on the same spot a no-op, so the
-    // every-render measurement cannot loop. Object.is, not ===: an unmeasurable anchor reads NaN, and NaN === NaN is
-    // false — every re-measure would then mint a fresh object and spin the tree.
+    // Re-seat the panel after every commit; the equality check makes a same-spot re-measure a no-op, so this
+    // every-render measurement cannot loop. Object.is, not ===: an unmeasurable anchor reads NaN, and NaN === NaN is false.
     useLayoutEffect(() => {
       const anchorEl = rootRef.current
       const panelEl = panelRef.current

@@ -1,5 +1,3 @@
-// applyTimeline paths of the fold (src/host/fold.ts). No mocks: the real fold runs.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { TimelineEvent } from '../../src/host/fold'
@@ -168,7 +166,6 @@ describe('user/message injection records', () => {
     assert.equal(state.events.length, 1)
     assert.equal(state.events[0].form, 'context')
     assert.equal(state.events[0].name, 'plugin')
-    // The same identity rides the surface node for the browser rows.
     assert.equal(state.surface[0].name, 'plugin')
   })
 
@@ -179,7 +176,6 @@ describe('user/message injection records', () => {
     assert.equal(state.events[0].sub, 'skill')
     assert.equal(state.events[0].name, 'code-review')
     assert.equal(state.events[0].form, 'skill')
-    // The skill name already labels the node (`skill`); no duplicate stamp.
     assert.ok(!('name' in state.surface[0]))
     assert.equal(state.surface[0].skill, 'code-review')
   })
@@ -211,8 +207,8 @@ describe('user/message injection records', () => {
   })
 
   test('a hostile form (truthy non-string) degrades to the default inject form', () => {
-    // The harness validates a source's `kind` but not its `form`: a durable
-    // number must not ride the record into the strict wire/state schemas (the permanent per-session freeze class).
+    // The harness validates a source's `kind` but not its `form`: a durable number must not ride the record into
+    // the strict wire/state schemas (the permanent per-session freeze class).
     const { state } = driveTimeline([
       userMessage(1, text('note'), { kind: 'plugin', plugin: 'dsh-x', form: 123 } as never),
     ])
@@ -260,10 +256,8 @@ describe('tool/result skill tagging', () => {
     assert.equal(node?.tool, 'skill')
     assert.equal(node?.skill, 'pdf')
     assert.equal(node?.cat, 'skill')
-    // The price moved from the tool bucket to the skill one (issue #66)…
     assert.equal(state.sums.tool, 0)
     assert.equal(state.sums.skill, node?.tokens)
-    // …and the per-request record carries the skill figure in its total.
     assert.equal(state.requests.at(-1)?.skill, node?.tokens)
     assert.ok((state.requests.at(-1)?.total ?? 0) >= (node?.tokens ?? 0))
     assert.deepEqual(state.events, [
@@ -272,9 +266,7 @@ describe('tool/result skill tagging', () => {
   })
 
   test('an untraced result (tool/call gone) tags from the wrapper alone and keeps its tool identity', () => {
-    // No tool/call armed: node.tool resolves to undefined — the content
-    // wrapper is trusted (a missed tag is worse than a content guess). The
-    // `skill` stamp keeps the load countable as a tool call.
+    // No tool/call armed: node.tool is undefined — the content wrapper is trusted (a missed tag is worse) and `skill` keeps it countable.
     const { state } = driveTimeline([toolResult(1, { callId: 'zz', content: skillBody('xlsx') })])
     const node = state.surface.at(-1)
     assert.equal(node?.skill, 'xlsx')
@@ -304,8 +296,7 @@ describe('tool/result skill tagging', () => {
   })
 
   test('skill content nested inside a foreign wrapper block never tags', () => {
-    // The skill wrapper rides the result's own text blocks (first-level); a
-    // nested foreign block is a hostile shape — unscanned, never a throw.
+    // The skill wrapper rides the result's own first-level text blocks; a nested foreign block is unscanned, never a throw.
     const ev: TimelineEvent = {
       type: 'tool/result', seq: 1, time: at(),
       data: {
@@ -422,11 +413,6 @@ describe('the answers tally (assistant messages carrying text)', () => {
 })
 
 describe('hostile provider usage (issue #44: stats must survive nonconforming figures)', () => {
-  // The registry parses every served view (and every cold-restored state)
-  // against the unit's strict integer schemas with no containment: one raw
-  // nonconforming figure in the state fails the gate on EVERY later delivery
-  // and permanently freezes the session's projection feed. The fold therefore
-  // sanitizes each bucket before it touches the state, and the records stay complete (billed, not dropped).
   test('fractional buckets round to integers', () => {
     const { state } = driveTimeline([
       assistantMessage(1, { usage: { inputTokens: 10.4, cacheReadTokens: 20.6, outputTokens: 3.5 } }),
@@ -481,8 +467,6 @@ describe('hostile provider usage (issue #44: stats must survive nonconforming fi
       assistantMessage(3, { turn: 1, step: 2, usage: { inputTokens: Number.NaN, outputTokens: null } }),
       assistantMessage(4, { turn: 1, step: 3, usage: { inputTokens: 12.4 } }),
     ])
-    // The gates the registry itself parses with: a throw here is exactly the
-    // issue #44 freeze (the drive loop and every later delivery die on it).
     drive.def.stateSchema.parse(assertPlainJson(drive.state))
     drive.def.wire.viewSchema.parse(drive.def.wire.view(drive.state))
   })
@@ -502,8 +486,6 @@ describe('hostile provider usage (issue #44: stats must survive nonconforming fi
 })
 
 describe('session/end-seed', () => {
-  // A seeded fork's inherited prefix: a settlement the parent session already
-  // priced, replayed verbatim into the child's log (issue #94).
   const inherited = [
     header(1, { model: 'deepseek-v3' }),
     assistantMessage(2, { usage: { inputTokens: 100 } }),
@@ -632,9 +614,8 @@ describe('unknown event types', () => {
 
 describe('session-cost accumulation', () => {
   const usage = { inputTokens: 100 }
-  // DeepSeek peak windows: Beijing Time weekdays 09:00–12:00 and 14:00–18:00 (UTC 01:00–04:00 and
-  // 06:00–10:00). 2024-01-01 is a Monday; 2024-01-06/07 the weekend. 02:00 UTC Monday is peak; the
-  // helpers' default clock (1970-01-01T00:00:01 UTC) is off-peak.
+  // DeepSeek peak windows: Beijing Time weekdays 09:00–12:00 and 14:00–18:00 (UTC 01:00–04:00 and 06:00–10:00);
+  // 02:00 UTC Monday is peak, the helpers' default clock (1970-01-01T00:00:01 UTC) is off-peak.
   const PEAK = Date.UTC(2024, 0, 1, 2, 0, 0)
   const at100 = (seq: number, time: number) => assistantMessage(seq, { usage, time })
 
@@ -754,13 +735,9 @@ describe('session-cost accumulation', () => {
 describe('hostile events', () => {
   test('a malformed assistant/message is dropped instead of taking the fold down', () => {
     const def = timelineDef({})
-    // deriveEventMessage dereferences data.message.content — a log without it
-    // must not throw out of apply (the projection registry has no net; a
-    // throwing fold stalls the unit and the browser waits on loading forever).
     const init = def.init()
     const next = def.apply(init, { type: 'assistant/message', seq: 1, time: at(), data: {} } as TimelineEvent)
     assert.equal(next, init, 'a failed event leaves the state untouched')
-    // The fold carries on: the next well-formed event still lands.
     const then = def.apply(next, assistantMessage(2, { turn: 1, step: 1 }))
     assert.equal(then.surface.length, 1)
     assert.equal(then.requests.length, 1)
@@ -769,14 +746,12 @@ describe('hostile events', () => {
 
   test('null and primitive content blocks price and render as nothing', () => {
     const blocks = [null, 7, 'x', { type: 'text', text: 'hello' }] as never
-    // The tool/result has NO preceding tool/call — the unpaired lookup must
-    // not stamp an `undefined`-valued node.tool (it would fail every projection-cache write for the session).
+    // The tool/result has NO preceding tool/call: the unpaired lookup must not stamp an `undefined`-valued node.tool.
     const { state } = driveTimeline([
       userMessage(1, blocks),
       toolResult(2, { callId: 'c1', content: blocks }),
       assistantMessage(3, { content: blocks }),
     ])
-    // The text block still prices; the junk blocks cost overhead only.
     assert.ok(state.sums.user > 0)
     assertPlainJson(state)
   })

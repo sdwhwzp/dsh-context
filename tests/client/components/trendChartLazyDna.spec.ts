@@ -83,7 +83,6 @@ describe('capDnaRuns', () => {
     assert.ok(capped.length <= 96)
     assert.equal(capped[0].from, 0)
     assert.equal(capped[capped.length - 1].to, dense[dense.length - 1].to)
-    // Adjacent samples of the same colour coalesce into one run.
     assert.ok(capped.every((run, i) => i === 0 || capped[i - 1].color !== run.color))
     const mono = Array.from({ length: 400 }, (_, i) => ({ color: '#a', from: i / 4, to: (i + 1) / 4 }))
     assert.equal(capDnaRuns(mono, 96).length, 1)
@@ -100,7 +99,6 @@ describe('TrendChart lazy DNA bands', () => {
       const dnaBars = queryAll(m.container, '.lc-bar-dna')
       assert.ok(dnaBars.length > 0 && dnaBars.length < reqs.length, `windowed DNA bars (${dnaBars.length})`)
       assert.ok(lazy.calls.size < reqs.length, `only visible steps assembled (${lazy.calls.size})`)
-      // Hovering a DNA bar resolves the band under the pointer and paints the lifetime slice across the window.
       await act(async () => { dnaBars[0].dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientY: 10 })) })
       await flush()
       assert.ok(queryAll(m.container, '.lc-dna-slice').length > 0)
@@ -140,7 +138,7 @@ describe('TrendChart lazy DNA bands', () => {
     try {
       assert.ok(queryAll(m.container, '.lc-bar-dna').length > 0)
       assert.deepEqual(axisOf(m.container), eagerAxis, 'lazy delta axes match the eager per-band maxima')
-      // Exact churn bounds require every bar's key changes: no totals-based shortcut.
+      // Exact churn bounds need every bar's key changes, so there is no totals shortcut.
       assert.ok(lazy.calls.size <= reqs.length * 2, `bounded per-seq lookups (${lazy.calls.size})`)
       assert.ok(bars(m.container).length > 0)
     } finally {

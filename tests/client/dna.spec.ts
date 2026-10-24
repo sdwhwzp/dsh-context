@@ -1,6 +1,3 @@
-// dnaOf (src/client/dna.ts): the DNA strip's per-item decomposition — the system prompt and the header epoch's
-// tool schemas lead, the message flow follows in seq order (the order the model reads the context).
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { deltaBandsOf, dnaBaseLabel, dnaOf, trendBandsOf } from '../../src/client/dna'
@@ -64,9 +61,7 @@ describe('dnaOf', () => {
   })
 
   test('a mid-session epoch refresh keeps the header bands at the FRONT (the epoch seq is bookkeeping, not prompt position)', () => {
-    // The regression this pins: dsh appends `request/header` at dispatch time of the first request using the header, so a
-    // refreshed epoch's seq lands AFTER every message already in context — epoch-seq ordering parked the system/tools
-    // bands behind the tool results those very schemas describe.
+    // dsh appends `request/header` at dispatch, after every message already in context: epoch-seq ordering would invert the bands.
     const items = dnaOf(asm({
       system: system({ seq: 50 }),
       header: header({ seq: 50, tools: [tool('bash', 30)] }),
@@ -140,7 +135,6 @@ describe('dnaBaseLabel', () => {
 })
 
 describe('deltaBandsOf', () => {
-  // Fixture builder: one bar's band list per entry; bands shared across bars pair up by key.
   function barsOf(spec: [key: string, cat: string, tokens: number][][]): TrendBand[][] {
     return spec.map(list => {
       let off = 0
@@ -167,7 +161,6 @@ describe('deltaBandsOf', () => {
       [['sys', 'system', 100], ['n1', 'user', 100], ['a1', 'assistant', 90], ['n4', 'user', 30]],
     ])
     const d = deltaBandsOf(b2, b1)
-    // Up: a1 grew +30 (keeping its read-order slot), then the n4 newcomer +30. Down: t1 left −40.
     assert.deepEqual(d.up.map(b => [b.key, b.tokens, b.off]), [['a1', 30, 0], ['n4', 30, 30]])
     assert.deepEqual(d.down.map(b => [b.key, b.tokens, b.off]), [['t1', -40, 0]])
     assert.deepEqual(d.up.map(b => b.cat), ['assistant', 'user'])

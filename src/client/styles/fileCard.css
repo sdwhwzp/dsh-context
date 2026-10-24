@@ -1,12 +1,12 @@
-/* The title, the tally and the chips share one row whenever they fit and wrap naturally when they don't. On a
-   phone-width card the chips fold inside their band, so the title row reserves that folded height rather than
-   following the tallies it renders. */
+/* Title, tally and chips share one row when they fit and wrap when they don't; at 380px the chips fold inside
+   their band, so the title row reserves that folded height rather than following the tallies it renders. */
 .lc-fa-card .lc-card-title { align-content: center; }
 @container lc-card (max-width: 380px) { .lc-fa-card .lc-card-title { min-height: 69px; } }
 .lc-fa-ctl, .lc-br-toolctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .lc-fa-n { margin-left: 4px; font-weight: 700; opacity: 0.75; }
-.lc-fa-search, .lc-br-tool-search, .lc-find-input { flex: 1; min-width: 80px; font: inherit; font-size: 12px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 3px 8px; outline: none; }
-.lc-fa-sort { flex: none; }
+.lc-fa-search, .lc-br-tool-search, .lc-find-input { font: inherit; font-size: 12px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 3px 8px; outline: none; }
+/* The buttons fold inside the group rather than overflowing a narrow card. */
+.lc-fa-sort { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; }
 .lc-fa-meta { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 400; }
 /* Sits outside the scrolling list, so the tip bubble never clips. */
 .lc-fa-meta-delta { position: relative; }
@@ -26,14 +26,12 @@
 .lc-fa-b-read { color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); }
 .lc-fa-b-write { color: var(--dsw-alias-state-success-primary); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent); }
 .lc-fa-b-search { color: var(--dsw-alias-state-warn-primary); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent); }
-/* Kind chips keep their purpose color in every state; only the active chip adds the filled tint. */
 .lc-fa-chip-read, .lc-fa-chip-read:hover { color: var(--dsw-alias-brand-primary); }
 .lc-fa-chip-write, .lc-fa-chip-write:hover { color: var(--dsw-alias-state-success-primary); }
 .lc-fa-chip-search, .lc-fa-chip-search:hover { color: var(--dsw-alias-state-warn-primary); }
 .lc-fa-chip-read.lc-gran-on, .lc-fa-chip-read.lc-gran-on:hover { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); color: var(--dsw-alias-brand-primary); }
 .lc-fa-chip-write.lc-gran-on, .lc-fa-chip-write.lc-gran-on:hover { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent); color: var(--dsw-alias-state-success-primary); }
 .lc-fa-chip-search.lc-gran-on, .lc-fa-chip-search.lc-gran-on:hover { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent); color: var(--dsw-alias-state-warn-primary); }
-/* The aggregate chip reads blue in every state; its active state fills solid instead of the kind chips' tint. */
 .lc-fa-chip-all, .lc-fa-chip-all:hover { color: var(--dsw-alias-state-business-primary); }
 .lc-fa-chip-all.lc-gran-on, .lc-fa-chip-all.lc-gran-on:hover { background: var(--dsw-alias-button-info-fill); color: var(--dsw-alias-label-primary-foreground); }
 .lc-fa-delta { flex: none; display: inline-flex; gap: 5px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -43,7 +41,6 @@
 .lc-fa-ops { margin: 0 8px 8px 15px; padding: 2px 0 2px 10px; border-left: 2px solid var(--dsw-alias-border-l1); display: flex; flex-direction: column; gap: 1px; }
 .lc-fa-op { display: flex; align-items: center; gap: 8px; min-width: 0; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 11px; padding: 3px 6px; text-align: left; border-radius: 5px; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-fa-op-link { cursor: pointer; }
-/* The op's values and stamp hold the right edge; the detail text takes the room instead. */
 .lc-fa-op-meta { flex: none; margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .lc-fa-op-time { flex: none; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
 .lc-fa-op-tool { flex: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-secondary); }

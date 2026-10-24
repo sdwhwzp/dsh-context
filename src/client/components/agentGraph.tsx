@@ -1,21 +1,5 @@
-/**
- * The Agent network card — the head of the Fleet tab, and (compact) the right Sidebar's Context
- * panel. The current agent's whole family (ancestors, siblings, subagents) as a node graph, where
- * every node is a live card of that session's own context — title, occupancy, and a composition
- * bar. Links are bezier curves fanned out from the parent's foot, hued per level-1 family; hovering
- * a card lights its whole lineage (ancestors and subtree). A card click follows the mount: the
- * sidebar jumps straight to that agent's session; the Fleet tab selects instead (`onSelect` —
- * ring + cross-panel linkage), and the jump lives on the boards' own open buttons.
- *
- * The sidebar mount pairs the graph with the inspector (agentInspector.tsx) on its right — the
- * `lc-card` container query folds that split to stacked on the narrow pane — following the hovered
- * card, the pinned pick, or the current session. The Fleet tab's mount drops the inspector
- * (`inspector={false}`): its own members and task boards carry that detail beside the graph.
- *
- * The forest derivation lives in fleetModel.ts (`useFleetModel`): the Fleet tab derives the family
- * once and passes both halves in (`forest`/`team`), so every panel reads the same family; the
- * sidebar mount leaves them undefined and the card derives its own.
- */
+/** The Agent network card: the sidebar mounts it with the inspector beside it (the `lc-card` query folds that split);
+ * the Fleet tab passes its shared forest/team and selects on click instead of jumping. */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from 'react'
 import { IconWorkspaceTreeOutlineRegular, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -42,30 +26,24 @@ import { AgentInspector } from './agentInspector'
 
 export interface AgentGraphProps {
   sessionId?: string
-  /** Live stats of the current session from the tab's own projections (internal derivation only). */
   self?: AgentSelfStats
   /** The Fleet tab's shared derivation; undefined = the card derives its own (the sidebar mount). */
   forest?: AgentForest | null
-  /** The family's team projection for the header chip; undefined = the internal derivation's own. */
   team?: FleetTeam | null
-  /** The pinned session (the Fleet tab's list/board picks); its card rings. */
   pinnedId?: string | null
   /** Controlled hover (the Fleet tab lifts it so the list rows light graph nodes too). */
   hoverId?: string | null
   onHover?: (id: string | null) => void
-  /** When set (the Fleet tab), a card click selects the node — ring + cross-panel linkage —
-   * instead of jumping to its session; a small corner button keeps the jump. */
+  /** Set on the Fleet tab: a card click selects (ring + cross-panel linkage) instead of jumping. */
   onSelect?: (id: string) => void
   /** The preview pane beside the graph: the sidebar's compact mount keeps it, the Fleet tab paints the graph alone. */
   inspector?: boolean
 }
 
-/** Entrance stagger cap for the cards and their bar segments (the stackedBar idiom). */
 const STAGGER_CAP = 8
-/** The graph's viewport height, mirrored by `.lc-agents-stage`'s max-height in agentGraph.css. */
+/** The graph's fold height, mirrored by the stage's max-height and Fleet flex-basis in agentGraph.css. */
 const STAGE_H = 560
 
-/** The link's S-curve: vertical tangents at both card edges, curvature proportional to the drop, clamped to [24, 96]. */
 function linkPath(x1: number, y1: number, x2: number, y2: number): string {
   const k = Math.min(96, Math.max(24, (y2 - y1) * 0.5))
   return `M ${x1} ${y1} C ${x1} ${y1 + k}, ${x2} ${y2 - k}, ${x2} ${y2}`
@@ -81,8 +59,8 @@ export function makeAgentGraph(
 
   function AgentGraph(props: AgentGraphProps): ReactElement | null {
     const sessionId = props.sessionId
-    // The internal derivation runs only when the caller passes no forest in; the flag is a
-    // mount-stable prop split (the Fleet tab always passes one, the sidebar never does).
+    // The internal derivation runs only when the caller passes no forest in; the flag is a mount-stable prop split
+    // (the Fleet tab always passes one, the sidebar never does).
     const internal = useFleetModel(ctx, heads, sessionId, props.self, props.forest === undefined)
     const forest = props.forest !== undefined ? props.forest : internal.forest
     const team = props.team !== undefined ? props.team : internal.team
@@ -93,29 +71,30 @@ export function makeAgentGraph(
     useEffect(() => { setShowAll(false) }, [sessionId])
     const hoverId = props.hoverId !== undefined ? props.hoverId : internalHover
     const onHover = props.onHover ?? setInternalHover
-    // The shared price book (the stats board's own store): a card's cost estimate
-    // appears once the book lands, and never blocks the rest of the card.
+    // The shared price book (the stats board's own store): a card's cost estimate appears once the book lands, never blocks it.
     const { book } = useModelPrices()
     const currency = displayCurrencyOf(ctx.locale)
 
-    // The layout is fully responsive: re-run it whenever the stage's visible
-    // width changes (sidebar toggles, window resizes, split views).
+    // Re-layout whenever the stage's visible width changes (sidebar toggles, resizes, split views).
     const stageRef = useRef<HTMLDivElement | null>(null)
     const [stageWidth, setStageWidth] = useState(0)
+    const [stageHeight, setStageHeight] = useState(0)
     useEffect(() => {
       /* v8 ignore start -- jsdom has neither ResizeObserver nor layout; tests exercise the natural-pitch fallback (stageWidth 0). */
       const el = stageRef.current
       if (el === null || typeof ResizeObserver !== 'function') return
-      // contentRect, not clientWidth: the stage's 4px side padding is breathing room for
-      // hover shadows, and sizing to clientWidth would overshoot the content box by exactly
-      // that padding, arming a phantom horizontal scrollbar whenever the layout fits exactly.
-      const observer = new ResizeObserver(([entry]) => { setStageWidth(entry.contentRect.width) })
+      // contentRect, not clientWidth: the stage's 4px side padding is breathing room for hover shadows, so clientWidth
+      // would overshoot the content box by that padding and arm a phantom horizontal scrollbar when the layout fits exactly.
+      const observer = new ResizeObserver(([entry]) => {
+        setStageWidth(entry.contentRect.width)
+        // Only the folded stage tells how much canvas is on screen; expanded, the stage IS the canvas.
+        if (!showAll) setStageHeight(entry.contentRect.height)
+      })
       observer.observe(el)
       return () => { observer.disconnect() }
       /* v8 ignore stop */
-    }, [])
-    // A horizontal swipe running off the stage's edge must not chain into the browser's history navigation
-    // (overscroll.ts): the sheet's overscroll-behavior-x covers Chromium/Firefox, this covers WebKit.
+    }, [showAll])
+    // Keep a swipe off the stage from chaining into browser history (overscroll.ts covers the WebKit gap).
     useEffect(() => {
       const el = stageRef.current
       /* v8 ignore next 1 -- the stage renders whenever the card does, and React
@@ -127,7 +106,10 @@ export function makeAgentGraph(
     const layout = useMemo(() => (forest !== null ? layoutForest(forest, stageWidth) : null), [forest, stageWidth])
 
     if (forest === null || layout === null) return null
-    const overflowsStage = layout.height > STAGE_H
+    const tallFamily = layout.height > STAGE_H
+    // The Fleet stage fills the stretched card, so the measured stage height, not the fold, decides whether the canvas
+    // clips; an expanded stage keeps the toggle reachable even when a resize brings the layout under the fold.
+    const overflowsStage = showAll || (tallFamily && layout.height > stageHeight)
     const byId = new Map(forest.nodes.map(n => [n.id, n]))
     /** v8 ignore next 1 -- agentForestOf anchors the forest at the current session, so a current node always exists. */
     const current = forest.nodes.find(n => n.isCurrent) ?? forest.nodes[0]
@@ -139,15 +121,13 @@ export function makeAgentGraph(
     let totalTokens = 0
     for (const n of forest.nodes) totalTokens += n.head !== null ? n.head.tokens : 0
 
-    // The hovered card's lineage (ancestor chain + own subtree) lights its links; the rest dim.
     const lit = lineageOf(forest, hoverId)
 
     const open = (id: string): void => {
       if (id === current.id) return
       openSessionVia(ctx, id)
     }
-    // Select mode (the Fleet tab): a card click rings the node and steers the sibling panels;
-    // even the current card is pickable. The jump stays with the boards' own open buttons.
+    // Select mode (the Fleet tab): even the current card is pickable; the jump stays with the boards' own open buttons.
     const select = props.onSelect
     const keyOpen = (id: string) => (ev: KeyboardEvent) => {
       if (ev.key !== 'Enter' && ev.key !== ' ') return
@@ -156,7 +136,6 @@ export function makeAgentGraph(
       else open(id)
     }
 
-    // The sidebar's preview follows the hover, the pin, or the current session.
     const inspector = (
       <AgentInspector
         node={inspected}
@@ -233,7 +212,7 @@ export function makeAgentGraph(
 
         <div className="lc-agents-split">
           <div className="lc-agents-main">
-            <div className={'lc-agents-stage' + (showAll ? ' lc-agents-stage-all' : '')} ref={stageRef}>
+            <div className={'lc-agents-stage' + (tallFamily ? ' lc-agents-stage-tall' : '') + (showAll ? ' lc-agents-stage-all' : '')} ref={stageRef}>
               <div
                 className={'lc-agents-canvas' + (lit !== null ? ' lc-agents-focus' : '')}
                 style={{ width: layout.width, height: layout.height }}
@@ -328,11 +307,9 @@ interface CardProps {
   hovered: boolean
   /** The hovered card's lineage (ancestors + subtree): the focus dim spares these cards. */
   on: boolean
-  /** The list/team/comms pick this card echoes with a ring. */
   pinned: boolean
   onHover: (id: string | null) => void
   onOpen: (id: string) => void
-  /** Set on the Fleet tab: card click selects (ring + panel linkage) instead of opening. */
   onSelect?: (id: string) => void
   onKeyOpen: (ev: KeyboardEvent) => void
   /** The price book and display currency for the cost estimate (null book → no estimate shown). */
@@ -348,25 +325,23 @@ function AgentCard(props: CardProps): ReactElement {
   const { node, x, y, width } = props
   const pct = node.head !== null ? node.head.pct : null
   const segs = node.head !== null ? barSegments(node.head.parts, pct, pressureColorOf(pct)) : []
-  // The headline figure is the agent's CONSUMPTION: the tokenUsage tally, with the
-  // fold's own cost ledger standing in when the tally is absent (cold relatives).
+  // The headline figure is the agent's CONSUMPTION: the tokenUsage tally, with the fold's own cost ledger standing in
+  // when the tally is absent (cold relatives).
   const consumed = node.billed !== null && node.billed > 0 ? node.billed
     : node.costUsage !== null ? billedTokensOf(node.costUsage) : null
   const cost = estimateSessionCost(node.costUsage, props.book, props.currency)
   const metricBits: string[] = []
   if (consumed !== null && consumed > 0) metricBits.push(props.fmt(consumed))
   if (cost !== null) metricBits.push(formatCost(cost, props.currency))
-  // Activity footer: the run's duration, then its step count. Either bit may be missing —
-  // a node that never ran has no steps, a cold one no timing yet.
+  // Duration, then steps; either may be absent (a node that never ran has no steps, a cold one no timing).
   const meta: string[] = []
   if (node.durationMs !== null) meta.push(fmtDurationCompact(node.durationMs))
   if (node.requests > 0) meta.push(props.t('agents.steps', { n: node.requests }))
   const selectable = props.onSelect !== undefined
   const cls = 'lc-agent-card animate-lc-agent-in motion-reduce:animate-none'
     + (node.isCurrent ? ' lc-agent-self' : '')
-    // lc-agent-hover shares the card's own :hover rule, so the boards' linked hover
-    // lifts the card exactly like pointing at it (and stays the specs' state anchor).
-    // lc-agent-on marks the hovered card's lineage — the canvas' focus dim spares it.
+    // lc-agent-hover shares the card's own :hover rule, so the boards' linked hover lifts the card exactly like
+    // pointing at it (and stays the specs' state anchor). lc-agent-on marks the hovered card's lineage — focus dim spares it.
     + (props.hovered ? ' lc-agent-hover' : '')
     + (props.on ? ' lc-agent-on' : '')
     + (props.pinned ? ' lc-agent-pinned' : '')
@@ -402,9 +377,8 @@ function AgentCard(props: CardProps): ReactElement {
               </>
             )}
         </div>
-        {/* The badge sits OUTSIDE the clamped label: an inline badge would be clipped away
-            whenever a long title claims both lines. The lc-agent-self-badge class carries no
-            rule of its own — it stays as the specs' anchor for the self marker. */}
+        {/* The badge sits OUTSIDE the clamped label: an inline badge would be clipped whenever a long title claims
+            both lines. The lc-agent-self-badge class carries no rule of its own — it is the specs' self-marker anchor. */}
         {node.isCurrent ? <span className="lc-agents-badge lc-agent-self-badge">{props.t('agents.self')}</span> : null}
       </div>
       <div className="lc-agent-metric">

@@ -59,11 +59,10 @@ describe('ContextBrowser tool results', () => {
     await click(catRow(m, 'tool'))
     const rows = elemRows(m)
     assert.equal(rows.length, nodes.length)
-    // Dot presence per case (collapsed rows): every marker failure + the two
-    // fold-stamped failures (isError, err flag) — nothing else.
+    // Dot presence per case (collapsed rows): every marker failure plus the two fold-stamped failures.
     const dots = queryAll(m.container, '.lc-br-err-dot')
     assert.equal(dots.length, 9, 'one red dot per failing result')
-    // Newest-first order: rows[0] is seq 97 (joined clean result), then 96, 95, ...
+    // Newest-first order: seq 97 (joined clean result), then 96, 95, ...
     assert.ok(text(rows[0]).includes('bash'))
     assert.ok(text(rows[1]).includes('?'), 'missing tool name tags as ?')
     assert.ok(text(rows[1]).includes('Tool Result'), 'no join → placeholder preview')
@@ -88,7 +87,6 @@ describe('ContextBrowser tool results', () => {
     const m = await mount(h(Browser, props({ data, convNodes })))
     await click(catRow(m, 'tool'))
     const rows = elemRows(m)
-    // Newest first: index map by seq (97, 96, 95, 94, 93, 92, 91, 90..80).
     const byIdx = Object.fromEntries([97, 96, 95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 84, 83, 82, 81, 80].map((s, i) => [s, i]))
     const expand = async (seq: number) => {
       await click(rows[byIdx[seq]])
@@ -98,25 +96,21 @@ describe('ContextBrowser tool results', () => {
     assert.ok(text(content).includes('OK'))
     assert.ok(!queryAll(content, '.lc-br-err-dot').length)
     await click(elemRows(m)[byIdx[89]])
-    // Exit-code failure with the pill.
     content = await expand(80)
     assert.ok(text(content).includes('Failed · exit 3'))
     await click(elemRows(m)[byIdx[80]])
-    // Killed by signal: failure without an exit code.
     content = await expand(81)
     assert.ok(text(content).includes('Failed'))
     assert.ok(!text(content).includes('exit'))
     await click(elemRows(m)[byIdx[81]])
-    // Shell killed after a failing command: the command's code wins.
+    // Shell killed after a failing command: the command's own code wins.
     content = await expand(86)
     assert.ok(text(content).includes('Failed · exit 7'))
     await click(elemRows(m)[byIdx[86]])
-    // Orphan result: no call card, but the result body renders.
     content = await expand(92)
     assert.ok(!text(content).includes('→'), 'no call card without a call record')
     assert.ok(text(content).includes('orphan'))
     await click(elemRows(m)[byIdx[92]])
-    // Non-array content: call card only.
     content = await expand(93)
     assert.ok(text(content).includes('OK'))
     assert.ok(!text(content).includes('raw-text'))

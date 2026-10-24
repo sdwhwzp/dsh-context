@@ -1,7 +1,6 @@
 /**
- * jsdom reports zero layout metrics, so beforeAll overrides them (scrollWidth follows the bar count, clientWidth is
- * test-controlled, the scrollLeft setter dispatches a real scroll event in a microtask) — the overflow/scroll-anchor
- * logic runs FOR REAL — and afterAll restores the originals.
+ * jsdom reports zero layout metrics, so beforeAll overrides them (scrollWidth follows the bar count,
+ * clientWidth is test-controlled, scrollLeft dispatches a real scroll event); afterAll restores them.
  */
 
 import assert from 'node:assert/strict'
@@ -17,7 +16,7 @@ const TrendChart = makeTrendChart(kit)
 const CHART_H = 112
 const BAR_CELL = 16 // BAR_W 14 + BAR_GAP 2
 
-/** Module-level default client width; tests may retarget it (with try/finally) before mounting. */
+/** Default client width; tests may retarget it (try/finally) before mounting. */
 const viewport = { clientW: 400 }
 
 type LayoutEl = HTMLElement & { __clientW?: number; __scrollL?: number; __scrollW?: number }
@@ -74,10 +73,11 @@ interface Spies {
   hoverTurn: (number | null)[]
   pickTurn: number[]
   focusHandled: number
+  seqFocusHandled: number
 }
 
-function makeSpies(): { spies: Spies; handlers: Pick<TrendChartProps, 'onSelect' | 'onHover' | 'onHoverTurn' | 'onPickTurn' | 'onFocusTurnHandled'> } {
-  const spies: Spies = { select: [], hover: [], hoverTurn: [], pickTurn: [], focusHandled: 0 }
+function makeSpies(): { spies: Spies; handlers: Pick<TrendChartProps, 'onSelect' | 'onHover' | 'onHoverTurn' | 'onPickTurn' | 'onFocusTurnHandled' | 'onFocusSeqHandled'> } {
+  const spies: Spies = { select: [], hover: [], hoverTurn: [], pickTurn: [], focusHandled: 0, seqFocusHandled: 0 }
   return {
     spies,
     handlers: {
@@ -86,6 +86,7 @@ function makeSpies(): { spies: Spies; handlers: Pick<TrendChartProps, 'onSelect'
       onHoverTurn: (t) => { spies.hoverTurn.push(t) },
       onPickTurn: (t) => { spies.pickTurn.push(t) },
       onFocusTurnHandled: () => { spies.focusHandled++ },
+      onFocusSeqHandled: () => { spies.seqFocusHandled++ },
     },
   }
 }
@@ -101,6 +102,7 @@ function propsOf(requests: RequestRecord[], over: Partial<TrendChartProps> = {})
     granularity: 'step',
     mode: 'total',
     focusTurn: null,
+    focusSeq: null,
     hoverCat: null,
     ...handlers,
     ...over,
@@ -111,7 +113,7 @@ function bars(container: HTMLElement): HTMLElement[] {
   return queryAll(container, '.lc-bar')
 }
 
-/** jsdom/cssstyle may keep hex or normalize to rgb(); accept the exact color either way. */
+/** jsdom/cssstyle may keep hex or normalize to rgb(); accept either. */
 function assertColor(actual: string, hex: string): void {
   const n = parseInt(hex.slice(1), 16)
   const rgb = `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`

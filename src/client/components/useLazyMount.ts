@@ -3,11 +3,8 @@ import { useCallback, useEffect, useState } from 'react'
 /** Give the idle slice (or the timeout fallback) room to mount the deferred block without blocking a scroll frame. */
 const IDLE_TIMEOUT_MS = 200
 
-/**
- * Mount a below-the-fold block only once its placeholder nears the conversation viewport (or, without
- * IntersectionObserver, immediately): the first commit then stays small and the deferred cards mount in an
- * idle slice instead of stretching the open's long task. The placeholder keeps the row's measured height.
- */
+/** Mounts a below-the-fold block once its placeholder nears the conversation viewport (or immediately without
+ * IntersectionObserver), so the first commit stays small; the placeholder keeps the row's measured height. */
 export function useLazyMount(force = false): [(el: HTMLElement | null) => void, boolean] {
   const [node, setNode] = useState<HTMLElement | null>(null)
   const ref = useCallback((el: HTMLElement | null) => { setNode(el) }, [])

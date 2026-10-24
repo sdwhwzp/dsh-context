@@ -1,4 +1,4 @@
-/** Pending/failed note for the detail collections: a settled-without-data read must not render as an empty state. */
+/** A settled-without-data detail read must render a note, never an empty state. */
 
 import { type ReactElement } from 'react'
 import type { ViewKit } from '../viewkit'

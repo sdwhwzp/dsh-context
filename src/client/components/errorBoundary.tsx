@@ -1,5 +1,4 @@
-/** A subtree render error degrades to this styled card with a working Retry; the harness's own slot boundary
- * would leave an empty error placeholder instead. */
+/** A subtree render error becomes this retryable card; the harness's slot boundary would leave an empty error placeholder. */
 
 import { Component, type ComponentType, type ReactNode } from 'react'
 import type { Translate } from '../i18n'

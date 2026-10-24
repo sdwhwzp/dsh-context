@@ -5,7 +5,6 @@ import { browserCapOf } from '../../../src/client/components/contextView'
 describe('browserCapOf — the Context browser column\'s height ceiling', () => {
   test('the span from the first left card\'s top to the last card\'s bottom, rounded UP', () => {
     assert.equal(browserCapOf([{ top: 100, bottom: 280.4 }, { top: 287.4, bottom: 609 }]), 509)
-    // A fractional span rounds up: the card is never shorter than the cards beside it.
     assert.equal(browserCapOf([{ top: 100, bottom: 280.4 }, { top: 287.4, bottom: 609.4 }]), 510)
   })
 

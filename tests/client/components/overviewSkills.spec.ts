@@ -16,14 +16,12 @@ function stat(name: string, loads: number, last: number, sessions = 1): SkillLoa
   return { name, loads, sessions, last }
 }
 
-/** A catalog fixture: the full entry, a path-less project entry, and an unknown-source entry with a long description. */
 const CATALOG: ReadonlyMap<string, SkillInfo> = new Map([
   ['tdd', { name: 'tdd', description: 'Test-driven development.\nWrite the test first.', path: '/home/u/.agents/skills/tdd/SKILL.md', source: 'user-agents' }],
   ['grill-me', { name: 'grill-me', description: '', source: 'project-dsh' }],
   ['custom-skill', { name: 'custom-skill', description: ` ${'x'.repeat(200)} `, path: '/opt/skills/custom.md', source: 'team-registry' }],
 ])
 
-/** The portaled hover card (document.body), when shown. */
 function bubble(): HTMLElement | null {
   return document.querySelector('#lc-skilltip-bubble')
 }
@@ -71,22 +69,18 @@ describe('OverviewSkills', () => {
     assert.ok(query<HTMLElement>(rows[0], '.lc-ov-skill-dot').getAttribute('style')?.includes(skillColorOf('tdd')))
     assert.ok(query<HTMLElement>(rows[0], '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(100% - 12px)'))
     assert.ok(query<HTMLElement>(rows[1], '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(25% - 3px)'), 'the share of the heaviest row')
-    // The summary sub under the title names both figures — the distinct skills and the total loads.
     assert.ok(text(query(m.container, '.lc-ov-skills-sub')).includes('2 skills · 15 loads'))
     await m.unmount()
   })
 
   test('the share bar scales to the heaviest row wherever the ordering puts it — never past the content edge', async () => {
-    // A recent ordering can lead with a lighter row; the bar's denominator
-    // must still be the heaviest tally (a first-row denominator overflowed
-    // the card at 200%), and the width subtracts the row's horizontal insets
-    // so 100% stops at the content edge instead of crossing the unit's ring.
+    // A recent ordering can lead with a lighter row: the bar denominator is always the heaviest tally,
+    // and the width subtracts the row's insets so 100% stops at the content edge.
     const m = await mount(h(Skills, { stats: [stat('light', 1, NOW), stat('heavy', 2, NOW)], now: NOW }))
     const rows = queryAll<HTMLElement>(m.container, 'button.lc-ov-skill')
     assert.ok(query(rows[0], '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(50% - 6px)'))
     assert.ok(query(rows[1], '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(100% - 12px)'))
     await m.unmount()
-    // A hostile all-zero scope divides safely into empty bars.
     const zero = await mount(h(Skills, { stats: [stat('zero', 0, NOW)], now: NOW }))
     assert.ok(query<HTMLElement>(zero.container, '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(0% - 0px)'))
     await zero.unmount()
@@ -266,7 +260,6 @@ describe('OverviewSkills', () => {
       await flush()
       assert.deepEqual(writes, ['/home/u/.agents/skills/tdd/SKILL.md'])
       assert.equal(text(query(m.container, '.lc-skilld-pathv-text')), 'Copied', 'the flash claims the landed copy')
-      // A second click mid-flash re-arms the timer — the flash holds.
       await click(query(m.container, 'button.lc-skilld-pathv'))
       await flush()
       assert.equal(text(query(m.container, '.lc-skilld-pathv-text')), 'Copied')
@@ -308,7 +301,6 @@ describe('OverviewSkills', () => {
       await m.update(h(Skills, { stats: [], selected: 'custom-skill', catalog: CATALOG, now: NOW }))
       assert.equal(text(query(m.container, '.lc-skilld-grid .lc-skilld-v')), 'team-registry', 'the unknown source displays raw in the grid')
       assert.equal(text(query(m.container, '.lc-skilld-pathv-text')), '/opt/skills/custom.md')
-      // The pin releases: the block leaves (with its timer pending — the unmount-style cleanup runs here).
       await m.update(h(Skills, { stats: [], selected: null, catalog: CATALOG, now: NOW }))
       assert.equal(queryAll(m.container, '.lc-ov-skill-detail').length, 0)
       await m.unmount()
@@ -370,11 +362,9 @@ describe('OverviewSkills', () => {
     await click(buttons[0])
     assert.deepEqual(picks, ['loads'])
     await m.unmount()
-    // Fewer than two rows: nothing to order, the toggle stays out.
     const one = await mount(h(Skills, { stats: [stat('tdd', 1, NOW)], onSort: () => {}, now: NOW }))
     assert.equal(queryAll(one.container, '.lc-card-title .lc-gran').length, 0)
     await one.unmount()
-    // No sort prop and no relay: the loads ordering is marked, a click only renders.
     const bare = await mount(h(Skills, { stats: [stat('a', 1, NOW), stat('b', 2, NOW)], now: NOW }))
     const bareButtons = queryAll<HTMLButtonElement>(bare.container, '.lc-card-title .lc-gran button')
     assert.equal(bareButtons[0].getAttribute('aria-pressed'), 'true')
@@ -433,7 +423,6 @@ describe('OverviewSkills', () => {
     const detail = query(m.container, '.lc-ov-skill-detail')
     assert.equal(detail.closest('.lc-ov-skill-unit'), null, 'no inline seat without the pinned row')
     assert.equal(queryAll(detail, '.lc-skilld-head').length, 1, 'the detached seat carries the head')
-    // All twenty-five generated names match 'skill' — twenty rows plus the overflow line counting the filtered set.
     await actType(input, 'skill')
     assert.equal(queryAll(m.container, 'button.lc-ov-skill').length, 20)
     assert.ok(text(m.container).includes('5 more skills'), 'the overflow counts the filtered set')
@@ -475,7 +464,6 @@ describe('OverviewSkills', () => {
   })
 })
 
-/** Type into an input through the React change path (native setter + input event, act-wrapped). */
 async function actType(input: HTMLInputElement, value: string): Promise<void> {
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set

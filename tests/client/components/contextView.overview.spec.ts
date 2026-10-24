@@ -1,5 +1,3 @@
-// ContextView — the overview face: chip placement and exclusivity, the ribbon swap, and the turn-strip click that
-// pins the turn in turn granularity.
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -45,14 +43,12 @@ describe('ContextView — overview face', () => {
     const adaptive = () => buttonByText(m.container, DICT_EN['trend.adaptive'])
     await click(dna())
     assert.ok(dna().className.includes('lc-gran-on'))
-    // Overview activation clears DNA; DNA activation clears Overview.
     await click(overview())
     assert.ok(overview().className.includes('lc-gran-on'))
     assert.equal(dna().className.includes('lc-gran-on'), false)
     await click(dna())
     assert.equal(overview().className.includes('lc-gran-on'), false)
     assert.ok(dna().className.includes('lc-gran-on'))
-    // Adaptive coexists with DNA but activation still clears Overview.
     await click(adaptive())
     assert.ok(dna().className.includes('lc-gran-on'))
     assert.ok(adaptive().className.includes('lc-gran-on'))
@@ -60,7 +56,6 @@ describe('ContextView — overview face', () => {
     assert.equal(dna().className.includes('lc-gran-on'), false)
     assert.equal(adaptive().className.includes('lc-gran-on'), false)
     assert.ok(overview().className.includes('lc-gran-on'))
-    // Toggling off restores the bars face.
     await click(overview())
     assert.equal(queryAll(m.container, '.lc-bar').length, 3)
     await m.unmount()
@@ -75,12 +70,10 @@ describe('ContextView — overview face', () => {
     assert.equal(svg.getAttribute('viewBox'), '0 0 2 112')
     // The whole retained log's axis: max 420.
     assert.equal(query(m.container, '.lc-axis-top').textContent, '420')
-    // Quartile + full-span record flags (3 records: the interior ½ and the full span), labeled by step, and the
-    // turn strip's labels.
+    // Quartile + full-span record flags (3 records: the interior ½ and the full span), labeled by step.
     assert.deepEqual(queryAll(m.container, '.lc-trend-flag-label').map(f => f.textContent), ['2', '3'])
     assert.deepEqual(queryAll(m.container, '.lc-turn-label').map(l => l.textContent), ['1', '0'])
 
-    // Clicking a strip block forces turn granularity and pins the turn's closing record.
     await click(query(m.container, '.lc-turn'))
     assert.ok(buttonByText(m.container, DICT_EN['gran.turn']).className.includes('lc-gran-on'))
     assert.match(query(m.container, '.lc-fit-cursor').className, /lc-fit-pin/)
@@ -93,19 +86,17 @@ describe('ContextView — overview face', () => {
     await click(buttonByText(m.container, DICT_EN['trend.overview']))
     const surface = query(m.container, '.lc-chart')
     pinRect(surface, 400, 130)
-    // Plot y 42 (clientY 60) is the tools band in every record: 100..300 tokens of the 420 max.
     await act(async () => {
+    // Plot y 42 (clientY 60) is the tools band in every record: 100..300 tokens of the 420 max.
       surface.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 200, clientY: 60 }))
     })
     await flush()
     const open = queryAll(m.container, '.lc-br-cat-row.lc-br-cat-open')
     assert.equal(open.length, 1)
     assert.ok(text(open[0]).includes(DICT_EN['cat.tools']), 'the tools category opens')
-    // The browser's own onOpenCat focuses the chart: only that category is painted now.
     const polys = queryAll(m.container, '.lc-fit-svg polygon')
     assert.equal(polys.length, 1)
     assert.equal(polys[0].getAttribute('data-cat'), 'tools')
-    // The click still pins the nearest record (the middle one), and the browser shows that step, not live.
     assert.equal(query(m.container, '.lc-fit-pin').style.left, '50%')
     assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, '4')
     await m.unmount()
@@ -124,13 +115,11 @@ describe('ContextView — overview face', () => {
     const { View, props } = viewWith('100', 'sv-overview-auto-grow', 99)
     const m = await mount(h(View, props))
     assert.equal(queryAll(m.container, '.lc-bar').length, 99)
-    // DNA is on before the crossing: the auto activation clears it (the faces are exclusive).
     await click(buttonByText(m.container, DICT_EN['trend.dna']))
     await m.update(h(View, { ...props, useProjection: projectionsFor(stepsTimeline(100)) }))
     assert.equal(queryAll(m.container, '.lc-bar').length, 0)
     assert.ok(buttonByText(m.container, DICT_EN['trend.overview']).className.includes('lc-gran-on'))
     assert.equal(buttonByText(m.container, DICT_EN['trend.dna']).className.includes('lc-gran-on'), false)
-    // The reader turns the ribbon off; the next steps never force it back on.
     await click(buttonByText(m.container, DICT_EN['trend.overview']))
     assert.equal(queryAll(m.container, '.lc-bar').length, 100)
     await m.update(h(View, { ...props, useProjection: projectionsFor(stepsTimeline(101)) }))
@@ -153,7 +142,6 @@ describe('ContextView — overview face', () => {
     const m = await mount(h(View, props))
     await click(buttonByText(m.container, DICT_EN['trend.overview']))
     assert.equal(queryAll(m.container, '.lc-bar').length, 100)
-    // Another session and back: the fired marker keeps the reader's choice for the first one.
     await m.update(h(View, { ...props, sessionId: 'sv-overview-auto-other', useProjection: projectionsFor(stepsTimeline(3)) }))
     assert.ok(queryAll(m.container, '.lc-bar').length > 0)
     await m.update(h(View, props))

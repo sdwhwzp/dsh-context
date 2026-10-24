@@ -1,6 +1,3 @@
-// The contextHeaders projection unit (src/host/headers.ts) — the request-header EPOCH METADATA
-// behind the timeline's envelope figures. Pure init/apply/view over real envelopes; no harness plumbing.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { estimateSystemTokens } from '../../src/shared/estimate'
@@ -61,8 +58,8 @@ describe('createContextHeadersDefinition', () => {
     for (const [seq, raw] of [[2, null], [3, undefined], [4, 42]] as const) {
       assert.equal(def.apply(state, headerEvent(seq, raw) as never), state, `header ${String(raw)} is not an epoch`)
     }
-    // A data-less envelope is unreachable from the harness (append validates
-    // the payload) but must degrade to "not an epoch" all the same: this unit has no try/catch around its fold.
+    // A data-less envelope is unreachable from the harness (append validates the payload) but must degrade
+    // to "not an epoch" all the same: this unit has no try/catch around its fold.
     assert.equal(def.apply(state, { type: 'request/header', seq: 5, time: 5000 } as never), state)
   })
 
@@ -218,10 +215,8 @@ describe('hostile tool entries', () => {
   })
 
   test('hostile shapes a committed log can hold keep the state lossless JSON and bounded', () => {
-    // Committed event data is already the harness's lossless-JSON snapshot (session.append
-    // throws on anything else), so the hostile surface here is wrong-SHAPED plain JSON —
-    // never functions, undefined-valued properties, or exotic objects. Content-sized
-    // junk (nested schema bodies) must not leak into the metadata state.
+    // Committed event data is already the harness's lossless-JSON snapshot, so the hostile surface here is
+    // wrong-SHAPED plain JSON — never functions or exotic objects; content-sized junk must not leak into state.
     const def = createContextHeadersDefinition()
     const state = fold(def, [headerEvent(1, {
       tools: [
@@ -258,7 +253,6 @@ describe('read-compat over v1 rows', () => {
 
   test('a v1 cached row seeds the fold and the view normalizes it to metadata', () => {
     const def = createContextHeadersDefinition()
-    // The state schema accepts the v1 shape — the row is usable, not discarded.
     assert.deepEqual(def.stateSchema.parse(structuredClone(v1State())), v1State())
     const view = def.wire.view(v1State())
     assert.equal(def.wire.viewSchema.safeParse(view).success, true, 'normalized view passes the strict wire schema')
@@ -290,7 +284,6 @@ describe('read-compat over v1 rows', () => {
     assert.ok(!('system' in state.headers[2]), 'new folds stay metadata-only in state')
     assert.ok('system' in state.headers[0], 'seeded legacy epochs keep their state shape until they age out')
 
-    // Retention: the oldest epochs leave regardless of generation.
     for (let seq = 11; seq <= 60; seq++) state = def.apply(state, header(seq) as never)
     assert.equal(state.headers.length, 50)
     assert.equal(state.headers[0].seq, 11, 'the seeded v1 epoch aged out first')

@@ -1,6 +1,3 @@
-// FleetSummary — the Fleet tab's overview strip: family-wide stat chips and the progress bar whose
-// semantics follow the session shape (shared tasks, else subagent completion, else nothing).
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -107,7 +104,6 @@ describe('FleetSummary', () => {
     assert.ok(text(m.container).includes('$0.45'))
     await m.unmount()
 
-    // A book without the model prices nothing — the chip stays out.
     const bare = pricesBookOf({ other: { models: { 'x': { cost: { input: 1, output: 1, cache_read: 1 } } } } })
     const m2 = await mount(h(FleetSummary, propsOf({ forest: priced, book: bare })))
     assert.ok(!text(m2.container).includes('est.'))

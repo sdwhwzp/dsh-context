@@ -1,7 +1,3 @@
-// The step-boundary message identity guard (src/host/stepIdentity.ts) — the issue #51 compatibility
-// layer. The harness's load path refuses a session whose log holds an unidentified `user/message`,
-// while the runtime append path never checks; the guard mints ids at the `agent/pre-step` seam.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'

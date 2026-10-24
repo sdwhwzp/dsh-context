@@ -1,8 +1,5 @@
-/**
- * Note: the 'trend.empty' panel and the defaultGranularity/defaultTrendMode settings reads live in the PARENT
- * (contextView.tsx); TrendChart itself always renders the chart frame, so the empty-history arm is asserted as an
- * empty frame here.
- */
+/** The 'trend.empty' panel and granularity/mode settings reads live in the parent (contextView.tsx);
+ *  TrendChart always renders the frame, so the empty-history arm is asserted here as an empty frame. */
 
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
@@ -16,8 +13,6 @@ import { CHART_H, TrendChart, assertColor, bars, kit, makeSpies, propsOf, req } 
 
 describe('TrendChart empty history', () => {
   test('renders the chart frame with no bars and no turn blocks', async () => {
-    // The 'trend.empty' placeholder is the parent's (contextView) render arm; with zero requests the chart itself
-    // renders an empty frame: unit axis (maxTotal floors at 1), empty scroll content, empty turn strip.
     const m = await mount(h(TrendChart, propsOf([])))
     assert.equal(bars(m.container).length, 0)
     assert.equal(queryAll(m.container, '.lc-turn').length, 0)
@@ -43,10 +38,9 @@ describe('TrendChart entrance rise cap', () => {
     assert.equal(stacks.length, RISE_CAP + 10)
     const risers = stacks.filter(s => s.className.includes('animate-lc-bar-in'))
     assert.equal(risers.length, RISE_CAP)
-    // The window is what rises: every column from its edge on, none before it.
     assert.deepEqual(stacks.slice(0, 10).map(s => s.className.includes('animate-lc-bar-in')), new Array<boolean>(10).fill(false))
     assert.deepEqual(stacks.slice(10).map(s => s.className.includes('animate-lc-bar-in')), new Array<boolean>(RISE_CAP).fill(true))
-    // The window's own cascade counts from its edge — raw indices would all sit past the stagger cap and rise in unison.
+    // The window's own cascade counts from its edge — raw indices would exceed the stagger cap and rise in unison.
     assert.equal(stacks[10].style.getPropertyValue('--lc-i'), '0')
     await m.unmount()
   })
@@ -59,7 +53,6 @@ describe('TrendChart entrance rise cap', () => {
   })
 
   test('the DNA and DNA+delta interiors obey the same cap', async () => {
-    // A band that grows by one token per bar, so the DNA+delta arms exist for every bar but the first.
     const reqs: RequestRecord[] = []
     const bands: TrendBand[][] = []
     for (let i = 0; i < RISE_CAP + 5; i++) {
@@ -72,7 +65,6 @@ describe('TrendChart entrance rise cap', () => {
     assert.equal(totalDivs.length, RISE_CAP + 5)
     assert.equal(totalDivs.filter(d => d.className.includes('animate-lc-bar-in')).length, RISE_CAP)
     await total.unmount()
-    // The first bar carries no baseline, so its delta arm renders nothing at all.
     const delta = await mount(h(TrendChart, propsOf(reqs, { dna: bands, mode: 'delta' })))
     const deltaDivs = queryAll(delta.container, '.lc-bar-dna')
     assert.equal(deltaDivs.length, RISE_CAP + 4)
@@ -92,7 +84,6 @@ describe('TrendChart step granularity, total mode', () => {
     assert.equal(bs.length, 3)
     assert.deepEqual(bs.map(b => b.getAttribute('data-seq')), ['1', '2', '3'])
 
-    // Seven priced categories, in CATS order, with the shipped colors; max bar segments scale against maxTotal=660.
     const segs1 = queryAll(bs[0], '.lc-bar-stack > div')
     assert.equal(segs1.length, 7)
     for (let i = 0; i < CATS.length; i++) assertColor(segs1[i].style.background, CATS[i].color)
@@ -102,7 +93,6 @@ describe('TrendChart step granularity, total mode', () => {
     const segs2 = queryAll(bs[1], '.lc-bar-stack > div')
     assert.equal(segs2[0].style.height, `${Math.round(200 / 660 * CHART_H)}px`)
 
-    // Zero-value categories are skipped entirely (r3.user = 0 → five segments, no user-green segment).
     const segs3 = queryAll(bs[2], '.lc-bar-stack > div')
     assert.equal(segs3.length, 5)
     assert.ok(![...segs3].some(s => s.style.background.includes('var(--color-green-500)')))
@@ -113,8 +103,6 @@ describe('TrendChart step granularity, total mode', () => {
     assert.equal(query(m.container, '.lc-axis-q1').textContent, '165')
     assert.equal(query(m.container, '.lc-axis-bot').textContent, '0')
 
-    // Turn strip: turn 1 spans two step columns (2*16-2 = 30px), the turnless request lands in group 0 (14px);
-    // zebra fills alternate and stay disjoint from the category palette.
     const turns = queryAll(m.container, '.lc-turn')
     assert.equal(turns.length, 2)
     assert.equal(turns[0].style.width, '30px')
@@ -132,27 +120,23 @@ describe('TrendChart step granularity, total mode', () => {
     const r3 = req(3, { turn: 2, step: 0, system: 0, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 0, prompt: 500 })
     const m = await mount(h(TrendChart, propsOf([r1, r2, r3])))
 
-    // maxTotal follows the heuristic totals (600), not the provider prompt (1200).
     assert.equal(query(m.container, '.lc-axis-top').textContent, '600')
     const bs = bars(m.container)
     assert.equal(bs.length, 3)
-    // Identical compositions plot IDENTICAL segment heights regardless of the reported prompt — a constant
-    // system prompt must not ride the provider/heuristic ratio (that per-request rescale faked growth into
-    // categories the fold never changed).
+    // Identical compositions plot IDENTICAL heights regardless of the reported prompt — a constant
+    // system prompt must not ride the provider/heuristic ratio (that rescale faked growth).
     const segs1 = queryAll(bs[0], '.lc-bar-stack > div')
     const segs2 = queryAll(bs[1], '.lc-bar-stack > div')
     assert.equal(segs1.length, 6)
     assert.deepEqual(segs2.map(s => s.style.height), segs1.map(s => s.style.height))
     assert.equal(segs1[0].style.height, `${Math.round(200 / 600 * CHART_H)}px`)
-    // A usage-only record (prompt without messages) still renders no segments.
     assert.equal(queryAll(bs[2], '.lc-bar-stack > div').length, 0)
 
     // The tip is placed over its bar's visible slice imperatively (transform, not `left`), so it never
-    // contributes to the scroller's overflow — see the overlay test below.
+    // contributes to the scroller's overflow.
     const { spies, handlers } = makeSpies()
     await m.update(h(TrendChart, { ...propsOf([r1, r2, r3]), ...handlers, hoveredSeq: 2 }))
     const tip = query(m.container, '.lc-chart-tip')
-    // Rows: identity, then the SAME total the bar is drawn against (the heuristic 600, not the prompt 1200).
     assert.deepEqual(
       queryAll(tip, 'span').map(r => r.textContent),
       [kit.t('tip.step', { t: 1, s: 1, n: 2 }), kit.t('tip.total', { n: '600' })],
@@ -180,18 +164,13 @@ describe('TrendChart delta mode', () => {
   test('diverging stacks pile positive deltas up and hang negatives down off a solid zero line', async () => {
     const m = await mount(h(TrendChart, propsOf([base, grown, shrunk], { mode: 'delta' })))
 
-    // maxUp=60 (grown: +10 x6), maxDown=120 (shrunk: -20 x6) → scale 112/180, zero line at upPx=37.
     assert.equal(query(m.container, '.lc-axis-top').textContent, '+60')
-    // Quarter marks sit on the uniform scale: +15 above (height ¼), -75 below (height ¾). The +15 mark's
-    // label box (top 41) is 9px from the zero label's (13+37=50) — under one 11px label height — so it
-    // drops itself instead of overlapping the zero reference; the -75 mark stays.
     assert.equal(queryAll(m.container, '.lc-axis-q3').length, 0)
     assert.equal(query(m.container, '.lc-axis-q1').textContent, '-75')
     assert.equal(query(m.container, '.lc-axis-mid').textContent, '0')
     assert.equal(query(m.container, '.lc-axis-mid').style.top, `${13 + 37}px`)
     assert.equal(query(m.container, '.lc-axis-bot').textContent, '-120')
     assert.equal(query(m.container, '.lc-grid-zero').style.top, `${18 + 37}px`)
-    // Each surviving quarter mark keeps its dashed guide; the mark that yielded to the zero label drops it too.
     assert.equal(queryAll(m.container, '.lc-grid-q3').length, 0)
     assert.ok(query(m.container, '.lc-grid-q1'))
 
@@ -207,11 +186,9 @@ describe('TrendChart delta mode', () => {
     assert.equal(down3.length, 6)
     assert.equal(down3[0].style.height, `${Math.round(20 * CHART_H / 180)}px`)
     assert.equal(queryAll(bs[2], '.lc-bar-up > div').length, 0)
-    // The up stack rides downPx up from the bottom, the down stack hangs upPx from the zero line.
     assert.equal(query(bs[1], '.lc-bar-up').style.bottom, '75px')
     assert.equal(query(bs[2], '.lc-bar-down').style.top, '37px')
 
-    // Delta tooltip: signed net change on the metric row, '+' only for positive nets.
     await m.update(h(TrendChart, propsOf([base, grown, shrunk], { mode: 'delta', hoveredSeq: 2 })))
     assert.deepEqual(
       queryAll(query(m.container, '.lc-chart-tip'), 'span').map(r => r.textContent),
@@ -227,7 +204,6 @@ describe('TrendChart delta mode', () => {
   test('growth-only history zeroes the negative axis arm; shrink-only zeroes the positive arm', async () => {
     const up = await mount(h(TrendChart, propsOf([zeroReq, base], { mode: 'delta' })))
     assert.equal(query(up.container, '.lc-axis-top').textContent, '+300')
-    // Zero line pinned to the chart bottom (upPx 112) clears both quarter marks: +225 / +75.
     assert.equal(query(up.container, '.lc-axis-q3').textContent, '+225')
     assert.equal(query(up.container, '.lc-axis-q1').textContent, '+75')
     assert.equal(query(up.container, '.lc-axis-bot').textContent, '0')
@@ -239,7 +215,6 @@ describe('TrendChart delta mode', () => {
     await up.unmount()
 
     const down = await mount(h(TrendChart, propsOf([base, zeroReq], { mode: 'delta' })))
-    // Zero line pinned to the chart top (upPx 0): the quarter marks read -75 / -225.
     assert.equal(query(down.container, '.lc-axis-top').textContent, '0')
     assert.equal(query(down.container, '.lc-axis-q3').textContent, '-75')
     assert.equal(query(down.container, '.lc-axis-q1').textContent, '-225')
@@ -251,11 +226,11 @@ describe('TrendChart delta mode', () => {
   })
 
   test('a quarter mark landing on the zero label drops itself; the opposite mark keeps its place', async () => {
-    // maxUp=90 (+90 system), maxDown=30 (-30 tools) → upPx 84: the zero label (top 97) sits exactly on the
-    // ¼-height mark (top 97), which drops itself; the ¾-height mark renders +60 well clear of it.
     const flat = req(1, { turn: 1, step: 0, system: 0, tools: 30, user: 0, inject: 0, assistant: 0, tool: 0, total: 30 })
     const mixed = req(2, { turn: 1, step: 1, system: 90, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 90 })
     const m = await mount(h(TrendChart, propsOf([flat, mixed], { mode: 'delta' })))
+    // maxUp=90 (+90 system), maxDown=30 (−30 tools) → upPx 84: the zero label (top 97) sits exactly on
+    // the ¼-height mark (top 97), which drops itself; the ¾-height mark renders +60 clear of it.
     assert.equal(query(m.container, '.lc-axis-top').textContent, '+90')
     assert.equal(query(m.container, '.lc-axis-q3').textContent, '+60')
     assert.equal(queryAll(m.container, '.lc-axis-q1').length, 0)
@@ -280,7 +255,6 @@ describe('TrendChart turn granularity', () => {
     assert.equal(bs.length, 2)
     const turns = queryAll(m.container, '.lc-turn')
     assert.equal(turns.length, 2)
-    // Aggregated groups always occupy exactly one column.
     assert.deepEqual(turns.map(t => t.style.width), ['14px', '14px'])
     assert.deepEqual(turns.map(t => t.textContent), ['1', '2'])
 
@@ -291,14 +265,13 @@ describe('TrendChart turn granularity', () => {
     assert.ok(query(m.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.turn1', { t: 2 })))
     await m.unmount()
 
-    // A multi-step aggregate of TURNLESS requests reports turn 0.
     const turnless = aggregateByTurn([req(10, { turn: undefined }), req(11, { turn: undefined })])
     const m2 = await mount(h(TrendChart, propsOf(turnless, { granularity: 'turn', hoveredSeq: 11 })))
     assert.ok(query(m2.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.turn', { t: 0, n: 2 })))
     await m2.unmount()
 
-    // A turn-mode record missing stepCount (the parent always aggregates, so this is defensive) degrades to 1 step;
-    // a missing turn field degrades to turn 0 the same way.
+    // A turn-mode record missing stepCount (the parent always aggregates; defensive) degrades to 1
+    // step; a missing turn field degrades to turn 0 the same way.
     const m3 = await mount(h(TrendChart, propsOf([req(20, { turn: undefined, step: 3 })], { granularity: 'turn', hoveredSeq: 20 })))
     assert.ok(query(m3.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.turn1', { t: 0 })))
     await m3.unmount()
@@ -338,7 +311,6 @@ describe('TrendChart step flags', () => {
     const m = await mount(h(TrendChart, propsOf(reqs)))
     const flags = queryAll(m.container, '.lc-trend-flag')
     assert.equal(flags.length, 2)
-    // Single- and multi-digit labels alike; the flag rides its bar (5th and 10th columns).
     assert.deepEqual(flags.map(f => f.textContent), ['5', '10'])
     const bs = bars(m.container)
     assert.equal(queryAll(bs[0], '.lc-trend-flag').length, 0)

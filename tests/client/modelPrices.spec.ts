@@ -1,13 +1,9 @@
-// The model-price book (src/client/modelPrices.ts): the boundary sanitizer over the models.dev payload and the
-// fetch store (kick on first subscribe, visible failure with a backed-off automatic retry, test-loader injection).
-
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, test, vi } from 'vitest'
 import { getModelPricesSnap, pricesBookOf, resetModelPrices, setModelPricesLoader, subscribeModelPrices } from '../../src/client/modelPrices'
 import type { ModelPricesSnap } from '../../src/client/modelPrices'
 import { priceOf } from '../../src/client/cost'
 
-/** A minimal but real-shaped slice of the models.dev /api.json payload. */
 const FIXTURE = {
   deepseek: {
     npm: '@ai-sdk/openai-compatible',
@@ -70,7 +66,6 @@ describe('pricesBookOf', () => {
     assert.equal(cands.get('anthropic')?.primary, true, '@ai-sdk/anthropic is anthropic itself')
     assert.equal(cands.get('gateway')?.primary, false, 'the generic package is a mirror')
     assert.equal(cands.get('foreign')?.primary, false, '@ai-sdk/openai does not make foreign OpenAI')
-    // End to end: an unknown dsh route prices through the vendor branch.
     assert.deepEqual(priceOf(book, 'claude', 'claude-sonnet-5'), { hit: 0.2, miss: 2, write: 2.5, out: 10 })
   })
 
@@ -115,7 +110,6 @@ describe('the price store', () => {
     assert.deepEqual(getModelPricesSnap(), { book: null, failed: false })
     const seen: ModelPricesSnap[] = []
     const un = subscribeModelPrices(() => seen.push(getModelPricesSnap()))
-    // A second subscription in the same tick finds the fetch already in flight and never re-kicks.
     const un2 = subscribeModelPrices(() => {})
     await settle()
     assert.equal(calls, 1)
@@ -137,9 +131,7 @@ describe('the price store', () => {
     subscribeModelPrices(() => snaps.push(getModelPricesSnap()))
     await settle()
     assert.deepEqual(getModelPricesSnap(), { book: null, failed: true })
-    // A subscriber joining while the retry timer is armed never re-kicks.
     subscribeModelPrices(() => {})
-    // First retry waits 30s, misses, then backs off to 60s.
     await vi.advanceTimersByTimeAsync(29_999)
     assert.equal(calls, 1)
     await vi.advanceTimersByTimeAsync(1)
@@ -162,7 +154,6 @@ describe('the price store', () => {
     await settle()
     assert.equal(calls, 1)
     off()
-    // The armed retry fires once, finds nobody subscribed, and ends the cycle.
     await vi.advanceTimersByTimeAsync(30_000)
     assert.equal(calls, 1, 'the idle cycle reaches no loader')
     await vi.advanceTimersByTimeAsync(20 * 60_000)
@@ -177,7 +168,6 @@ describe('the price store', () => {
     subscribeModelPrices(() => snaps.push(getModelPricesSnap()))
     await settle()
     assert.equal(getModelPricesSnap().failed, true)
-    // failures=2 → the next wait is 60s, and the cap holds after that.
     await vi.advanceTimersByTimeAsync(30_000)
     assert.equal(getModelPricesSnap().failed, true)
     for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(240_000)
@@ -207,7 +197,6 @@ describe('the price store', () => {
     await settle()
     assert.deepEqual(seen, [], 'no emissions after unsubscribing')
     assert.deepEqual(getModelPricesSnap().book, pricesBookOf(FIXTURE), 'the in-flight fetch still lands silently')
-    // The SDK loader is restored without firing (no subscription, no kick).
     setModelPricesLoader(null)
     assert.deepEqual(getModelPricesSnap().book, pricesBookOf(FIXTURE))
   })

@@ -1,5 +1,4 @@
-// Shared rig for the backfill specs (tests/host/backfill.spec.ts and backfill-sliced.spec.ts):
-// the trigger route box, the log capture, and the fake cold-path faces.
+// Shared rig for the backfill specs: the trigger route box, the log capture, and the fake cold-path faces.
 
 import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
@@ -47,11 +46,8 @@ export function captureLogs(ctx: Context): LogLine[] {
   return lines
 }
 
-/** One format-refusal face of the persistence seam. The format edge throws
- * `SessionFormatUnsupportedMigrationError`, but the seam translates it — with
- * the "source vN artifact remains unchanged (raw log: …)" suffix — into
- * `SessionFormatUnsupportedError` before the error escapes (issue #75): the pass must classify BOTH faces as the same refusal.
- */
+/** One format-refusal face of the persistence seam: the format edge throws `SessionFormatUnsupportedMigrationError`,
+ * translated (with the source-unchanged suffix) into `SessionFormatUnsupportedError`; the pass classifies BOTH alike. */
 export function unsupportedFormatError(name: string): Error {
   const error = new Error(
     'subagent/descriptor 0 uses unsupported descriptor version 2'
@@ -61,7 +57,6 @@ export function unsupportedFormatError(name: string): Error {
   return error
 }
 
-/** A connection face whose route registration lands in `route`. */
 export function connectionOf(route: RouteBox): unknown {
   return {
     fetch: {

@@ -18,7 +18,7 @@ export function makeOverviewCard(kit: ViewKit): (props: OverviewCardProps) => Re
   return function OverviewCard(props: OverviewCardProps): ReactElement {
     const { row } = props
     const timeline = row.timeline
-    // The two money figures ride the TEAM scope (the whole subtree); the donut and the turns stay the session's own —
+    // The two money figures ride the TEAM scope (the whole subtree); the donut and turns stay the session's own —
     // the ring reads the session's CURRENT context.
     const billed = billedOf(row)
     const occupancy = timeline !== null && typeof timeline.contextWindow === 'number' && timeline.contextWindow > 0

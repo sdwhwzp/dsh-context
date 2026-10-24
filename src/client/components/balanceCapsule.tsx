@@ -1,14 +1,4 @@
-/**
- * BalanceCapsule — the DeepSeek open-platform balance pill in the Context
- * Insights page's heading (the plugin's one account-level figure, beside the
- * session-level ones). Clicking it opens the platform's usage console in a
- * new tab. Each mount reads a fresh authorized figure; pending, denied and
- * failed reads render nothing. Unmount aborts the request and ignores late
- * responses. The non-zero breakdown uses the page's portaled hover tip in
- * the entry's own currency (the pill itself carries the total); the entry
- * follows the active locale (zh → CNY) with the account's first currency as
- * the fallback.
- */
+/** Fresh authorized balance; unmount cancels the request and discards late replies. */
 
 import { useEffect, useState, type ReactElement } from 'react'
 import { balanceEntryOf, fetchPlatformBalance } from '../balance'
@@ -16,14 +6,12 @@ import type { PlatformBalance } from '../../shared/types'
 import type { ClientCtx } from '../services'
 import type { ViewKit } from '../viewkit'
 
-/** The symbol prefix for the currencies the platform serves; others show their code. */
 function symbolOf(currency: string): string {
   if (currency === 'CNY') return '¥'
   if (currency === 'USD') return '$'
   return currency + ' '
 }
 
-/** The platform console page behind the capsule's click. */
 const USAGE_URL = 'https://platform.deepseek.com/usage'
 
 export function makeBalanceCapsule(ctx: ClientCtx, kit: ViewKit): () => ReactElement | null {
@@ -44,7 +32,6 @@ export function makeBalanceCapsule(ctx: ClientCtx, kit: ViewKit): () => ReactEle
     const entry = balanceEntryOf(balance, active === 'zh' ? 'cny' : 'usd')
     if (entry === null) return null
     const money = (amount: number): string => symbolOf(entry.currency) + amount.toFixed(2)
-    // The tooltip lists only the non-zero breakdown parts, so an all-zero account rides bare.
     const tipLines = [
       ...(entry.toppedUp > 0 ? [t('balance.tip.toppedUp') + ': ' + money(entry.toppedUp)] : []),
       ...(entry.granted > 0 ? [t('balance.tip.granted') + ': ' + money(entry.granted)] : []),

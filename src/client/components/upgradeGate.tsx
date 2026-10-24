@@ -1,20 +1,16 @@
-/** The baseline-gate modal: when the host reports a harness below the supported baseline (the `unsupported` record on
- * the pushed `contextTimeline` value), the tab keeps rendering its zeroed cards and this dialog names the detected
- * version against the required minimum. Dismissal is remembered per session in a module-level ledger, so tab remounts
- * do not re-pop it while a fresh app launch does. */
+/** The baseline-gate modal: when the host reports a harness below the supported baseline, the tab keeps rendering its
+ * zeroed cards and this dialog names the detected version. Dismissal lives in a module-level per-session ledger. */
 
 import { useCallback, useState, type ReactElement } from 'react'
 import type { ViewKit } from '../viewkit'
 import { useEscapeClose } from './escapeClose'
 
-/** Sessions whose gate the user already dismissed this browser session. */
 const dismissed = new Set<string>()
 
 export interface UpgradeGateProps {
   sessionId?: string
   /** The detected harness version, already re-proved. */
   current: string
-  /** The plugin's minimum supported baseline. */
   minimum: string
 }
 

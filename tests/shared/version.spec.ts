@@ -21,20 +21,22 @@ describe('parseVersion', () => {
 
 describe('meetsBaseline', () => {
   test(`the supported baseline is ${BASELINE_DSH_VERSION}`, () => {
-    assert.equal(BASELINE_DSH_VERSION, '0.1.7-rc.2')
+    assert.equal(BASELINE_DSH_VERSION, '0.2.0-rc.2')
   })
 
   test('baseline and above pass; anything below fails', () => {
-    assert.equal(meetsBaseline('0.1.7-rc.2'), true, 'the baseline itself')
-    assert.equal(meetsBaseline('0.1.7-rc.3'), true)
-    assert.equal(meetsBaseline('0.1.7'), true, 'the final release of the baseline line')
-    assert.equal(meetsBaseline('0.2.0-rc.2'), true, 'the newest supported line')
-    assert.equal(meetsBaseline('0.2.0-alpha.1'), true, 'a newer X.Y.Z outranks any channel (the 0.2.0 previews pass)')
+    assert.equal(meetsBaseline('0.2.0-rc.2'), true, 'the baseline itself')
+    assert.equal(meetsBaseline('0.2.0-rc.3'), true)
+    assert.equal(meetsBaseline('0.2.0'), true, 'the final release of the baseline line')
+    assert.equal(meetsBaseline('0.2.1-rc.2'), true, 'the newer supported line')
+    assert.equal(meetsBaseline('0.2.1-alpha.1'), true, 'a semantically newer release at a lower channel outranks the floor')
     assert.equal(meetsBaseline('1.0.0-alpha.1'), true, 'a newer major outranks everything below it')
-    assert.equal(meetsBaseline('0.1.7-rc.1'), false, 'an older rc of the baseline line')
-    assert.equal(meetsBaseline('0.1.7-alpha.1'), false, 'alpha is below rc at equal X.Y.Z')
-    assert.equal(meetsBaseline('0.1.6'), false, 'a hypothetical final of the dropped cycle')
-    assert.equal(meetsBaseline('0.1.5-rc.1'), false, 'the previous floor, now gated')
+    assert.equal(meetsBaseline('0.2.0-rc.1'), false, 'an older rc of the baseline line')
+    assert.equal(meetsBaseline('0.2.0-alpha.1'), false, 'alpha is below rc at equal X.Y.Z')
+    assert.equal(meetsBaseline('0.1.7-rc.2'), false, 'the just-dropped line is now below the floor')
+    assert.equal(meetsBaseline('0.1.7'), false, 'the dropped line final')
+    assert.equal(meetsBaseline('0.3.0-alpha.1'), true, 'a newer minor at a lower channel outranks the floor')
+    assert.equal(meetsBaseline('0.1.5-rc.1'), false)
     assert.equal(meetsBaseline('0.1.2-rc.1'), false)
     assert.equal(meetsBaseline('0.0.9'), false)
   })
@@ -46,7 +48,7 @@ describe('meetsBaseline', () => {
   })
 
   test('accepts an explicit baseline', () => {
-    assert.equal(meetsBaseline('0.1.5-rc.1', '0.2.0'), false)
+    assert.equal(meetsBaseline('0.1.7-rc.2', '0.2.0'), false)
     assert.equal(meetsBaseline('0.2.0', '0.2.0-alpha.1'), true)
   })
 })

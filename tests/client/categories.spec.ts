@@ -1,6 +1,3 @@
-// Category parts (src/client/categories.ts): the seven-bucket parts builder, the official contextBreakdown split
-// (rounding residue on the largest category, clamped) and the provider-anchored reproportioning.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { anchoredParts, billedParts, officialParts, partsOf, type PartsPart } from '../../src/client/categories'
@@ -55,7 +52,6 @@ describe('officialParts', () => {
   test('rounding residue lands on the largest category', () => {
     const cur = current({ system: 1, tools: 2, user: 33, assistant: 33, tool: 34, total: 103 })
     const bd: ContextBreakdown = { systemTokens: 0, toolsTokens: 0, messageTokens: 10 }
-    // Shares round to 3/3/3 (assigned 9); the residue of 1 lands on `tool`.
     const parts = officialParts(cur, bd)
     assert.deepEqual(values(parts), { system: 0, tools: 0, user: 3, inject: 0, skill: 0, assistant: 3, tool: 4 })
   })
@@ -63,8 +59,6 @@ describe('officialParts', () => {
   test('a negative rounding residue is clamped to zero', () => {
     const cur = current({ user: 25, inject: 25, assistant: 25, tool: 25, total: 100 })
     const bd: ContextBreakdown = { systemTokens: 0, toolsTokens: 0, messageTokens: 2 }
-    // Each share rounds 0.5 up to 1 (assigned 4); the residue of -2 on the
-    // largest (first-seen, `user`) would go negative without the clamp.
     const parts = officialParts(cur, bd)
     assert.deepEqual(values(parts), { system: 0, tools: 0, user: 0, inject: 1, skill: 0, assistant: 1, tool: 1 })
   })
@@ -127,8 +121,6 @@ describe('billedParts', () => {
   test('the billed input splits by the estimated ratios and output closes exact', () => {
     const cur = current({ system: 50, tools: 50, user: 100, inject: 0, assistant: 100, tool: 100, total: 400 })
     const parts = billedParts(cur, null, USAGE)
-    // Input 400 equals the estimated total, so the ratios carry over as-is;
-    // the eight parts sum to the chat line's 460 by construction.
     assert.deepEqual(parts.map(p => [p.key, p.color, p.value]), [
       ['system', 'var(--color-indigo-500)', 50],
       ['tools', 'var(--color-amber-500)', 50],

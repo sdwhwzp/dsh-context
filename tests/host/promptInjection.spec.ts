@@ -1,7 +1,3 @@
-// System-prompt injection (src/host/promptInjection.ts): the two globally registered
-// prompt sections carrying the configured prefix/suffix, their live-text providers,
-// and the feature-detect degradation when the harness prompt registry is absent.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
@@ -30,14 +26,12 @@ function fakeSystemPrompt(): SystemPromptFace & { registered: RegisteredSection[
   }
 }
 
-/** A context whose deferred inject fires synchronously with the given service view. */
 function ctxWith(systemPrompt: unknown): Context {
   return {
     inject: (_names: unknown, cb: (inner: unknown) => void) => { cb({ systemPrompt }) },
   } as unknown as Context
 }
 
-/** A volatile config reference stand-in over a mutable box. */
 function ref(box: { value: unknown }): { get: () => unknown } {
   return { get: () => box.value }
 }
@@ -103,7 +97,6 @@ describe('watchPromptInjection', () => {
   test('the deferred inject rides the real cordis: early, late, and never-provided compositions', async () => {
     const { Context } = await import('@deepseek-ai/cordis')
 
-    // Provided before this entry mounts.
     const early = new Context()
     early.provide('systemPrompt', fakeSystemPrompt())
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -111,7 +104,6 @@ describe('watchPromptInjection', () => {
     await new Promise(resolve => setTimeout(resolve, 10))
     assert.equal((early.reflect.get('systemPrompt') as unknown as { registered: RegisteredSection[] }).registered.length, 2, 'the service first: both sections register')
 
-    // Provided after this entry mounts (a composition that starts later).
     const late = new Context()
     watchPromptInjection(late, { promptPrefix: 'P' } as never)
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -120,7 +112,6 @@ describe('watchPromptInjection', () => {
     await new Promise(resolve => setTimeout(resolve, 10))
     assert.equal(lateFace.registered.length, 2, 'the service later: the pending inject fires on the provide')
 
-    // Never provided: no throw, nothing registers.
     const never = new Context()
     assert.doesNotThrow(() => watchPromptInjection(never, {} as never))
     await new Promise(resolve => setTimeout(resolve, 10))

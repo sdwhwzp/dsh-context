@@ -1,10 +1,8 @@
-/** Escape-to-close for the plugin's overlays: capture-phase window keydown, so the harness's Escape routing
- * (a bubble-phase window listener) never sees the key. */
+/** Escape-to-close overlays: capture-phase keydown so the harness's bubble-phase Escape routing never sees the key. */
 
 import { useEffect, useRef } from 'react'
 
-/** `onClose` rides a latest-ref: a per-render resubscribe would rerun the cleanup's focus restore and yank focus
- * out of the overlay's own inputs on every keystroke. */
+/** `onClose` rides a latest ref: a per-render resubscribe would rerun cleanup's focus restore and yank focus from overlay inputs. */
 export function useEscapeClose(active: boolean, onClose: () => void): void {
   const close = useRef(onClose)
   close.current = onClose

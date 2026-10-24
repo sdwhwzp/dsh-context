@@ -1,8 +1,3 @@
-// Latest-version check (src/client/latestVersion.ts): registry fetch with a 1h TTL, the semver comparator,
-// and the useNewerVersion hook every surface's update hint reads.
-// The fetch is stubbed per test — the suite never hits the network — and each fetch test re-imports the module
-// (vi.resetModules) to reset the module-level cache. Two registries are tried in order (official npm, then npmmirror).
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
@@ -159,8 +154,7 @@ describe('isNewerVersion', () => {
   })
 })
 
-/** Mount the hook through a throwaway component; `version` emulates the tsdown define. The settled value is
- *  what the hook last reported — an empty string stands for null, and a late setState still re-renders. */
+/** Mount the hook through a throwaway component; `version` emulates the tsdown define. An empty settled value stands for null. */
 async function renderUseNewerVersion(version?: string): Promise<{ settled: () => string; unmount: () => Promise<void> }> {
   vi.resetModules()
   if (version === undefined) delete (globalThis as Record<string, unknown>).__DSH_CTX_VERSION__
@@ -214,7 +208,6 @@ describe('useNewerVersion', () => {
     await unmount()
     resolveFetch!({ ok: true, json: () => Promise.resolve({ version: '2.0.0' }) })
     await flush()
-    // No state update after unmount, no act warning, and the value never lands.
     assert.equal(settled(), '')
   })
 })

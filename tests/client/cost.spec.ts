@@ -1,5 +1,3 @@
-// Session-cost estimate (src/client/cost.ts): the model-price-book lookup tiers and the fixed 1 CNY = 0.15 USD conversion.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { estimateSessionCost, billedTokensOf, formatCost, formatPriceRate, mergeCostUsage, priceFaceOf, priceIndexOf, priceOf, toCurrency } from '../../src/client/cost'
@@ -8,20 +6,17 @@ import type { CostBucketTotals, SessionCostUsage } from '../../src/shared/types'
 
 const M = 1_000_000
 
-/** Real-shaped rates (deepseek-v4-flash on models.dev — the official off-peak list; no cache_write published). */
 const FLASH = { hit: 0.003, miss: 0.15, write: 0.15, out: 0.6 }
 const PRO = { hit: 0.003625, miss: 0.435, write: 0.435, out: 0.87 }
 const KIMI = { hit: 0.19, miss: 0.95, write: 0.95, out: 4 }
 const K3 = { hit: 0.3, miss: 3, write: 3, out: 15 }
 
-/** The book is keyed by the models.dev provider ids, exactly as extracted. */
 const BOOK: ModelPrices = {
   deepseek: { 'deepseek-v4-flash': FLASH, 'deepseek-v4-pro': PRO },
   moonshotai: { 'kimi-k2.7-code': KIMI, 'kimi-k3': K3 },
   'opencode-go': { 'deepseek-v4-flash': FLASH },
 }
 
-/** A book plus its resolution index (npm absent → no vendor is "primary"). */
 function bookOf(prices: ModelPrices, npmOf: Record<string, string | null> = {}): ModelBook {
   return { prices, index: priceIndexOf(prices, npmOf) }
 }
@@ -140,10 +135,7 @@ describe('priceIndexOf / the model-side resolution tiers', () => {
   })
 
   test('a deepseek- model id prices from the first-party branch first (issue #93)', () => {
-    // The live-registry shape: azure re-lists `deepseek-v4-pro` flat (no
-    // cache_read published) and its `@ai-sdk/azure` package is the only
-    // self-named one — DeepSeek rides `@ai-sdk/openai-compatible`, so the
-    // model-side tiers would hand the id to azure. The `deepseek-` spelling prices from DeepSeek's own listing instead.
+    // azure re-lists `deepseek-v4-pro` flat without cache_read rates, so a `deepseek-` id must price from DeepSeek's own branch.
     const AZURE_FLAT = { hit: 1.74, miss: 1.74, write: 1.74, out: 3.48 }
     const hostBook = bookOf({
       deepseek: { 'deepseek-v4-pro': PRO },
@@ -256,8 +248,6 @@ describe('billedTokensOf (the token face of the billed buckets)', () => {
       junk: 5,
       p: { m: 'garbage', m2: { peak: null, off: { uncached: 'x', cacheRead: 7 } } },
     } as unknown as SessionCostUsage
-    // The non-record provider/model/period branches drop whole; the junk
-    // bucket field coerces to zero (numOf), the number survives.
     assert.equal(billedTokensOf(usage), 7)
   })
 })
@@ -274,8 +264,7 @@ describe('estimateSessionCost', () => {  test('null usage or null book prices to
   })
 
   test('a provider id the registry does not know still prices by model id', () => {
-    // The issue #91 shape: a subscription/proxy route (`claude`, a gateway)
-    // whose models live under the vendor's registry branch.
+    // A subscription/proxy route (`claude`) whose models live under the vendor's registry branch.
     close(estimateSessionCost({ unmapped: { 'deepseek-v4-flash': { peak: bucket(0, M, 0, 0) } } }, BOOK_B, 'usd'), 0.15)
   })
 
@@ -298,8 +287,6 @@ describe('estimateSessionCost', () => {  test('null usage or null book prices to
       0.95 + 0.95,
       'a flat-rate provider bills a peak bucket at book price, never doubled',
     )
-    // The account route shares DeepSeek's period list, so its peak buckets
-    // double too — the fold splits them only since providers.ts maps it.
     close(estimateSessionCost({ 'deepseek-account': { 'deepseek-v4-flash': split } }, BOOK_B, 'usd'), 0.3 + 0.15)
   })
 
@@ -310,7 +297,6 @@ describe('estimateSessionCost', () => {  test('null usage or null book prices to
 
   test('the CNY currency converts the USD total at 1 CNY = 0.15 USD', () => {
     const usage = { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(0, M, 0, 0) } } }
-    // 1M peak-window miss bills the official CNY peak price: ¥2.
     close(estimateSessionCost(usage, BOOK_B, 'cny'), 2)
   })
 
@@ -393,12 +379,9 @@ describe('mergeCostUsage', () => {
 
 describe('priceFaceOf', () => {
   test('names the registry face every resolution path lands on', () => {
-    // Direct branch: the dsh provider's rename maps onto the registry id.
     assert.deepEqual(priceFaceOf(BOOK_B, 'deepseek-official', 'deepseek-v4-flash'), { pid: 'deepseek', mid: 'deepseek-v4-flash', rate: FLASH })
     assert.deepEqual(priceFaceOf(BOOK_B, 'kimi-coding', 'k3'), { pid: 'moonshotai', mid: 'kimi-k3', rate: K3 }, 'the suffix path names the full registry spelling')
-    // First-party seam: a deepseek- id prices from DeepSeek's own branch.
     assert.deepEqual(priceFaceOf(BOOK_B, 'future-gateway', 'deepseek-v4-pro'), { pid: 'deepseek', mid: 'deepseek-v4-pro', rate: PRO })
-    // Model-side tiers: the winning candidate's own face.
     assert.deepEqual(priceFaceOf(BOOK_B, 'any-gateway', 'kimi-k2.7-code'), { pid: 'moonshotai', mid: 'kimi-k2.7-code', rate: KIMI })
     assert.equal(priceFaceOf(BOOK_B, '', 'mystery'), null)
     assert.equal(priceFaceOf(null, 'deepseek-official', 'deepseek-v4-flash'), null)

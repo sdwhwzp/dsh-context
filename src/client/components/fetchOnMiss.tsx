@@ -1,5 +1,5 @@
-/** The fetch-on-miss state machine: one targeted history read per missed key; `absent`/`failed` are terminal, and a landed
- * value caches by key (history is immutable, so it never refetches). */
+/** Fetch-on-miss: one targeted history read per missed key; `absent`/`failed` are terminal, and a landed value caches
+ * by key (history is immutable, so it never refetches). */
 
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Translate } from '../i18n'

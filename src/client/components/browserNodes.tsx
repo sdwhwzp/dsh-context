@@ -1,5 +1,3 @@
-/** The context browser's per-node rendering: one surface node's rows and its fold-stamped identity. */
-
 import type { ReactElement, ReactNode } from 'react'
 import type { Category, SurfaceNode } from '../../shared/types'
 import type { Assembled } from '../assemble'

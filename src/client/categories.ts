@@ -1,7 +1,3 @@
-/** Category presentation config. Every part carries two figures: `raw`, the
- * heuristic count, and `value`, the provider-anchored bar width proportioned by
- * the heuristic ratios (equal when no anchor applies). */
-
 import type { Category, ContextBreakdown, RequestRecord, Snapshot, TokenUsage } from '../shared/types'
 
 export interface PartsPart {
@@ -10,7 +6,6 @@ export interface PartsPart {
   value: number
   /** Heuristic count shown by the legend and tooltips (defaults to value). */
   raw?: number
-  /** Tooltip display name, defaulting to the category label of `key`. */
   label?: string
   /** Shared-hover group: a hover key equal to a part's group lights it. */
   group?: string
@@ -28,8 +23,7 @@ export const CATS: { key: Category | 'system' | 'tools'; color: string }[] = [
 
 export const CAT_COLOR = Object.fromEntries(CATS.map(c => [c.key, c.color])) as Record<Category | 'system' | 'tools', string>
 
-/** The message-fold categories in canonical order — the tail of CATS without the
- * singular `system`/`tools` bands. The pie panel and the block map lay parts out in this order. */
+/** The message-fold categories in canonical order — `CATS` without the singular `system`/`tools` bands. */
 export const MESSAGE_CATS: readonly (Category | 'system' | 'tools')[] = ['user', 'inject', 'skill', 'assistant', 'tool']
 
 export function partsOf(breakdown: Snapshot['current'] | RequestRecord): PartsPart[] {
@@ -38,8 +32,7 @@ export function partsOf(breakdown: Snapshot['current'] | RequestRecord): PartsPa
   })
 }
 
-/** Build the pie-consistent raw parts from the OFFICIAL `contextBreakdown`
- * figures when delivered, subdividing messages by the fold's ratios; absent the projection the fold's own sums serve. */
+/** Pie-consistent raw parts from the OFFICIAL `contextBreakdown` when delivered, else the fold's own sums. */
 export function officialParts(
   current: Snapshot['current'],
   breakdown: ContextBreakdown | null,
@@ -58,8 +51,7 @@ export function officialParts(
       assigned += count
       if (current[cat as Category] > current[largest]) largest = cat as Category
     }
-    // Rounding residue lands on the largest category; the clamp keeps a tiny
-    // message bucket with several rounded-up shares from going negative.
+    // Rounding residue lands on the largest category; the clamp keeps a tiny bucket from going negative.
     shares[largest] = Math.max(0, shares[largest] + messages - assigned)
   } else {
     for (const cat of MESSAGE_CATS) shares[cat] = 0
@@ -73,8 +65,7 @@ export function officialParts(
   }))
 }
 
-/** Reproportion heuristic parts to a provider-anchored target: the heuristic
- * supplies the ratios, the provider sample the total; `value` takes the anchored figure and `raw` keeps the heuristic count. */
+/** Reproportion heuristic parts to a provider-anchored target: the heuristic supplies ratios, the provider the total. */
 export function anchoredParts(parts: PartsPart[], target: number | null): PartsPart[] {
   const sourced = parts.map(p => ({ ...p, raw: p.raw ?? p.value }))
   if (target === null || target <= 0) return sourced
@@ -86,9 +77,8 @@ export function anchoredParts(parts: PartsPart[], target: number | null): PartsP
   return sourced.map(p => ({ ...p, value: Math.round(p.raw * scale) }))
 }
 
-/** The Token card's billed split by WHAT the tokens are: the six composition
- * categories share the provider-reported prompt total by the composition card's
- * ratios, and the exact output count closes the ring, so the parts total the chat line's token count by construction. */
+/** The Token card's billed split: composition categories share the provider prompt total, and output closes
+ * the ring, so the parts total the chat line's count by construction. */
 export function billedParts(
   current: Snapshot['current'],
   breakdown: ContextBreakdown | null,

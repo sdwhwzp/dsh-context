@@ -1,23 +1,12 @@
 /*
- * Tailwind entry: tsdown.config.ts compiles the utilities carried by the plugin's JSX class lists.
- * The sibling sheets keep what the variants cannot own here: the harness's `--dsw-*` chrome, the
- * JS-state class systems (several of which double as test anchors), their contextual overrides, and
- * the element transitions, which follow the harness motion tokens over exact per-element property
- * lists — Tailwind's preset durations would freeze those values.
- *
- * Deliberate deviations from a stock Tailwind setup, all for cohabitation with the harness host page:
- * - No preflight and no theme import: a reset would re-skin host chrome.
- * - `--spacing: 4px` instead of 0.25rem, so utilities keep their designed px sizes regardless of the
- *   host's root font size.
- * - Utilities compile UNLAYERED: a layered utility would lose to ANY unlayered host rule. The sheet
- *   imports FIRST in client/index.ts, so the sibling sheets still win same-specificity ties.
- * - dsh styles itself through CSS modules and `--ds-*`/`--dsw-*` tokens, so generic names like
- *   `flex`/`gap-2` cannot collide; the flat `lc-*` namespace is the plugin's own chrome.
- *
- * @tailwindcss/node / @tailwindcss/oxide are pinned to one exact version (as is lightningcss): the
- * config process loads this compiler alongside lightningcss's native binding, and two copies of any
- * native set in that realm break the napi calls. `tailwindcss` itself is not a direct dependency —
- * @tailwindcss/node pulls it at that same exact version, so the pin holds with no second entry.
+ * Tailwind entry: tsdown.config.ts compiles the utilities carried by the plugin's JSX class lists; the sibling sheets
+ * keep the harness chrome, the JS-state classes and the token-driven transitions. Deviations for host cohabitation:
+ * no preflight/theme import (a reset would re-skin host chrome), `--spacing: 4px` (the host's root font size must not
+ * resize utilities), and UNLAYERED utilities with this sheet imported FIRST so sibling sheets win same-specificity
+ * ties. Generic utility names cannot collide: dsh styles itself through CSS modules and `--ds-*`/`--dsw-*` tokens, so
+ * `flex`/`gap-2` stay ours; the flat `lc-*` namespace is the plugin's own chrome.
+ * @tailwindcss/node, @tailwindcss/oxide and lightningcss stay pinned to one exact version: both native sets load
+ * in one realm and two copies break the napi calls.
  */
 @theme static {
   --spacing: 4px;

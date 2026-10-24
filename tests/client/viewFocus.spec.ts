@@ -1,6 +1,3 @@
-// viewFocus (src/client/viewFocus.ts) — the chat→Context jump relay, the sidebar-tab opener, and the
-// conversation-tab activation against a real jsdom tab bar.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { activateViewTab, openContextSidebar, requestContextFocus, subscribeContextFocus, takeContextFocus } from '../../src/client/viewFocus'
@@ -104,18 +101,15 @@ describe('activateViewTab', () => {
       assert.equal(context.__clicks(), 1)
       assert.equal(chat.__clicks(), 0)
 
-      // Already-active: reported success without a redundant click.
       context.setAttribute('aria-selected', 'true')
       assert.equal(activateViewTab('Context'), true)
       assert.equal(context.__clicks(), 1)
 
-      // Whitespace-padded label text still matches the trimmed comparison.
       context.setAttribute('aria-selected', 'false')
       context.textContent = '  Context '
       assert.equal(activateViewTab('Context'), true)
       assert.equal(context.__clicks(), 2)
 
-      // No tab carries the label → nothing clicked, false.
       assert.equal(activateViewTab('Missing'), false)
       assert.equal(trajectory.__clicks(), 0)
     } finally {

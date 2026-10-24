@@ -1,6 +1,3 @@
-// Plugin self-metadata (src/client/meta.ts): the build-time define fallbacks and the define-armed variants, each
-// setting its globals BEFORE the dynamic import (vi.resetModules clears the cache so the constants re-evaluate).
-
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
 

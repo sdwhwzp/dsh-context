@@ -1,9 +1,6 @@
-/**
- * The block map panel under the browser's composition bar: a squarified treemap of
- * the shown step's context (treemap.ts builds the grouped blocks). Layout is measured
- * in pixels and re-run on pane drags; the hover bubble is anchored to its block INSIDE
- * the panel, so page scrolls never detach it (the stackedBar tip's trick).
- */
+/** Block map under the composition bar: a squarified treemap of the shown step (treemap.ts builds the grouped blocks).
+ * Layout is measured in px and re-run on pane drags; the hover bubble anchors INSIDE the panel, so page scroll never
+ * detaches it (the stackedBar tip's trick). */
 
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react'
 import type { Assembled } from '../assemble'
@@ -13,17 +10,15 @@ import { mapOf, squarify, type MapBlock, type MapCat } from '../treemap'
 
 export interface BrowserTreemapProps {
   view: Assembled
-  /** The browser's open category: its region stays framed without hover. */
   openCat: string | null
-  /** Incoming shared composition hover (a category key, live only): lights the matching region. */
+  /** Incoming shared composition hover (a category key, live only). */
   hoverKey?: string | null
-  /** Present only while the browser shows the live step: a block hover reports its category upward. */
+  /** Present only on the live step: a block hover reports its category upward. */
   onHoverKey?: (key: string | null) => void
   onPickCat: (cat: string) => void
   onPickBlock: (cat: string, block: MapBlock) => void
 }
 
-/** The toggle button's glyph: a tiny treemap. */
 export function MapIcon(): ReactElement {
   return (
     <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
@@ -46,7 +41,6 @@ const HEAD = 16
 // A region smaller than this drops its header strip; its blocks fill the frame.
 const HEAD_MIN_W = 56
 const HEAD_MIN_H = 40
-// Block text gates: the name line, then the token figure, render only when they fit.
 const LABEL_MIN_W = 42
 const LABEL_MIN_H = 22
 const NUM_MIN_H = 36
@@ -85,7 +79,6 @@ interface MapTip {
   bottom: number
 }
 
-/** The whole map's layout, computed once per render: regions in panel space, blocks in both spaces. */
 function layoutTree(cats: MapCat[], w: number, h: number): LaidCat[] {
   const out: LaidCat[] = []
   for (const lc of squarify(cats, { x: 0, y: 0, w, h })) {
@@ -261,7 +254,6 @@ export function makeBrowserTreemap(kit: ViewKit): (props: BrowserTreemapProps) =
                 : null}
               {lc.blocks.map((lb) => {
                 const b = lb.b
-                // Saturation scales with the block's share of its region, so the heavy block reads hot at a glance.
                 const alpha = Math.round(14 + 30 * Math.sqrt(b.tokens / c.tokens))
                 const on = tipKey === b.key
                 return (

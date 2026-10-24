@@ -1,8 +1,5 @@
-// A driver over the session-projection registry's DOCUMENTED semantics — the rules the REAL dsh registries enforce, mirrored
-// from `packages/session/session-projection/src/index.ts` at each supported tag. The real-code matrix (tests/compat/matrix.spec.ts) runs
-// the ACTUAL registry sources per tag; this driver exists so `pnpm test` alone still detects a definition that drifts from any supported
-// generation's rules (a missing wire block, a non-plain-JSON state, an init that cannot take the header…). Every supported line shares
-// one documented contract, so the driver takes no baseline: one run covers them all.
+// A driver over the session-projection registry's DOCUMENTED semantics, mirrored from dsh's
+// `packages/session/session-projection` at each supported tag; every supported line shares one contract.
 
 interface ErasedDefinition {
   key: string
@@ -13,7 +10,6 @@ interface ErasedDefinition {
   stateVersion: number
 }
 
-/** The structural face the registry's register overload really reads (the plugin's real definitions satisfy it). */
 export interface DefinitionLike {
   key: string
   stateSchema: { parse(value: unknown): unknown }
@@ -31,7 +27,7 @@ interface UnitCell {
 export interface SessionLike {
   seq: number
   header: unknown
-  /** Inherited events from pre-identity log compaction (registry hands it to init). */
+  /** Inherited event count from pre-identity log compaction; the registry hands it to `init`. */
   inheritedEventCount: number
   events: unknown[]
 }
@@ -51,8 +47,7 @@ export interface CheckpointRow {
 
 export type Checkpoint = Record<string, CheckpointRow>
 
-/** The registry's register-time rules: a non-negative safe integer `stateVersion`, and a shared key must agree on the version.
- */
+/** Register-time rule violations: non-negative safe-integer `stateVersion`, and a shared key must agree on it. */
 export class RegistryViolationError extends Error {}
 
 /** The plain-JSON persistence gate: the projection cache's own write precondition (mirrored in the fold helpers). */
@@ -62,7 +57,6 @@ export class RegistryDriver {
   private readonly registrations = new Map<string, { def: ErasedDefinition; cells: Map<SessionLike, UnitCell> }>()
   private readonly listeners = new Set<ChangeListener>()
 
-  /** `ctx.sessionProjections.register` — accepts the plugin's real definitions. */
   register(definition: DefinitionLike): () => void {
     if (!Number.isSafeInteger(definition.stateVersion) || definition.stateVersion < 0) {
       throw new RegistryViolationError(`stateVersion must be a non-negative integer, got ${String(definition.stateVersion)}`)
@@ -107,7 +101,6 @@ export class RegistryDriver {
     }
   }
 
-  /** The `session/event` eager drive. */
   driveEvent(session: SessionLike, event: { seq: number }): void {
     for (const { def, cells } of this.registrations.values()) {
       let cell = cells.get(session)
@@ -125,7 +118,6 @@ export class RegistryDriver {
     }
   }
 
-  /** One consistent cut: every wire unit's schema-validated view. */
   snapshot(session: SessionLike): ProjectionSnapshot {
     const values: Record<string, unknown> = {}
     for (const { def, cells } of this.registrations.values()) {
@@ -156,10 +148,8 @@ export class RegistryDriver {
     return rows
   }
 
-  /** The projection cache's WRITE precondition (session-projection-cache
-   * src/index.ts): every row must be losslessly JSON-serializable or the
-   * whole write fails with a TypeError — one undefined-valued property in
-   * one unit's state once broke every session on the host (issues #5-#7, #27-#30). Returns the detached JSON image. */
+  /** The projection cache's WRITE precondition: every row must be losslessly JSON-serializable or the whole write
+   * fails with a TypeError. Returns the detached JSON image. */
   checkpointJson(session: SessionLike): Record<string, unknown> | undefined {
     return snapshotJson(this.checkpoint(session)) as Record<string, unknown> | undefined
   }

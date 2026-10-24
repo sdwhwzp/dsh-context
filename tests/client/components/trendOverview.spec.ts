@@ -1,5 +1,3 @@
-// The trend card's overview face: total/delta ribbon geometry, quartile-only flags, the shared hover/tip flow,
-// and the proportional turn strip. jsdom layout rides the shared trendChart harness (clientWidth 400).
 
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
@@ -74,7 +72,6 @@ describe('TrendOverview total-mode ribbon', () => {
     assert.equal(polys[5].getAttribute('points'), '0,56 1,0 1,22.4 0,67.2')
     assert.equal(polys[0].style.fill, 'var(--color-indigo-500)')
     assert.equal(polys[5].style.stroke, 'var(--color-teal-500)')
-    // Whole-log quarter axis.
     assert.equal(query(m.container, '.lc-axis-top').textContent, '600')
     assert.equal(query(m.container, '.lc-axis-q3').textContent, '450')
     assert.equal(query(m.container, '.lc-axis-mid').textContent, '300')
@@ -87,10 +84,8 @@ describe('TrendOverview total-mode ribbon', () => {
     const m = await mount(h(TrendOverview, propsOf([r1])))
     const svg = query(m.container, '.lc-fit-svg')
     assert.equal(svg.getAttribute('viewBox'), '0 0 1 112')
-    // One record's own scale: maxTotal 300, so the 100-token system band tops at 74.67.
     assert.equal(query(svg, 'polygon').getAttribute('points'), '0,74.67 1,74.67 1,112 0,112')
     assert.equal(query(m.container, '.lc-turn-label').textContent, '1')
-    // The quartiles collapse onto the sole record; the interior filter plants no pole.
     assert.equal(queryAll(m.container, '.lc-trend-flag').length, 0)
     await m.unmount()
   })
@@ -119,7 +114,6 @@ describe('TrendOverview delta ribbon', () => {
     await lone.unmount()
 
     const m = await mount(h(TrendOverview, propsOf([deltaBase, deltaGrown, deltaBase], { mode: 'delta' })))
-    // The zero label rides the line at 13+56; the quarter marks clear it.
     assert.equal(query(m.container, '.lc-axis-mid').style.top, `${13 + 56}px`)
     assert.equal(query(m.container, '.lc-axis-q3').textContent, '+28')
     assert.equal(query(m.container, '.lc-axis-q1').textContent, '-28')
@@ -138,7 +132,6 @@ describe('TrendOverview delta ribbon', () => {
 
   test('a quarter mark yields entirely when its label box would overlap the zero label', async () => {
     const heavy = req(1, { turn: 1, step: 0, system: 400, tools: 350, user: 330, inject: 320, skill: 310, assistant: 340, tool: 360, total: 2490 })
-    // +140 up, then −560 down: the zero line sits at 13+22, colliding with the q3 mark.
     const upSmall = req(2, { turn: 1, step: 1, system: 540, total: 2630, tools: 350, user: 330, inject: 320, skill: 310, assistant: 340, tool: 360 })
     const downBig = req(3, { turn: 2, step: 0, system: 340, tools: 290, user: 270, inject: 260, skill: 250, assistant: 280, tool: 300, total: 1990 })
     const m1 = await mount(h(TrendOverview, propsOf([heavy, upSmall, downBig], { mode: 'delta' })))
@@ -148,7 +141,6 @@ describe('TrendOverview delta ribbon', () => {
     assert.equal(query(m1.container, '.lc-axis-q1').textContent, '-385')
     await m1.unmount()
 
-    // +420 up, then −140 down: the zero line rides the q1 mark instead.
     const upBig = req(2, { turn: 1, step: 1, system: 820, total: 2910, tools: 350, user: 330, inject: 320, skill: 310, assistant: 340, tool: 360 })
     const downSmall = req(3, { turn: 2, step: 0, system: 760, tools: 270, total: 2690, user: 330, inject: 320, skill: 310, assistant: 340, tool: 360 })
     const m2 = await mount(h(TrendOverview, propsOf([heavy, upBig, downSmall], { mode: 'delta' })))
@@ -173,16 +165,13 @@ describe('TrendOverview duration overlay', () => {
     const svg = query(m.container, '.lc-fit-svg')
     assert.equal(svg.getAttribute('viewBox'), '0 0 3 112')
     const lines = queryAll(svg, 'polyline:not(.lc-dur-halo)')
-    // [r3, r4] bridges the missing r2 stamp; r1 stands alone as a dot.
     assert.equal(lines.length, 1)
     assert.equal(lines[0].getAttribute('points'), '2,0 3,84')
-    // One run's halo polyline + one dot's halo circle.
     assert.equal(queryAll(svg, '.lc-dur-halo').length, 2)
     const dot = queryAll(svg, 'circle').find(c => c.getAttribute('r') === '2')
     assert.ok(dot !== undefined)
     assert.equal(dot.getAttribute('cx'), '0')
     assert.equal(dot.getAttribute('cy'), '56')
-    // The right-hand duration axis keeps its quartiles.
     assert.equal(query(m.container, '.lc-axis-r .lc-axis-top').textContent, '2.0s')
     assert.equal(query(m.container, '.lc-axis-r .lc-axis-q1').textContent, '500ms')
     await m.unmount()
@@ -236,13 +225,11 @@ describe('TrendOverview flags and markers', () => {
   })
 
   test('short logs keep the collapsed-at-start pole out but keep the full-span pole', async () => {
-    // Two records: the mid quartiles collapse; only the full-span pole survives, at the right edge.
     const two = await mount(h(TrendOverview, propsOf(steps(2))))
     const flag = query(two.container, '.lc-trend-flag')
     assert.equal(query(flag, '.lc-trend-flag-label').textContent, '2')
     assert.equal(flag.style.left, 'calc(100% - 1px)')
     await two.unmount()
-    // Three records: the interior ½ pole and the full-span pole.
     const three = await mount(h(TrendOverview, propsOf(steps(3))))
     const flags = queryAll(three.container, '.lc-trend-flag')
     assert.deepEqual(flags.map(f => query(f, '.lc-trend-flag-label').textContent), ['2', '3'])
@@ -264,7 +251,6 @@ describe('TrendOverview flags and markers', () => {
     assert.deepEqual(queryAll(m.container, '.lc-turn-label').map(l => l.textContent), ['2', '3', '4', '5'])
     const blocks = queryAll(m.container, '.lc-turn')
     assert.equal(blocks.length, 5)
-    // One record per turn: the blocks match the ribbon's equal turn slots.
     assert.deepEqual(blocks.map(b => b.style.flexGrow), ['1', '1', '1', '1', '1'])
     await m.unmount()
   })
@@ -276,17 +262,14 @@ describe('TrendOverview flags and markers', () => {
       ...Array.from({ length: 50 }, (_, i) => req(3 + i, { turn: 3, step: i })),
     ])
     const m = await mount(h(TrendOverview, propsOf(aggs, { granularity: 'turn' })))
-    // Three equal ribbon slots: the interior ½ pole lands on turn 2, the full span on turn 3.
     assert.deepEqual(queryAll(m.container, '.lc-trend-flag-label').map(l => l.textContent), ['2', '3'])
     assert.equal(queryAll(m.container, '.lc-trend-flag')[1].style.left, 'calc(100% - 1px)')
-    // The blocks are equal too (a heavy turn does not widen its block), so every quartile gets a label.
     assert.deepEqual(queryAll(m.container, '.lc-turn').map(b => b.style.flexGrow), ['1', '1', '1'])
     assert.deepEqual(queryAll(m.container, '.lc-turn-label').map(l => l.textContent), ['1', '2', '3'])
     await m.unmount()
   })
 
   test('turn poles carry the absolute turn numbers, not window ordinals', async () => {
-    // Retention trimmed the head: the first plotted turn is 301, and the flags say so.
     const aggs = aggregateByTurn([301, 302, 303, 304, 305].map((turn, i) => req(i + 1, { turn, step: 0 })))
     const m = await mount(h(TrendOverview, propsOf(aggs, { granularity: 'turn' })))
     assert.deepEqual(queryAll(m.container, '.lc-trend-flag-label').map(l => l.textContent), ['302', '303', '304', '305'])
@@ -347,7 +330,6 @@ describe('TrendOverview pointer interaction', () => {
     })))
     const surface = query(m.container, '.lc-chart')
     stubSurfaceRect(surface)
-    // fx .5 → the middle record; a sub-half-step drift stays put; the far edge clamps to the last; x<0 to the first.
     await moveX(surface, 200)
     await moveX(surface, 210)
     await moveX(surface, 399)
@@ -362,7 +344,6 @@ describe('TrendOverview pointer interaction', () => {
     const m = await mount(h(TrendOverview, propsOf(reqs)))
     const surface = query(m.container, '.lc-chart')
     stubSurfaceRect(surface)
-    // HoveredSeq never changes here: the local state alone must paint the cursor and the tip.
     await moveX(surface, 200)
     assert.equal(query(m.container, '.lc-fit-cursor').style.left, '50%')
     assert.equal(query(query(m.container, '.lc-chart-tip'), 'span').textContent, kit.t('tip.step', { t: 1, s: 2, n: 5 }))
@@ -379,10 +360,8 @@ describe('TrendOverview pointer interaction', () => {
     const m = await mount(h(TrendOverview, propsOf(reqs, { onHover: (s) => { spies.hover.push(s) } })))
     const surface = query(m.container, '.lc-chart')
     stubSurfaceRect(surface)
-    // Plot y = clientY − 18: the default 300-token stack puts tool at 0..22.4 and system at 74.67..112.
     await moveXY(surface, 200, 30)
     assert.equal(surface.getAttribute('data-catdim'), 'tool')
-    // The same record, one band down: only the category changes, with no second record relay.
     await moveXY(surface, 200, 120)
     assert.equal(surface.getAttribute('data-catdim'), 'system')
     assert.deepEqual(spies.hover, [3])
@@ -403,7 +382,6 @@ describe('TrendOverview pointer interaction', () => {
     await clickXY(surface, 200, 30)
     assert.deepEqual(spies.cat, ['tool:3'])
     assert.deepEqual(spies.select, [3])
-    // A click above the stack has no category to open: it only pins.
     await clickXY(surface, 200, 0)
     assert.deepEqual(spies.cat, ['tool:3'])
     assert.deepEqual(spies.select, [3, 3])
@@ -418,10 +396,8 @@ describe('TrendOverview pointer interaction', () => {
     const m = await mount(h(TrendOverview, propsOf([r1, r2])))
     const surface = query(m.container, '.lc-chart')
     stubSurfaceRect(surface)
-    // At x 25% the painted stack is 250k tall, so y 10px is above it — though the nearest record's 300k stack is not.
     await moveXY(surface, 100, 28)
     assert.equal(surface.hasAttribute('data-catdim'), false)
-    // At x 75% the painted user sliver (y 56..74.67) is under the pointer, though the nearest record has no user band.
     await moveXY(surface, 300, 78)
     assert.equal(surface.getAttribute('data-catdim'), 'user')
     await m.unmount()
@@ -431,7 +407,6 @@ describe('TrendOverview pointer interaction', () => {
     const m = await mount(h(TrendOverview, propsOf([deltaBase, deltaGrown, deltaBase], { mode: 'delta' })))
     const surface = query(m.container, '.lc-chart')
     stubSurfaceRect(surface)
-    // Record 1 grows every band by 8 (up arms 56→0); record 2 shrinks them (down arms 56→112).
     await moveXY(surface, 200, 22)
     assert.equal(surface.getAttribute('data-catdim'), 'tool')
     await moveXY(surface, 400, 128)
@@ -448,11 +423,9 @@ describe('TrendOverview pointer interaction', () => {
     assert.equal(queryAll(m.container, '.lc-fit-wash').length, 2)
     await moveXY(surface, 200, 30)
     assert.equal(queryAll(m.container, '.lc-fit-wash').length, 0)
-    // Above the stack there is no category to trace: the wash returns.
     await moveXY(surface, 200, 0)
     assert.equal(queryAll(m.container, '.lc-fit-wash').length, 2)
     assert.equal(surface.hasAttribute('data-catdim'), false)
-    // A focused ribbon paints one category; hovering it still keeps the band original (no wash).
     await m.update(h(TrendOverview, propsOf(reqs, { activeTurn: 1, focusCat: 'tool' })))
     await moveXY(surface, 200, 30)
     assert.equal(queryAll(m.container, '.lc-fit-wash').length, 0)
@@ -523,7 +496,6 @@ describe('TrendOverview pointer interaction', () => {
     assert.match(cursors[1].className, /lc-fit-pin/)
     assert.equal(cursors[1].style.left, '0%')
 
-    // Unknown hovered AND selected records leave neither rule behind.
     await m.update(h(TrendOverview, propsOf(reqs, { hoveredSeq: 999, selectedSeq: 999 })))
     assert.equal(queryAll(m.container, '.lc-chart-tip').length, 0)
     assert.equal(queryAll(m.container, '.lc-fit-cursor').length, 0)
@@ -531,7 +503,6 @@ describe('TrendOverview pointer interaction', () => {
   })
 
   test('tip rows follow the granularity, mode, focus and duration state', async () => {
-    // Turn granularity reads the aggregate's own stepCount: a two-step turn and a one-step turn.
     const aggs = aggregateByTurn([req(1, { turn: 1, step: 0 }), req(2, { turn: 1, step: 1 }), req(3, { turn: 2, step: 0 })])
     const m1 = await mount(h(TrendOverview, propsOf(aggs, { granularity: 'turn', hoveredSeq: 2 })))
     assert.deepEqual(queryAll(query(m1.container, '.lc-chart-tip'), 'span').map(r => r.textContent), [
@@ -542,7 +513,6 @@ describe('TrendOverview pointer interaction', () => {
     assert.equal(query(query(m1.container, '.lc-chart-tip'), 'span').textContent, kit.t('tip.turn1', { t: 2 }))
     await m1.unmount()
 
-    // Delta names the signed net change.
     const grew = req(2, { turn: 1, step: 1, system: 200, tools: 100, user: 60, inject: 40, assistant: 80, tool: 120, total: 600 })
     const m2 = await mount(h(TrendOverview, propsOf([req(1), grew], { mode: 'delta', hoveredSeq: 2 })))
     assert.ok(query(m2.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.delta', { n: '+300' })))
@@ -550,14 +520,12 @@ describe('TrendOverview pointer interaction', () => {
     assert.ok(query(m2.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.delta', { n: '-300' })))
     await m2.unmount()
 
-    // Duration appends its row; focus names the category instead of claiming a total.
     const m3 = await mount(h(TrendOverview, propsOf([req(1, { activeMs: 2000 }), grew], { durationCurve: true, hoveredSeq: 1 })))
     assert.ok(query(m3.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.duration', { n: '2.0s' })))
     await m3.update(h(TrendOverview, propsOf([req(1), grew], { focusCat: 'tool', hoveredSeq: 1 })))
     assert.ok(query(m3.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.cat', { cat: kit.catLabel('tool'), n: '60' })))
     await m3.unmount()
 
-    // A stepless record falls back to Turn 0 · Step 0.
     const m4 = await mount(h(TrendOverview, propsOf([req(9, { turn: undefined, step: undefined })], { hoveredSeq: 9 })))
     assert.equal(query(query(m4.container, '.lc-chart-tip'), 'span').textContent, kit.t('tip.step', { t: 0, s: 0, n: 1 }))
     await m4.unmount()
@@ -573,7 +541,6 @@ describe('TrendOverview turn strip', () => {
       onHoverTurn: (t: number | null) => { spies.hoverTurn.push(t) },
       onPickTurn: (t: number) => { spies.pickTurn.push(t) },
     }
-    // Turn 1 = records [0..2] of 0..5: no left wash, the rest of the plot dimmed by the right one.
     const m = await mount(h(TrendOverview, propsOf(reqs, { activeTurn: 1, ...handlers })))
     assert.match(query(m.container, '.lc-chart-scroll').className, /lc-chart-dim/)
     const washes = queryAll(m.container, '.lc-fit-wash')
@@ -582,7 +549,6 @@ describe('TrendOverview turn strip', () => {
     assert.equal(washes[1].style.width, '50%')
     assert.match(query(m.container, '.lc-turn').className, /lc-turn-on/)
 
-    // Turn 2 = records [3..5]: half a step of left wash, the right edge clamps empty.
     await m.update(h(TrendOverview, propsOf(reqs, { activeTurn: 2, ...handlers })))
     const washes2 = queryAll(m.container, '.lc-fit-wash')
     assert.equal(washes2[0].style.width, '50%')
@@ -594,7 +560,6 @@ describe('TrendOverview turn strip', () => {
     assert.equal(queryAll(m.container, '.lc-fit-wash').length, 0)
     assert.equal(queryAll(m.container, '.lc-turn-on').length, 0)
 
-    // Strip hover lights a turn; the click pins it; leaving the strip clears the hover.
     await hover(query(m.container, '.lc-turn'))
     assert.deepEqual(spies.hoverTurn, [1])
     await click(query(m.container, '.lc-turn'))

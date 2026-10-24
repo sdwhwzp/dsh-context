@@ -1,27 +1,18 @@
-/** Provider-anchored headline derivation for the Context tab and the /context popup: the two official
- * token-meter projections the chat's composer ring also reads — `contextPressure` for the anchored total,
- * `contextBreakdown` for the composition counts — so the legend matches the ring panel by construction. */
-
 import type { ContextBreakdown, ContextPressure, ContextTimeline } from '../shared/types'
 import { anchoredParts, officialParts, type PartsPart } from './categories'
 import { reserveGeometry, type ContextReserve } from './reserve'
 
 export interface Headline {
   tokens: number
+  /** Both optional: absent when no window is known; a refused compaction target drops `reserve` alone (`reserve.ts`). */
   window?: number
   pct: number | null
-  /** Composition parts: `value` is the provider-anchored bar width (the ring's fill), `raw` the official
-   *  heuristic count the legend and tooltips show. */
+  /** `value` is the provider-anchored bar width (the ring's fill); `raw` the heuristic count the legend shows. */
   parts: PartsPart[]
-  /** Absent when the window reserves nothing (reserve.ts). */
   reserve?: ContextReserve
 }
 
-/**
- * The kernel's own composer-ring derivation (ui-conversation's `contextOccupancy`:
- * `Math.min(100, Math.round(used / window * 100))`, `used` = `projectedTokens ?? pressureTokens`) on a
- * 0.1 grid. Callers prove `window > 0`.
- */
+/** The kernel's own composer-ring derivation (`ui-conversation`'s `contextOccupancy`) on a 0.1 grid; `window > 0`. */
 export function occupancyPercent(tokens: number, window: number): number {
   return Math.min(100, Math.round(tokens / window * 1000) / 10)
 }
@@ -32,19 +23,16 @@ export function headlineOf(
   breakdown: ContextBreakdown | null = null,
 ): Headline {
   const current = data.current
-  // Same formula the chat ring displays: the official projection is the newest usage sample carried
-  // forward by the heuristic surface movement since it was taken.
+  // Same formula the chat ring displays: the official projection carried forward by heuristic surface movement.
   const projected = pressure !== null && typeof pressure.projectedTokens === 'number'
     ? pressure.projectedTokens
     : undefined
-  // The kernel's own fallback order (`contextOccupancy`): the bare provider sample. A real fold stamps
-  // `pressureTokens` and the surface sample together, so the order matters only for foreign or hand-edited rows.
+  // The kernel's own fallback order: the bare provider sample; a real fold stamps both figures together.
   const sampled = pressure !== null && typeof pressure.pressureTokens === 'number'
     ? pressure.pressureTokens
     : undefined
-  // Fallback anchor, one request behind the projection: the newest request's provider prompt plus the
-  // heuristic movement since it was logged. The split-generation wire head carries that record's billing
-  // summary as `last` (request records ride the detail channel); the inline generation reads its newest record.
+  // Fallback anchor one request behind the projection: the newest request's prompt plus the heuristic
+  // movement since; the split-generation head carries it as `last`, the inline generation its newest record.
   const last = data.last
   const requests = data.requests
   const lastReq = requests.length > 0 ? requests[requests.length - 1] : null

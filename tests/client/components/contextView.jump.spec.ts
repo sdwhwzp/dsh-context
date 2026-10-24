@@ -5,7 +5,7 @@ import { requestContextFocus, takeContextFocus } from '../../../src/client/viewF
 import { DICT_EN } from '../../../src/client/i18n'
 import { TestClientCtx } from '../helpers/harness'
 import { click, flush, mount, query, queryAll, text } from '../helpers/kit'
-import { buttonByText, makeView, mountInScroller, mountRich, projectionsFor, richTimeline, T0, timeline } from './contextViewHarness'
+import { buttonByText, eventLink, makeView, mountInScroller, mountRich, overflowingScroller, projectionsFor, richTimeline, settingsWith, T0, timeline } from './contextViewHarness'
 
 describe('ContextView — chat→Context jump', () => {
   test('the relay flips the chart to turn bars, pins the reply\'s turn, and consumes itself', async () => {
@@ -77,9 +77,8 @@ describe('ContextView — chat→Context jump', () => {
       return { top } as DOMRect
     })
 
-    // The jump remount: restore applies 42, then the jump resolves and the
-    // reveal scrolls the composition card to the scrollport's top (42 + 350).
-    // jsdom reports 0 for both — the scroller must overflow to be operative.
+    // The remount restores 42, then the reveal scrolls the card to the scrollport top: 42 + 350.
+    // jsdom reports 0 for both, so the scroller must overflow to be operative.
     requestContextFocus('sv-jumpscroll', 4)
     const scroller2 = document.createElement('div')
     scroller2.setAttribute('data-conversation-scroll', '')
@@ -114,8 +113,8 @@ describe('ContextView — the stats board\'s pill jumps', () => {
     scroller.style.overflowY = 'auto'
     Object.defineProperty(scroller, 'scrollHeight', { value: 900 })
     Object.defineProperty(scroller, 'clientHeight', { value: 300 })
-    // jsdom lays out nothing: fixed viewport tops make each reveal's rect delta deterministic, shifted by the scroll the
-    // reveal itself applies — the same live geometry a real page reports (450 − 100, then 700 − 100 on top of that).
+    // jsdom lays out nothing: fixed viewport tops make each reveal's rect delta deterministic (450 − 100),
+    // shifted by the scroll the reveal itself applies (then 700 − 100).
     const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
       const inScroller = !this.hasAttribute('data-conversation-scroll')
       const top = this.hasAttribute('data-conversation-scroll') ? 100
@@ -161,5 +160,79 @@ describe('ContextView — the stats board\'s pill jumps', () => {
     } finally {
       gBCR.mockRestore()
     }
+  })
+})
+
+describe('ContextView — the events card\'s boundary rows', () => {
+  function compactionLink(container: ParentNode): HTMLElement {
+    return eventLink(container, DICT_EN['ev.compaction'].replace('{n}', '2'))
+  }
+
+  test('a click pins the step the compaction landed on, aligns the browser, and reveals the trend card', async () => {
+    const scroller = overflowingScroller(1200)
+    const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const top = this.hasAttribute('data-conversation-scroll') ? 100
+        : this.hasAttribute('data-lc-trend') ? 450 : 0
+      return { top } as DOMRect
+    })
+    try {
+      const View = makeView(new TestClientCtx())
+      const m = await mountInScroller(h(View, {
+        sessionId: 'sv-compactjump',
+        useProjection: projectionsFor(richTimeline()),
+      }), scroller)
+      assert.equal(queryAll(m.container, '.lc-bar-selected').length, 0, 'nothing is pinned before the click')
+
+      await click(compactionLink(m.container))
+      // The compaction (seq 3) contributes to the first request after it — the step the chart draws its ✂ marker on.
+      assert.ok(query(m.container, '.lc-bar[data-seq="4"]').className.includes('lc-bar-selected'), 'the landed-on step is pinned')
+      // Bar index 1 centered: 1 * (BAR_W + BAR_GAP) + BAR_W / 2 − the jsdom client width (0).
+      assert.equal(query<HTMLElement>(m.container, '.lc-chart-scroll').scrollLeft, 1 * 16 + 7, 'the trend scrolled to the landed bar')
+      assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, '4', 'the browser aligns to the same step')
+      assert.equal(scroller.scrollTop, 350, 'the trend card scrolled to the scrollport top')
+      await m.unmount()
+    } finally {
+      gBCR.mockRestore()
+    }
+  })
+
+  test('a click leaves the overview face and flips turn granularity to the exact step', async () => {
+    const View = makeView(new TestClientCtx(), settingsWith({ defaultGranularity: 'turn' }))
+    const m = await mount(h(View, { sessionId: 'sv-compactoverview', useProjection: projectionsFor(richTimeline()) }))
+    assert.equal(queryAll(m.container, '.lc-bar').length, 2, 'one aggregate bar per turn at mount')
+    await click(buttonByText(m.container, DICT_EN['trend.overview']))
+    assert.ok(buttonByText(m.container, DICT_EN['trend.overview']).className.includes('lc-gran-on'))
+
+    await click(compactionLink(m.container))
+    assert.ok(!buttonByText(m.container, DICT_EN['trend.overview']).className.includes('lc-gran-on'), 'the overview yields to the bar face')
+    assert.ok(buttonByText(m.container, DICT_EN['gran.step']).className.includes('lc-gran-on'), 'step granularity is on')
+    assert.equal(queryAll(m.container, '.lc-bar').length, 3)
+    assert.ok(query(m.container, '.lc-bar[data-seq="4"]').className.includes('lc-bar-selected'))
+    await m.unmount()
+  })
+
+  test('a prune row jumps the same way — it shares the compaction anchor', async () => {
+    const data = richTimeline({
+      events: [{ seq: 3, time: T0 + 2000, kind: 'prune', tokens: 500, turn: 1, step: 2, fromTurn: 1, fromStep: 1 }],
+    })
+    const View = makeView(new TestClientCtx())
+    const m = await mount(h(View, { sessionId: 'sv-prunejump', useProjection: projectionsFor(data) }))
+    await click(eventLink(m.container, DICT_EN['ev.prune']))
+    assert.ok(query(m.container, '.lc-bar[data-seq="4"]').className.includes('lc-bar-selected'), 'the pruned step is pinned')
+    assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, '4')
+    await m.unmount()
+  })
+
+  test('a compaction past the retained log has no landing step, so its row stays a plain label', async () => {
+    const data = richTimeline({ events: [{ seq: 99, time: T0 + 9000, kind: 'compaction', count: 2, tokens: 100 }] })
+    const View = makeView(new TestClientCtx())
+    const m = await mount(h(View, { sessionId: 'sv-compactpast', useProjection: projectionsFor(data) }))
+    const row = queryAll(m.container, '.lc-event').find(r => text(r).includes(DICT_EN['ev.compaction'].replace('{n}', '2')))
+    assert.ok(row !== undefined, 'the compaction row is listed')
+    assert.equal(row.querySelector('.lc-event-jump'), null, 'a jump it cannot make is not offered as a link')
+    assert.equal(query(row, '.lc-event-label').tagName, 'SPAN')
+    assert.equal(queryAll(m.container, '.lc-bar-selected').length, 0)
+    assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, 'live')
+    await m.unmount()
   })
 })

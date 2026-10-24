@@ -1,6 +1,5 @@
 import { useEffect, useState, type RefObject } from 'react'
 
-/** Extra rows rendered above and below the viewport so a fling never exposes blank space. */
 export const ROW_WINDOW_OVERSCAN = 8
 
 export interface RowRange {
@@ -8,7 +7,6 @@ export interface RowRange {
   to: number
 }
 
-/** The row slice that covers a fixed-row-height scroll viewport. Pure, so the card tests pin the geometry. */
 export function rowWindowFor(
   scrollTop: number,
   viewport: number,
@@ -22,11 +20,8 @@ export function rowWindowFor(
   return { from, to: Math.max(from, to) }
 }
 
-/**
- * Render only the rows a fixed-row-height scroller shows: the list keeps its full height through caller-owned
- * spacers, every readout stays in the model, and the window only shifts when a scroll crosses a row boundary.
- * Disabled (or unmeasured) lists render in full, so tests and narrow wrapped layouts never change.
- */
+/** Renders only the rows a fixed-row-height scroller shows: full height via caller-owned spacers, every readout in the
+ * model, and the window shifts only across row boundaries. Disabled/unmeasured lists render in full. */
 export function useRowWindow(
   ref: RefObject<HTMLElement | null>,
   count: number,

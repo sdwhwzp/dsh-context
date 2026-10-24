@@ -1,8 +1,5 @@
 .lc-chartrow { display: flex; gap: 6px; align-items: stretch; }
-/* The trend card's reserved body, standing in for the plot + the detail panel while no step is selected. Every box
-   wears the panel's OWN class, so both states are measured by the same rules and cannot drift apart; only the boxes
-   that would otherwise collapse to nothing carry a pinned height. The pending/empty note sits in the plot lane, so
-   the first step's arrival fills this card instead of pushing every card below it down the page. */
+/* The trend card's reserved body stands in for the plot + detail panel while no step is selected; every box wears the panel's OWN class so both states measure alike, and the pending note sits in the plot lane so the first step fills this card. */
 .lc-trend-lane { display: flex; flex-direction: column; }
 /* Mirrors `.lc-chart-scroll`'s height: the 130px plot + the 14px turn strip + the 4px gap + the 8px scrollbar gutter. */
 .lc-trend-lane > .lc-trend-plot { display: flex; align-items: center; justify-content: center; height: 156px; box-sizing: border-box; }
@@ -10,7 +7,6 @@
 .lc-trend-lane .lc-stacked { height: 10px; margin: 3px 0; }
 .lc-axis { position: relative; width: 40px; height: 150px; padding-top: 18px; box-sizing: border-box; color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .lc-axis span { position: absolute; right: 0; line-height: 1; }
-/* Anchored to the column's LEFT edge so the duration labels stream rightward away from the plot. */
 .lc-axis-r { width: 34px; flex: none; }
 .lc-axis-r span { left: 0; right: auto; }
 .lc-axis-top { top: 13px; }
@@ -56,14 +52,14 @@
 .lc-bar-stack > div:first-child { border-radius: 0 0 2px 2px; }
 .lc-bar-stack > div:last-child { border-radius: 2px 2px 0 0; }
 .lc-bar-stack > div:only-child { border-radius: 2px; }
-/* Delta mode: diverging stacks anchored at the zero line, growth up and shrinkage down; only each arm's outer end rounds, so the zero-line joins stay crisp. */
 .lc-bar-up, .lc-bar-down { position: absolute; left: 0; width: 100%; display: flex; }
 .lc-bar-up { flex-direction: column-reverse; }
 .lc-bar-down { flex-direction: column; }
 .lc-bar-up > div, .lc-bar-down > div { width: 100%; }
 .lc-bar-up > div:last-child { border-radius: 2px 2px 0 0; }
 .lc-bar-down > div:last-child { border-radius: 0 0 2px 2px; }
-/* The container carries the hovered category key in `data-catdim`, so CSS alone lights that key in every bar and the memoized bars never re-render on a cross-card hover or the overview's local band trace. Opacity only: a `filter` forced per-segment layerization on every toggle (issue #116). The re-light list must track the Category vocabulary — a bucket missing here dims every bar with nothing lit (issue #66). */
+/* `data-catdim` lets CSS alone light the hovered category in every bar, so the memoized bars never re-render on a
+   cross-card hover; opacity only, since a `filter` forced per-segment layerization. The re-light list must track the Category vocabulary — a missing bucket dims every bar. */
 .lc-cat-seg { transition: opacity var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-chart[data-catdim] .lc-cat-seg { opacity: 0.35; }
 .lc-chart[data-catdim='system'] .lc-cat-seg[data-cat='system'],
@@ -86,40 +82,33 @@
 /* The overview's ribbon shares this svg, so the turn dim hits the curve's own strokes — an svg-level dim would wash out every band. */
 .lc-chart-dim .lc-duration polyline, .lc-chart-dim .lc-duration circle { opacity: 0.35; }
 .lc-bar-marker { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); z-index: 2; font-size: 11px; color: var(--dsw-alias-state-warn-primary); }
-/* Record flags: a 1px pole into the chart's top padding band with the record's number boxed at its top, extending LEFT so it never adds scrollable overflow — the bar chart plants one on every 5th step bar, the overview on its quartile records, labeled by step or turn. Decorative and pointer-transparent, and outside the animated stacks so the entrance rise leaves it standing. */
+/* Record flags: a 1px pole into the chart's top padding band with the number boxed at its top, extending LEFT so it
+   never adds scrollable overflow. Decorative and pointer-transparent, outside the animated stacks so the rise leaves it standing. */
 .lc-trend-flag { position: absolute; right: -1px; top: -17px; bottom: 0; z-index: 2; width: 1px; background: color-mix(in srgb, var(--color-neutral-500) 45%, transparent); pointer-events: none; }
 .lc-trend-flag-label { position: absolute; top: 0; right: 0; box-sizing: border-box; padding: 1px 3px; border: 1px solid color-mix(in srgb, var(--color-neutral-500) 45%, transparent); border-radius: 3px; background: var(--dsw-alias-bg-layer-1); font-size: 9px; line-height: 1; font-weight: 600; color: var(--dsw-alias-label-secondary); white-space: nowrap; }
 /* NEUTRAL zebra fills (inline, see TURN_FILLS) — never the category palette, which would read as a detached bottom segment of the bars. */
 .lc-turns { display: flex; gap: 2px; overflow: hidden; margin-top: 4px; padding: 0 2px; box-sizing: border-box; width: max-content; min-width: 100%; }
 .lc-turn { flex: none; box-sizing: border-box; text-align: center; font-size: 10px; line-height: 14px; font-weight: 600; color: var(--dsw-alias-label-secondary); border-radius: 3px; height: 14px; white-space: nowrap; cursor: pointer; transition: filter var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out), opacity var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-turn-on { filter: brightness(1.35); color: var(--dsw-alias-label-primary); }
-/* Labels render at natural width, centered over their block, so a 2-digit "12" over a 14px turn overflows instead of ellipsizing away. trendChart.tsx sets one shrunk font size when the tightest adjacent pair would collide at the 10px base (mirrored as LABEL_FONT). */
+/* Labels render at natural width, centered over their block, so a 2-digit "12" over a 14px turn overflows instead of
+   ellipsizing away; trendChart.tsx shrinks the font when the tightest adjacent pair would collide (mirrored as LABEL_FONT). */
 .lc-turn-label { display: inline-block; }
 
-/* ---- Overview (总览) face: the whole retained log as one continuous stacked ribbon, edge to edge, no scroll. ---- */
 /* A non-scrolling scroller keeps the bars chart's box (the 8px bottom gutter pin included), so both faces measure
-   the same height and the card never resizes on the toggle. `scrollbar-gutter: auto` — `stable` on a hidden
-   scroller reserves a phantom gutter in some engines. */
+   the same height and the card never resizes on the toggle; `scrollbar-gutter: auto`, since `stable` on a hidden scroller reserves a phantom gutter. */
 .lc-chart-scroll.lc-chart-fit { overflow-x: hidden; scrollbar-gutter: auto; }
 .lc-chart-fit .lc-chart { width: 100%; min-width: 0; padding-left: 0; padding-right: 0; cursor: pointer; }
 /* One stretched svg carries the stacked bands AND the duration curve: x in viewBox units (one per record) stretched
-   edge to edge, y in px (viewBox height 112 = rendered height), so vertical figures stay px-exact. The rise opens
-   from the baseline as ONE composited layer (the per-band stagger's sweep idiom). Declared after `.lc-duration` at
-   equal specificity so the plot's left/right edges win the position pair. `width: 100%` — a viewBox svg is a
-   replaced element, so an auto absolute width collapses to the intrinsic ratio's width (the viewBox unit count) and
-   the ribbon never fills the pane. */
+   edge to edge, y in px (viewBox 112 = rendered height). Declared after `.lc-duration` at equal specificity so the plot's edges win the position pair; `width: 100%` because a viewBox svg is a replaced element whose auto absolute width collapses to the intrinsic ratio. */
 .lc-fit-svg { top: 18px; left: 0; width: 100%; height: 112px; transform-origin: 50% 100%; }
 .lc-fit-svg polygon { stroke-width: 1; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .lc-fit-svg polyline, .lc-fit-svg circle { vector-effect: non-scaling-stroke; }
-/* Marker/flag layer mirroring the ribbon's box: the ✂ markers keep their pointer hover (the title), the poles
-   stay decorative. */
+/* Marker/flag layer mirroring the ribbon's box: the ✂ markers keep their pointer hover, the poles stay decorative. */
 .lc-fit-layer { position: absolute; top: 18px; left: 0; right: 0; height: 112px; pointer-events: none; }
 .lc-chart-fit .lc-bar-marker { pointer-events: auto; }
-/* The hover/selection rules: brand for the picked record, label-primary for the pinned one. */
-.lc-fit-cursor { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--dsw-alias-brand-primary); pointer-events: none; }
+/* Brand for the picked record, label-primary for the pinned one; z-index 2 clears the ribbon svg's own z-index 1 (`.lc-duration`). */
+.lc-fit-cursor { position: absolute; top: 0; bottom: 0; z-index: 2; width: 0; border-left: 1px solid var(--dsw-alias-brand-primary); pointer-events: none; }
 .lc-fit-pin { border-left-color: var(--dsw-alias-label-primary); }
-/* Hover-dim wash over the plot's other turns (the bars' opacity dim, applied as a cover). */
 .lc-fit-wash { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 65%, transparent); pointer-events: none; }
-/* Proportional zebra blocks: touching (gap 0), grow ∝ their record span, square corners so fills join cleanly. */
 .lc-chart-fit .lc-turns { width: 100%; min-width: 0; gap: 0; padding: 0; }
 .lc-chart-fit .lc-turn { flex: none; border-radius: 0; }

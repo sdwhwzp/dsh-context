@@ -1,8 +1,3 @@
-// TaskBoard — the family work board: the team's shared task DAG (readiness ordering, inline
-// dependency chips with the blocker's own dot and its whole prerequisite chain on focus) beside
-// each subagent's delegation read as a task, all grouped under their owners (roster order, spawn
-// order, unowned last) with the toolbar's search and status filter steering the board, owner
-// picks narrowing it, the completion bar, and the empty states.
 
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
@@ -18,7 +13,6 @@ import { click, hover, makeKit, mount, query, queryAll, text, unhover } from '..
 const kit = makeKit()
 const rich = makeRichText(kit)
 
-/** React's controlled input needs the native setter for the change to register. */
 async function typeIn(input: HTMLInputElement, value: string): Promise<void> {
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value)
@@ -55,7 +49,6 @@ function nodeOf(id: string, over: Partial<AgentNode> = {}): AgentNode {
 const FOREST: AgentForest = {
   nodes: [
     nodeOf('root', { isCurrent: true, depth: 0 }),
-    // A running delegation with live figures; a settled one; an idler that never ran.
     nodeOf('s1', { label: 'scout the edges', running: true, model: 'deepseek-flash', head: { tokens: 800, window: 1000, pct: 80, parts: [] }, requests: 5, durationMs: 42000, updatedAt: 8 }),
     nodeOf('s2', { label: 'archive the wins', completed: true, head: { tokens: 200, window: 1000, pct: 20, parts: [] }, requests: 1, durationMs: 9000, updatedAt: 6 }),
     nodeOf('s3', { label: 'idle helper', updatedAt: 4 }),
@@ -88,13 +81,10 @@ describe('TaskBoard — the owner-grouped board', () => {
   test('groups under each owner: roster order, strays, delegations in spawn order, unowned last', async () => {
     const m = await mount(h(TaskBoard, propsOf()))
     const heads = queryAll(m.container, '.lc-tasks-group-head')
-    // worker-bee owns task-1; ghost served no roster row and keeps its own band; the rest is unowned.
-    // Delegations board headless — the single row IS the agent.
     assert.deepEqual(
       heads.map(el => text(el)),
       ['worker-bee1', 'ghost1', `${DICT_EN['fleet.taskUnowned']}3`],
     )
-    // The band heads wear the members board's hue icon (a stray none); delegation rows carry their own.
     assert.equal(queryAll(m.container, '.lc-tasks-group-head .lc-member-icon').length, 1)
     assert.equal(queryAll(m.container, '.lc-team-task-head .lc-member-icon').length, 3)
     await m.unmount()
@@ -104,10 +94,9 @@ describe('TaskBoard — the owner-grouped board', () => {
     const m = await mount(h(TaskBoard, propsOf()))
     const scout = query(m.container, '[data-task="s1"]')
     assert.ok(text(scout).includes('in progress'))
-    assert.ok(text(scout).includes('800 · 42s · 5 steps'))
+    assert.ok(text(scout).includes('42s · 5 steps'))
     assert.ok(query(scout, '.lc-team-task-subject').className.includes('lc-team-task-subject-clamp'))
     assert.ok(query(scout, '.lc-team-task-head .lc-member-icon') !== null, 'the row wears the agent hue')
-    // The settled delegation reads done; the idler reads pending without a meta line.
     assert.ok(text(query(m.container, '[data-task="s2"]')).includes('completed'))
     const idler = query(m.container, '[data-task="s3"]')
     assert.ok(text(idler).includes('pending'))
@@ -122,10 +111,8 @@ describe('TaskBoard — the owner-grouped board', () => {
       ['s3', { detail: null }],
     ])
     const m = await mount(h(TaskBoard, propsOf({ detailOf: id => details.get(id) })))
-    // Closed: the briefing clamps into the row, no boxes.
     assert.equal(queryAll(m.container, '[data-task="s1"] .lc-team-task-desc').length, 1)
     assert.equal(queryAll(m.container, '[data-task="s1"] .lc-ts-card').length, 0)
-    // Opened: the boxed sections — brief, agent, final reply.
     await click(query(m.container, '[data-task="s1"]'))
     const boxes = queryAll(m.container, '[data-task="s1"] .lc-ts-card')
     assert.equal(boxes.length, 3)
@@ -133,15 +120,12 @@ describe('TaskBoard — the owner-grouped board', () => {
     assert.ok(text(boxes[1]).includes('scout the edges'))
     assert.ok(text(boxes[2]).includes('Edges mapped'))
     assert.ok(text(boxes[2]).includes(DICT_EN['fleet.tasks.reply']))
-    // The head's switch flips the body to the raw source and back.
     await click(query(boxes[0], '.lc-gran-btn'))
     assert.ok(query(boxes[0], '.lc-ts-lines') !== null)
     await click(queryAll(boxes[0], '.lc-gran-btn')[1])
     assert.equal(queryAll(boxes[0], '.lc-ts-lines').length, 0)
-    // A second pick folds the card back.
     await click(query(m.container, '[data-task="s1"]'))
     assert.equal(queryAll(m.container, '[data-task="s1"] .lc-ts-card').length, 0)
-    // An empty briefing and a settled-empty detail board no description box.
     await click(query(m.container, '[data-task="s2"]'))
     assert.equal(queryAll(m.container, '[data-task="s2"] .lc-team-task-desc').length, 0)
     assert.equal(queryAll(m.container, '[data-task="s2"] .lc-ts-card').length, 1, 'the agent box still boards')
@@ -154,7 +138,6 @@ describe('TaskBoard — the owner-grouped board', () => {
     const pins = new Array<string | null>()
     const hovers = new Array<string | null>()
     const focuses = new Array<string | null>()
-    // The owner's landed report-back rides the opened team card.
     const details = new Map<string, { detail: FleetDetail | null }>([
       ['w1', { detail: { lastReply: { time: 1_700_000_000_000, text: 'Schema parser landed.' }, messages: [], truncated: false } }],
     ])
@@ -169,23 +152,19 @@ describe('TaskBoard — the owner-grouped board', () => {
     await click(row)
     await unhover(row)
     assert.deepEqual([...hovers], ['w1', null])
-    // The pick unfolded the boxed sections; a row pick never pins — the owner chip does.
     assert.ok(query(row, '.lc-ts-card') !== null)
     assert.deepEqual([...pins], [])
     assert.ok(text(row).includes('Schema parser landed.'), 'the owner’s final report-back boards')
     await click(query(row, '.lc-team-task-box-agent .lc-team-task-owner'))
     assert.deepEqual([...pins], ['w1'])
-    // A second pick folds the card back.
     await click(row)
     assert.equal(queryAll(row, '.lc-ts-card').length, 0)
-    // The keyboard unfolds too: Enter opens, an unrelated key is inert.
     await act(async () => { row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
     assert.ok(query(row, '.lc-ts-card') !== null)
     await act(async () => { row.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true })) })
     assert.ok(query(row, '.lc-ts-card') !== null)
     await act(async () => { row.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })) })
     assert.equal(queryAll(row, '.lc-ts-card').length, 0)
-    // Enter on a nested control bubbles, but never folds the card out from under it.
     await click(row)
     await act(async () => {
       query(row, '.lc-team-task-box-agent .lc-team-task-owner')
@@ -194,13 +173,11 @@ describe('TaskBoard — the owner-grouped board', () => {
     assert.ok(query(row, '.lc-ts-card') !== null)
     assert.deepEqual([...pins], ['w1'])
 
-    // A pick landing on a dep chip flashes the blocker instead of unfolding.
     const blocked = query(m.container, '[data-task="task-2"]')
     await click(query(blocked, '.lc-team-task-dep'))
     assert.deepEqual([...focuses], ['task-1'])
     assert.equal(queryAll(blocked, '.lc-ts-card').length, 0, 'the dep chip never unfolds')
 
-    // An unowned task's agent box is absent — nothing to pin.
     const ghost = query(m.container, '[data-task="task-4"]')
     await hover(ghost)
     await click(ghost)
@@ -209,7 +186,6 @@ describe('TaskBoard — the owner-grouped board', () => {
     assert.equal(queryAll(ghost, '.lc-ts-card').length, 0, 'no agent box without an owner')
     assert.deepEqual([...pins], ['w1'])
 
-    // A delegation row unfolds with the agent box pinning the subagent itself.
     const scout = query(m.container, '[data-task="s1"]')
     await hover(scout)
     await click(scout)
@@ -226,19 +202,16 @@ describe('TaskBoard — the owner-grouped board', () => {
     assert.ok(text(query(m.container, '.lc-tasks-filter')).includes('worker-bee'))
     await m.unmount()
 
-    // A subagent pick narrows to its own delegation; the chip names the label, not the id.
     const picked = await mount(h(TaskBoard, propsOf({ ownerFilter: 's1' })))
     assert.deepEqual(queryAll(picked.container, '.lc-team-task').length, 1)
     assert.ok(text(query(picked.container, '.lc-tasks-filter')).includes('scout the edges'))
     await picked.unmount()
 
-    // A pick the board cannot resolve chips its raw key over an empty board.
     const ghostly = await mount(h(TaskBoard, propsOf({ ownerFilter: 'zzz-ghost' })))
     assert.equal(queryAll(ghostly.container, '.lc-team-task').length, 0)
     assert.ok(text(query(ghostly.container, '.lc-tasks-filter')).includes('zzz-ghost'))
     await ghostly.unmount()
 
-    // The pick chip clears the narrowing.
     const filters = new Array<string | null>()
     const clearing = await mount(h(TaskBoard, propsOf({ ownerFilter: 's1', onOwnerFilter: key => { filters.push(key) } })))
     await click(query(clearing.container, '.lc-tasks-filter'))
@@ -258,7 +231,6 @@ describe('TaskBoard — the owner-grouped board', () => {
   test('the owner chip pins the member; an owner off the roster is inert', async () => {
     const pins = new Array<string | null>()
     const m = await mount(h(TaskBoard, propsOf({ onPinMember: id => { pins.push(id) } })))
-    // Group-head buttons first (worker-bee, then the stray ghost), then the rows' own chips.
     const owners = queryAll(m.container, '.lc-team-task-owner')
     await click(owners[0])
     await click(owners[1])
@@ -272,16 +244,13 @@ describe('TaskBoard — the owner-grouped board', () => {
 describe('TaskBoard — the team task DAG', () => {
   test('the pending pool reads ready-first; the dependency line carries the blocker’s own dot', async () => {
     const m = await mount(h(TaskBoard, propsOf({ ownerFilter: null })))
-    // Within a group: in-flight first, then the pending pool ready-first, then done.
     const worker = queryAll(m.container, '.lc-tasks-group')[0]
     assert.deepEqual(queryAll(worker, '.lc-team-task-subject').map(el => el.textContent), ['schema parsing'])
     const deps = queryAll(m.container, '.lc-team-task-deps')
     assert.equal(deps.length, 3)
     assert.ok(text(deps[0]).includes('task-1'))
     assert.ok(deps[0].querySelector('span') !== null, 'the blocker dot renders')
-    // The unknown blocker chips no dot.
     assert.equal(deps[2].querySelectorAll('span').length, 0)
-    // Status badges, scopes, warning, id.
     assert.ok(text(m.container).includes('ready'))
     assert.ok(text(m.container).includes('blocked'))
     assert.ok(text(m.container).includes('Write scopes: src/'))
@@ -297,34 +266,28 @@ describe('TaskBoard — the team task DAG', () => {
     assert.deepEqual([...focuses], ['task-1'])
     await m.unmount()
 
-    // Focused on task-3: its chain (task-2, then task-1 through it) lights along.
     const focused = await mount(h(TaskBoard, propsOf({ focusTaskId: 'task-3', onFocusTask: id => { focuses.push(id) } })))
     assert.ok(query(focused.container, '[data-task="task-3"]').className.includes('lc-team-task-focus'))
     assert.ok(query(focused.container, '[data-task="task-2"]').className.includes('lc-team-task-chain'))
     assert.ok(query(focused.container, '[data-task="task-1"]').className.includes('lc-team-task-chain'))
     assert.ok(!query(focused.container, '[data-task="s1"]').className.includes('lc-team-task-chain'))
-    // The unknown blocker (task-99) has no row to light.
     await focused.unmount()
 
-    // Focused on task-2: clicking task-3's blocker chip (task-2) toggles the ring off.
     const toggle = await mount(h(TaskBoard, propsOf({ focusTaskId: 'task-2', onFocusTask: id => { focuses.push(id) } })))
     assert.ok(query(toggle.container, '[data-task="task-1"]').className.includes('lc-team-task-chain'))
     await click(query(toggle.container, '[data-task="task-3"] .lc-team-task-dep'))
     assert.deepEqual([...focuses].slice(-1), [null])
     await toggle.unmount()
 
-    // A focused leaf with no blockers lights no chain.
     const leaf = await mount(h(TaskBoard, propsOf({ focusTaskId: 'task-1' })))
     assert.equal(queryAll(leaf.container, '.lc-team-task-chain').length, 0)
     await leaf.unmount()
 
-    // A focused task whose blocker the board does not serve walks the chain without it.
     const orphan = await mount(h(TaskBoard, propsOf({ focusTaskId: 'task-5' })))
     assert.ok(query(orphan.container, '[data-task="task-5"]').className.includes('lc-team-task-focus'))
     assert.equal(queryAll(orphan.container, '.lc-team-task-chain').length, 0)
     await orphan.unmount()
 
-    // A focus landing on a delegation row rings it too.
     const agentFocus = await mount(h(TaskBoard, propsOf({ focusTaskId: 's1' })))
     assert.ok(query(agentFocus.container, '[data-task="s1"]').className.includes('lc-team-task-focus'))
     await agentFocus.unmount()
@@ -332,7 +295,6 @@ describe('TaskBoard — the team task DAG', () => {
 
   test('the team description clamps into the row; the unowned badge stands in', async () => {
     const m = await mount(h(TaskBoard, propsOf()))
-    // Closed, the description clamps; opening replaces it with the boxed sections.
     assert.equal(queryAll(m.container, '[data-task="task-1"] .lc-team-task-desc').length, 1)
     assert.equal(queryAll(m.container, '[data-task="task-1"] .lc-ts-card').length, 0)
     await click(query(m.container, '[data-task="task-1"]'))
@@ -355,10 +317,8 @@ describe("TaskBoard — the opened card's full read", () => {
     const row = query(m.container, '[data-task="s2"]')
     await click(row)
     assert.deepEqual([...opened], ['s2'])
-    // A second pick folds the card back without re-asking.
     await click(row)
     assert.deepEqual([...opened], ['s2'])
-    // An unowned team row has no report-back to read.
     await click(query(m.container, '[data-task="task-4"]'))
     assert.deepEqual([...opened], ['s2'])
     await m.unmount()
@@ -367,7 +327,6 @@ describe("TaskBoard — the opened card's full read", () => {
   test('the opened card renders the excerpt first, then the full report-back in place', async () => {
     const excerpt = { detail: { lastReply: { time: 1_700_000_000_000, text: '13 of 15 cases…' }, messages: [], truncated: true } }
     const fullDetail = { lastReply: { time: 1_700_000_000_000, text: '13 of 15 cases, all four quadrants covered.' }, messages: [], truncated: false }
-    // Pending: the excerpt stands under the loading note.
     const pending = await mount(h(TaskBoard, propsOf({
       detailOf: () => excerpt,
       fullOf: () => ({ detail: null, pending: true }),
@@ -379,7 +338,6 @@ describe("TaskBoard — the opened card's full read", () => {
     assert.ok(text(card).includes(DICT_EN['fleet.tasks.replyFull']))
     await pending.unmount()
 
-    // Landed: the full text replaces the excerpt and the note yields to the clock.
     const landed = await mount(h(TaskBoard, propsOf({
       detailOf: () => excerpt,
       fullOf: () => ({ detail: fullDetail, pending: false }),
@@ -406,7 +364,6 @@ describe("TaskBoard — the opened card's full read", () => {
     assert.ok(text(card).includes(DICT_EN['fleet.tasks.replyExcerpt']))
     await m.unmount()
 
-    // A short, uncut excerpt with no full read yet shows no state note at all.
     const small = { detail: { lastReply: { time: 1_700_000_000_000, text: 'done' }, messages: [], truncated: false } }
     const plain = await mount(h(TaskBoard, propsOf({ detailOf: () => small, fullOf: () => ({ detail: null, pending: false }) })))
     await click(query(plain.container, '[data-task="s2"]'))
@@ -418,7 +375,6 @@ describe("TaskBoard — the opened card's full read", () => {
   test('the delegation brief upgrades to the full read once it lands', async () => {
     const clipped = { detail: { initialPrompt: 'brief within 1600…', lastReply: { time: 1_700_000_000_000, text: 'ok' }, messages: [], truncated: true } }
     const fullDetail = { initialPrompt: 'the whole briefing prompt, unwound.', messages: [], truncated: false }
-    // Pending: the opened brief keeps the excerpt prompt.
     const waits = await mount(h(TaskBoard, propsOf({
       detailOf: () => clipped,
       fullOf: () => ({ detail: null, pending: true }),
@@ -428,7 +384,6 @@ describe("TaskBoard — the opened card's full read", () => {
     assert.ok(text(row).includes('brief within 1600…'), 'the opened brief keeps the excerpt while waiting')
     await waits.unmount()
 
-    // Landed: the opened brief shows the whole prompt; a folded row still clamps the excerpt.
     const landed = await mount(h(TaskBoard, propsOf({
       detailOf: () => clipped,
       fullOf: () => ({ detail: fullDetail, pending: false }),
@@ -448,16 +403,12 @@ describe('TaskBoard — the toolbar and guidance states', () => {
   test('the status filter counts and narrows across both kinds', async () => {
     const m = await mount(h(TaskBoard, propsOf()))
     const filters = queryAll(m.container, '.lc-fleet-filters .lc-gran-btn')
-    // All 8 rows; in progress 2 (task-2, s1); pending 4; done 2.
     assert.ok(text(filters[0]).includes('8'))
     await click(filters[1])
-    // Document order: agent groups board ahead of the unowned pool.
     assert.deepEqual(queryAll(m.container, '.lc-team-task-subject').map(el => el.textContent), ['scout the edges', 'wire the view'])
     await click(filters[2])
-    // The ready 'docs' rides the stray band the roster never served.
     assert.deepEqual(queryAll(m.container, '.lc-team-task-subject').map(el => el.textContent), ['docs', 'idle helper', 'polish', 'orphan dep'])
     await click(filters[3])
-    // Roster groups board first: task-1 (worker-bee) ahead of the settled delegation.
     assert.deepEqual(queryAll(m.container, '.lc-team-task-subject').map(el => el.textContent), ['schema parsing', 'archive the wins'])
     await m.unmount()
   })

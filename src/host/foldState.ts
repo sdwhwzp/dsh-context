@@ -1,15 +1,17 @@
-/**
- * The timeline fold's persisted state shape and the event envelope it consumes, plus the state's
- * construction and retention bounds — the plain JSON the projection cache checkpoints. `fold.ts`
- * owns the reducer that writes it.
- */
+/** The timeline fold's persisted state shape, event envelope, construction and retention bounds — the plain JSON the projection cache
+ * checkpoints. `fold.ts` owns the reducer that writes it. */
 
-import type { Category, ContextEventRecord, FileOpRecord, RequestRecord, SessionCostUsage, SurfaceNode, SystemPromptNode, TimingSpan, TimingTotals } from '../shared/types'
+import type { Category, CommandRecord, CommandStats, ContextEventRecord, FileOpRecord, RequestRecord, SessionCostUsage, SurfaceNode, SystemPromptNode, TimingSpan, TimingTotals } from '../shared/types'
 import type { FoldBounds } from './config'
 
-/** The runtime event envelope this fold consumes. The core `SessionEvent` union carries only core event types;
- * plugin-merged vocabulary (the `compaction/*` family, declared by `dsh-compaction`) is absent, and the fold must
- * not depend on those packages — so it widens to this structural envelope. */
+/** The state's command record: the wire record plus the callId the fold pairs result/job events on. Never served —
+ * `foldWire` strips it (optional precisely so the strip is a plain `delete`). */
+export interface CommandStateRecord extends CommandRecord {
+  call?: string
+}
+
+/** The core `SessionEvent` union carries only core types; plugin-merged vocabulary (the `compaction/*` family, declared by
+ * `dsh-compaction`) is absent, and the fold must not depend on those packages — so it widens here. */
 export interface TimelineEvent {
   type: string
   seq: number
@@ -23,90 +25,83 @@ export interface TimelineState {
   surface: SurfaceNode[]
   sums: Record<Category, number>
   systemTokens: number
-  /** The live system-prompt nodes, oldest first. `systemTokens` is the LAST entry with tokens > 0 (the harness's
-   * own "last nonempty surviving system" rule), so an empty dormant node keeps its position without clearing the
-   * prompt. Bounded by SYSTEM_NODES_MAX. Absent on rows folded before this field existed; the client then falls
-   * back to the header epoch's own envelope figure. */
+  /** The live system-prompt nodes, oldest first; `systemTokens` is the LAST nonempty one (the harness rule), so an empty dormant node
+   * keeps its position. Absent rows fall back to the header epoch's envelope figure. */
   systems?: SystemPromptNode[]
   toolsTokens: number
-  /** The projection cache requires plain JSON: a property whose value is `undefined` makes the whole checkpoint
-   * unserializable, failing EVERY cache write for the session — including the `title` row that powers the session
-   * list after a restart. Optional fields therefore stay absent until a value is known, never `undefined`-valued. */
+  /** The projection cache requires plain JSON: an `undefined`-valued property fails EVERY cache write for the session, so optional fields
+   * stay absent until a value is known. */
   model?: string
   provider?: string
+  /** Last-wins: a header without an effort clears it. */
+  reasoningEffort?: string
   lastModel?: string
   contextWindow?: number
-  /** The newest `request/header` envelope's routed output cap (dsh materializes the adapter default
-   * into it). Last-wins: a header omitting the cap clears it. */
+  /** The newest `request/header` envelope's routed output cap (dsh materializes the adapter default into it). Last-wins: a header
+   * omitting the cap clears it. */
   maxOutputTokens?: number
   requests: RequestRecord[]
-  /** The number of turn runs in `requests` (a run = consecutive records sharing one `turn`). Maintained
-   * incrementally at the single append site and recomputed when a trim replaces the array, so the retention
-   * trim's cap check stays O(1) per event. Absent on rows folded before the field existed. */
+  /** Turn runs in `requests` (consecutive records sharing one `turn`), maintained at the single append site and recomputed on trim, so
+   * the cap check stays O(1); absent on older rows. */
   turnRuns?: number
   events: ContextEventRecord[]
-  /** Recently removed surface nodes (stamped COPIES carrying `gone`), in removal order. Bounded two ways in
-   * trimState: capped to `maxArchiveNodes`, and pruned to removals after the oldest retained request. */
+  /** Removed surface nodes as stamped COPIES carrying `gone`, in removal order; bounded to `maxArchiveNodes` and pruned to removals after
+   * the oldest retained request. */
   archived: SurfaceNode[]
-  /** Cumulative billed-token totals per (provider, model), split into pricing periods for DeepSeek. Never trimmed, so
-   * the estimate covers the COMPLETE session log. */
+  /** Cumulative billed-token totals per (provider, model, period); never trimmed, so the estimate covers the COMPLETE log. */
   cost?: SessionCostUsage
-  /** Whole-session human-input tally (see Snapshot.humanInputs); never trimmed, like `cost`. */
   humanInputs?: number
-  /** Whole-session answers tally (see Snapshot.answers); never trimmed, like `humanInputs`. */
   answers?: number
-  /** The user's newest own message as a bounded one-line preview. Last-wins: a text-less input (images only) keeps the previous line. */
+  /** The user's newest own message as a bounded one-line preview. Last-wins: a text-less input keeps the previous line. */
   lastUser?: string
   archiveFloor?: number
-  /** Bumped by every fold that mutates the request records, context events, live surface, or removed-node
-   * archive; the slim wire head carries it so an open tab knows its fetched detail went stale. */
+  /** Bumped when a fold mutates the served detail (requests, events, live surface, archive); the slim head carries it. */
   detailRev?: number
-  /** Whole-session timing totals (see TimingTotals), running sums over the COMPLETE session log like `cost`. */
+  /** Whole-session timing totals, running sums over the COMPLETE log like `cost`. */
   timing?: TimingTotals
-  /** The open step's start instant, armed by `step/start` and consumed by the `assistant/message` (TTFT/generation
-   * split) and `step/end` (wall time) that follow. One slot, not a map: steps are sequential in the log, so the
-   * newest `step/start` is the one those events close — a hostile interleaved log degrades to skipped durations. */
+  /** The open step's start instant, armed by `step/start` and consumed by the following `assistant/message` and `step/end`; one slot, not
+   * a map, so a hostile interleaved log degrades to skipped durations. */
   stepStart?: {
     time: number
     firstToken?: number
   }
-  /** The open step's CLOSED user-wait intervals (real log instants), pushed replace-style as each wait settles: an
-   * approval decision, or an `ask_user_question` call's whole tool window. `step/end` subtracts their clamped
-   * union from the step window to price the request's `activeMs`, then deletes the slot. */
+  /** The open step's CLOSED user-wait intervals; `step/end` subtracts their clamped union from the step window to price `activeMs`, then
+   * deletes the slot. */
   stepWaits?: { start: number; end: number }[]
-  /** The open step's PENDING approval waits (request id → its `approval/asked` instant), disarmed by the matching
-   * `approval/decided`. A crash mid-decision leaves the pair dangling, so `step/end` closes the survivors at its
-   * own instant. Deleted at `step/start` (a superseded step's leftovers) and `step/end`. */
+  /** The open step's PENDING approval waits (request id → `approval/asked` instant); a crash mid-decision leaves the pair dangling, so
+   * `step/end` closes the survivors at its own instant. */
   stepApprovals?: Record<string, number>
-  /** The seq of the request record committed by the open step's `assistant/message` — the back-pointer `step/end`
-   * stamps `activeMs` onto. Nothing pushes between a step's message and its end, so the record is the requests
-   * tail and the stamp is an O(1) tail write guarded by this seq. */
+  /** The seq of the request record the open step's `assistant/message` committed — the back-pointer `step/end` stamps `activeMs` onto;
+   * nothing pushes between a step's message and its end, so the stamp is an O(1) tail write. */
   stepRequestSeq?: number
-  /** The timing strip's painted spans: every completed step's time slices in log order, stamped with their REAL
-   * instants — the TTFT wait, the decode blocks in stream order, the tool-run windows, and the in-step residue.
-   * Idle time BETWEEN steps carries no span. Bounded by TIMING_SPANS_MAX (newest tail kept). */
+  /** The timing strip's painted spans in log order, stamped with their REAL instants; idle time BETWEEN steps carries no span. Bounded by
+   * TIMING_SPANS_MAX (newest tail kept). */
   spans: TimingSpan[]
-  /** The open step's accumulated painted spans; `step/end` clamps them into the step window, de-overlaps
-   * first-wins (parallel runs paint their union), fills the holes with the residue kind, and flushes the tiling
-   * into `spans`. Deleted at the flush (the plain-JSON precondition). */
+  /** The open step's accumulated spans; `step/end` clamps them into the step window, de-overlaps first-wins (parallel runs paint their
+   * union), fills holes with the residue kind, then deletes the slot (plain-JSON precondition). */
   stepSpans?: TimingSpan[]
-  /** Tool callId → the call's name, start instant, and raw arguments, armed by `tool/call` and DELETED when its
-   * `tool/result` folds in — the map stays at pending-call size instead of growing for the session's lifetime. */
+  /** Tool callId → name, start instant and raw arguments, armed by `tool/call` and DELETED when its `tool/result` folds in — the map
+   * stays at pending-call size instead of growing for the session's lifetime. */
   callNames: Record<string, { name: string; start: number; argsRaw?: string }>
-  /** Seq list of the surface nodes the next replacement will shadow, armed by the metering event
-   * (`compaction/summary` | `compaction/prune`) and consumed by the replacement that must follow it
-   * synchronously. The producer's shadow price covers exactly these seqs, which can differ from the
-   * replacement's declared range (pruned replacement nodes keep their own seqs, beyond the range end). */
+  /** Seq list the next replacement shadows, armed by the metering event and consumed by the replacement that must follow synchronously;
+   * it can differ from the replacement's declared range (pruned nodes keep their own seqs). */
   pendingShadowedSeqs?: number[]
-  /** The seq of the `compaction/prune` event that armed `pendingShadowedSeqs`. The shadowed path rewrites that
-   * event's `tokens` from the gross shadow price to the NET freed amount, so the row matches the drop the trend chart shows. */
+  /** The metering event whose `tokens` the shadowed path rewrites from gross shadow price to the NET freed amount. */
   pendingShadowEventSeq?: number
-  /** The fold-derived file-operation log: one record per executed file op, bounded by `maxFileOps`; the trim stamps `fileOpsFloor`. */
   fileOps: FileOpRecord[]
   /** The newest dropped op's seq (the card's coverage floor for the served op log). */
   fileOpsFloor?: number
-  /** Nested Code-Mode ops buffered by their top run_code call id until the parent's result folds (the dispatch
-   * events land BEFORE it). Bounded by PENDING_CODE_OPS_MAX, so a hostile log that never settles a run_code cannot grow it. */
+  /** The command log, in call order (creation at `tool/call`, settle in place at `tool/result`/`job/settled`). */
+  commands: CommandStateRecord[]
+  /** The newest dropped command record's seq (the panel's coverage floor). */
+  commandsFloor?: number
+  /** Whole-log execution tallies; each record contributes exactly once, at its running → terminal transition. */
+  commandStats?: CommandStats
+  /** Nested Code-Mode command records buffered by their top run_code call id until the parent's result folds
+   * (same lifecycle as `pendingCodeOps`). */
+  pendingCodeCmds?: Record<string, CommandStateRecord[]>
+  /** Nested Code-Mode ops buffered by their top run_code call id until the parent's result folds (the dispatch events land BEFORE it).
+   * Bounded by PENDING_CODE_OPS_MAX, so a hostile log that never settles a run_code cannot grow it. */
   pendingCodeOps?: Record<string, FileOpRecord[]>
 }
 
@@ -139,28 +134,46 @@ export function countTurnRuns(requests: RequestRecord[]): number {
 }
 
 export function trimState(st: TimelineState, bounds: FoldBounds): void {
-  // Trim by WHOLE turn-runs as soon as the run count crosses the cap —
-  // not only when the raw step count does — so the state stays
-  // deterministically at the newest ~maxKeptTurns turns (a threshold-only
-  // policy would oscillate: trim to 1200, regrow to 1500, trim again). The
-  // run count is the incremental `turnRuns` ledger; a row restored from cache before the field existed recomputes it once here.
+  // Trim by WHOLE turn-runs as soon as the count crosses the cap — not only when the raw step count does — so the state stays
+  // deterministically at the newest ~maxKeptTurns; a threshold-only policy would oscillate.
   st.turnRuns = st.turnRuns ?? countTurnRuns(st.requests)
   if (st.turnRuns > bounds.maxKeptTurns) {
     st.requests = trimToLastTurns(st.requests, bounds.maxKeptTurns)
     st.turnRuns = countTurnRuns(st.requests)
   }
-  // Pathological many-step turns: hard step backstop after the turn trim.
+  // A hard step backstop after the turn trim, for pathological many-step turns.
   if (st.requests.length > bounds.maxRequestSteps) {
     st.requests = st.requests.slice(-bounds.maxRequestSteps)
     st.turnRuns = countTurnRuns(st.requests)
   }
   if (st.events.length > bounds.maxEvents) st.events = st.events.slice(-bounds.maxEvents)
   if (st.spans.length > TIMING_SPANS_MAX) st.spans = st.spans.slice(-TIMING_SPANS_MAX)
-  // The newest dropped op's seq becomes the served op log's coverage floor.
   if (st.fileOps.length > bounds.maxFileOps) {
     const drop = st.fileOps.length - bounds.maxFileOps
     st.fileOpsFloor = Math.max(st.fileOpsFloor ?? 0, st.fileOps[drop - 1].seq)
     st.fileOps = st.fileOps.slice(drop)
+  }
+  if (st.commands.length > bounds.maxCommands) {
+    let excess = st.commands.length - bounds.maxCommands
+    let floor = 0
+    // Oldest SETTLED records drop first; a running record (an in-flight or background-dispatched call) is kept.
+    const kept: CommandStateRecord[] = []
+    for (const rec of st.commands) {
+      if (excess > 0 && rec.status !== 'running') {
+        excess--
+        floor = Math.max(floor, rec.seq)
+        continue
+      }
+      kept.push(rec)
+    }
+    // A hostile log of never-settling calls can still overflow: then the oldest running records drop too.
+    if (kept.length > bounds.maxCommands) {
+      const extra = kept.length - bounds.maxCommands
+      for (const rec of kept.slice(0, extra)) floor = Math.max(floor, rec.seq)
+      kept.splice(0, extra)
+    }
+    st.commandsFloor = Math.max(st.commandsFloor ?? 0, floor)
+    st.commands = kept
   }
   if (st.archived.length > 0) {
     let drop = 0
@@ -181,7 +194,7 @@ export function trimState(st: TimelineState, bounds: FoldBounds): void {
   }
 }
 
-/** A count cap, newest tail kept; at ~6-8 spans per step it covers a few hundred recent steps, far past the strip's pixel resolution. */
+/** A count cap, newest tail kept; at ~6-8 spans per step it covers a few hundred steps, past the strip's pixel resolution. */
 const TIMING_SPANS_MAX = 2_000
 
 export function createTimelineState(): TimelineState {
@@ -196,6 +209,7 @@ export function createTimelineState(): TimelineState {
     archived: [],
     callNames: {},
     fileOps: [],
+    commands: [],
     spans: [],
   }
 }

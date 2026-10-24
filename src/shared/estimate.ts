@@ -1,6 +1,4 @@
-/** Token heuristics shared by the host fold and the client boundary, mirroring the harness
- * token-meter's fixed density (4 chars ≈ 1 token, +4 per content block, +4 role framing) on both
- * sides. */
+/** Mirrors the harness token-meter's fixed density on both sides (docs/compatibility.md §4). */
 
 const CHARS_PER_TOKEN = 4
 const ROLE_OVERHEAD = 4
@@ -16,8 +14,7 @@ export function estimateTextTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
 }
 
-/** Price a `system/message` payload exactly like the harness's `estimateSystemMessage`: text
- * density over every block plus role framing, no per-block overhead. */
+/** Mirrors the harness's `estimateSystemMessage`: text density over every block plus role framing, no per-block overhead. */
 export function estimateSystemContent(blocks: unknown): number {
   if (!Array.isArray(blocks) || blocks.length === 0) return 0
   let characters = 0

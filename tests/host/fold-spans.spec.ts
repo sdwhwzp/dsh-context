@@ -1,7 +1,3 @@
-// The timing strip's span fold (src/host/fold.ts): every completed step flushes its painted time slices — the TTFT wait, the decode blocks
-// in stream order, the tool-run windows, and the in-step residue — into the persisted `spans` collection the client packs gapless by
-// duration share (IDLE time between steps carries no span). No mocks: the real fold runs.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { TimelineEvent } from '../../src/host/fold'
@@ -12,7 +8,6 @@ import { assertPlainJson, driveTimeline, timelineDef } from './helpers/projectio
 
 const text = (t: string) => [{ type: 'text', text: t }]
 
-/** One raw `chunk` record of an embedded assistant stream, at an absolute time. */
 const chunkRec = (time: number, chunk: unknown): unknown => ({ type: 'chunk', time, chunk })
 
 /** tool/call at an explicit instant (the events helper's clock is shared, so the spans specs pin times raw). */
@@ -51,9 +46,6 @@ describe('spans — the step flush', () => {
   })
 
   test('the decode window opens at the first marker when it beats the token; the wait covers only the silent prefix', () => {
-    // The reasoning marker (100) sits BEFORE the first stamped chunk (110):
-    // the decode window opens at the marker, so the wait band is the 100ms
-    // of true silence and the block owns its whole marker-tiled interval.
     const { state } = driveTimeline([
       stepStart(1, { time: 0 }),
       assistantMessage(2, {
@@ -73,11 +65,6 @@ describe('spans — the step flush', () => {
   })
 
   test('a redacted reasoning block still paints: the marker tiles its window even though no chunk stamps a token', () => {
-    // The provider's durable stream carries the reasoning BLOCK markers but
-    // packs no reasoning chunks (the content is redacted): the first token
-    // lands on a tool-call fragment at 952. Metering (ttftMs) opens the
-    // decode window at the MARKER — anchoring the wait at the token would
-    // charge the 588ms the legend's own tally reports to the wait as well, and the rows would double-count it past 100%.
     const { state } = driveTimeline([
       stepStart(1, { time: 0 }),
       assistantMessage(2, {
@@ -110,8 +97,7 @@ describe('spans — the step flush', () => {
   })
 
   test('blocks stamped wholly past the message instant drop out of the tile', () => {
-    // Hostile stream: both markers sit beyond the assistant message's own
-    // instant — their claimed intervals assert decode after the message landed, so they paint nothing.
+    // Hostile stream: both markers sit beyond the assistant message's own instant, so they paint nothing.
     const { state } = driveTimeline([
       stepStart(1, { time: 0 }),
       assistantMessage(2, {
@@ -164,7 +150,6 @@ describe('spans — the step flush', () => {
     assert.deepEqual(state.spans, [
       { kind: 'ttft', start: 0, end: 100 },
       { kind: 'other', start: 100, end: 1_400 },
-      // 1_400 → 10_000: the session was idle — nothing paints.
       { kind: 'ttft', start: 10_000, end: 10_100 },
       { kind: 'other', start: 10_100, end: 11_400 },
     ])
@@ -174,7 +159,6 @@ describe('spans — the step flush', () => {
     const { state } = driveTimeline([
       stepStart(1, { time: 0 }),
       assistantMessage(2, { time: 1_000 }),
-      // Three overlapping windows: two identical (one shadows whole), one longer.
       toolCallAt(3, 'c1', 2_000),
       toolCallAt(4, 'c2', 2_000),
       toolCallAt(5, 'c3', 2_000),
@@ -189,7 +173,6 @@ describe('spans — the step flush', () => {
       { kind: 'tools', start: 3_000, end: 3_500 },
       { kind: 'other', start: 3_500, end: 4_000 },
     ])
-    // The totals keep the TRUE per-call sums (3_500ms over 3 calls) — only the strip de-overlaps.
     assert.equal(state.timing?.toolsMs, 1_000 + 1_000 + 1_500)
     assert.equal(state.timing?.toolCalls, 3)
   })
@@ -261,8 +244,7 @@ describe('spans — the step flush', () => {
 
 describe('spans — retention, wire, and schema faces', () => {
   test('the collection keeps the newest tail past the 2_000-span cap', () => {
-    // 41 steps × 50 spans each (a 48-marker decode run): 2_050 spans — the
-    // cap must drop the oldest step whole. Fewer, denser steps keep the fold cheap enough for a CI runner's 5s test timeout.
+    // 41 steps × 50 spans each is the fold's cost guard for a CI 5s timeout; the cap drops the oldest step whole.
     const events: TimelineEvent[] = []
     for (let i = 0; i < 41; i++) {
       const start = i * 10_000
@@ -292,11 +274,9 @@ describe('spans — retention, wire, and schema faces', () => {
     assert.deepEqual(drive.view.spans, drive.state.spans)
     assert.notEqual(drive.view.spans, drive.state.spans, 'the served array never aliases the state')
     assert.notEqual(drive.view.spans?.[0], drive.state.spans[0], '…nor its items')
-    // The detail payload (the channel's serve) carries the same copies.
     const detail = buildTimelineDetail(drive.state, resolveBounds({}))
     assert.deepEqual(detail.spans, drive.state.spans)
     assert.notEqual(detail.spans[0], drive.state.spans[0])
-    // The slim head (detail-channel deployments) has no spans key at all.
     const slimDef = timelineDef({}, true)
     let slimState = slimDef.init()
     for (const ev of events) slimState = slimDef.apply(slimState, ev)
@@ -310,8 +290,7 @@ describe('spans — retention, wire, and schema faces', () => {
       stepEnd(3, { time: 1_400 }),
     ])
     for (const state of drive.states) drive.def.stateSchema.parse(structuredClone(state))
-    // A row folded before the collection existed has no `spans` key: the
-    // required-key schema rejects it, so the projection cache refolds it from the durable log (the stateVersion 22 → 23 bump).
+    // A row folded before the collection existed has no `spans` key: the required-key schema rejects it (the stateVersion 22 → 23 bump).
     const stale = structuredClone(drive.state) as unknown as Record<string, unknown>
     delete stale.spans
     assert.throws(() => drive.def.stateSchema.parse(stale))
@@ -324,8 +303,7 @@ describe('spans — retention, wire, and schema faces', () => {
       toolCallAt(3, 'c1', 1_100),
       toolResult(4, { callId: 'c1', content: text('ok'), time: 1_200 }),
       stepEnd(5, { time: 1_400 }),
-      // A step left OPEN mid-accumulation: the intermediate states carry the
-      // armed accumulator through the same gate (driveTimeline pins the no-absent-members rule on every one).
+      // A step left OPEN mid-accumulation: the intermediate states carry the armed accumulator through the same gate.
       stepStart(6, { time: 2_000 }),
       assistantMessage(7, { time: 3_000, stream: [chunkRec(2_100, { type: 'text-delta', text: 'y' })] }),
     ])

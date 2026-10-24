@@ -1,7 +1,3 @@
-// The skill-catalog route (src/host/skills.ts): deferred-inject gating on the connection face, the session-addressed resolution mirroring
-// the harness's own skill catalog (observeSession → cwd + preset; a live agent's scoped registry wins; a cold session rides a scope lease;
-// every gap falls back to the global layers), and the typed `null` for every unusable face — never a throw into the transport.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
@@ -20,8 +16,8 @@ interface CtxSpec {
   workingDirectory?: unknown
 }
 
-/** A minimal host ctx double with cordis inject semantics (mirrors
- * balance.spec.ts's): the callback runs once its dependency list completes, and `ctx.get` serves the request-time reads. */
+/** A minimal host ctx double with cordis inject semantics (mirrors balance.spec.ts's): the callback runs once its
+ * dependency list completes, and `ctx.get` serves the request-time reads. */
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?: RouteFetch } } {
   const captured: { path?: string; fetch?: RouteFetch } = {}
   const services = new Map<string, unknown>()

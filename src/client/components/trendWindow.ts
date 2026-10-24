@@ -16,7 +16,6 @@ export function initialBarWindow(n: number, overscan: number = WINDOW_OVERSCAN_B
   return n <= TREND_WINDOW_MIN ? { from: 0, to: Math.max(0, n - 1) } : { from: Math.max(0, n - 1 - 4 * overscan), to: n - 1 }
 }
 
-/** The range that must exist for the current scroll position, expressed in bar indices. */
 export function windowRangeFor(scrollLeft: number, clientWidth: number, n: number, overscan: number = WINDOW_OVERSCAN_BARS): BarWindow {
   if (n <= TREND_WINDOW_MIN) return { from: 0, to: Math.max(0, n - 1) }
   const pitch = BAR_W + BAR_GAP

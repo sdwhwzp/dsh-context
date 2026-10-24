@@ -1,12 +1,5 @@
-/**
- * The host-wide cold-read governor (issue #121).
- *
- * Every cold read (the warm-up pass's per-session fold, the detail route's cold rung)
- * materializes a whole durable log: the persistence backend decodes every frame before it can
- * slice one event, so a 10k-event session lands as a several-hundred-MB object graph. The gate
- * admits one read at a time (FIFO) and only while the heap leaves headroom; a skipped read
- * takes the caller's designed no-data path, never a visible failure.
- */
+/** The host-wide cold-read governor: every cold read materializes a whole durable log, so the gate admits one at a time (FIFO) and only
+ * below the heap ceiling; a skipped read takes the caller's designed no-data path, never a visible failure. */
 
 import { getHeapStatistics } from 'node:v8'
 
@@ -15,14 +8,12 @@ export interface HeapReading {
   limit: number
 }
 
-/** The admission face both cold paths share. */
 export interface ColdReadGate {
-  /** Resolves `undefined` when the read was skipped under pressure — the caller's own no-data path answers instead. */
+  /** Resolves `undefined` when the read was skipped under pressure — the caller's no-data path answers instead. */
   admit<T>(read: () => Promise<T>): Promise<T | undefined>
 }
 
-/** A cold read starts only below two-thirds of the process's own V8 ceiling, leaving the top
- * third for the read itself plus the harness's own decoded-log floors. */
+/** Two-thirds of the process's own V8 ceiling; the top third is headroom for the read and the harness's own logs. */
 const HIGH_WATER = 2 / 3
 
 function v8Reading(): HeapReading {
@@ -32,8 +23,8 @@ function v8Reading(): HeapReading {
 
 const noop = (): void => {}
 
-/** One governor per host process, shared by both cold paths. `reading` is injectable for
- * tests; a throwing or garbage probe fails OPEN — the meter must never block a read. */
+/** One governor per host process. `reading` is injectable for tests; a throwing or garbage probe fails OPEN, since the meter must never
+ * block a read. */
 export function makeColdReadGate(reading: () => HeapReading = v8Reading): ColdReadGate {
   const clear = (): boolean => {
     try {

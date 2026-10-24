@@ -1,12 +1,8 @@
-// The official DeepSeek vision image-token calculator port (src/shared/imageTokens.ts). Reference values verified against the docs
-// calculator itself (see the module header).
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { estimateImageTokens } from '../../src/shared/imageTokens'
 
 describe('estimateImageTokens', () => {
-  // Verified against https://api-docs.deepseek.com/zh-cn/quick_start/token_usage.
   test.each([
     [2048, 1365, 313],
     [800, 600, 341],
@@ -20,9 +16,7 @@ describe('estimateImageTokens', () => {
   })
 
   test('every valid size lands inside the documented cap band', () => {
-    // The documented band is 117–384; aspect ratios at the 8:1 clamp price
-    // slightly under it (128×16 → 113) — same patch grid as the docs
-    // calculator, so pin the observed floor rather than the marketing one.
+    // The documented band is 117–384; the 8:1 clamp prices slightly under it (128×16 → 113), so pin the observed floor.
     for (let w = 16; w <= 4096; w *= 2) {
       for (let h = 16; h <= 4096; h *= 2) {
         const tokens = estimateImageTokens(w, h)
@@ -37,14 +31,12 @@ describe('estimateImageTokens', () => {
   })
 
   test('a tall strip beyond the ~190:1 grid threshold solves on the collapsed-width arm', () => {
-    // The padded grid overflows the budget (860 tokens) and ratio 214 >
-    // 189.5, so the solve collapses width to one patch unit (gridW < 1 arm).
+    // The padded grid overflows the budget and the ratio exceeds the threshold, so the solve collapses width (gridW < 1 arm).
     assert.equal(estimateImageTokens(50, 12000), 381)
   })
 
   test('a first-solve overflow walks the budget down until the grid fits', () => {
-    // Parity terms can push the solved grid a token or two over budget; the
-    // loop decrements until it fits (found by fuzz: 360×3243 exercises it).
+    // Parity terms can push the solved grid over budget; the loop decrements until it fits (found by fuzz: 360×3243).
     assert.equal(estimateImageTokens(360, 3243), 281)
   })
 
@@ -58,8 +50,7 @@ describe('estimateImageTokens', () => {
   })
 
   test('astronomical (finite) dimensions fail to converge and return null instead of throwing', () => {
-    // w×h overflows to Infinity: the fixed-point iteration never stabilizes,
-    // so the 9-iteration cap narrows to null (untrusted-log defense).
+    // w×h overflows to Infinity: the fixed-point iteration never stabilizes, so the 9-iteration cap narrows to null.
     assert.equal(estimateImageTokens(Number.MAX_VALUE, Number.MAX_VALUE), null)
     assert.equal(estimateImageTokens(1e308, 1e308), null)
   })

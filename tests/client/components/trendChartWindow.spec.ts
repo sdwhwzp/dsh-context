@@ -28,7 +28,6 @@ describe('trend chart windowing', () => {
     assert.equal(range.from, Math.max(0, Math.floor(8000 / PITCH) - WINDOW_OVERSCAN_BARS))
     assert.equal(range.to, Math.min(n - 1, Math.ceil(8400 / PITCH) + WINDOW_OVERSCAN_BARS))
     assert.ok(range.from > 0 && range.to < n - 1)
-    // Near both edges the range clamps into the history.
     assert.equal(windowRangeFor(0, 400, n).from, 0)
     assert.equal(windowRangeFor(999_999, 400, n).to, n - 1)
   })
@@ -94,7 +93,7 @@ describe('trend chart windowing', () => {
         'window follows the scroll to the oldest bars',
       )
       assert.equal(bars(m.container)[0].getAttribute('data-seq'), String(list[0].seq))
-      // The full readout remains: axis, turn strip and hover model still see 400 columns.
+      // The full readout remains: the turn strip still sees all 400 columns.
       assert.equal(query(m.container, '.lc-turns').children.length, 1)
     } finally {
       await m.unmount()

@@ -46,7 +46,7 @@ describe('TrendChart category hover-link', () => {
     const chart = query(m.container, '.lc-chart')
     assert.equal(chart.hasAttribute('data-catdim'), false)
 
-    // Every total-mode segment is tagged with its category; a zero-value category renders no segment to light.
+    // Every total-mode segment is tagged with its category; a zero-value category has no segment.
     const segs = queryAll(chart, '.lc-bar[data-seq="1"] .lc-bar-stack > .lc-cat-seg')
     assert.deepEqual(segs.map(s => s.getAttribute('data-cat')), CATS.map(c => c.key))
 
@@ -54,7 +54,6 @@ describe('TrendChart category hover-link', () => {
     await m.update(h(TrendChart, propsOf([r1, r2, r3], { hoverCat: 'tools' })))
     assert.equal(query(m.container, '.lc-chart').getAttribute('data-catdim'), 'tools')
 
-    // Delta mode: diverging stacks' segments are tagged the same way — an all-shrinking pair hangs all seven below the line.
     const big = req(4, { turn: 3, step: 0, system: 200, tools: 100, user: 60, inject: 40, skill: 30, assistant: 80, tool: 120 })
     await m.update(h(TrendChart, propsOf([big, r1], { mode: 'delta', hoverCat: 'user' })))
     const deltaChart = query(m.container, '.lc-chart')

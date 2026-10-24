@@ -1,9 +1,6 @@
-/** Stop a horizontal scroller's overscroll from reaching browser history navigation (trackpad
- * swipe-back/forward). `overscroll-behavior-x: contain` covers Chromium and Firefox, but WebKit still
- * navigates with it set (bug 240183), so the canceled wheel below is the only lever there. */
+/** WebKit ignores `overscroll-behavior-x: contain` (bug 240183) and still navigates, hence the canceled wheel below. */
 
-/** Cancel the horizontal-dominant wheel gestures a scroller cannot consume, so the browser never reads
- *  them as a history swipe. The listener must be non-passive, so it cannot ride React's passive wheel seat. */
+/** Must be non-passive (React's wheel seat is passive); cancels only the horizontal-dominant gestures the scroller cannot consume. */
 export function containHorizontalOverscroll(el: HTMLElement): () => void {
   const onWheel = (e: WheelEvent): void => {
     if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return

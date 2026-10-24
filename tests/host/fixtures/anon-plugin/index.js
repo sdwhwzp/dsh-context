@@ -1,6 +1,4 @@
-// Throwaway fixture emulating an anonymous locally linked plugin: its
-// entrypoint carries no name (so cordis falls back to the root fiber name),
-// and it registers a tool straight from its own package directory.
+// Fixture: an anonymous locally linked plugin whose entrypoint carries no name (cordis falls back to the root fiber name).
 
 export function registerBlind(tools) {
   return tools.register({ name: 'blind_tool' })

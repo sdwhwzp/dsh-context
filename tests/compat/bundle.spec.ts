@@ -1,8 +1,5 @@
-// The bundle smoke, as part of the `compat` project: the only check that exercises the BUILT artifacts (lib/client.js) — the packaging glue
-// (the `window.__ModuleLoader__.load({id, factory})` handoff, the CSS channel's data-plugin style tags, platform-module requires) only
-// exists after tsdown runs. Skipped cleanly when lib/ is absent (run `pnpm run build` first); the release workflow builds before `pnpm
-// test`, so it always runs there. Everything here runs against the REAL bundle in its own JSDOM with REAL React and the REAL ui-primitives
-// — only the harness services (locale/slots/effects) are in-memory implementations of their documented contracts.
+// The bundle smoke: the only check exercising the BUILT artifacts — `__ModuleLoader__`, the CSS data-plugin tags,
+// and platform-module requires only exist after tsdown. Skipped when lib/ is absent; real JSDOM + real React.
 
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -16,12 +13,10 @@ import * as staging from './staging'
 
 describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/client.js', () => {
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { pretendToBeVisual: true })
-  // The bundle evaluates against window-scoped globals; this spec owns its
-  // worker (per-file fork), so the assignment stays file-local.
+  // The bundle evaluates against window-scoped globals; this spec owns its worker (per-file fork).
   const globals = globalThis as { window?: unknown; document?: unknown }
 
   let handoff: { id: string; factory: (require: (spec: string) => unknown) => unknown } | null = null
-  /** Everything the assertions below look at, captured by the setup. */
   const state: {
     plugin?: { name: string; inject: string[]; apply(ctx: unknown): void }
     dicts: Map<string, Record<string, Record<string, string>>>
@@ -37,9 +32,8 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
     globals.window = dom.window
     globals.document = dom.window.document
 
-    // The primitives dist ships CSS modules Node cannot parse — the bundle only
-    // references its components as React leaves, so inert stand-ins play the
-    // shell's role here (their real rendering is covered by the vitest jsdom lane).
+    // The primitives dist ships CSS modules Node cannot parse; the bundle references its components as React
+    // leaves, so inert stand-ins play the shell's role (real rendering is covered by the jsdom lane).
     const inert = (name: string) => {
       const C = (): null => null
       ;(C as { displayName?: string }).displayName = name
@@ -71,9 +65,8 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
         return undefined
       },
       inject(_deps: string[], cb: (c: unknown) => void) {
-        // Cordis fires the callback once every requested service exists; this
-        // fake answers every name it knows up front, so it fires immediately.
-        // The configForms wiring guards on the absent service itself.
+        // Cordis fires the callback once every requested service exists; this fake answers every name up front,
+        // so it fires immediately. The configForms wiring guards on the absent service itself.
         cb(ctx)
       },
       effect(fn: () => (() => void) | void) {
@@ -90,9 +83,8 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
         },
       },
       slots: {
-        // The registry records every `register()` call and returns its idempotent disposer; an `inject`
-        // callback returns the declaration effect's own disposer (registry.ts `SlotInjectionEffect`), so the
-        // return value is never the registration — one `inject` may declare several.
+        // The registry records every `register()` call and returns its idempotent disposer; an `inject` callback
+        // returns the declaration effect's own disposer, so the return value is never the registration.
         inject: (_name: string, fn: () => unknown) => fn(),
         register: (opts: (typeof state.slots)[number][1]) => {
           state.slots.push([opts.name ?? '', opts])

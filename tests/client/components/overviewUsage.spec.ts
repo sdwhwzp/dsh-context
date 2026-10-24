@@ -72,8 +72,7 @@ describe('OverviewUsage', () => {
     }))
     const heightOf = (col: number, cls: string): string =>
       (queryAll(m.container, '.lc-ov-usage-col')[col].querySelector('.' + cls) as HTMLElement).style.height
-    // Columns run oldest first: 09-16 (col 6) holds both series' maxima,
-    // 09-15 (col 5) half-ish, 09-14 (col 4) the slivers under the 4% floor.
+    // Columns run oldest first; 09-16 (col 6) holds both series' maxima, the slivers under the 4% floor before it.
     assert.equal(heightOf(6, 'lc-ov-usage-tokens'), '100%')
     assert.equal(heightOf(5, 'lc-ov-usage-tokens'), '10%')
     assert.equal(heightOf(4, 'lc-ov-usage-tokens'), '4%')
@@ -97,7 +96,6 @@ describe('OverviewUsage', () => {
     assert.ok(query(m.container, '.lc-ov-usage-line-0') !== null)
     const baseline = query(m.container, '.lc-ov-usage-line-0') as HTMLElement
     assert.equal(baseline.style.bottom, '0%')
-    // Left rail: the tokens peak's quarters; right rail: the cost peak's.
     const left = queryAll(m.container, '.lc-ov-usage-rail-l .lc-ov-usage-tick').map(el => el.textContent)
     const right = queryAll(m.container, '.lc-ov-usage-rail-r .lc-ov-usage-tick').map(el => el.textContent)
     assert.deepEqual(left, ['0', '250', '500', '750', '1.0k'])

@@ -1,8 +1,3 @@
-/** The sessions-feed plumbing shared by the session-list consumers: the
- * list-snapshot React seat plus a page-scope cache holding one
- * in-flight-or-settled slim-head promise per session id, so a broken relative
- * never retries per snapshot tick and every consumer shares one fetch. */
-
 import { useCallback, useSyncExternalStore } from 'react'
 import type { ContextTimeline } from '../shared/types'
 import type { SessionsFaceLike } from './agentTree'

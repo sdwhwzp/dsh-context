@@ -1,5 +1,3 @@
-// Tool-call summaries (src/client/callSummary.ts): argument-JSON parsing and the conversation-block scanners.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { blockSummaryOf, callNamesOf, callSummaryOf, parseCallArgs, summaryInArgs } from '../../src/client/callSummary'

@@ -1,21 +1,5 @@
-/**
- * The Context Insights page: the plugin's first-level panel, registered on the layout's keyed `main` slot, so its
- * mount IS its open. Data comes from the root-scope sessions/workspaces standard kit — every list row's host-cached
- * projection values — so the page draws each session's insight without opening a log.
- *
- * Unlike the shipped first-level pages' centered 960px frame, the content column spans the pane so the grids and
- * legends adapt to it, and the page element is the `lc-ov` query container the folds key off. Hover tips portal to
- * <body>, because that container would otherwise capture their fixed positioning.
- *
- * The cluster holds ONE scope: a picked calendar range replaces the rolling preset and clicking a preset hands it
- * back, so they never both claim it, and everything the presets scope reads that one resolved window. The coverage
- * picker sits at the sessions feed's head and defaults to All: archived sessions fold into the page's every figure
- * unless the picker narrows them, and the Active Sessions card's label and sub-line follow the picked coverage.
- * Below the KPI
- * band and the usage chart, the heatmap pins both its column mates to a picked day, and a skill-card row click
- * narrows the session column to that skill's loaders within the same scope. A session card jumps through the
- * harness's own `openSessionVia`, whose navigation returns the center column to the conversation.
- */
+/** The Context Insights page: registered on the layout's keyed `main` slot, so its mount IS its open. The page is the
+ * `lc-ov` query container — unlike the shipped first-level 960px frame, the column spans the pane; tips portal to `body`. */
 
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react'
 import { estimateSessionCost, formatCost, type CostCurrency, type ModelBook } from '../cost'
@@ -28,14 +12,14 @@ import {
   UNGROUPED_KEY, workspacesSnapshotOf,
   type DayRange, type OverviewCoverage, type OverviewRange, type OverviewRow, type OverviewSort, type SkillSort,
 } from '../overview'
-import { openSessionVia, type ClientCtx } from '../services'
+import { openPluginSettings, openSessionVia, type ClientCtx } from '../services'
 import { readSkillCatalog } from '../skills'
-import { openPluginSettings } from '../settingsJump'
 import type { ContextSettings } from '../settings'
 import type { SkillInfo } from '../../shared/types'
 import { dayKeyOf } from '../../shared/days'
 import type { ViewKit } from '../viewkit'
 import { makeBalanceCapsule } from './balanceCapsule'
+import { ClearableInput } from './clearableInput'
 import { makeDateRange } from './dateRange'
 import { makeErrorBoundary } from './errorBoundary'
 import { makeHeatmap, todayKey, type HeatMetric } from './heatmap'
@@ -56,9 +40,7 @@ export interface OverviewPanelProps {
 
 const RANGES: readonly OverviewRange[] = ['today', '7d', '30d', 'all']
 const SORTS: readonly OverviewSort[] = ['recent', 'tokens', 'context']
-/** The coverage scopes the sessions feed serves, in menu order. */
 const COVERAGE: readonly OverviewCoverage[] = ['all', 'active', 'archived']
-/** The heatmap's depth metrics, in toggle order (tokens is the default). */
 const METRICS: readonly HeatMetric[] = ['sessions', 'tokens']
 
 export function makeOverviewPanel(
@@ -85,7 +67,6 @@ export function makeOverviewPanel(
     return typeof locale.getLocale === 'function' ? locale.getLocale().active : 'en'
   }
 
-  /** The display currency follows the active locale. */
   function activeCurrency(): CostCurrency {
     return activeLocale() === 'zh' ? 'cny' : 'usd'
   }
@@ -94,8 +75,8 @@ export function makeOverviewPanel(
     const { book } = useModelPrices()
     const snapshot = sessionsSnapshotOf(props)
     const wsSnapshot = workspacesSnapshotOf(props)
-    // The preset follows the served default until the reader picks one; a pick is written back as the
-    // new default where settings are writable, and a late-arriving section still lands while none is picked.
+    // The preset follows the served default until the reader picks one; a pick is written back as the new default where
+    // settings are writable, and a late-arriving section still lands while none is picked.
     const configuredRange = useSyncExternalStore(subscribeSettings, () => settings.defaultOverviewRange())
     const [picked, setPicked] = useState<OverviewRange | null>(null)
     const preset = picked ?? configuredRange
@@ -115,10 +96,8 @@ export function makeOverviewPanel(
     const groups = useMemo(() => sessionGroupsOf(wsSnapshot), [wsSnapshot])
     const [catalog, setCatalog] = useState<ReadonlyMap<string, SkillInfo> | null>(null)
 
-    // The skill card's metadata read: the registry resolves per SESSION (the
-    // workspace selects the project layer, the preset selects the discovery
-    // scope), so the current session anchors it; a session-less list still
-    // serves the global layers. A switch re-reads; a failed read leaves the card unenriched rather than stale.
+    // The skill catalogue resolves per SESSION (the workspace selects the project layer, the preset the discovery
+    // scope), so the current session anchors it; a switch re-reads, and a failed read leaves the card unenriched.
     const currentRow = (rows ?? []).find(row => row.current)
     const currentCwd = currentRow?.cwd
     const currentId = currentRow?.id
@@ -129,46 +108,37 @@ export function makeOverviewPanel(
       return () => { alive = false }
     }, [currentCwd, currentId])
 
-    // On mount (the panel's open): summon the host's projection warm-up (this
-    // page is the rows' only reader — one pass per host process) and re-pull
-    // the list once, so backfilled rows reach a long-connected page.
+    // On mount (the panel's open): summon the host's projection warm-up (this page is the rows' only reader — one pass
+    // per host process) and re-pull the list once, so backfilled rows reach a long-connected page.
     useEffect(() => {
       requestActivityBackfill()
       refreshSessions(ctx)
     }, [])
 
-    // Any filter change re-anchors the pager at the first page.
     useEffect(() => { setPage(0) }, [preset, custom, coverage, day, query, group, skill, sort])
 
     const currency = activeCurrency()
     const now = Date.now()
     const allRows = rows ?? []
     const covered = coveredRowsOf(allRows, coverage)
-    // The scope window every figure below reads: the calendar's own picked
-    // range while one is set (a malformed key keeps the preset, never an unprovable window), else the preset's rolling floor.
+    // The scope window every figure reads: the calendar's picked range (a malformed key keeps the preset), else the preset's floor.
     const scope = (custom !== null ? dayRangeWindow(custom) : null) ?? rangeWindowOf(preset, now)
-    // The head's date span, read off that same window so the picker and the
-    // presets can never disagree: a picked range's own two days, a preset's
-    // floor through today (its end is open), nothing at all under "all".
+    // The head's date span reads off that same window so the picker and presets can never disagree.
     const spanFrom = scope.start === null ? null : dayKeyOf(scope.start)
     const spanTo = scope.start === null ? null : dayKeyOf(scope.end ?? now)
     const span = spanFrom !== null && spanTo !== null ? { from: spanFrom, to: spanTo } : null
-    // The scope scopes the KPI band, the composition donut, and the grid;
-    // the heatmap keeps its own fixed window over the coverage-selected list.
+    // The scope scopes the KPI band, composition donut and grid; the heatmap keeps its own fixed window.
     const ranged = filterRows(covered, { scope, day: null, query: '' })
-    // The group chips count the day/query-scoped rows BEFORE the group filter
-    // applies, so selecting a chip never collapses the row itself.
+    // Group chips count the day/query-scoped rows BEFORE the group filter, so selecting a chip never collapses its row.
     const scoped = filterRows(ranged, { scope, day, query })
     const counts = groupCountsOf(scoped, wsSnapshot)
-    // A selection whose group fell out of scope keeps a phantom chip (count
-    // 0) so the active filter stays visible and one click out of it.
+    // A selection whose group fell out of scope keeps a phantom chip (count 0) so the filter stays visible, one click out.
     const chips = group !== null && !counts.some(c => c.key === group)
       ? [...counts, { key: group, count: 0 }]
       : counts
     const visible = sortRows(
       (group === null ? scoped : scoped.filter(row => inGroup(row, group, groups)))
-        // The skill card's row pin narrows the list to the skill's loaders
-        // within the card's own scope (the scope window plus the pinned day).
+        // The skill row pin narrows the list to the skill's loaders within the card's own scope (scope window + pinned day).
         .filter(row => skill === null || rowLoadedSkill(row, skill, { scope, day })),
       sort,
     )
@@ -183,12 +153,10 @@ export function makeOverviewPanel(
       if (state.status === 'ready' && state.writable) settings.set('defaultOverviewRange', range)
     }
     const openOne = (id: string): void => {
-      // The view owner's verb navigates the center column back to the
-      // conversation itself (selectPanel(null)), so the page needs no close.
+      // The view owner's verb navigates the center column back to the conversation itself, so the page needs no close.
       openSessionVia(ctx, id)
     }
-    // The sessions card mirrors its coverage: All prices in the window's
-    // archived share; the narrow scopes name what the full list holds.
+    // The sessions card mirrors its coverage: All prices in the window's archived share; the narrow scopes name the full total.
     const sessionsLabel = coverage === 'archived' ? t('ov.kpi.archived') : coverage === 'active' ? t('ov.kpi.sessions') : t('ov.kpi.allSessions')
     const sessionsSub = coverage === 'all'
       ? t('ov.kpi.inclArchived', { n: ranged.filter(row => row.archived).length })
@@ -197,12 +165,11 @@ export function makeOverviewPanel(
     return (
       <section className="lc-ov-page" aria-label={t('ov.title')} {...zoneProps}>
         {bubble}
-        {/* The page's one scroll region. */}
         <div className="lc-ov-pagescroll">
           <div className="lc-ov-pagecontent">
             <div className="lc-ov-pagehead" data-window-drag>
               <h1 className="lc-ov-pagetitle">{t('ov.title')}</h1>
-              <button type="button" className="lc-ov-settings" title={t('plugin.settingsOpen')} onClick={() => { openPluginSettings() }}>
+              <button type="button" className="lc-ov-settings" title={t('plugin.settingsOpen')} onClick={() => { openPluginSettings(ctx) }}>
                 <IconSettings size={14} />{t('plugin.settings')}
               </button>
               {/* Renders nothing until a live figure lands, so the heading row never reflows for it. */}
@@ -272,7 +239,7 @@ export function makeOverviewPanel(
                 </div>
                 <div className="lc-ov-stats">
                   <OverviewTokens tokens={kpi.tokenParts} />
-                  <StatsTiming timing={kpi.timing} />
+                  <StatsTiming timing={kpi.timing} scope="team" />
                 </div>
                 <div className="lc-ov-body">
                   <div className="lc-ov-left">
@@ -322,13 +289,13 @@ export function makeOverviewPanel(
                           {t('node.skillTag', { name: skill })} ×
                         </button>
                       )}
-                      <input
+                      <ClearableInput
                         className="lc-ov-search"
                         type="search"
                         value={query}
                         placeholder={t('ov.list.search')}
-                        aria-label={t('ov.list.search')}
-                        onChange={(ev) => { setQuery(ev.target.value) }}
+                        clearLabel={t('field.clear')}
+                        onChange={setQuery}
                       />
                       <select
                         className="lc-ov-cover"

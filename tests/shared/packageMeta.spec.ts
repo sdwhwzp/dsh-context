@@ -1,6 +1,3 @@
-// The specs pin the locale files' shape AND their listing in package.json's `files`/`exports` — a locale file those
-// lists miss would work from a linked checkout and silently vanish from the published package.
-
 import { readFile, readdir } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -28,8 +25,7 @@ describe('package meta localization', () => {
   })
 
   test('the zh dictionary is a real translation of the en one', async () => {
-    // The Host resolves the active locale against these entries with `en`
-    // as the final fallback — a copy-pasted zh file would read as English.
+    // The Host resolves the active locale against these entries with `en` as the final fallback.
     const en = JSON.parse(await readFile('locale/en.json', 'utf8')) as { meta: Record<string, string> }
     const zh = JSON.parse(await readFile('locale/zh.json', 'utf8')) as { meta: Record<string, string> }
     assert.deepEqual(Object.keys(zh.meta).sort(), Object.keys(en.meta).sort())
@@ -39,8 +35,6 @@ describe('package meta localization', () => {
   })
 
   test('package.json resolves and ships the locale dictionaries', async () => {
-    // The exports entry is a PATTERN the Node resolver matches each
-    // dictionary's full specifier (`dsh-context/locale/zh.json`) against.
     assert.equal(manifest.exports['./locale/*.json'], './locale/*.json', 'the locale exports pattern')
     const names = (await readdir('locale')).filter(name => name.endsWith('.json'))
     for (const name of names) {

@@ -30,7 +30,7 @@ describe('ContextView — targeted content fetch and image loading', () => {
         },
       },
     })
-    // The direct `remote.session` service is hostile, as on the real host: the face resolves only through the declared inject.
+    // The direct `remote.session` service is hostile, as on the real host: only the declared inject resolves the face.
     ctx.setService('remote.session', { get page() { throw new Error('cannot get property "remote.session" without inject') } })
     watchHistoryFaces(asClientCtx(ctx))
     const View = makeView(ctx)
@@ -43,13 +43,59 @@ describe('ContextView — targeted content fetch and image loading', () => {
     }))
     const catRow = queryAll(m.container, '.lc-br-cat-row').find(r => text(r).includes(DICT_EN['cat.user']))
     assert.ok(catRow !== undefined)
-    // The lone node auto-expands with the category, which triggers the fetch.
+    // The lone node auto-expands with the category, triggering the fetch.
     await click(catRow)
     await flush()
     assert.deepEqual(calls, [{ sessionId: 'sv-page', throughSeq: 1, beforeSeq: 2 }], 'one read anchored just past the seq')
     assert.ok(text(m.container).includes('OLD FULL BODY'), 'mapped page content renders')
     await m.unmount()
     // Unload the declared slot so no face stales into the next test.
+    ctx.dispose()
+  })
+
+  test('a subagent session epoch reads its prompt under the durable parent address (issue #193)', async () => {
+    const calls: unknown[] = []
+    const ctx = new TestClientCtx({
+      services: {
+        sessions: { subagentAddress: () => ({ parentSessionId: 'sv-parent', childSessionId: 'sv-sys', mode: 'continuable' }) },
+        remote: {
+          session: {
+            page: (request: unknown) => {
+              calls.push(request)
+              return Promise.resolve({
+                ok: true,
+                value: {
+                  records: [{
+                    type: 'event',
+                    event: { type: 'system/message', seq: 1, time: 1, data: { message: { content: [{ type: 'text', text: 'SYSTEM FROM PAGE' }] } } },
+                  }],
+                },
+              })
+            },
+          },
+        },
+      },
+    })
+    ctx.setService('remote.session', { get page() { throw new Error('cannot get property "remote.session" without inject') } })
+    watchHistoryFaces(asClientCtx(ctx))
+    const View = makeView(ctx)
+    const m = await mount(h(View, {
+      sessionId: 'sv-sys',
+      useProjection: projectionsFor(timeline(), {
+        contextHeaders: { headers: [{ seq: 1, time: 0, systemTokens: 5, tools: [] }] },
+      }),
+    }))
+    const sysRow = queryAll(m.container, '.lc-br-cat-row').find(r => text(r).includes(DICT_EN['cat.system']))
+    assert.ok(sysRow !== undefined)
+    await click(sysRow)
+    await flush()
+    assert.deepEqual(calls, [{
+      address: { kind: 'subagent', parentSessionId: 'sv-parent', childSessionId: 'sv-sys', mode: 'continuable' },
+      throughSeq: 1,
+      beforeSeq: 2,
+    }])
+    assert.ok(text(m.container).includes('SYSTEM FROM PAGE'), 'the fetched prompt renders')
+    await m.unmount()
     ctx.dispose()
   })
 
@@ -128,7 +174,7 @@ describe('ContextView — scroll ledger', () => {
       useProjection: undefined as ((key: string) => unknown) | undefined,
     }
 
-    // First visit: no ledger entry → the shared scroller is re-anchored at top.
+    // First visit: no ledger entry, so the shared scroller is re-anchored at top.
     const scroller1 = document.createElement('div')
     scroller1.setAttribute('data-conversation-scroll', '')
     const m1 = await mountInScroller(
@@ -137,12 +183,10 @@ describe('ContextView — scroll ledger', () => {
     )
     assert.equal(scroller1.scrollTop, 0)
 
-    // A data refresh re-runs the effect but the position is applied once.
     scroller1.scrollTop = 17
     await m1.update(h(View, { ...props, useProjection: projectionsFor(richTimeline({ droppedNodes: 3 })) }))
     assert.equal(scroller1.scrollTop, 17)
 
-    // Unmount saves the position into the module ledger.
     scroller1.scrollTop = 42
     await m1.unmount()
 

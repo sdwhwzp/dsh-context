@@ -1,6 +1,3 @@
-// The shared attachment vocabulary (src/shared/attachment.ts): both block spellings normalize into
-// one proven reference, and the preview tables classify what a card can show.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import {

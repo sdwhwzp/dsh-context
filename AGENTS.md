@@ -25,14 +25,9 @@ This `sdwhwzp/dsh-context` fork follows the [DSH fork synchronization rules](../
 - Keep code and tests small, loosely coupled, and modular; avoid duplication.
 - After updating tests, firstly run `pnpm exec vitest run tests/<area>/<name>.spec.ts -t "<test case name>"` (regex, use `"a|b"`) to iterate on the touched test cases.
 - Ensure every source code file or test code file has less than 1000 lines.
-- Add comments only for major decisions or significant value, and update or delete outdated ones when modifying the code.
-- Comments guideline:
-  - Cleanup all the unnecessary, unhelpful or deprecated comments
-  - Cleanup all comments that related code already self-explains or self-constructs, even crossing multiple files and modules.
-  - ONLY use necessary comments for critical major decisions or significant value that cannot be self-explained by the code itself or the dsh code
-  - Use precise, clear, and concise language in comments, avoiding vague or ambiguous statements.
-  - Less comments is always better: avoid over-explaining or repeating what the code already expresses.
-  - Always try to cleanup or remove comments
+- Comments: default to none. Never add one unless it records a non-obvious decision, constraint, or invariant the code cannot express — if you cannot name that reason, do not write it.
+- Never narrate what the code does, restate names or types, or explain the change you just made.
+- When touching code, delete or shrink comments that repeat the code, state the obvious, or are outdated; reducing the comment count is always welcome.
 - Write comments, documentation, PR descriptions, and commit messages in English.
 - Generate one-time temp files in the `.tmp` directory and clean them up right after use.
 
@@ -65,7 +60,7 @@ Complete ALL of these before ANY commit:
 
 ## Build & run
 - **Build**: run `pnpm run build` after applying code changes.
-- **Watch**: run `pnpm run watch` to hot-reload the local plugin in dsh while developing in the browser.
+- **Watch**: run `pnpm run watch` to hot-reload the local plugin in dsh while developing in the browser. The watch build is the lean profile — unminified JavaScript, no source maps, no declaration file — which keeps the watcher's resident set low; `pnpm run build` emits the full release artifacts.
 - **Web server**: it may already be running at `http://127.0.0.1:3080/`. To restart, run `pnpm run web` (kills the running `dsh web`, then starts `dsh web --no-open`).
 - **Tokenized URL**: always open the full URL printed at startup, `http://127.0.0.1:3080/?token=XXXXXXXXX`. Save it to `.tmp/dsh-web-url.txt` and read it from there for later browser runs; each restart prints a new token and the old URL stops working, so overwrite the file every time.
 - **Auth-token errors**: kill the dsh process, restart with `dsh web --no-open`, and open the newly printed tokenized URL.

@@ -1,5 +1,3 @@
-// fleetTeam.ts — the `agentTeam` projection's sanitizing parse and its roster/task helpers.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import {
@@ -82,7 +80,6 @@ describe('teamOf — the sanitizing parse', () => {
     assert.ok(team !== null)
     assert.equal(team.members[0].error, undefined)
     assert.equal(team.failure, undefined)
-    // A missing tasks array serves an empty board.
     assert.deepEqual(team.tasks, [])
   })
 })

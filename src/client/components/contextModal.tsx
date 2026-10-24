@@ -1,15 +1,16 @@
-/** The /context command's centered dialog: the same pushed `contextTimeline` data as the Context tab, distilled to the
- * current composition and the shared browser. */
+/** The `/context` command's centered dialog: the same pushed `contextTimeline` as the Context tab, distilled to the current
+ * composition and the shared browser. */
 
 import { createElement as h, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
+import { providerModelLabelOf } from '../agentTree'
 import { makeAttachmentOpener } from '../attachmentSource'
 import { measureDock } from '../dockMeasure'
 import { headlineOf } from '../headline'
 import { modalStoreOf, takePendingConsume } from '../modalStore'
 import type { ClientCtx, SessionStandardProps, SessionsFace } from '../services'
 import type { ContextSettings } from '../settings'
-import { contextBreakdownOf, contextPressureOf, conversationNodesOf, headersOf, imageLoaderOf, projectionOf, workspaceOf } from '../services'
+import { contextBreakdownOf, contextPressureOf, conversationNodesOf, headersOf, imageLoaderOf, projectionOf, sessionAddressOf, workspaceOf } from '../services'
 import { makeContentFetcher, makeHeaderFetcher, useHistoryFace } from '../historyPage'
 import { useTimelineSource } from '../timelineSource'
 import type { ViewKit } from '../viewkit'
@@ -72,17 +73,20 @@ export function makeContextModal(
       [ctx, sessionId],
     )
 
-    // The first render can race the declared inject (a watch rebuild remounts this overlay before the fiber re-fires),
-    // so both fetchers below must rebuild when the face lands or is revoked.
+    // A watch rebuild can remount this overlay before the declared inject re-fires: rebuild the fetchers when the face lands.
     const historyFace = useHistoryFace()
 
     const fetchContent = useMemo(
-      () => (sessionId !== '' && historyFace !== undefined ? makeContentFetcher(sessionId) : undefined),
-      [sessionId, historyFace],
+      () => (sessionId !== '' && historyFace !== undefined
+        ? makeContentFetcher(() => sessionAddressOf(ctx, sessionId))
+        : undefined),
+      [ctx, sessionId, historyFace],
     )
     const fetchHeader = useMemo(
-      () => (sessionId !== '' && historyFace !== undefined ? makeHeaderFetcher(sessionId) : undefined),
-      [sessionId, historyFace],
+      () => (sessionId !== '' && historyFace !== undefined
+        ? makeHeaderFetcher(() => sessionAddressOf(ctx, sessionId))
+        : undefined),
+      [ctx, sessionId, historyFace],
     )
 
     const close = useCallback(() => {
@@ -96,7 +100,6 @@ export function makeContextModal(
       if (scope !== undefined) scope.bail(scope, 'slash/input-consume-token', { guard })
     }, [ctx, sessionId])
 
-    // Capture-phase Escape close + focus restore (the shared overlay contract).
     useEscapeClose(open, close)
 
     // Keep the measurement anchor in the composer; the body portal escapes its skin filters and containing blocks.
@@ -120,7 +123,7 @@ export function makeContextModal(
     if (!open) return null
 
     const head = data !== null ? headlineOf(data, pressure, breakdown) : null
-    const subtitle = data !== null ? (data.model ? data.model : '') + (data.provider ? ' · ' + data.provider : '') : ''
+    const subtitle = data !== null ? providerModelLabelOf(data.provider, data.model, data.reasoningEffort) : ''
 
     return (
       <>

@@ -1,5 +1,3 @@
-// The projection warm-up (src/host/backfill.ts) over the REAL cordis context — no mocks.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -93,8 +91,7 @@ describe('watchActivityBackfill', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     assert.deepEqual(state.coldReads, [], 'the armed request holds until the faces complete')
 
-    // Re-arm the same face-shaped hole twice more: the request may land
-    // before or after the broken face — the re-proof answers either way.
+    // Re-arm the same face-shaped hole twice more: the request may land before or after the broken face.
     for (const broken of [
       { sessionProjectionCache: { coldSnapshot: () => ({}) } },
       { sessionPersistence: { notOpen: true } },
@@ -151,8 +148,7 @@ describe('watchActivityBackfill', () => {
   })
 
   test('the cached-rows probe rides the 2-arg face (header + keys)', async () => {
-    // The projection cache's `cachedSnapshot(meta, keys?)` — the lifecycle
-    // identity rides the header alone on every supported line.
+    // The projection cache's `cachedSnapshot(meta, keys?)`: the lifecycle identity rides the header alone.
     const ctx = new Context()
     const state = fakeState([{ header: { id: 'a', cwd: '/repo/a' } }])
     const calls: number[] = []
@@ -225,8 +221,7 @@ describe('watchActivityBackfill', () => {
     const route = arm(ctx, state)
     const dispose = watchActivityBackfill(ctx)
     await trigger(route)
-    // The skip-guard records come first, so every guard branch runs before
-    // the two folds complete the observable signal; the run then finishes.
+    // The skip-guard records come first, so every guard branch runs before the two folds complete the signal.
     await until(() => (state.coldSnapshots.length >= 2 ? true : undefined), 'two cold folds')
     await new Promise(resolve => setTimeout(resolve, 60))
     dispose()
@@ -235,9 +230,8 @@ describe('watchActivityBackfill', () => {
   })
 
   test('a session serving only the activity row (timeline version-stale) gets a cold refold', async () => {
-    // The lastUser bump's whole point: a cached timeline row that predates
-    // the field fails the version gate and reads as absent — the session is
-    // NOT "already served" and its rows are rebuilt on the pass.
+    // The lastUser bump's whole point: a cached timeline row that predates the field fails the version gate and
+    // reads as absent — the session is NOT "already served" and is rebuilt on the pass.
     const ctx = new Context()
     const state = fakeState([{ header: { id: 'a', cwd: '/repo/a' } }])
     const route: RouteBox = {}
@@ -345,9 +339,8 @@ describe('watchActivityBackfill', () => {
       { header: { id: 'legacy-2', cwd: '/repo/legacy-2' } },
       { header: { id: 'good', cwd: '/repo/good' } },
     ])
-    // One refusal per face of the seam's translation: the translated name a
-    // real dsh delivers, and the untranslated format-edge name (either may
-    // arrive) — both classify alike, one summary for the pair.
+    // One refusal per face of the seam's translation: the translated name real dsh delivers and the untranslated
+    // format-edge name — both classify alike, one summary for the pair.
     state.failReads.set('legacy-1', unsupportedFormatError('SessionFormatUnsupportedError'))
     state.failReads.set('legacy-2', unsupportedFormatError('SessionFormatUnsupportedMigrationError'))
     const route = arm(ctx, state)
@@ -479,7 +472,6 @@ describe('watchActivityBackfill', () => {
     ctx.provide('connection', connectionOf(route))
     const dispose = watchActivityBackfill(ctx)
     await trigger(route)
-    // The request landed while only the route half existed; the faces land now and the pass must still run.
     ctx.provide('sessionQuery', { listSessions: async () => state.listed })
     ctx.provide('sessionProjectionCache', {
       cachedSnapshot: () => undefined,

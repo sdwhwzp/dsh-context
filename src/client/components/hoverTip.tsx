@@ -1,13 +1,6 @@
-/**
- * The Context Insights page's hover tips: one fixed bubble, portaled to <body>, driven by event delegation off the page root.
- *
- * The page is the `lc-ov` query container, and its inline-size containment makes the page the containing block
- * for FIXED descendants: an in-tree bubble would paint sidebar-width away from its anchor.
- *
- * Anchors carry `data-lc-tip` (the label) and optional `data-lc-tip-side` ('top' default, 'bottom').
- *
- * @module dsh-context/client/components/hoverTip
- */
+/** Insights page hover tips: one fixed bubble portaled to `<body>`, driven by event delegation off the page root; the
+ * page's `lc-ov` containment would capture in-tree FIXED descendants (overview.css). Anchors carry `data-lc-tip` and
+ * optional `data-lc-tip-side` ('top' default, 'bottom'). */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
@@ -41,8 +34,8 @@ function tipOf(anchor: Element): ActiveTip | null {
   const r = anchor.getBoundingClientRect()
   const side = anchor.getAttribute('data-lc-tip-side') === 'bottom' ? 'bottom' : 'top'
   const rect = { left: r.left, top: r.top, width: r.width, height: r.height, bottom: r.bottom }
-  // The pass reads side, the rect edges and the viewport; the label sets the bubble width. Key it on those inputs,
-  // not the tip object: React can replay the show updater, and an equivalent rebuilt tip must not re-measure.
+  // The pass reads side, the rect edges and the viewport; the label sets the bubble width. Key on those inputs, not
+  // the tip object: React can replay the show updater, and an equivalent rebuilt tip must not re-measure.
   const signature = JSON.stringify([side, label, rect.left, rect.top, rect.width, rect.bottom, window.innerWidth, window.innerHeight])
   return { anchor, label, side, rect, signature }
 }

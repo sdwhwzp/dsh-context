@@ -1,6 +1,3 @@
-// The runtime register() attribution hook (src/host/attribution.ts) against a REAL cordis Context:
-// plugin fibers read `ctx.tools` (firing the internal/get waterfall) and call `register()` on a fake tools service.
-
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,13 +11,13 @@ const fileUrl = (file: string) => 'file:///' + file.replace(/\\/g, '/')
 /** Absolute path of this spec file (a file inside the dsh-context package). */
 const specFile = path.normalize(fileURLToPath(import.meta.url))
 
-/** Symbol cordis registers on its traced proxies (`Symbol.for`, shared
- * registry); reading it yields the wrapped underlying service instance. */
+/** Symbol cordis registers on its traced proxies (`Symbol.for`, shared registry); reading it yields the
+ * wrapped underlying service instance. */
 const CORDIS_ORIGINAL = Symbol.for('cordis.original')
 
-/** A tracked tools service shaped like dsh's ToolRuntime: a real Service
- * subclass whose `register` is a PROTOTYPE method — the shape that makes
- * cordis hand out a fresh traced proxy (closing over the reader's context) on every `ctx.tools` property read. */
+/** A tracked tools service shaped like dsh's ToolRuntime: a real Service subclass whose `register` is a
+ * PROTOTYPE method — which makes cordis hand out a fresh traced proxy (closing over the reader's context) on
+ * every `ctx.tools` property read. */
 class TrackedTools extends Service {
   layers = { global: { tools: new Map() } }
   constructor(ctx: Context) { super(ctx, 'tools') }
@@ -142,8 +139,7 @@ describe('createToolAttribution', () => {
   test('a foreign wrapper carrying a garbage attribution marker is left untouched', async () => {
     const app = new Context()
     const attribution = createToolAttribution(app)
-    // A wrapper that copied the peel-marker name with a non-function value:
-    // there is no original to recover, so the instance is not re-wrapped.
+    // A wrapper that copied the peel-marker name with a non-function value: no original to recover, so no re-wrap.
     const foreign = Object.assign(() => 'not-a-disposer', { attributedOriginal: 42 })
     const fake = { register: foreign }
     app.provide('tools', fake)
@@ -205,8 +201,8 @@ describe('createToolAttribution', () => {
     app.provide('tools', { register() { calls++; return () => {} } })
     const first = createToolAttribution(app)
     void first
-    // The second hook incarnation (a reload) peels the first wrapper back to
-    // the original: a registration records into the NEW hook only, and the original register still runs exactly once.
+    // The second hook incarnation (a reload) peels the first wrapper back to the original: a registration
+    // records into the NEW hook only, and the original register still runs once.
     const second = createToolAttribution(app)
     await app.plugin({
       name: 'provider-b',
@@ -305,8 +301,8 @@ describe('createToolAttribution', () => {
     await app.plugin({
       name: 'agent-scope',
       apply(sub) {
-        // Tracked services yield a FRESH traced proxy per property read, both
-        // peeling to the same underlying instance (issue #108's premise).
+        // Tracked services yield a FRESH traced proxy per property read, all peeling to the same instance
+        // (repeated reads must never re-wrap it).
         const first = (sub as unknown as { tools: TrackedTools & Record<symbol, unknown> }).tools
         const second = (sub as unknown as { tools: TrackedTools & Record<symbol, unknown> }).tools
         assert.notEqual(first, second, 'cordis hands out a fresh traced proxy per read')
@@ -366,8 +362,7 @@ describe('createToolAttribution', () => {
       { register() { return () => {} }, layers: {} },
       { register() { return () => {} }, layers: { global: {} } },
       { register() { return () => {} }, layers: { global: { tools: {} } } },
-      // A host tool service whose enumeration throws must not take the
-      // caller's startup down — the boot snapshot just stays empty.
+      // A host tool service whose enumeration throws must not take the caller's startup down — the snapshot stays empty.
       {
         register() { return () => {} },
         layers: { global: { tools: { entries() { throw new Error('boom') } } } },
@@ -399,24 +394,18 @@ describe('createToolAttribution', () => {
     const local = path.normalize(fileURLToPath(new URL('./fixtures/local-plugin/index.js', import.meta.url)))
     assert.equal(callerPackageFrom(undefined), undefined)
     assert.equal(callerPackageFrom('no frames here'), undefined)
-    // non-frame lines are skipped
+    // Fixture rows, each one parser rule: non-frame and position-less frames skip; bare absolute paths and
+    // file:// URLs (fn-wrapped, async) resolve; targets in this package or this module skip; unparseable and
+    // non-absolute (node: internals) targets skip.
     assert.equal(callerPackageFrom(`Error\n  note\n  at ${local}:1:2`), 'local-plugin')
-    // frames without a :line:col position are skipped, unresolvable targets yield undefined
     assert.equal(callerPackageFrom('Error\n    at x (file:///D:/no-position.js)\n    at y (file:///D:/has-position.js:1:2)'), undefined)
-    // bare absolute path frames (transpiled modules) resolve
     assert.equal(callerPackageFrom(`Error\n    at ${local}:1:2\n    at ${specFile}:3:4`), 'local-plugin')
-    // file:// URL frames with fn (...) wrappers resolve
     assert.equal(callerPackageFrom(`Error\n    at registerBlind (${fileUrl(anon)}:1:2)\n    at run (${fileUrl(specFile)}:3:4)`), 'anon-plugin')
-    // frames resolving to this package are skipped, the next package wins
     assert.equal(callerPackageFrom(`Error\n    at ${specFile}:1:2\n    at ${local}:3:4`), 'local-plugin')
-    // this module's own frames are skipped too
     const attributionFile = path.normalize(fileURLToPath(new URL('../../src/host/attribution.ts', import.meta.url)))
     assert.equal(callerPackageFrom(`Error\n    at ${attributionFile}:1:2\n    at ${local}:3:4`), 'local-plugin')
-    // unparseable file URLs are skipped
     assert.equal(callerPackageFrom(`Error\n    at x (file:///D:/bad%zz.js:1:2)\n    at y (${fileUrl(local)}:3:4)`), 'local-plugin')
-    // non-absolute targets (e.g. node: internal frames) are skipped
     assert.equal(callerPackageFrom(`Error\n    at ModuleJob.run (node:internal/modules/esm/module_job.js:346:20)\n    at y (${fileUrl(local)}:3:4)`), 'local-plugin')
-    // async wrappers are tolerated
     assert.equal(callerPackageFrom(`Error\n    at async fn (${fileUrl(anon)}:1:2)`), 'anon-plugin')
   })
 

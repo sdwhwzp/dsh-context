@@ -45,7 +45,6 @@ describe('OverviewCard', () => {
     assert.equal(query(m.container, '.lc-ov-session-time').textContent, '3h ago')
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '500')
     assert.equal(query(m.container, '.lc-donut-center span').textContent, '50.0%')
-    // The three mini stats: turns+steps lead, then the team's billed, then its cost.
     const labels = queryAll(m.container, '.lc-ov-mini-label').map(el => el.textContent)
     const values = queryAll(m.container, '.lc-ov-mini-value').map(el => el.textContent)
     assert.deepEqual(labels, ['Turns', 'Total Tokens', 'Total Est. Cost'])

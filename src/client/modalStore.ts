@@ -1,5 +1,4 @@
-/** Per-session open-state stores for the /context modal, plus the deferred token-consume guards;
- *  module-level so the state survives overlay remounts. */
+/** Per-session open-state stores for the /context modal, module-level so the state survives overlay remounts. */
 
 import type { TokenSpan } from './services'
 
@@ -32,8 +31,8 @@ export function modalStoreOf(sessionId: string): ModalStore {
   return store
 }
 
-// Each open path records the guard the input shell understands — span CAS for picks, bare-token equality
-// for enter — and the close path dispatches `slash/input-consume-token`; a stale guard fails soft.
+// Each open path records the guard the input shell understands — span CAS for picks, bare-token equality for enter — and a stale guard
+// fails soft.
 
 export type ConsumeGuard =
   | { kind: 'span'; span: TokenSpan }

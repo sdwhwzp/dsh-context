@@ -1,6 +1,3 @@
-// The Context Insights page's registrations (src/client/insightPage.ts): the keyed `main` panel and the
-// `sidebar.panellist` entry under one id, mounted while the `insightsEntry` preference shows them and unwound on 'hide'.
-
 import assert from 'node:assert/strict'
 import { createElement as h, type ReactElement } from 'react'
 import { describe, test } from 'vitest'
@@ -57,7 +54,6 @@ describe('watchInsightPage', () => {
     assert.equal(ctx.slots.of('main').length, 1, 'showing remounts the pair')
     assert.equal(ctx.slots.of('sidebar.panellist').length, 1)
 
-    // Unrelated preference changes never churn the mounts.
     settings.set('defaultGranularity', 'turn')
     assert.equal(ctx.slots.of('main').length, 1)
     assert.equal(ctx.slots.of('sidebar.panellist').length, 1)
@@ -73,7 +69,6 @@ describe('watchInsightPage', () => {
     assert.equal(hidden.slots.of('main').length, 0)
     assert.equal(hidden.slots.of('sidebar.panellist').length, 0)
     disposeHidden()
-    // A later flip reaches no mount: the subscription is gone.
     hiddenSettings.set('insightsEntry', 'show')
     assert.equal(hidden.slots.of('main').length, 0)
 
@@ -111,7 +106,6 @@ describe('watchInsightPage', () => {
   })
 
   test('a slots face returning no disposer is tolerated across flips and dispose', () => {
-    // A minimal face: inject/register land nothing unwindable (the harness contract allows either to return no handle).
     const bare = {
       slots: {
         inject: (_name: string, cb: () => unknown) => { cb(); return undefined },

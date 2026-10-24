@@ -92,8 +92,8 @@ describe('the trigger', () => {
     assert.equal(trigger(m).getAttribute('aria-expanded'), 'true')
     assert.ok(panel() !== null, 'the panel is portaled to the body')
 
-    // A preset's window rides the chip too — linked, but never in the brand
-    // voice and with no way back, because a preset is not a pick.
+    // A preset's window rides the chip too, but never in the brand voice and with no way back:
+    // a preset is not a pick.
     await set({ value: { from: '2026-09-10', to: '2026-10-09' } })
     assert.deepEqual(halves(), ['2026-09-10', '2026-10-09'])
     assert.ok(!trigger(m).className.includes('lc-dp-trigger-on'))
@@ -175,7 +175,6 @@ describe('picking a range', () => {
     assert.match(cell(m, '2026-10-06').className, /lc-dp-edge/)
     assert.match(cell(m, '2026-10-09').className, /lc-dp-today/)
     assert.match(cell(m, '2026-10-07').textContent ?? '', /^7$/, 'each cell prints its own day of the month')
-    // Clicking anywhere restarts the pick, so the old band releases.
     await click(cell(m, '2026-10-08'))
     assert.equal(cell(m, '2026-10-04').className.includes('lc-dp-in'), false)
     assert.match(text(query(panel()!, '.lc-dp-hint')), /end date/)
@@ -310,8 +309,8 @@ describe('the keyboard cursor', () => {
 
 describe('the panel seat', () => {
   test('sits under its trigger, inside the viewport, and flips when it would fall off', async () => {
-    // jsdom measures every element as 0; drive the panel's own box, then put
-    // the prototype's own descriptors back (deleting them would leave every later measurement NaN).
+    // jsdom measures every element as 0; drive the panel's own box, then restore the prototype's
+    // descriptors (deleting them would leave every later measurement NaN).
     const size = { w: 240, h: 300 }
     const own = (name: string): PropertyDescriptor | undefined => Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)
     const width = own('offsetWidth')
@@ -350,8 +349,8 @@ describe('the panel seat', () => {
   test('renders hidden until it has measured itself', async () => {
     const { m } = await open()
     await toggle(m)
-    // The layout effect measures before paint, so the seated panel is what a
-    // reader ever sees; a fresh mount would flash at (0, 0) without it.
+    // The layout effect measures before paint, so a reader never sees the (0, 0) flash a fresh
+    // mount would show.
     assert.equal(panel()!.style.visibility, '')
     assert.notEqual(panel()!.style.left, '0px')
   })

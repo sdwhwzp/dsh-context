@@ -85,11 +85,19 @@ describe('timingSumOf', () => {
       wallMs: 150, ttftMs: 15, genMs: 90, calls: 3, toolsMs: 40, toolCalls: 4,
       tools: { read: { calls: 3, ms: 25 }, write: { calls: 1, ms: 10 } },
     })
-    // The rows' own totals are never mutated, and a field no row carries
-    // stays absent (the card's un-split / no-chip fallbacks key off absence).
     assert.deepEqual(a.tools.read, { calls: 2, ms: 20 })
     assert.equal('reasoningMs' in (sum as object), false)
     assert.equal('speedMs' in (sum as object), false)
+  })
+
+  test('folds every family member — a null self and the dispatched subagents alike', () => {
+    const self = { wallMs: 100, ttftMs: 10, genMs: 60, calls: 2, toolsMs: 30, toolCalls: 3, tools: { read: { calls: 2, ms: 20 } } }
+    const kid = { wallMs: 50, ttftMs: 5, genMs: 30, calls: 1, toolsMs: 10, toolCalls: 1, tools: { read: { calls: 1, ms: 5 }, write: { calls: 1, ms: 10 } } }
+    const sum = timingSumOf([rowOf({ family: [null, { timing: self }, { timing: kid }] as unknown as ContextTimeline[] })])
+    assert.deepEqual(sum, {
+      wallMs: 150, ttftMs: 15, genMs: 90, calls: 3, toolsMs: 40, toolCalls: 4,
+      tools: { read: { calls: 3, ms: 25 }, write: { calls: 1, ms: 10 } },
+    })
   })
 
   test('the additive-optional fields sum their carriers only', () => {
@@ -100,7 +108,6 @@ describe('timingSumOf', () => {
     const preSplit = { wallMs: 1, ttftMs: 1, genMs: 10, calls: 1, toolsMs: 0, toolCalls: 0, tools: {} }
     const rowsOf = (timings: unknown[]): OverviewRow[] =>
       timings.map(timing => rowOf({ timeline: { timing } as unknown as ContextTimeline }))
-    // Carrier first: the pre-split row adds nothing to the decode split.
     const sum = timingSumOf(rowsOf([split, preSplit]))
     const reverse = timingSumOf(rowsOf([preSplit, split]))
     for (const merged of [sum, reverse]) {
@@ -113,7 +120,6 @@ describe('timingSumOf', () => {
       assert.equal(merged?.speedTokens, 100)
       assert.equal(merged?.speedMs, 2_000)
     }
-    // Two carriers of one field sum both.
     const both = timingSumOf(rowsOf([split, { ...split, reasoningMs: 6, speedTokens: 50 }]))
     assert.equal(both?.reasoningMs, 10)
     assert.equal(both?.speedTokens, 150)
@@ -121,8 +127,6 @@ describe('timingSumOf', () => {
 })
 
 describe('tokenPartsOf', () => {
-  // The standard composition: system 100, tools 50, and a 350-token message
-  // surface (user 30, inject 10, skill 10, assistant 200, tool 100).
   const STANDARD_CURRENT = { system: 100, tools: 50, user: 30, inject: 10, skill: 10, assistant: 200, tool: 100, total: 500 }
   const TINY_CURRENT = { system: 10, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 10 }
 
@@ -142,8 +146,6 @@ describe('tokenPartsOf', () => {
       rowOf({ timeline: { current: TINY_CURRENT, cost: { deepseek: { m: { peak: { uncached: 10, cacheRead: 0, cacheWrite: 0, output: 0 } } } }, requests: [] } as unknown as ContextTimeline }),
     ]
     const folded = tokenPartsOf(rows)
-    // Session 1: input 160 proportioned by 100:50:350 → 32/16/10/3/3/64/32, output 40.
-    // Session 2: input 10 lands on its only category; its zero output adds nothing.
     assert.deepEqual(folded, {
       total: 210,
       parts: [
@@ -250,11 +252,34 @@ describe('kpisOf', () => {
     assert.equal(kpi.toolsMs, 20_000)
     assert.equal(kpi.calls, 6)
     assert.equal(kpi.wallMs, 120_000)
-    // The aggregate cards' sources: the composition-folded billed split (the
-    // unbilled session adds nothing) and the summed timing totals.
     assert.equal(kpi.tokenParts?.total, 200)
     assert.deepEqual(kpi.tokenParts?.parts.find(p => p.key === 'system'), { key: 'system', color: 'var(--color-indigo-500)', value: 32 })
     assert.deepEqual(kpi.timing, { wallMs: 120_000, ttftMs: 1_000, genMs: 30_000, calls: 6, toolsMs: 20_000, toolCalls: 7, tools: {} })
+  })
+
+  test('an unbounded scope folds the whole family’s lifetime timing (self and subagents)', () => {
+    const self = {
+      counts: { turns: 3 },
+      timing: { wallMs: 90_000, ttftMs: 1_000, genMs: 30_000, calls: 4, toolsMs: 20_000, toolCalls: 7, tools: {} },
+    }
+    const kid = {
+      counts: { turns: 2 },
+      timing: { wallMs: 30_000, ttftMs: 0, genMs: 0, calls: 2, toolsMs: 0, toolCalls: 0, tools: {} },
+    }
+    const row = rowOf({
+      family: [self, kid] as unknown as ContextTimeline[],
+      familyCost: COST,
+      activity: { days: { '2026-09-16': { tokens: 5, requests: 1, cost: COST, turns: 9, wallMs: 999 } } },
+    })
+    const kpi = kpisOf([row], prices, 'usd')
+    assert.equal(kpi.turns, 5)
+    assert.equal(kpi.calls, 6)
+    assert.equal(kpi.wallMs, 120_000)
+    assert.equal(kpi.toolCalls, 7)
+    assert.equal(kpi.toolsMs, 20_000)
+    assert.equal(kpi.tokens, 200, 'usage rides familyCost without a scope and the ledger under the All preset')
+    assert.deepEqual(kpi.timing, { wallMs: 120_000, ttftMs: 1_000, genMs: 30_000, calls: 6, toolsMs: 20_000, toolCalls: 7, tools: {} })
+    assert.deepEqual(kpisOf([row], prices, 'usd', { start: null, end: null }), kpi, 'the All preset reads the same family timing')
   })
 
   test('a bounded scope folds only the daily ledger days inside the window', () => {
@@ -362,8 +387,6 @@ describe('aggregateDays', () => {
       rowOf({ activity: { days: { '2026-09-14': { tokens: 9, requests: 1, cost: { openai: { 'gpt-5': { peak: { uncached: 10, cacheRead: 0, cacheWrite: 0, output: 1 } } } } } } } }),
     ]
     const days = aggregateDays(rows, book, 'usd')
-    // The DeepSeek peak buckets double the list price: (100·1 + 50·0.1 + 40·2)·2/1e6 plus the
-    // second session's (1·1 + 1·2)·2/1e6.
     assert.ok(Math.abs((days['2026-09-16'].cost ?? 0) - 376e-6) < 1e-12)
     assert.equal(days['2026-09-15'].cost, null, 'a day without pricing records prices to nothing')
     assert.equal(days['2026-09-14'].cost, null, 'a model the book cannot price prices to nothing')

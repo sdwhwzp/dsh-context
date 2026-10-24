@@ -48,8 +48,6 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
     const View = makeView(ctx)
     const m = await mount(h(View, { sessionId: 'sv-slim', useProjection: projectionsFor(slimHead()) }))
 
-    // First paint: the counters are real (no detail needed), the detail cards name the pending read.
-    // The session node reads two figure rows off the head: turns/steps, then skill loads/answers.
     const values = queryAll(m.container, '.lc-flow-kv b').map(el => text(el))
     assert.deepEqual(values, ['1', '3', '0', '0'], 'turns/steps/skills/answers from the head counters')
     assert.ok(text(m.container).includes(DICT_EN['detail.loading']))
@@ -70,7 +68,6 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
     const View = makeView(ctx)
     const m = await mount(h(View, { sessionId: 'sv-reserve', useProjection: projectionsFor(slimHead()) }))
 
-    // Pending: the trend card stands in the same boxes the loaded panel uses, so its arrival changes no card's height.
     assert.equal(queryAll(m.container, '.lc-trend-lane').length, 1, 'the reserved body renders while the read is in flight')
     assert.equal(queryAll(m.container, '.lc-trend-lane .lc-legend .lc-chip').length, 7,
       'the lane reserves one chip per category')
@@ -151,6 +148,8 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
     const detail = new Promise<unknown>(resolve => { resolveDetail = resolve })
     const ctx = slimCtx(() => detail)
     const View = makeView(ctx)
+    // The jump is armed BEFORE the view mounts (the chat action relay): with the detail read still
+    // pending, the pin must wait for it rather than clamp against an empty record list.
     requestContextFocus('sv-slim-jump', 4)
     const m = await mount(h(View, { sessionId: 'sv-slim-jump', useProjection: projectionsFor(slimHead()) }))
     try {
@@ -182,7 +181,7 @@ describe('ContextView — the op-log generation (fileOps on the detail payload)'
           nodes: [],
           droppedNodes: 0,
           archive: [],
-          // The op log covers the full session — the conversation window join plays no role in this card on this generation.
+          // The op log covers the full session; the conversation window join plays no role here.
           fileOps: [
             { seq: 1, path: '/ws/README.md', kind: 'read', tool: 'read', err: false, added: 0, removed: 0, read: { start: 1, count: 12 } },
             { seq: 2, path: '/ws/src/a.ts', kind: 'write', tool: 'edit', err: false, added: 3, removed: 1 },

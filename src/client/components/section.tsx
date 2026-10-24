@@ -1,11 +1,9 @@
-/** The Context browser's titled card head, shared by the tool/detail cards and the attachment block. */
-
 import type { ReactElement, ReactNode } from 'react'
 
 export function Section(props: {
   label: string
   labelClass?: string
-  /** Fold the head's trailing group onto a second line under width pressure (rich-text heads; the call-name head must stay one-line). */
+  /** Fold the head's trailing group onto a second line under width pressure; the call-name head must stay one-line. */
   foldHead?: boolean
   count?: number
   actions?: ReactNode

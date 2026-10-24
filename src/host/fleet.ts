@@ -1,37 +1,22 @@
-/**
- * The Fleet detail route (`/api/dsh-context/fleet`) — per-session agent color that no projection
- * carries: the delegation prompt, the durable `subagent/descriptor` composition, and the
- * inter-agent traffic the session's own log attests (team relays addressed to it, historical
- * mailbox deliveries, and — in a parent's log — the runtime's accounts of children settling).
- *
- * Same transport and posture as the detail route (detail.ts): Connection's exact Fetch-route
- * registry behind the authenticated `/api` fence, the durable log read through
- * `ctx.sessionQuery.observeSession` (live-preferred, so one code path serves live and cold
- * sessions alike), and every read admitted by the shared cold-read gate. Extraction is
- * display-only and total: unknown event types and malformed payloads drop whole, never throw.
- *
- * The default body reads excerpts; a `full: true` body lifts the prompt/reply excerpt caps —
- * the task card's opened sections fetch that on demand, one whole-log read either way.
- */
+/** The Fleet detail route (`/api/dsh-context/fleet`): per-session agent color no projection carries — the delegation prompt, the
+ * `subagent/descriptor` composition, and attested inter-agent traffic. Display-only and total; a `full: true` body lifts the excerpt
+ * caps for the task card's opened sections. */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { FleetDescriptor, FleetDetail, FleetMemberInfo, FleetMessage } from '../shared/types'
 import { type ColdReadGate, makeColdReadGate } from './coldRead'
 import { canReadAccountSession, type ConnectionHostFace, registerPostRoute } from './connection'
 
-/** The plugin's fleet route, under the authenticated `/api` fence. */
 export const FLEET_ROUTE = '/api/dsh-context/fleet'
 
-/** Excerpt-mode payload caps: the fold's default read serves inspector excerpts, not transcripts. */
+/** The fold's default read serves inspector excerpts, not transcripts. */
 const MESSAGES_MAX = 40
 const MESSAGE_TEXT_MAX = 400
 const PROMPT_TEXT_MAX = 1600
 const REPLY_TEXT_MAX = 300
-/** The full read's only bound on prompt and reply — DSH itself never truncates either (the whole
- * log is already in hand), but a corrupted log should never flood a client that asked for text. */
+/** The full read's only bound: DSH never truncates these, but a corrupted log must not flood the client. */
 const FULL_TEXT_MAX = 100_000
 
-/** Whether the request asked for the task card's full read (unclipped prompt and reply). */
 function fullOf(body: unknown): boolean {
   return asRecord(body)?.full === true
 }
@@ -71,12 +56,11 @@ function clip(text: string, max: number): { text: string; cut: boolean } {
   return text.length > max ? { text: text.slice(0, max) + '…', cut: true } : { text, cut: false }
 }
 
-/** The descriptor's display fields off one `subagent/descriptor` payload; null unless the mode reads clean. */
 function descriptorOf(data: Record<string, unknown>): FleetDescriptor | null {
   const mode = data.mode
   if (mode !== 'one-shot' && mode !== 'continuable') return null
   const out: FleetDescriptor = { mode }
-  for (const key of ['label', 'provider', 'agentProvider', 'agentModel', 'persona'] as const) {
+  for (const key of ['label', 'provider', 'agentProvider', 'agentModel', 'agentReasoningEffort', 'persona'] as const) {
     const value = data[key]
     if (typeof value === 'string' && value !== '') out[key] = value
   }
@@ -85,11 +69,9 @@ function descriptorOf(data: Record<string, unknown>): FleetDescriptor | null {
 
 /** The mailbox generation stamps each delivery with a transport preamble; the excerpt drops it. */
 const MAILBOX_PREFIX = /^Team message \S+ from [^:]{1,64}:\s*/
-/** Relay deliveries open with a sender-framing block ("Agent <id> sent a message: " / "Team
- * message from <name>:"); the excerpt drops it — the UI labels the parties itself. */
+/** Relay deliveries open with a sender-framing block; the excerpt drops it — the UI labels the parties itself. */
 const RELAY_PREFIX = /^(?:Agent \S+ sent a message: |Team message from [^:\n]{1,64}:\s*)/
 
-/** One user/message event → one inter-agent message, or null when the event is none. */
 function messageOf(seq: number, time: number, data: Record<string, unknown>): FleetMessage | null {
   const source = asRecord(data.source)
   const kind = source?.kind
@@ -122,14 +104,12 @@ function messageOf(seq: number, time: number, data: Record<string, unknown>): Fl
   return message
 }
 
-/** Whether a user/message is a plain prompt (human-typed or a delegation's initial delivery, both
- * attributed `kind: 'user'` or unattributed) rather than injected context or agent traffic. */
+/** A human-typed prompt or a delegation's initial delivery (kind `'user'` or unattributed), not injected context. */
 function isPlainPrompt(source: Record<string, unknown> | null): boolean {
   if (source === null) return true
   return source.kind === 'user'
 }
 
-/** The roster facts of one `team/member` record (a lead-log event), or null when unsound. */
 function rosterMemberOf(data: Record<string, unknown>): FleetMemberInfo | null {
   const member = asRecord(data.member)
   if (member === null) return null
@@ -143,7 +123,6 @@ function rosterMemberOf(data: Record<string, unknown>): FleetMemberInfo | null {
   return out
 }
 
-/** The newest assistant text of the log — the agent's latest report-back. */
 function lastReplyOf(events: readonly unknown[], max: number): { time: number; text: string; cut: boolean } | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = asRecord(events[i])
@@ -164,9 +143,8 @@ function lastReplyOf(events: readonly unknown[], max: number): { time: number; t
   return null
 }
 
-/** Fold one session's durable events into its Fleet detail. Total over hostile input: any
- * malformed entry drops alone. `full` lifts the prompt/reply excerpt caps — the task card's
- * opened read — leaving only the hostile-payload bound; every other cap is display-bound and stands. */
+/** Total over hostile input: a malformed entry drops alone. `full` lifts only the prompt/reply excerpt caps, keeping the hostile-payload
+ * bound. */
 export function fleetDetailOfEvents(events: readonly unknown[], full = false): FleetDetail {
   const promptMax = full ? FULL_TEXT_MAX : PROMPT_TEXT_MAX
   const replyMax = full ? FULL_TEXT_MAX : REPLY_TEXT_MAX
@@ -212,7 +190,6 @@ export function fleetDetailOfEvents(events: readonly unknown[], full = false): F
       }
     }
   }
-  // Newest first; the cap keeps the payload an excerpt.
   messages.sort((a, b) => b.seq - a.seq)
   if (messages.length > MESSAGES_MAX) {
     messages.length = MESSAGES_MAX
@@ -230,8 +207,7 @@ export function fleetDetailOfEvents(events: readonly unknown[], full = false): F
   }
 }
 
-/** Serve the fleet route whenever the connection service is composed (the detail route's own
- * posture); sessionQuery is re-read per request so a late-arriving query service still arms. */
+/** Serve whenever `connection` is composed; `sessionQuery` is re-read per request so a late-arriving service arms. */
 export function watchFleetChannel(ctx: Context, coldReads: ColdReadGate = makeColdReadGate()): void {
   ctx.inject(['connection'], (c) => {
     const handler = async (request: Request, principal?: unknown): Promise<Response> => {

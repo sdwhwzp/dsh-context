@@ -1,10 +1,12 @@
-import { createElement as h, useState } from 'react'
+import { act, createElement as h, useState } from 'react'
+import { flushSync } from 'react-dom'
+import { createRoot } from 'react-dom/client'
 import assert from 'node:assert/strict'
-import { describe, test } from 'vitest'
+import { describe, test, vi } from 'vitest'
 import type { CatFocus, ContextBrowserProps } from '../../../src/client/components/browser'
 import type { ContextHeaders } from '../../../src/shared/types'
 import { click, flush, hover, mount, query, queryAll, surfaceNode, text, tipRows, unhover, type Mounted } from '../helpers/kit'
-import { Browser, catRow, kit, props, req, tl, typeToolSearch, withEpochContent } from './browserHarness'
+import { Browser, catRow, filterStat, kit, props, req, tl, typeToolSearch, withEpochContent } from './browserHarness'
 
 describe('ContextBrowser DNA mode and the open-category bar pin', () => {
   const dnaHeaders: ContextHeaders = {
@@ -43,7 +45,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     return query(row, '.lc-br-elem-row')
   }
 
-  /** The block map's region whose head label matches (the map's own picks drive the feed's group rows). */
   function regionByHead(m: Mounted, label: string): HTMLElement {
     const region = queryAll(m.container, '.lc-map-cat')
       .find(r => queryAll(r, '.lc-map-cat-label').some(l => l.textContent === label))
@@ -52,7 +53,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
   }
 
   test('the DNA toggle is parent-linked when both props arrive; a lone prop is ignored', async () => {
-    // Linked on: the bar redraws and the button reflects the parent's state without a click.
     const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders, dna: true, onDnaChange: () => {} })))
     assert.equal(bands(m).length, 7)
     assert.ok(dnaButton(m).className.includes('lc-gran-on'))
@@ -71,8 +71,25 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     await m.unmount()
   })
 
+  test('the filter summary is populated before the DNA feed leaves its first-paint skeleton', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const silent = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      flushSync(() => {
+        root.render(h(Browser, props({ data: dnaData, headers: dnaHeaders, dna: true, onDnaChange: () => {} })))
+      })
+      assert.ok(query(container, '.lc-br-flat[aria-hidden="true"]'), 'the ready effect has not run yet')
+      assert.equal(text(query(container, '.lc-br-filter-stat')), '×6 ≈275')
+    } finally {
+      await act(async () => { root.unmount() })
+      container.remove()
+      silent.mockRestore()
+    }
+  })
+
   test('the toggle redraws the composition bar as one band per item, in prompt order', async () => {    const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders })))
-    // Category mode: one segment per category in CATS order, pick cursor off, tooltip slot unmounted.
     assert.equal(bands(m).length, 6)
     const normal = bands(m).map(seg => seg.style.width)
     assert.deepEqual(normal, [100, 75, 20, 10, 40, 30].map(v => `${v / 275 * 100}%`))
@@ -120,7 +137,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     await unhover(query(m.container, '.lc-stacked'))
     assert.ok(!tip.className.includes('lc-bar-tip-on'))
 
-    // The incoming category mirror still works: the open category's bands light as a group (no tooltip for a mirrored hover).
     await m.update(wired('tool'))
     assert.deepEqual(bands(m).map(seg => seg.className.includes('lc-stacked-seg-on')), [false, false, false, false, true, false, false])
     assert.ok(!query(m.container, '.lc-bar-tip').className.includes('lc-bar-tip-on'))
@@ -158,14 +174,12 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     try {
       const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders })))
       await click(dnaButton(m))
-      // Band n3 (index 4) opens that exact feed row.
       await click(bands(m)[4])
       const onRows = queryAll(m.container, '.lc-br-elem-on')
       assert.equal(onRows.length, 1)
       assert.ok(text(onRows[0]).includes('bash'))
       assert.deepEqual(scrolls, [], 'the pick reveals inside the card — never a scrollIntoView that could drag the page')
 
-      // A stale flat filter cannot hide the clicked band's row.
       await typeToolSearch(m, 'zzz')
       assert.ok(text(query(m.container, '.lc-br-flat')).includes('No rows match'))
       await click(bands(m)[3])
@@ -181,7 +195,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
       await click(flatRow(m, 'Tool Schemas'))
       assert.equal(queryAll(m.container, '.lc-br-content').length, 0, 'the group closes with the schema row open')
 
-      // The system band opens the system row (the metadata-only note without a header fetcher).
       await click(bands(m)[0])
       assert.ok(text(query(m.container, '.lc-br-flat')).includes('token estimates only'))
       await m.unmount()
@@ -195,7 +208,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     await click(dnaButton(m))
     assert.ok(query(m.container, '.lc-br-flat'))
     assert.equal(queryAll(m.container, '.lc-br-cat-row').length, 0, 'the accordion yields to the feed')
-    // Reading order bottom-up: the newest message is row one (#4 = the 4th prompt message), the header closes the list.
     const labels = flatRows(m).map(r => text(r))
     assert.equal(labels.length, 6)
     assert.ok(labels[0].includes('#4') && labels[0].includes('Injected Context') && labels[0].includes('Notice'))
@@ -205,7 +217,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     assert.ok(labels[4].includes('Tool Schemas') && labels[4].includes('2 Items') && labels[4].includes('≈75'))
     assert.ok(labels[5].includes('System Prompt') && labels[5].includes('≈100'))
 
-    // The tools group opens into the category body's sorted schema rows; the system row opens its own section beside it.
     await click(flatRow(m, 'Tool Schemas'))
     const toolRows = queryAll(m.container, '.lc-br-content .lc-br-elem-row')
     assert.equal(toolRows.length, 2)
@@ -219,14 +230,18 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
   test('the DNA feed text lens filters message rows, the tools group, and the system row', async () => {
     const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders })))
     await click(dnaButton(m))
+    assert.equal(filterStat(m), '×6 ≈275')
     await typeToolSearch(m, 'bash')
     const rows = flatRows(m)
     assert.equal(rows.length, 2, 'the matching tool result and the tools group stay')
     assert.ok(text(rows[0]).includes('#2') && text(rows[1]).includes('Tool Schemas'))
+    assert.equal(filterStat(m), '×2 ≈105')
     await typeToolSearch(m, 'zzz')
+    assert.equal(filterStat(m), '×0 ≈0')
     assert.ok(text(query(m.container, '.lc-br-flat')).includes('No rows match'))
     await typeToolSearch(m, '')
     assert.equal(flatRows(m).length, 6)
+    assert.equal(filterStat(m), '×6 ≈275')
     await m.unmount()
   })
 
@@ -243,6 +258,7 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     const rows = flatRows(m)
     assert.equal(rows.length, 1, 'the tools group stays on a plugin-only match')
     assert.ok(text(rows[0]).includes('Tool Schemas'))
+    assert.equal(filterStat(m), '×1 ≈75')
     await m.unmount()
   })
 
@@ -290,13 +306,11 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders })))
     await click(dnaButton(m))
     await click(query(m.container, '.lc-br-map-btn'))
-    // The tools region head opens the feed's tools group row.
     await click(query(regionByHead(m, 'Tool Schemas'), '.lc-map-cat-head'))
     assert.ok(flatRow(m, 'Tool Schemas').closest('.lc-br-elem')?.className.includes('lc-br-elem-on'))
     // A message category is interleaved in the feed — the pick is a no-op, the tools group stays the only open row.
     await click(query(regionByHead(m, 'User Messages'), '.lc-map-cat-head'))
     assert.equal(queryAll(m.container, '.lc-br-content').length, 1)
-    // The system region head opens the system row; the tools group stays open beside it.
     await click(query(regionByHead(m, 'System Prompt'), '.lc-map-cat-head'))
     assert.ok(flatRow(m, 'System Prompt').closest('.lc-br-elem')?.className.includes('lc-br-elem-on'))
     await m.unmount()
@@ -305,19 +319,16 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
   test('hovering a DNA feed row lights its exact band on the bar; the header groups light their group', async () => {
     const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders })))
     await click(dnaButton(m))
-    // Row #2 (the bash tool result) lights its own band; the per-item tooltip rides the exact-band hover.
     await hover(flatRows(m)[2].querySelector('.lc-br-elem-row')!)
     let on = bands(m).map(seg => seg.className.includes('lc-stacked-seg-on'))
     assert.deepEqual(on, [false, false, false, false, true, false, false], 'row #2 is the 5th band (n3)')
     assert.ok(query(m.container, '.lc-bar-tip').className.includes('lc-bar-tip-on'))
     await unhover(flatRows(m)[2].querySelector('.lc-br-elem-row')!)
     assert.ok(bands(m).every(seg => !seg.className.includes('lc-stacked-seg-on')))
-    // The tools group row lights the whole tools group (cat-key match, no per-item tooltip).
     await hover(flatRow(m, 'Tool Schemas'))
     on = bands(m).map(seg => seg.className.includes('lc-stacked-seg-on'))
     assert.deepEqual(on, [false, true, true, false, false, false, false])
     assert.ok(!query(m.container, '.lc-bar-tip').className.includes('lc-bar-tip-on'))
-    // The system row lights the system band (cat-key match, no tooltip).
     await unhover(flatRow(m, 'Tool Schemas'))
     await hover(flatRow(m, 'System Prompt'))
     assert.deepEqual(bands(m).map(seg => seg.className.includes('lc-stacked-seg-on')), [true, false, false, false, false, false, false])
@@ -335,7 +346,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     assert.ok(flatRows(m).every((r, i) => i === 2 || !r.className.includes('lc-br-elem-echo')))
     await unhover(bands(m)[4])
     assert.ok(flatRows(m).every(r => !r.className.includes('lc-br-elem-echo')))
-    // A tool-schema band echoes onto the tools group row; the system band onto the system row.
     await hover(bands(m)[1])
     assert.ok(flatRow(m, 'Tool Schemas').closest('.lc-br-elem')?.className.includes('lc-br-elem-echo'))
     await unhover(bands(m)[1])
@@ -358,14 +368,12 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     assert.ok(Math.abs(parseFloat(segs[1].style.width) - 99.65) < 0.001)
     await hover(segs[0])
     assert.deepEqual(tipRows(query(m.container, '.lc-bar-tip')), ['User Messages', '≈2 · 0% of used context', null])
-    // Category mode keeps exact widths (no floor outside DNA mode).
     await click(dnaButton(m))
     assert.deepEqual(bands(m).map(seg => seg.style.width), ['0.2%', '99.8%'])
     await m.unmount()
   })
 
   test('category mode: the open category stays lit; a pointer hover overrides the pin and the pin resumes on leave', async () => {
-    // A parent really holding the shared hover key, so hovers round-trip like the overview link.
     const Harness = (p2: Omit<ContextBrowserProps, 'hoverKey' | 'onHoverKey'>) => {
       const [hoverKey, setHoverKey] = useState<string | null>(null)
       return h(Browser, props({ ...p2, hoverKey, onHoverKey: setHoverKey }))
@@ -373,7 +381,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     const m = await mount(h(Harness, { data: dnaData, headers: dnaHeaders }))
     const stack = query(m.container, '.lc-stacked')
     assert.ok(!stack.className.includes('lc-stacked-dim'), 'nothing pinned while no category is open')
-    // Opening a category pins its segment lit (category order: system, tools, user, inject, assistant, tool).
     await click(catRow(m, 'assistant'))
     assert.deepEqual(bands(m).map(seg => seg.className.includes('lc-stacked-seg-on')), [false, false, false, false, true, false])
     assert.ok(stack.className.includes('lc-stacked-dim'))
@@ -427,7 +434,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     assert.ok(!query(m.container, '.lc-stacked').className.includes('lc-stacked-dim'))
     assert.ok(bands(m).every(seg => !seg.className.includes('lc-stacked-seg-on')))
     assert.ok(!query(m.container, '.lc-bar-tip').className.includes('lc-bar-tip-on'), 'the dead key floats no tooltip either')
-    // Band order is now sys, bash, write, n3, n4, n5: the assistant band click pins its band group under the stale hover.
     await click(bands(m)[4])
     assert.deepEqual(bands(m).map(seg => seg.className.includes('lc-stacked-seg-on')), [false, false, false, false, true, false])
     await hover(bands(m)[3])

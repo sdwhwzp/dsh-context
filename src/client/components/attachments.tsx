@@ -1,11 +1,5 @@
-/**
- * The Context browser's attachment block. Every `image`/`file` block a message carries renders here
- * in the message's OWN order — one card each, images with their session-authorized thumbnail, other
- * files with their type glyph, type badge, and size. One click IS the preview: the card hands the
- * attachment's named host path to dsh's own preview column (attachmentSource.ts), which renders
- * markdown, code, PDFs, office documents, and images under the file's real name. A refused open
- * leaves a note on that card alone.
- */
+/** Attachment blocks in the message's OWN order. One click IS the preview: the card hands the attachment's named
+ * host path to dsh's own preview column (`attachmentSource.ts`); a refused open leaves a note on that card alone. */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { attachmentExtension } from '../../shared/attachment'
@@ -18,7 +12,6 @@ import type { ViewKit } from '../viewkit'
 import { FileTypeGlyph } from '../primitives'
 import { Section } from './section'
 
-/** One message's ordered attachment block, plus that message's own IO seats. */
 export interface AttachmentKit {
   Section: (props: {
     attachments: readonly AttachmentRef[]
@@ -29,7 +22,7 @@ export interface AttachmentKit {
   open?: AttachmentOpener
 }
 
-/** The image reference the harness loader consumes; only proven facts are handed over. */
+/** The reference the harness's image loader consumes — only proven facts are handed over. */
 function imageRefOf(ref: AttachmentRef): ImageRefLike {
   return {
     attachmentId: ref.attachmentId,
@@ -41,35 +34,31 @@ function imageRefOf(ref: AttachmentRef): ImageRefLike {
   }
 }
 
-/** The name a card shows: the attachment's own, else its kind's label. */
 function nameOf(ref: AttachmentRef, t: ViewKit['t']): string {
   return ref.name ?? t(ref.kind === 'image' ? 'attach.image' : 'attach.file')
 }
 
-/** One labelled figure of a card. */
 interface Fact {
   label: string
   value: string
   tip?: string
 }
 
-/** The type line of an attachment (the harness file card's own rule): the upper-cased extension,
- * else the attachment's kind. */
+/** The harness file card's own rule: the upper-cased extension, else the attachment's kind. */
 function typeOf(ref: AttachmentRef, t: ViewKit['t']): string {
   const ext = attachmentExtension(ref.name ?? '')
   if (ext !== '') return ext.toUpperCase().slice(0, 8)
   return ref.kind === 'image' ? t('attach.image') : t('attach.file')
 }
 
-/** The image thumbnail's lifecycle: bytes through the harness's session-authorized loader, read
- * once per mount. */
+/** Bytes through the harness's session-authorized loader, read once per id/loader. */
 function useImageSrc(attachment: AttachmentRef, load: ImageLoader | undefined): {
   src: string | null
   failed: boolean
 } {
   const [state, setState] = useState<{ src: string | null; failed: boolean }>({ src: null, failed: false })
-  // The reference is re-proven from the log on every render, so the read keys off the id and reads
-  // the current reference through a latest-ref: a row re-render must not re-read the bytes.
+  // The reference is re-proven from the log on every render, so the read keys off the id and takes the current
+  // reference through a latest-ref: a row re-render must not re-read the bytes.
   const latest = useRef(attachment)
   latest.current = attachment
   const id = attachment.attachmentId
@@ -89,8 +78,7 @@ function useImageSrc(attachment: AttachmentRef, load: ImageLoader | undefined): 
   return state
 }
 
-/** An attachment's facts as label/value rows: an image's dimensions and its vision price, a file's
- * size and what its handle costs — the same figures the chat and the harness's own file card show. */
+/** The figures the chat and the harness's own file card show, as label/value rows. */
 function factsOf(ref: AttachmentRef, t: ViewKit['t'], fmt: ViewKit['fmt']): Fact[] {
   const dimsOf = (w: number | undefined, h: number | undefined): string | null =>
     w !== undefined && h !== undefined ? `${w}×${h}` : null
@@ -128,7 +116,6 @@ function factsOf(ref: AttachmentRef, t: ViewKit['t'], fmt: ViewKit['fmt']): Fact
 function AttachmentCard(props: {
   attachment: AttachmentRef
   load?: ImageLoader
-  /** This card's own open state: resolving the preview path, or refused. */
   state: 'idle' | 'opening' | 'failed'
   onOpen: () => void
   t: ViewKit['t']
@@ -164,15 +151,14 @@ function AttachmentCard(props: {
               <span className="lc-att-ext">{typeOf(attachment, t)}</span>
             </>
           )}
-        {/* The invite rides the thumbnail as a chip over a soft scrim: the facts beside it never move,
-            and the glyph or thumbnail stays readable through it. */}
+        {/* The invite rides the thumbnail as a chip over a scrim, so the facts beside it never move. */}
         <span className={'lc-att-hint' + (state === 'opening' ? ' lc-att-hint-on' : '')}>
           <span className="lc-att-hint-label">{state === 'opening' ? t('attach.loading') : hint}</span>
         </span>
       </span>
       <span className="lc-att-meta">
         <span className="lc-att-name" title={name}>{name}</span>
-        {/* An image has no extension badge on its tile, so its type keeps the row; a file's badge says it. */}
+        {/* An image has no extension badge on its tile, so its type keeps the row. */}
         {image ? (
           <span className="lc-att-row"><b className="lc-att-row-label">{t('attach.type')}</b>{typeOf(attachment, t)}</span>
         ) : null}
@@ -187,8 +173,8 @@ function AttachmentCard(props: {
   )
 }
 
-/** The ordered attachment block. `load`/`open` are optional: without them the cards stay metadata
- * only (a harness with no image face, a deployment with no preview column). */
+/** The ordered attachment block. `load`/`open` are optional: without them the cards stay metadata only (a harness
+ * with no image face, a deployment with no preview column). */
 export function makeAttachmentSection(kit: ViewKit): AttachmentKit['Section'] {
   const { t, fmt } = kit
   return function AttachmentSection(props: {

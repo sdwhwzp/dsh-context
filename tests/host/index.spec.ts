@@ -1,6 +1,3 @@
-// The Host-half plugin module (src/host/index.ts) against the REAL cordis registry, session store, and session-projection registry: real
-// envelopes appended to a real session, folded by the registered units, read back through the snapshot cut and the change feed.
-
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,7 +14,6 @@ import type {} from '../../src/shared/types'
 const plugin = { name, inject, apply } as never
 const noConfig = {} as never
 
-/** The committed version-probe homes (see version.spec.ts). */
 const HOMES = fileURLToPath(new URL('./fixtures/version/homes', import.meta.url))
 
 async function bootWithHome(home: string) {
@@ -144,8 +140,7 @@ describe('dsh-context host plugin', () => {
 
   test('register-hook attribution flows through to the rendered headers', async () => {
     const { ctx } = await boot()
-    // dsh-context booted before any tools service existed; a late-provided
-    // instance is wrapped on first read inside the registering plugin.
+    // dsh-context booted before any tools service existed; a late-provided instance is wrapped on first read.
     ctx.provide('tools', { register() { return () => {} } })
     await ctx.plugin({
       name: 'my-agent-tools',
@@ -186,7 +181,6 @@ describe('dsh-context host plugin', () => {
 
   test('the split generation with the detail route live: slim wire head + the endpoint serves the collections', async () => {
     const ctx = new Context()
-    // The plugin's own routes (detail, fleet, attachment, warm-up trigger, balance, skills); keep them by path.
     const routes = new Map<string, { fetch?: (request: Request) => Promise<Response> }>()
     ctx.provide('connection', {
       fetch: {
@@ -202,7 +196,6 @@ describe('dsh-context host plugin', () => {
     await ctx.plugin(plugin, noConfig)
     const session = ctx.sessions.create()
     appendRealEnvelopes(session)
-    // A file-tool pair: the fold-derived op log serves through the detail endpoint.
     const call = session.append('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: JSON.stringify({ file_path: 'src/a.ts' }) } as never)
     session.append('tool/result', {
       message: { role: 'tool', toolCallId: 'c1', content: [{ type: 'text', text: 'ok' }], source: { kind: 'tool', callId: 'c1' } },
@@ -273,7 +266,7 @@ describe('the baseline gate', () => {
 
     const timeline = ctx.sessionProjections.snapshot(session).values.contextTimeline
     assert.ok(timeline !== undefined, 'the fallback unit still delivers (no eternal loading)')
-    assert.deepEqual(timeline.unsupported, { current: '0.1.5-rc.1', minimum: BASELINE_DSH_VERSION })
+    assert.deepEqual(timeline.unsupported, { current: '0.1.7-rc.2', minimum: BASELINE_DSH_VERSION })
     assert.equal(timeline.current.total, 0, 'the log is NOT folded below the baseline')
     assert.equal(timeline.nodes.length, 0, 'real appends leave no surface nodes')
     assert.equal(timeline.model, undefined, 'no model metadata either')

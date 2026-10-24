@@ -74,7 +74,6 @@ describe('ContextBrowser header epochs', () => {
     await flush()
     assert.ok(text(query(m.container, '.lc-br-body')).includes('SYS A'))
     assert.equal(calls, 2)
-    // Re-opening the first epoch's section hits the cache, not the fetcher.
     await pickStep(m, 'live')
     await click(catRow(m, 'system'))
     await flush()
@@ -130,8 +129,7 @@ describe('ContextBrowser header epochs', () => {
     await act(async () => { pendings[1]!.resolve(CONTENTS[15]!) })
     await flush()
     assert.ok(text(query(m.container, '.lc-br-body')).includes('SYS A'))
-    // Back to live: epoch 35's fetch is in flight; the cached epoch 15 renders
-    // without a fetch — then the stale resolve lands, ignored.
+    // Back to live: epoch 15 renders from cache, then the stale resolve lands, ignored.
     await pickStep(m, 'live')
     await click(catRow(m, 'system'))
     await flush()
@@ -168,7 +166,6 @@ describe('ContextBrowser header epochs', () => {
     assert.ok(text(query(m.container, '.lc-br-body')).includes('token estimates only'))
     await click(catRow(m, 'tools'))
     assert.equal(elemRows(m).length, 1, 'metadata rows still render')
-    // The lone metadata row auto-opens with the category; its body explains the degradation.
     assert.ok(text(query(m.container, '.lc-br-content')).includes('token estimates only'))
     await m.unmount()
   })
@@ -208,10 +205,8 @@ describe('ContextBrowser header epochs', () => {
   })
 
   test('a legacy content-bearing epoch (pre-#37 wire) still counts the system prompt', async () => {
-    // The value shape a host running the pre-#37 view serves: the system TEXT
-    // rides the epoch and no systemTokens price exists (the real cached row
-    // that read 0 items while the breakdown still showed ≈1.6k). Routed through
-    // headersOf — the boundary the real callers sanitize the projection with.
+    // Legacy value shape: the system TEXT rides the epoch with no systemTokens price; `headersOf` sanitizes
+    // the projection like the real callers do.
     const legacy = {
       headers: [{
         seq: 12,
@@ -239,9 +234,8 @@ describe('ContextBrowser header epochs', () => {
   })
 
   test('a system prompt rides the timeline systems list, fetched from its own event seq', async () => {
-    // The header epoch carries NO system price (the prompt is a
-    // `system/message` surface node), so the section resolves the prompt
-    // from `data.systems` and reads its text off that node's seq.
+    // The header epoch carries NO system price (the prompt is a `system/message` surface node), so the
+    // section resolves it from `data.systems` and reads its text off that node's seq.
     const headers: ContextHeaders = { headers: [{ seq: 15, time: 1500, tools: [{ name: 'x', tokens: 1 }] }] }
     const data = tl({
       current: { system: 30, tools: 1, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 31 },

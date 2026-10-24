@@ -1,7 +1,5 @@
-/** The /context modal's dock insets: the fixed backdrop spans the frame's centre column, not the viewport.
- * The frame's inline grid template (`<sidebar>px <centre> <rightbar>`) is the only host anchor, and its
- * trailing px track is the right panel's BOUND, not the solved width (the grid squeezes the centre first),
- * so it is clamped to the space the centre minimum leaves; unresolved measures degrade to 0 insets. */
+/** The /context modal's dock insets: the backdrop spans the frame's centre column. The inline grid template's
+ * trailing px track is the right panel's BOUND, so clamp it to what the centre minimum leaves. */
 
 export interface DockMeasure {
   left: number

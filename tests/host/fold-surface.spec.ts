@@ -1,6 +1,3 @@
-// applySurface paths of the fold (src/host/fold.ts): per-category node projection, the callNames
-// consume-once lifecycle, the shadow-price claim protocol, and every surfaceOp variant. No mocks: the real fold runs.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import type { TimelineEvent, TimelineState } from '../../src/host/fold'
@@ -66,8 +63,7 @@ describe('applySurface tool/result branch', () => {
   })
 
   test('a result without the source callId pairs nothing and leaves callNames untouched', () => {
-    // A hostile/foreign envelope: the admission validation requires the
-    // source callId, so a source-less row can only arrive hostile — it folds to an unnamed node instead of throwing.
+    // A hostile/foreign envelope: no source callId can only arrive hostile — it folds to an unnamed node.
     const ev: TimelineEvent = {
       type: 'tool/result', seq: 2, time: at(),
       data: { message: { role: 'tool', toolCallId: 'keep', content: text('ok') } },
@@ -89,9 +85,8 @@ describe('applySurface tool/result branch', () => {
   })
 
   test('the retired envelope-only error mark no longer flags the node', () => {
-    // The pre-V4 spelling (an event-level `data.error` with no message mark)
-    // is unreachable through the supported harnesses' admission validation;
-    // a hostile replay carrying it degrades to an unflagged node, never a throw.
+    // The pre-V4 spelling (an event-level `data.error` with no message mark) is unreachable through the
+    // supported harnesses' admission validation; a hostile replay carrying it degrades to an unflagged node.
     const ev: TimelineEvent = {
       type: 'tool/result', seq: 2, time: at(),
       data: {
@@ -223,7 +218,6 @@ describe('surfaceOp variants', () => {
     assert.deepEqual(state.surface.map(n => n.seq), [3, 5])
     assert.equal(state.sums.user, 22)
     assert.deepEqual(state.archived.map(n => [n.seq, n.gone]), [[1, 5], [2, 5]], 'removed nodes archived as stamped copies')
-    // Gross 100 rewritten to the net freed amount: 24 removed - 10 re-added.
     assert.equal(state.events[0].tokens, 14)
     assertPlainJson(state)
   })

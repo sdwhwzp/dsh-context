@@ -1,24 +1,18 @@
-/** The plugin's user-settings binding (browser half): the Host-served `dsh-context` namespace carries per-user
- * display preferences, degrading to the schema defaults wherever that surface is absent or read-only. */
-
 import type { DefaultDeltaBase, DefaultFileSort, DefaultGranularity, DefaultDurationCurve, DefaultOverviewRange, DefaultPlacement, DefaultToolSort, DefaultTrendMode, FleetTab, InsightsEntry, OverviewAutoSteps, SettingsField } from '../shared/types'
 
 export type { DefaultDeltaBase, DefaultFileSort, DefaultToolSort, SettingsField } from '../shared/types'
 
-/** The auto-overview threshold in retained steps; null when the preference is off. */
 export function overviewThresholdOf(value: OverviewAutoSteps): number | null {
   return value === 'off' ? null : Number(value)
 }
 
-/** The bound settings form (`ctx.configForms.get`), as consumed. */
 export interface SettingsScopeLike {
   getSnapshot(): { status: string; value: unknown; writable: boolean }
   subscribe(listener: () => void): () => void
   set(field: string, value: unknown): Promise<void>
 }
 
-/** The `ctx.configForms` service face, as consumed; the bound form satisfies {@link SettingsScopeLike}
- *  (same snapshot/subscribe/set shape). */
+/** The `ctx.configForms` service face, as consumed; the bound form satisfies {@link SettingsScopeLike}. */
 export interface ConfigFormsFace {
   get(namespace: string): SettingsScopeLike
   whileServed(namespaces: readonly string[], register: () => () => void): () => void
@@ -82,12 +76,12 @@ function prefsOf(value: unknown): Prefs {
   if (value === null || typeof value !== 'object') return {}
   const v = value as Record<string, unknown>
   return {
-    ...(v.defaultPlacement === 'all' || v.defaultPlacement === 'tab' || v.defaultPlacement === 'sidebar' ? { placement: v.defaultPlacement } : {}),
+    ...(v.defaultPlacement === 'all' || v.defaultPlacement === 'tab' || v.defaultPlacement === 'sidebar' || v.defaultPlacement === 'hide' ? { placement: v.defaultPlacement } : {}),
     ...(v.defaultGranularity === 'step' || v.defaultGranularity === 'turn' ? { granularity: v.defaultGranularity } : {}),
     ...(v.defaultTrendMode === 'total' || v.defaultTrendMode === 'delta' ? { mode: v.defaultTrendMode } : {}),
     ...(v.defaultDeltaBase === 'step' || v.defaultDeltaBase === 'turn' ? { deltaBase: v.defaultDeltaBase } : {}),
     ...(v.defaultToolSort === 'size' || v.defaultToolSort === 'count' || v.defaultToolSort === 'name' ? { toolSort: v.defaultToolSort } : {}),
-    ...(v.defaultFileSort === 'count' || v.defaultFileSort === 'latest' || v.defaultFileSort === 'path' || v.defaultFileSort === 'name' ? { fileSort: v.defaultFileSort } : {}),
+    ...(v.defaultFileSort === 'count' || v.defaultFileSort === 'lines' || v.defaultFileSort === 'latest' || v.defaultFileSort === 'path' || v.defaultFileSort === 'name' ? { fileSort: v.defaultFileSort } : {}),
     ...(v.insightsEntry === 'show' || v.insightsEntry === 'hide' ? { insightsEntry: v.insightsEntry } : {}),
     ...(v.defaultDurationCurve === 'show' || v.defaultDurationCurve === 'hide' ? { durationCurve: v.defaultDurationCurve } : {}),
     ...(v.overviewAutoSteps === '100' || v.overviewAutoSteps === '200' || v.overviewAutoSteps === '300' || v.overviewAutoSteps === 'off' ? { overviewAutoSteps: v.overviewAutoSteps } : {}),
@@ -99,11 +93,10 @@ function prefsOf(value: unknown): Prefs {
 }
 
 export function createContextSettings(): ContextSettings {
-  let state: SettingsState = { status: 'loading', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'count', insightsEntry: 'show', durationCurve: 'show', overviewAutoSteps: '200', overviewRange: '30d', fleetTab: 'show', promptPrefix: '', promptSuffix: '', writable: false }
+  let state: SettingsState = { status: 'loading', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'lines', insightsEntry: 'show', durationCurve: 'show', overviewAutoSteps: '200', overviewRange: '30d', fleetTab: 'show', promptPrefix: '', promptSuffix: '', writable: false }
   let scope: SettingsScopeLike | undefined
   const listeners = new Set<() => void>()
-  /** Every field is a scalar, so a shallow compare is the store's identity check — and a new preference
-   *  joins it without editing a growing chain of `&&`s. */
+  /** Every field is a scalar, so a shallow compare is the identity check; a new preference joins it automatically. */
   const unchanged = (a: SettingsState, b: SettingsState): boolean =>
     (Object.keys(b) as (keyof SettingsState)[]).every(key => a[key] === b[key])
   const publish = (next: SettingsState): void => {
@@ -113,16 +106,14 @@ export function createContextSettings(): ContextSettings {
   }
   const sync = (bound: SettingsScopeLike): { placement?: DefaultPlacement; insightsEntry?: InsightsEntry; fleetTab?: FleetTab } => {
     const snap = bound.getSnapshot()
-    // Bounded catch (the compatibility.md parser gate): a value that throws on property access
-    // keeps the current state instead of throwing into the mirror's fan-out.
+    // Bounded catch: a value throwing on property access keeps the current state instead of breaking the mirror's fan-out.
     let prefs: Prefs = {}
     let raw: Record<string, unknown> | undefined
     try {
       prefs = prefsOf(snap.value)
       raw = snap.value !== null && typeof snap.value === 'object' ? snap.value as Record<string, unknown> : undefined
     } catch { /* hostile value */ }
-    // Fail open: a config problem must never leave an entry hidden. A value the plugin cannot understand
-    // degrades to the field's default; a section without the field (older Host half) keeps the current state.
+    // Fail open: an unreadable value degrades to the field's default; a section missing the field keeps the current state.
     publish({
       status: snap.status === 'ready' || snap.status === 'unavailable' ? snap.status : 'loading',
       placement: prefs.placement ?? (raw?.defaultPlacement === undefined ? state.placement : 'all'),

@@ -1,7 +1,5 @@
-/**
- * The fold's untrusted-input metering: provider-reported usage normalized to billed counts, plus the
- * accumulators that write the state's cumulative cost, decode, and per-tool timing tallies.
- */
+/** The fold's untrusted-input metering: provider-reported usage normalized to billed counts, plus the accumulators that write the state's
+ * cumulative cost, decode and per-tool timing tallies. */
 
 import type { CostBucketTotals, CostModelUsage, SessionCostUsage, TimingTotals, ToolTimingTotals } from '../shared/types'
 import { isDeepSeekProvider } from '../shared/providers'
@@ -16,18 +14,12 @@ export interface UsageLike {
   outputTokens?: unknown
 }
 
-/** One usage object's buckets, normalized to billed counts (see {@link tokenCountOf}). The cost
- * ledger accumulates these into the same bucket vocabulary it serves, so they share one shape. */
 export type BilledUsage = CostBucketTotals
 
 /**
- * One provider-reported usage bucket as a billed count, or null when the field carries no readable number. Fractions
- * round and negatives clamp to 0: a gateway reporting `cached_tokens > prompt_tokens` drives the disjoint uncached
- * figure below zero, and one raw figure in the state would fail the wire/state schemas' `.int().nonnegative()` gates
- * on every later delivery, permanently freezing the projection feed for the session. NaN, infinities, and non-numeric
- * values read as absent.
- *
- * Exported so the activity unit re-proves the same buckets with the same sanitizer.
+ * One provider-reported usage bucket as a billed count, or null when unreadable. Fractions round and negatives clamp
+ * to 0: a gateway reporting `cached_tokens > prompt_tokens` drives the disjoint uncached figure negative, and one raw
+ * figure would fail the wire/state schemas' `.int().nonnegative()` gates on every delivery, freezing the projection feed.
  */
 export function tokenCountOf(value: unknown): number | null {
   if (typeof value === 'number') {
@@ -51,9 +43,8 @@ export function isBeijingPeak(time: number): boolean {
   return (h >= 9 && h < 12) || (h >= 14 && h < 18)
 }
 
-/** Clones along the mutated path only — the untouched branch stays shared with the persisted previous state, which the
- * apply contract never mutates in place. Buckets arrive sanitized, so the totals stay at the schemas' non-negative safe
- * integers. The timeline fold and the activity ledger price by this ONE walk, so their records share one shape. */
+/** Clones along the mutated path only: the untouched branch stays shared with the persisted previous state, which the apply contract
+ * never mutates in place; buckets arrive sanitized, so totals stay safe non-negative integers. */
 export function addBilledUsage(
   prev: SessionCostUsage | undefined,
   provider: string,
@@ -76,8 +67,7 @@ export function addBilledUsage(
   return { ...(prev ?? {}), [provider]: nextModels }
 }
 
-/** The mirror of {@link addBilledUsage}: a served value must never alias the persisted record it was folded
- * from, so every level of the ledger is copied. */
+/** The mirror of {@link addBilledUsage}: a served value must never alias the persisted record it was folded from. */
 export function copyCostUsage(cost: SessionCostUsage): SessionCostUsage {
   const copy: SessionCostUsage = {}
   for (const provider in cost) {
@@ -101,7 +91,6 @@ export function accumulateCost(st: TimelineState, time: number, usage: BilledUsa
   st.cost = addBilledUsage(st.cost, st.provider ?? '', model, time, usage)
 }
 
-/** The busiest 16 tool names are kept. */
 const TOOL_TIMING_CAP = 16
 
 /** The decode buckets of the generation split, in card order. */
@@ -120,7 +109,6 @@ export function ensureTiming(st: TimelineState): TimingTotals {
   return st.timing
 }
 
-/** The TimingTotals fields each decode bucket's span and count land in. */
 const DECODE_FIELDS: Record<DecodeKind, { ms: 'reasoningMs' | 'textMs' | 'toolArgMs'; n: 'reasoningBlocks' | 'textBlocks' | 'toolArgBlocks' }> = {
   reasoning: { ms: 'reasoningMs', n: 'reasoningBlocks' },
   text: { ms: 'textMs', n: 'textBlocks' },
@@ -136,10 +124,8 @@ export function addDecode(timing: TimingTotals, kind: DecodeKind, ms: number, bl
 
 /** A new name beyond the cap evicts the smallest tally, so the state stays bounded even over a hostile log of unique names. */
 export function bumpToolTotals(timing: TimingTotals, name: string, ms: number): void {
-  // `__proto__` is the one key that assigns the prototype instead of a row: the tally would be lost, the cap would
-  // never see it, and `foldWire`'s `for...in` would then copy the inherited `calls`/`ms` as `{}` — failing the strict
-  // wire schema, which throws inside the registry's uncontained drive and stalls this unit's push feed for good. The
-  // client boundary skips the same name.
+  // `__proto__` assigns the prototype instead of a row: the tally would be lost and `foldWire`'s `for...in` would then
+  // copy inherited members, failing the strict wire schema inside the registry's uncontained drive. The client skips it too.
   if (name === '__proto__') return
   // hasOwn, not an index check: a missing key IS possible at runtime (a name outside the persisted tally).
   if (!Object.hasOwn(timing.tools, name)) {

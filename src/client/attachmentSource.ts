@@ -1,10 +1,4 @@
-/**
- * The on-click attachment plumbing behind the browser's cards. Nothing is fetched while a message row
- * is merely rendered: one click resolves that attachment's named host path through the plugin's own
- * `/api/dsh-context/attachment` route (host/attachment.ts), and the harness's preview column then
- * opens it — the File Activity card's own two rungs (`previewAddressOf` → `openResourceVia`) with the
- * attachment's real filename carrying the viewer's file kind.
- */
+/** On-click attachment plumbing: nothing is fetched while a row renders; one click resolves the named host path. */
 
 import { previewAddressOf } from './fileActivity'
 import type { AttachmentRef } from '../shared/attachment'
@@ -22,14 +16,12 @@ export function clearAttachmentPaths(): void {
   paths.clear()
 }
 
-/** One route payload's path, re-proved: a non-string or empty path is no path. */
 export function pathOfValue(value: unknown): string | null {
   const data = asRecord(value)
   return data !== null && typeof data.path === 'string' && data.path !== '' ? data.path : null
 }
 
-/** The session-authorized attachment locator, or undefined without a session (cards then render
- * metadata only). A failed resolution resolves null and is never cached, so a retry re-reads. */
+/** The session-authorized locator; a failed resolution resolves null and is never cached, so a retry re-reads. */
 export function makeAttachmentLocator(sessionId: string | undefined): AttachmentLocator | undefined {
   if (typeof sessionId !== 'string' || sessionId === '') return undefined
   return async (attachment: AttachmentRef) => {
@@ -60,12 +52,7 @@ export function makeAttachmentLocator(sessionId: string | undefined): Attachment
   }
 }
 
-/**
- * Open one attachment in the harness's own preview column, or report that it could not be opened.
- * Resolution order is the File Activity card's: the cited attachment's named host path behind the
- * plugin's route, then the harness's `dsh-resource://file/…` address.
- * @returns whether a preview took the address.
- */
+/** Open through the File Activity card's own rungs: the route-named host path, then `dsh-resource://file/…`. */
 export function makeAttachmentOpener(
   ctx: ClientCtx,
   sessionId: string | undefined,
@@ -77,8 +64,7 @@ export function makeAttachmentOpener(
   return async (attachment: AttachmentRef) => {
     const path = await locate(attachment)
     if (path === null) return false
-    // The address layer's form only refuses directories; WHICH viewer renders the file is the
-    // preview column's own decision, keyed off the path's suffix.
+    // The address layer only refuses directories; the preview column picks the viewer by path suffix.
     const address = previewAddressOf(path, 'text', false, sessionId, workspace)
     return address !== undefined && openPreview(address)
   }

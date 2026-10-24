@@ -1,14 +1,9 @@
-// revealScroll (src/client/revealScroll.ts) — the jump's landing reveal against real jsdom DOM: the nearest
-// ancestor that ACTUALLY scrolls (overflowing style alone is not enough) takes the rect-delta scroll.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { revealInScrollParent, revealRowInCard } from '../../src/client/revealScroll'
 
-/** A viewport rect carrying only the top the reveal reads. */
 const top = (t: number): DOMRect => ({ top: t }) as DOMRect
 
-/** An overflow-styled scroller holding the anchor, stubbed with real overflow and viewport tops. */
 function mounted(oy: 'auto' | 'scroll', scrollerTop: number, anchorTop: number): { scroller: HTMLDivElement; anchor: HTMLDivElement } {
   const scroller = document.createElement('div')
   scroller.style.overflowY = oy
@@ -40,9 +35,6 @@ describe('revealInScrollParent', () => {
   })
 
   test('a grow-with-content box (auto yet never overflowing) is skipped for the real scroller above', () => {
-    // The Context tab's own `.lc-root` shape on layouts where an OUTER
-    // container scrolls: styled auto, scrollHeight == clientHeight — taking
-    // it would scroll a no-op while the real scroller waits above.
     const { scroller, anchor } = mounted('auto', 0, 300)
     const grown = document.createElement('div')
     grown.style.overflowY = 'auto'
@@ -77,8 +69,6 @@ describe('revealInScrollParent', () => {
 describe('revealRowInCard', () => {
   const rect = (t: number, b: number): DOMRect => ({ top: t, bottom: b }) as DOMRect
 
-  /** page > card > region > row: the region overflows (the card's rows region), every box has a fixed
-   * viewport rect, and the page — above the card — rides its own scroll to prove nothing above moves. */
   function mounted(rowTop: number, rowBottom: number, regionOverflow = true): {
     page: HTMLDivElement; card: HTMLDivElement; region: HTMLDivElement; row: HTMLDivElement
   } {
@@ -94,7 +84,6 @@ describe('revealRowInCard', () => {
     Object.defineProperty(region, 'clientHeight', { value: regionOverflow ? 200 : 300 })
     region.getBoundingClientRect = () => rect(0, 200)
     row.getBoundingClientRect = () => rect(rowTop, rowBottom)
-    // Off-zero so both scroll directions land in-range (jsdom clamps scrollTop at the bounds).
     region.scrollTop = 30
     page.scrollTop = 55
     return { page, card, region, row }

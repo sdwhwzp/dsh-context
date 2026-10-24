@@ -41,7 +41,6 @@ describe('ContextBrowser focus bridges', () => {
       assert.equal(onRows.length, 1)
       assert.ok(text(onRows[0]).includes('focusable'))
       assert.deepEqual(scrolls, [], 'the open row reveals inside the card — never a scrollIntoView that could drag the page')
-      // A step focus switches the assembled view.
       await m.update(h(Browser, props({
         data, headers, convNodes,
         nodeFocus: { step: 20, key: 'n1', cat: 'user' },
@@ -78,7 +77,7 @@ describe('ContextBrowser — the split generation detail states', () => {
   test('a pending detail read names the state on the note strip', async () => {
     const m = await mount(h(Browser, { data: tl({}), headers: null, detailState: 'loading' }))
     assert.ok(text(m.container).includes(DICT_EN['detail.loading']))
-    // The picker still offers the live surface (the sections read zero until the detail lands).
+    // The picker still offers the live surface; sections read zero until the detail lands.
     assert.equal(queryAll(m.container, '.lc-br-pick option').length, 1)
     await m.unmount()
   })
@@ -103,7 +102,6 @@ describe('ContextBrowser — the split generation detail states', () => {
       assert.ok(!text(m.container).includes(DICT_EN['detail.loadFailed']))
       await m.unmount()
     }
-    // And the prop-less caller (older hosts) renders nothing either.
     const m = await mount(h(Browser, { data: tl({}), headers: null }))
     assert.ok(queryAll(m.container, '.lc-br-retry').length === 0)
     await m.unmount()
@@ -164,7 +162,7 @@ describe('ContextBrowser open-category reporting', () => {
     const onOpenCat = (c: string | null): void => { opens.push(c) }
     let handled = 0
     const m = await mount(h(Browser, props({ data, onOpenCat })))
-    // The stats card's Answers figure: assistant open, the answer chip picked — the tool-call-only row filters out.
+    // The Answers figure: assistant open, the answer chip picked; the tool-call-only row filters out.
     await m.update(h(Browser, props({
       data,
       onOpenCat,
@@ -181,7 +179,7 @@ describe('ContextBrowser open-category reporting', () => {
     const shownRows = queryAll(assistantCat, '.lc-br-elem')
     assert.equal(shownRows.length, 1, 'only the textual reply survives the answer filter')
     assert.ok(text(shownRows[0]).includes('an answer'))
-    // The stats card's Skill Loads figure: skill open, no chip picked, lens cleared.
+    // The Skill Loads figure: skill open, no chip picked, lens cleared.
     await m.update(h(Browser, props({
       data,
       onOpenCat,

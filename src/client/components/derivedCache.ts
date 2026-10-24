@@ -2,14 +2,12 @@ import { assemble } from '../assemble'
 import type { Assembled } from '../assemble'
 import type { ContextHeaders, ContextTimeline } from '../../shared/types'
 
-/** Per-owner derived values. Keyed weakly by the served projection (or a composite owner) so a superseded cache
- *  can be collected without a manual eviction pass. The detail store keeps at most a handful of payloads alive. */
+/** Per-owner derived values, weakly keyed by the served projection (or a composite owner) so a superseded cache
+ *  can be collected without manual eviction; the detail store keeps at most a handful of payloads alive. */
 const derived = new WeakMap<object, Map<string, unknown>>()
 
-/**
- * Reuse a pure derivation across component remounts (tab switches, sidebar reopen) while the same served
- * projection object is current. The value must be a pure function of the projection and `key`.
- */
+/** Reuse a pure derivation across remounts (tab switches, sidebar reopen) while the same projection object is
+ * current; the value must be a pure function of the projection and `key`. */
 export function cachedByData<T>(owner: object, key: string, compute: () => T): T {
   let values = derived.get(owner)
   if (values === undefined) {
@@ -23,7 +21,7 @@ export function cachedByData<T>(owner: object, key: string, compute: () => T): T
   return value
 }
 
-/** assemble() is a pure walk over the projection + header epoch; hover previews and remounts revisit the same steps. */
+/** assemble() is a pure walk over projection + header epoch; hover previews and remounts revisit the same steps. */
 const NO_HEADERS = {}
 const assembled = new WeakMap<ContextTimeline, WeakMap<object, Map<number | null, Assembled>>>()
 

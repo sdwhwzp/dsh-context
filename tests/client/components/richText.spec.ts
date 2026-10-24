@@ -13,7 +13,6 @@ const { RichText, RichSwitch, useRichMode } = makeRichText(kit)
 const SAMPLE = '# Title\n\nsome **bold** text'
 const JSON_SAMPLE = '{"name": "dsh", "meta": {"tags": ["a", "b"], "ver": 2}}'
 
-/** The raw body re-joined from its rendered line spans, i.e. the exact source text. */
 function rawText(container: ParentNode): string {
   return queryAll(container, '.lc-ts-line').map(line => line.textContent).join('\n')
 }
@@ -26,14 +25,12 @@ function expandedRowPreviewSelector(): string {
   return rule[1].trim()
 }
 
-/** A row's direct child carrying one of the JsonTree locals (the preview's descendants carry punctuation too). */
 function directChildWith(parent: Element, local: string): HTMLElement {
   const el = [...parent.children].find(child => (child.getAttribute('class') ?? '').includes(`_${local}`))
   assert.ok(el instanceof HTMLElement, `no direct child with the ${local} local`)
   return el
 }
 
-/** Harness wiring the hook to the switch and the body, like the detail cards do. */
 function Harness(props: { text: string }) {
   const [mode, setMode, json] = useRichMode(props.text)
   return h('div', {}, h(RichSwitch, { mode, json, onPick: setMode }), h(RichText, { text: props.text, mode }))
@@ -76,12 +73,10 @@ describe('RichText', () => {
     const m = await mount(h(RichText, { text: JSON_SAMPLE, mode: 'json' }))
     const tree = query(m.container, '.lc-ts-desc-json [role=tree]')
     assert.equal(tree.getAttribute('aria-label'), 'JSON Content')
-    // Root entries plus the auto-opened second level: name, meta, and meta's own children.
     const rows = queryAll(m.container, '[role=treeitem]')
     assert.equal(rows.length, 4)
     assert.match(rows.map(r => r.textContent).join('|'), /tags/)
     assert.equal(document.activeElement, outside, 'the second-level auto-open never steals focus')
-    // A hover seats the row's copy action, titled through the localized copyButtonTitle.
     await hover(rows[0])
     const copy = query(m.container, '[data-json-copy-button]')
     assert.equal(copy.getAttribute('title'), 'Copy value; right-click for copy options')
@@ -112,7 +107,6 @@ describe('RichText', () => {
       assert.equal(comma.matches(rule), true, `${name}: the stranded comma hides`)
       assert.equal(label.matches(rule), false, `${name}: the field label stays`)
     }
-    // A collapsed expandable row keeps its preview under the same rule.
     const collapsedRow = queryAll(m.container, '[role=treeitem][aria-expanded=false]')
       .find(row => row.querySelector('[data-json-expander]') !== null)
     assert.ok(collapsedRow !== undefined)
@@ -284,7 +278,6 @@ describe('useRichFind', () => {
     vi.useRealTimers()
   })
 
-  /** Harness wiring the hook the way TextSection does: toggle + bar + the keyed, ref'd body. */
   function FindHarness(props: { text: string; mode?: RichMode }) {
     const find = useRichFind(props.text, props.mode ?? 'raw')
     return h('div', {},

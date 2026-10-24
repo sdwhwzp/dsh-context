@@ -67,8 +67,7 @@ describe('applyActivity: event filtering', () => {
   })
 
   test('a tagged fork/seed marker resets the ledger; the untagged resume marker keeps it', () => {
-    // A seeded fork's inherited prefix: one settlement the parent session
-    // already booked, plus the step slot its open tail left armed (issue #94).
+    // A seeded fork's inherited prefix: one settlement the parent already booked, plus the step slot its open tail left armed.
     let state = applyActivity({ days: {} }, assistantMessage(at(0), { inputTokens: 10 }))
     state = applyActivity(state, { type: 'step/start', seq: 2, time: at(0), data: {} } as never)
     const seeded = state
@@ -150,7 +149,6 @@ describe('applyActivity: the ledger', () => {
     assert.equal(keys.length, 400)
     assert.equal(keys.includes('2026-01-01'), false, 'the oldest day dropped')
     assert.equal(keys.includes('2026-01-02'), true, 'the kept suffix starts the next day')
-    // Later folds within the cap keep every day.
     state = applyActivity(state, assistantMessage(at(400), { inputTokens: 1 }))
     assert.equal(Object.keys(state.days).length, 400)
     assert.equal(state.days['2027-02-05'].requests, 2)
@@ -168,7 +166,6 @@ describe('contextActivity unit: the view', () => {
   })
 })
 
-/** A `user/message` carrying (or faking) a `skill-invocation` source. */
 function skillInvocation(time: number, source: unknown): SessionEvent {
   return { type: 'user/message', seq: 1, time, data: { source } } as never
 }
@@ -209,7 +206,6 @@ describe('applyActivity: skill loads', () => {
     state = applyActivity(state, skillResult(at(0), 'source text quoting <skill_content name="…"> inline', 'c1'))
     assert.equal(state.days['2026-01-01'].skills, undefined)
     assert.equal(state.days['2026-01-01'].toolCalls, 1, 'the read still prices its tool run')
-    // Wholly unpaired results add no tool run (a trimmed/foreign call).
     state = applyActivity(state, skillResult(at(0), '<skill_content name="ponytail">…</skill_content>', 'c9'))
     assert.equal(state.days['2026-01-01'].skills, undefined)
     assert.equal(state.days['2026-01-01'].toolCalls, 1)
@@ -252,7 +248,6 @@ describe('applyActivity: skill loads', () => {
     }
     assert.equal(state.skillCalls?.length, 100, 'the oldest pending claims drop first')
     assert.equal(state.skillCalls?.includes('c1'), false)
-    // Non-skill calls and unreadable ids never arm a skill claim (the bash run still times itself).
     for (const ev of [
       toolCall(at(0), 'c2', 'bash'),
       toolCall(at(0), 7, 'skill'),
@@ -365,7 +360,7 @@ describe('applyActivity: skill loads', () => {
   })
 })
 
-/** A `request/header` event carrying the route in force (the fold's only model/provider source). */
+/** A `request/header` carrying the route in force (the fold's only model/provider source). */
 function requestHeader(model: unknown, provider: unknown): SessionEvent {
   return {
     type: 'request/header',
@@ -641,8 +636,8 @@ describe('contextActivity unit: the schemas over the pricing record', () => {
     const served = view.days[day]
     const persisted = state.days[day]
     assert.ok(persisted.cost !== undefined && persisted.skills !== undefined, 'the fixture carries both records')
-    // `cost` is four levels deep and `skills` two; a shallow day copy would leave both pointing at persisted state,
-    // so a mutating registry, cache writer, or wire payload would write straight into the fold's own record.
+    // `cost` is four levels deep and `skills` two; a shallow day copy would leave both pointing at persisted
+    // state, so a mutating registry, cache writer, or wire payload would write straight into the fold's record.
     assert.notEqual(served.cost, persisted.cost)
     assert.notEqual(served.cost?.['deepseek-official'], persisted.cost?.['deepseek-official'])
     assert.notEqual(served.cost?.['deepseek-official']?.['deepseek-v4'], persisted.cost?.['deepseek-official']?.['deepseek-v4'])

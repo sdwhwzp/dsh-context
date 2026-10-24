@@ -9,8 +9,7 @@ import { click, flush, hover, mount, query, queryAll, text, unhover, until } fro
 import { buttonByText, makeView, projectionsFor, T0, timeline } from './contextViewHarness'
 
 describe('ContextView — file activity card', () => {
-  // Chart hover previews the browser/file activity after a short rest; a rapid sweep keeps only the trailing
-  // value (contextView's hover debounce), so tests wait for the trailing update before asserting.
+  // Chart hover previews after a short rest; a rapid sweep keeps only the trailing value (hover debounce).
   const rest = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 200))
   /** Six steps with two file ops: a live read (seq 3) and an edit (seq 5) compacted away before seq 6 dispatched. */
   function fileTimeline(): ContextTimeline {
@@ -64,14 +63,14 @@ describe('ContextView — file activity card', () => {
     const { m, card } = await mountFiles('sv-files-scope')
     assert.ok(text(card).includes('+1') && text(card).includes('−2'))
 
-    // Hovering the FIRST bar bounds the fold at the second request: the edit drops out.
+    // The first bar bounds the fold at the second request: the edit drops out.
     await hover(query(m.container, '.lc-bar[data-seq="2"]'))
     await rest()
     assert.equal(queryAll(card, '.lc-fa-meta-delta').length, 0)
     assert.equal(queryAll(card, '.lc-fa-row').length, 1)
     assert.ok(!text(card).includes('+1'))
 
-    // The turn-less mid step still bounds at the next request: both the read and the edit stay.
+    // The turn-less mid step still bounds at the next request: both ops stay.
     await hover(query(m.container, '.lc-bar[data-seq="6"]'))
     await rest()
     assert.ok(text(card).includes('+1'))
@@ -115,13 +114,13 @@ describe('ContextView — file activity card', () => {
     const { m, card } = await mountFiles('sv-files-locate')
     const pick = query<HTMLSelectElement>(m.container, 'select.lc-br-pick')
 
-    // Expand the file row: the compacted edit (seq 5) has no viewing step and
-    // its click is a no-op; the read (seq 3) reveals in step 4's surface.
+    // The compacted edit (seq 5) has no viewing step, so its click is a no-op; the read (seq 3) reveals
+    // in step 4's surface.
     await click(query(card, '.lc-fa-row'))
     const ops = queryAll(card, '.lc-fa-op')
     assert.equal(ops.length, 2)
-    // The Context Browser's own stamp: the read result (seq 3) is first carried by the seq-4 request (Turn 1 · Step 2);
-    // the compacted edit's carrying request is turn-less, so its row prints no stamp.
+    // The browser's own stamp: the read result (seq 3) is first carried by the seq-4 request (Turn 1 · Step 2);
+    // the compacted edit's carrying request is turn-less, so its row prints only a clock.
     assert.ok(text(query(ops[1], '.lc-fa-op-time')).includes('T1 S2'))
     assert.ok(/^\d{2}:\d{2}:\d{2}$/.test(text(query(ops[0], '.lc-fa-op-time'))))
     await click(ops[0]) // edit, gone = 6: unlocatable
@@ -172,10 +171,8 @@ describe('ContextView — file activity card', () => {
     const card = queryAll(m.container, '.lc-card').find(c => text(c).includes(DICT_EN['files.title']))
     assert.ok(card !== undefined)
     await click(query(card, '.lc-fa-row'))
-    // The op is attributed to the nested tool, and says why (its program).
     assert.ok(text(card).includes('edit'))
     assert.ok(text(card).includes('Fix the failing test'))
-    // The click lands on the parent run_code node (seq 3 → step 4's surface).
     await click(query(card, '.lc-fa-op'))
     const pick = query<HTMLSelectElement>(m.container, 'select.lc-br-pick')
     assert.equal(pick.value, '4')
@@ -286,8 +283,8 @@ describe('ContextView — file activity card', () => {
             },
           },
         },
-        // No preview type claims the address (or no surface is mounted): the throw
-        // is the face's own wiring-error report, and the card must fall back.
+        // No preview type claims the address (or no surface is mounted): the throw is the face's own
+        // wiring-error report, so the card must fall back.
         sidebarRight: { openResource: () => { throw new Error('no registered tab type claims it') } },
       },
     })
@@ -311,9 +308,8 @@ describe('ContextView — file activity card', () => {
   })
 
   test('an unencodable path skips the preview and still opens on the system', async () => {
-    // Parsing resilience: a lone surrogate in a log path is unrepresentable in a
-    // resource address (the encoder throws), so the preview opener is never
-    // asked for one address and the system opener still takes the resolved path.
+    // Parsing resilience: a lone surrogate in a log path is unrepresentable in a resource address (the
+    // encoder throws), so the preview opener is never asked and the system opener takes the resolved path.
     const opened: string[] = []
     const previewed: string[] = []
     const ctx = new TestClientCtx({
@@ -377,8 +373,8 @@ describe('ContextView — file activity card', () => {
 
   test('a ctx without service access degrades the card wiring, not the view', async () => {
     const View = makeView({} as unknown as TestClientCtx)
-    // No session id: the view stays on its loading screen; the workspace and
-    // opener wiring (both read ctx before the early return) resolve to nothing.
+    // No session id: the view stays on its loading screen; the workspace and opener wiring (both read
+    // ctx before the early return) resolve to nothing.
     const m = await mount(h(View, { sessionId: '' }))
     assert.ok(text(m.container).includes(DICT_EN.loading))
     await m.unmount()

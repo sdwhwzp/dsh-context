@@ -68,16 +68,13 @@ describe('Heatmap', () => {
     assert.ok(byKey.get('2026-09-10')?.className.includes('lc-heat-2'), '30 of the 100-token peak draws level 2')
     assert.ok(byKey.get('2026-09-09')?.className.includes('lc-heat-3'))
     assert.ok(byKey.get('2026-09-08')?.className.includes('lc-heat-1'), 'a crumb is never invisible')
-    // A zero-token day stays as an activity button (its requests still count),
-    // but the token metric depths it at level 0.
+    // A zero-token day stays a button (its requests count) but the token metric depths it at 0.
     assert.ok(byKey.get('2026-09-07')?.className.includes('lc-heat-0'))
     assert.equal(byKey.get('2026-09-16')?.getAttribute('aria-label'), '2026-09-16\n2 active sessions\n100 tokens')
     assert.equal(byKey.get('2026-09-10')?.getAttribute('aria-label'), '2026-09-10\n1 active sessions\n30 tokens')
-    // Inert cells: data-less days and future days draw as plain spans.
     const spans = queryAll(m.container, 'span.lc-heat-cell')
     assert.ok(spans.length > 0)
     assert.ok(spans.some(s => s.className.includes('lc-heat-future')), 'future placeholders present')
-    // Weekday labels sit on the rows they name (Sunday-first: row 1 = Mon): Mon/Wed/Fri carry their names, the rest blank.
     const wds = queryAll(m.container, '.lc-heat-wd')
     assert.deepEqual(wds.map(w => w.textContent), ['', 'Mon', '', 'Wed', '', 'Fri', ''])
     await m.unmount()
@@ -85,18 +82,14 @@ describe('Heatmap', () => {
 
   test('month labels mark the columns where a month begins', async () => {
     const days = { '2026-09-16': { tokens: 10, requests: 1, sessions: 1, cost: null } }
-    // The default 8-week window runs Sunday 2026-07-26 → 2026-09-13: July
-    // began outside it, August begins in the Jul 26 column (Sat Aug 1) and September in the Aug 30 column (Tue Sep 1).
+    // The default 8-week window runs Sunday 2026-07-26 → 2026-09-13: August begins in the Jul 26
+    // column (Sat Aug 1) and September in the Aug 30 column (Tue Sep 1).
     const m = await mount(h(Heatmap, { days, today: TODAY }))
     assert.deepEqual(queryAll(m.container, '.lc-heat-mon').map(s => s.textContent), ['Aug', 'Sep'])
     await m.unmount()
-    // A mid-month window never crosses a month's first day, yet the opening
-    // column still names its own month; later columns stay unlabeled.
     const m2 = await mount(h(Heatmap, { days, today: TODAY, weeks: 2 }))
     assert.deepEqual(queryAll(m2.container, '.lc-heat-mon').map(s => s.textContent), ['Sep'])
     await m2.unmount()
-    // A later column that opens on the 1st carries the label itself (its
-    // whole week stays in the new month; 2026-02-01 was a Sunday).
     const m3 = await mount(h(Heatmap, { days: { '2026-02-03': { tokens: 1, requests: 1, sessions: 1, cost: null } }, today: '2026-02-03', weeks: 2 }))
     assert.deepEqual(queryAll(m3.container, '.lc-heat-mon').map(s => s.textContent), ['Jan', 'Feb'])
     await m3.unmount()

@@ -1,6 +1,3 @@
-// The sliced cold fold of the projection warm-up (src/host/backfill.ts, issue #145) over the
-// REAL registry + the plugin's REAL units — byte-equality against one single-shot restore.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -27,7 +24,6 @@ interface SliceRig {
   restoreCalls: number[]
 }
 
-/** One single-shot restore over the same log on a fresh registry — the sliced path's reference answer. */
 function referenceRows(events: SessionEvent[], id: string): unknown {
   const ctx = new Context()
   const registry = new SessionProjectionRegistry(ctx as never)
@@ -37,9 +33,8 @@ function referenceRows(events: SessionEvent[], id: string): unknown {
   return registry.restore({}, events, 0 as never, { id, version: 1, createdAt: 1, cwd: `/repo/${id}`, isSeeded: false } as never, 0 as never).checkpoint
 }
 
-/** Arm the backfill with the REAL registry + the plugin's REAL units, fake persistence serving
- * `events`, and the sliced path's faces (prepare/write) wired to the registry the way dsh's
- * SessionStore and SessionProjectionCache wire them. */
+/** Arm the backfill with the REAL registry + the plugin's REAL units, fake persistence serving `events`, and the
+ * sliced path's faces (prepare/write) wired the way dsh wires them. */
 function armSliced(ctx: Context, eventsById: Map<string, SessionEvent[]>, opts: {
   liveOnPrepare?: Set<string>
   failPrepare?: Set<string>
@@ -241,7 +236,6 @@ describe('the sliced cold fold (issue #145)', () => {
     await new Promise(resolve => setTimeout(resolve, 30))
     dispose()
     assert.deepEqual(state.coldSnapshots.sort(), ['s1', 's2', 's3', 's4'])
-    // Rests follow the measured 400ms cost; the third rest trips the 1000ms budget into a full pause.
     assert.deepEqual(sleeps, [400, 400, 1_000, 400])
     const pauses = lines.filter(l => l.level === 'info' && l.text.includes('pausing after'))
     assert.equal(pauses.length, 1, 'the budget pause reports once')
@@ -330,7 +324,6 @@ describe('the sliced cold fold (issue #145)', () => {
     await trigger(route)
     await until(() => (state.coldSnapshots.length === 2 ? true : undefined), 'both sessions folded')
     await new Promise(resolve => setTimeout(resolve, 30))
-    // The post-dispose session-level rest skipped its sleep entirely, so only the first rest slept.
     assert.deepEqual(sleeps, [25])
   })
 

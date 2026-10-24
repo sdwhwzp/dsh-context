@@ -1,6 +1,3 @@
-// AgentInspector — the network card's right column: identity, figures, composition, team
-// membership and owned tasks, descriptor/prompt off the fleet-detail read, and the agent's comms.
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -147,7 +144,6 @@ describe('AgentInspector — team membership', () => {
       const m = await mount(h(AgentInspector, propsOf({ node: nodeOf(id), team: TEAM })))
       const el = query(m.container, '.lc-inspector')
       assert.ok(text(el).includes(marker), `${id} shows ${marker}`)
-      // No owned tasks for these members.
       assert.equal(queryAll(el, '.lc-inspector-task').length, 0)
       await m.unmount()
     }
@@ -164,12 +160,12 @@ describe('AgentInspector — the fleet-detail sections', () => {
 
   test('descriptor and prompt render off the landed detail; the node model joins the config', async () => {
     const m = await mount(h(AgentInspector, propsOf({
-      node: nodeOf('w1', { model: 'deepseek-flash' }),
+      node: nodeOf('w1', { model: 'deepseek-flash', reasoningEffort: 'max' }),
       detail: { detail: DETAIL },
     })))
     const el = query(m.container, '.lc-inspector')
-    // The node's own model leads; the descriptor's distinct model follows, deduped.
-    assert.ok(text(el).includes('deepseek-flash · fork · deepseek-v4 · careful reviewer'))
+    // The node's own model (with its effort) leads; the descriptor's distinct model follows, deduped.
+    assert.ok(text(el).includes('deepseek-flash (max) · fork · deepseek-v4 · careful reviewer'))
     assert.ok(text(el).includes('Review the diff carefully.'))
     // jsdom reports no clamping: the expand toggle stays hidden.
     assert.equal(queryAll(el, '.lc-inspector-btn').length, 1, 'only the open button')
@@ -255,11 +251,9 @@ describe('AgentInspector — comms', () => {
     // The self side (this inspector's agent) renders as plain text, its peer as a button.
     assert.ok(text(rows[1]).includes('worker-bee'))
     assert.ok(text(rows[1]).includes('Main Agent'))
-    // The historical mailbox row names its sender without an id join.
     assert.ok(text(rows[2]).includes('lead'))
     assert.ok(text(rows[3]).includes('worker-bee'))
     await click(query(rows[0], 'button.lc-inspector-comm-peer'))
-    // The settled row's self side is plain text; its one button pins the recipient.
     await click(query(rows[1], 'button.lc-inspector-comm-peer'))
     assert.deepEqual(pins, ['root', 'root'])
     await m.unmount()

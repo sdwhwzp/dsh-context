@@ -9,7 +9,7 @@ const kitZh = makeKit('zh')
 const Gate = makeUpgradeGate(kit)
 
 function render(sessionId: string | undefined, extra: { current?: string; minimum?: string } = {}) {
-  return mount(h(Gate, { sessionId, current: extra.current ?? '0.1.1-rc.2', minimum: extra.minimum ?? '0.1.7-rc.2' }))
+  return mount(h(Gate, { sessionId, current: extra.current ?? '0.1.1-rc.2', minimum: extra.minimum ?? '0.2.0-rc.2' }))
 }
 
 describe('UpgradeGate', () => {
@@ -17,7 +17,7 @@ describe('UpgradeGate', () => {
     const en = await render('s-en')
     try {
       assert.match(text(en.container), /Update DeepSeek Harness/)
-      assert.match(text(en.container), /dsh-context supports DeepSeek Harness v0\.1\.7-rc\.2 or newer\./)
+      assert.match(text(en.container), /dsh-context supports DeepSeek Harness v0\.2\.0-rc\.2 or newer\./)
       assert.match(text(en.container), /v0\.1\.1-rc\.2/)
       assert.match(text(en.container), /Current/)
       assert.match(text(en.container), /Minimum required/)
@@ -25,11 +25,11 @@ describe('UpgradeGate', () => {
       await en.unmount()
     }
     const ZhGate = makeUpgradeGate(kitZh)
-    const zh = await mount(h(ZhGate, { sessionId: 's-zh', current: '0.1.0', minimum: '0.1.7-rc.2' }))
+    const zh = await mount(h(ZhGate, { sessionId: 's-zh', current: '0.1.0', minimum: '0.2.0-rc.2' }))
     try {
       assert.match(text(zh.container), /请更新 DeepSeek Harness 版本/)
-      assert.match(text(zh.container), /dsh-context 插件支持 DeepSeek Harness v0\.1\.7-rc\.2 或更新版本。/)
-      assert.match(text(zh.container), /v0\.1\.7-rc\.2及更新的版本/)
+      assert.match(text(zh.container), /dsh-context 插件支持 DeepSeek Harness v0\.2\.0-rc\.2 或更新版本。/)
+      assert.match(text(zh.container), /v0\.2\.0-rc\.2及更新的版本/)
       assert.match(text(zh.container), /v0\.1\.0/)
     } finally {
       await zh.unmount()
@@ -72,7 +72,7 @@ describe('UpgradeGate', () => {
     assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null)
     await keydown('Escape')
     assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
-    // A closed gate does not react to further keys (listener detached).
+    // Listener detached: a closed gate ignores further keys.
     await keydown('Escape')
     assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
     await m.unmount()
@@ -82,9 +82,9 @@ describe('UpgradeGate', () => {
     const m = await render('s-switch-a')
     await click(query(m.container, '.lc-gate-ok'))
     assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
-    await m.update(h(Gate, { sessionId: 's-switch-b', current: '0.1.0', minimum: '0.1.7-rc.2' }))
+    await m.update(h(Gate, { sessionId: 's-switch-b', current: '0.1.0', minimum: '0.2.0-rc.2' }))
     assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null)
-    await m.update(h(Gate, { sessionId: 's-switch-a', current: '0.1.0', minimum: '0.1.7-rc.2' }))
+    await m.update(h(Gate, { sessionId: 's-switch-a', current: '0.1.0', minimum: '0.2.0-rc.2' }))
     assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
     await m.unmount()
   })

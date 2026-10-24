@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { opsOfCall, parseCallArgs } from '../../src/shared/fileOps'
 
-/** The tool/result presentation meta of a grep with the complete by-file match groups. */
 function grepMeta(files: Record<string, number>): unknown {
   return {
     shape: 'matches',
@@ -58,7 +57,6 @@ describe('opsOfCall — one op per settled call', () => {
     assert.deepEqual([ins.added, ins.removed], [1, 0])
     const [create] = opsOfCall({ seq: 4, tool: 'str_replace_editor', argsRaw: JSON.stringify({ command: 'create', path: '/a.ts', file_text: 'q' }) })
     assert.deepEqual([create.added, create.removed], [1, 0])
-    // An unknown command writes zero lines but still rows (with its error flag).
     const [odd] = opsOfCall({ seq: 5, tool: 'str_replace_editor', argsRaw: JSON.stringify({ command: 'undo_edit', path: '/a.ts' }), err: true })
     assert.deepEqual([odd.kind, odd.added, odd.removed, odd.err], ['write', 0, 0, true])
   })
@@ -82,7 +80,6 @@ describe('opsOfCall — one op per settled call', () => {
       argsRaw: JSON.stringify({ pattern: 'TODO' }),
       meta: grepMeta({ 'a.ts': 3, 'b.ts': 1 }),
     })
-    // The searched path/pattern rows first (here the workspace-wide pattern), then each hit file with its count.
     assert.deepEqual(ops.map(o => [o.path, o.hits]), [['TODO', undefined], ['a.ts', 3], ['b.ts', 1]])
     assert.equal(ops[0].pattern, true, 'the pathless target rows as the pattern')
     assert.ok(ops.slice(1).every(o => o.detail === 'TODO'), 'the pattern detail rides each hit op')
@@ -105,7 +102,6 @@ describe('opsOfCall — one op per settled call', () => {
       argsRaw: JSON.stringify({ pattern: 'TODO', path: 'src/', include: '*.ts' }),
       meta: grepMeta({ 'src/a.ts': 2, 'src/b.ts': 1 }),
     })
-    // The searched directory rows first with the pattern detail, then the hits.
     assert.deepEqual(ops.map(o => [o.path, o.hits ?? 0]), [['src/', 0], ['src/a.ts', 2], ['src/b.ts', 1]])
     assert.equal(ops[0].detail, 'TODO (*.ts)')
     assert.equal(ops[0].pattern, undefined, 'a real path is not a pattern row')

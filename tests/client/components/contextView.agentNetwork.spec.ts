@@ -1,7 +1,4 @@
-// The Agent network card's two Context-view hosts: the right Sidebar keeps it inline (its column has no room
-// for a tab of its own), while the center Context tab hands it to the Fleet tab. The card's OWN session stats
-// come from the view's projections — a list row carries no subagent-timing projection (the harness writes that
-// one on subagent sessions alone), so its duration and step count have to arrive from here.
+// The card's own session stats can only arrive from the view's projections: a list row carries no subagent timing.
 
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
@@ -11,9 +8,8 @@ import { TestClientCtx } from '../helpers/harness'
 import { click, mount, query, queryAll, text } from '../helpers/kit'
 import { makeView, projectionsFor, richTimeline } from './contextViewHarness'
 
-/** The outward sessions face the card reads: one row, the current session, no subagent.
- * getSnapshot hands back the SAME object every call — the card reads it through
- * useSyncExternalStore, which loops on a fresh snapshot per read. */
+/** The sessions face's one row; getSnapshot returns the SAME object — `useSyncExternalStore` loops on a
+ *  fresh snapshot per read. */
 function selfOnly() {
   const snapshot = { byId: { 'sv-self': { displayTitle: 'Main Agent', running: false, blank: false, updatedAt: 1 } } }
   return { list: { getSnapshot: (): unknown => snapshot, subscribe: (): (() => void) => () => {} } }
@@ -28,7 +24,7 @@ describe('ContextView — the agent network card\'s own session', () => {
 
     const self = query(m.container, '.lc-agent-card.lc-agent-self')
     assert.equal(text(self).includes('Main Agent'), true)
-    // richTimeline carries three steps; the duration is the timing card's active time.
+    // Three steps come from richTimeline; 6m27s is TIMING.wallMs.
     assert.equal(query(self, '.lc-agent-meta-text').textContent, '6m27s · 3 steps')
     await m.unmount()
   })
@@ -48,13 +44,12 @@ describe('ContextView — the agent network card\'s own session', () => {
 
     assert.equal(queryAll(m.container, '.lc-agents').length, 0, 'no agent network on the Context tab')
     assert.equal(queryAll(m.container, '.lc-agent-card').length, 0)
-    // The rest of the tab still paints — the split moved the card, not the page.
+    // The split moves the card, not the page.
     assert.ok(queryAll(m.container, '.lc-card').length > 0)
     await m.unmount()
   })
 
   test("the stats board's family cell opens the Fleet tab, else the panel that keeps the card", async () => {
-    // The tab bar the harness renders: the Fleet tab activates on click, like the real one.
     const bar = document.createElement('div')
     const tab = (label: string): HTMLButtonElement => {
       const b = document.createElement('button')
@@ -85,12 +80,10 @@ describe('ContextView — the agent network card\'s own session', () => {
     const sidebar = { openTab: (kind: string): void => { opened.push(kind) } }
     const View = makeView(new TestClientCtx({ services: { sessions: selfOnly(), sidebarRight: sidebar } }))
     const m = await mount(h(View, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
-    // No Fleet tab in the tab bar (the fleetTab preference is off): the panel that keeps the card inline opens.
     await click(query(m.container, '.lc-flow-team'))
     assert.deepEqual(opened, ['dsh-context'], 'the sidebar panel whose Context tab holds the card')
     await m.unmount()
 
-    // A deployment serving neither: the click stays a quiet no-op.
     const bare = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }))
     const m2 = await mount(h(bare, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
     await click(query(m2.container, '.lc-flow-team'))
@@ -98,7 +91,6 @@ describe('ContextView — the agent network card\'s own session', () => {
   })
 
   test('with neither view served the family cell is a plain figure, never a dead button', async () => {
-    // The tab off and a placement that serves no Sidebar: nothing can open, so the cell drops its button role.
     const settings = createContextSettings()
     settings.set('defaultPlacement', 'tab')
     settings.set('fleetTab', 'hide')

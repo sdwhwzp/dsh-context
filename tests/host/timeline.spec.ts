@@ -1,6 +1,3 @@
-// The contextTimeline projection unit (src/host/timeline.ts) — the projection-definition contract surface (stateSchema + required wire),
-// its schemas, and the config-resolved retention bounds, over a real folded log. Fold semantics themselves live in fold.ts.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { createContextTimelineDefinition } from '../../src/host/timeline'
@@ -21,7 +18,6 @@ import {
 } from './helpers/events'
 import type { TimelineEvent } from '../../src/host/fold'
 
-/** A realistic session log touching every envelope family the fold serves. */
 function realLog(): TimelineEvent[] {
   return [
     header(1, {
@@ -47,7 +43,7 @@ describe('createContextTimelineDefinition', () => {
   test('carries the supported projection contract on one unit', () => {
     const def = createContextTimelineDefinition({}, () => false)
     assert.equal(def.key, 'contextTimeline')
-    assert.equal(def.stateVersion, 28)
+    assert.equal(def.stateVersion, 31)
     assert.equal(typeof def.init, 'function')
     assert.equal(typeof def.apply, 'function')
     // The supported registry contract: stateSchema + a REQUIRED wire block.
@@ -71,9 +67,8 @@ describe('createContextTimelineDefinition', () => {
     assert.ok(view.nodes.length > 0)
     assert.ok(view.requests.length > 0)
     assert.ok(view.events.length > 0)
-    // The duration overlay's per-request step active time (RequestRecord.activeMs): the first
-    // request's step ran start (tick 4s) → end (tick 9s) with its bash call inside and no user
-    // waits; the second folded after stepEnd consumed the slot.
+    // The duration overlay's per-request step active time: step start (tick 4s) → end (tick 9s), bash call inside,
+    // no user waits; the second request folded after stepEnd consumed the slot.
     assert.equal(view.requests[0].activeMs, 5000, 'step start → step end, the tool run included')
     assert.equal(view.requests[1].activeMs, undefined, 'no open step slot, no stamp')
 

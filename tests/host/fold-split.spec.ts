@@ -1,7 +1,3 @@
-// The split wire generation (src/host/foldWire.ts buildTimelineHead / buildTimelineDetail + the fold's detailRev ledger): the slim head carries the
-// counters and headline anchor, the detail payload the heavy collections, and the revision bumps exactly on detail-mutating folds. Also
-// pins the equivalence: inline view = head + detail, so the two generations can never drift apart.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { buildTimelineDetail, buildTimelineHead, skillNameOf } from '../../src/host/fold'
@@ -22,13 +18,11 @@ import {
 } from './helpers/events'
 import { assertPlainJson, driveTimeline, timelineDef } from './helpers/projection'
 
-/** A session log touching every envelope family the fold serves (mirrors the compat driver's canonical log). */
 function canonicalLog(): TimelineEvent[] {
   return [
     header(1, {
       tools: [{ name: 'bash', description: 'run a command' }],
-      model: 'deepseek-v4-flash',
-      provider: 'deepseek',
+      config: { model: 'deepseek-v4-flash', provider: 'deepseek', reasoningEffort: 'max' },
     }),
     systemMessage(2),
     requestContext(3, { contextWindow: 128000 }),
@@ -46,16 +40,16 @@ function canonicalLog(): TimelineEvent[] {
 
 describe('the detailRev ledger', () => {
   test('bumps exactly on the detail-mutating folds of the canonical log', () => {
-    // Mutations: userMessage(5), assistantMessage(6), toolResult(8),
-    // stepEnd(9, the strip's span flush), assistantMessage(10), compaction(11), planMode(12) — seven in total.
+    // Mutations: userMessage(5), assistantMessage(6), toolResult(8), stepEnd(9), assistantMessage(10),
+    // compaction(11), planMode(12) — seven in total.
     const { state } = driveTimeline(canonicalLog())
     assert.equal(state.detailRev, 7)
   })
 
   test('the working-slot and envelope folds do NOT bump (nothing to refetch)', () => {
     const { def, state } = driveTimeline(canonicalLog())
-    // step/start (arms the step slot), tool/call (arms the call ledger),
-    // request/context (capacity metadata), and a header with an UNCHANGED model all leave the detail collections as-is.
+    // step/start, tool/call, request/context, and a header with an UNCHANGED model leave the detail
+    // collections as-is.
     const follow: TimelineEvent[] = [
       requestContext(13, { contextWindow: 256000 }),
       header(14, { model: 'deepseek-v4-flash', provider: 'deepseek', reason: 'change' }),
@@ -65,7 +59,6 @@ describe('the detailRev ledger', () => {
     let st = state
     for (const ev of follow) st = def.apply(st, ev)
     assert.equal(st.detailRev, 7, 'no detail mutation, no bump')
-    // The capacity metadata and the header DID fold (state changed) — only the rev stayed.
     assert.notEqual(st, state)
   })
 
@@ -88,21 +81,18 @@ describe('buildTimelineHead', () => {
     assert.equal(head.ok, true)
     assert.equal(head.model, 'deepseek-v4-flash')
     assert.equal(head.provider, 'deepseek')
+    assert.equal(head.reasoningEffort, 'max')
     assert.equal(head.contextWindow, 128000)
     assert.ok(head.current.total > 0)
-    // The retained records tally: one turn, two steps, the compaction event.
+    // `counts` are retained-record tallies; `humanInputs`/`answers` are whole-session tallies (one user
+    // message, two textual assistant replies).
     assert.deepEqual(head.counts, { turns: 1, steps: 2, injects: 0, compactions: 1, prunes: 0, skills: 0 })
-    // The whole-session tally rides the head too: the canonical log's one user message (injections excluded).
     assert.equal(head.humanInputs, 1)
-    // …and both its textual assistant replies (a step counts as an answer only when the message carried text).
     assert.equal(head.answers, 2)
-    // The card preview rides the head: the canonical log's own user message.
     assert.equal(head.lastUser, 'hello there')
-    // The headline anchor is the newest retained request's billing summary.
     const lastReq = state.requests.at(-1)!
     assert.deepEqual(head.last, { seq: lastReq.seq, total: lastReq.total, prompt: 20 })
     assert.equal(head.detailRev, 7)
-    // The collections stay empty on the head — the detail channel serves them.
     assert.deepEqual(head.requests, [])
     assert.deepEqual(head.events, [])
     assert.deepEqual(head.nodes, [])
@@ -122,8 +112,8 @@ describe('buildTimelineHead', () => {
   })
 
   test('the skills counter tallies DISTINCT loaded-skill names — the catalog digest never counts', () => {    const { state } = driveTimeline([
-      // A `/name` invocation and a `skill`-tool load both load a skill; the
-      // available-skills catalog digest is the directory listing, not a load.
+      // A `/name` invocation and a `skill`-tool load both load a skill; the available-skills catalog digest is
+      // the directory listing, not a load.
       userMessage(1, [{ type: 'text', text: 'run' }], { kind: 'skill-invocation', form: 'skill', name: 'grilling' }),
       toolCall(2, { callId: 'c1', name: 'skill' }),
       toolResult(3, { callId: 'c1', content: [{ type: 'text', text: '<skill_content name="grilling">instructions</skill_content>' }] }),
@@ -132,8 +122,7 @@ describe('buildTimelineHead', () => {
       userMessage(6, [{ type: 'text', text: 'once more' }], { kind: 'skill-invocation', form: 'skill', name: 'grilling' }),
     ])
     const head = buildTimelineHead(state)
-    // 'grilling' loaded twice counts once; the catalog digest rides an
-    // untagged inject event — five injects, two distinct skills.
+    // 'grilling' loaded twice counts once; the catalog digest rides an untagged inject event.
     assert.deepEqual(head.counts, { turns: 0, steps: 0, injects: 5, compactions: 0, prunes: 0, skills: 2 })
     assertPlainJson(head)
   })
@@ -186,7 +175,6 @@ describe('buildTimelineDetail', () => {
     assert.deepEqual(detail.head.current, view.current)
     assert.deepEqual(detail.head.counts, buildTimelineHead(state).counts)
     assertPlainJson(detail)
-    // The detail never aliases the persisted state.
     assert.notEqual(detail.requests[0], state.requests[0])
     assert.notEqual(detail.archive, state.archived)
   })

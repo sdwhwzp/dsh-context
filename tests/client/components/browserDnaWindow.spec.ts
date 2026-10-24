@@ -68,7 +68,6 @@ describe('ContextBrowser DNA feed windowing', () => {
       const pads = queryAll<HTMLElement>(m.container, '.lc-row-pad')
       assert.equal(pads.length, 1)
       assert.ok(Number.parseFloat(pads[0].style.height) > 0)
-      // The composition bar still carries every item: only the feed's DOM is windowed.
       assert.ok(queryAll(m.container, '.lc-stacked-seg').length >= 200, 'composition bar keeps every item')
       const scroller = query<HTMLElement>(m.container, '.lc-br-scroll')
       scroller.scrollTop = 600
@@ -77,7 +76,7 @@ describe('ContextBrowser DNA feed windowing', () => {
       await until(() => queryAll<HTMLElement>(m.container, '.lc-row-pad').length === 2, 'a top pad appears after scrolling')
       const shifted = queryAll<HTMLElement>(m.container, '.lc-br-flat > .lc-br-elem').length
       assert.ok(shifted < 200)
-      // Header/tool groups are the feed's tail: after the bottom pad, so they stay at the feed end.
+      // Header/tool groups are the feed's tail: they must follow the bottom pad.
       const children = [...query<HTMLElement>(m.container, '.lc-br-flat').children] as HTMLElement[]
       const lastPad = children.map((el, i) => el.classList.contains('lc-row-pad') ? i : -1).filter(i => i >= 0).at(-1)
       const tail = children.at(-1)
@@ -93,7 +92,7 @@ describe('ContextBrowser DNA feed windowing', () => {
       await until(() => queryAll(m.container, '.lc-br-flat > .lc-br-elem').length < 200, 'feed windowed')
       const segs = queryAll<HTMLElement>(m.container, '.lc-br-bar .lc-stacked-seg')
       assert.ok(segs.length > 0)
-      // Without headers the first band is the oldest message, which the newest-first window does not render.
+      // Without headers the first band is the oldest message, off the newest-first window.
       await act(async () => { segs[0].dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
       await until(() => queryAll(m.container, '[data-lc-key="n1"]').length === 1, 'off-window echoed row mounted')
       assert.ok(query<HTMLElement>(m.container, '.lc-br-scroll').scrollTop > 0)

@@ -15,7 +15,6 @@ import { COST, rowOf, win } from './overview.fixtures'
 
 describe('rangeWindowOf', () => {
   test('each preset pins its start; all is the open window', () => {
-    // Local anchors, so the calendar-day window reads the same in every zone.
     const now = new Date(2026, 8, 20, 12).getTime()
     const midnight = new Date(2026, 8, 20).getTime()
     assert.deepEqual(rangeWindowOf('today', now), { start: midnight, end: null }, 'today opens on the local midnight')
@@ -44,8 +43,6 @@ describe('dayRangeWindow', () => {
   })
 
   test('a pair that arrives backwards is ordered on the way in', () => {
-    // The pick path sorts already; this is the seam that keeps a hand-built
-    // pair from filtering the page down to an empty window.
     assert.deepEqual(dayRangeWindow({ from: '2026-09-12', to: '2026-09-10' }), dayRangeWindow({ from: '2026-09-10', to: '2026-09-12' }))
   })
 })
@@ -76,7 +73,6 @@ describe('filterRows', () => {
     assert.deepEqual(filterRows(rows, { scope: win('today', now), day: null, query: '' }).map(r => r.id), ['new', 'active'])
     assert.deepEqual(filterRows(rows, { scope: win('7d', now), day: null, query: '' }).map(r => r.id), ['new', 'active'])
     assert.deepEqual(filterRows(rows, { scope: win('all', now), day: null, query: '' }).map(r => r.id), ['old', 'new', 'active'])
-    // Today's own boundary: hours in, one minute before the local midnight out.
     const dRows = [
       rowOf({ id: 'in', title: 'this morning', updatedAt: now - 2 * 3_600_000 }),
       rowOf({ id: 'out', title: 'last night', updatedAt: midnight - 60_000 }),
@@ -87,11 +83,8 @@ describe('filterRows', () => {
 
   test('a bounded window also admits a ledger-active session whose last prompt is older', () => {
     const rows = [
-      // The long run started today: no new user prompt, but its ledger day is in the window.
       rowOf({ id: 'long-run', updatedAt: midnight - 3 * 86_400_000, activity: { days: { '2026-09-11': { tokens: 5, requests: 1 } } } }),
-      // A prompt inside the window with no billing still counts as touched.
       rowOf({ id: 'prompt-only', updatedAt: now }),
-      // Neither signal is inside the window.
       rowOf({ id: 'stale', updatedAt: midnight - 3 * 86_400_000 }),
     ]
     assert.deepEqual(filterRows(rows, { scope: win('today', now), day: null, query: '' }).map(r => r.id), ['long-run', 'prompt-only'])
@@ -119,8 +112,6 @@ describe('filterRows', () => {
   })
 
   test('a picked range closes both ends of the window', () => {
-    // A two-day window: the day before its start and the day after its end are
-    // both out, and the end day's last millisecond is still in.
     const scope = dayRangeWindow({ from: '2026-09-10', to: '2026-09-11' })
     assert.ok(scope !== null)
     const window = [
@@ -143,11 +134,9 @@ describe('filterRows', () => {
     assert.deepEqual(filterRows(rows, { scope: win('all', now), day: null, query: '/repo' }).map(r => r.id), ['new'])
     assert.deepEqual(filterRows(rows, { scope: win('all', now), day: null, query: '  ' }).length, 3, 'a blank query matches all')
     assert.deepEqual(filterRows(rows, { scope: win('all', now), day: null, query: 'zzz' }), [])
-    // The session's newest own message joins the haystack.
     const talked = rowOf({ id: 'talk', title: 'quiet title', timeline: { lastUser: 'ship the QUARTERLY report' } as unknown as ContextTimeline })
     assert.deepEqual(filterRows([talked], { scope: win('all', now), day: null, query: 'quarterly' }).map(r => r.id), ['talk'])
     assert.deepEqual(filterRows([talked], { scope: win('all', now), day: null, query: 'quiet' }).map(r => r.id), ['talk'], 'the title still matches')
-    // A non-string last message (a hostile fold shape) never matches.
     const odd = rowOf({ id: 'odd', title: 'odd one', timeline: { lastUser: 42 } as unknown as ContextTimeline })
     assert.deepEqual(filterRows([odd], { scope: win('all', now), day: null, query: '42' }), [])
   })

@@ -1,7 +1,4 @@
-/** The Context emblem: the document sheet bundled from the package-root `icon.svg` (the file package.json
- * `icon` hands the Host) rather than read off the harness primitives, so the plugin's identity is
- * self-contained. The identity seats keep the sheet's fixed fills; only the sidebar's panel-list seat
- * opts into `mono`, the harness's own line weight. */
+/** The Context emblem, bundled from the package-root `icon.svg` so the plugin's identity is self-contained. */
 
 import sheetMarkup from '../../icon.svg?raw'
 import { useId, type ReactElement } from 'react'
@@ -30,9 +27,8 @@ const canvasRect = (fill: string, rest = ''): string => `<rect ${CANVAS_ATTRS} f
 
 const SHIFTS: [number, number][] = [[INSET, 0], [-INSET, 0], [0, INSET], [0, -INSET]]
 
-/** The mono seat's markup: the sheet masked down to the harness line weight rather than redrawn — the plugin
- * ships ONE artwork. Compositing, not `feMorphology`: that filter rounds its radius to whole device pixels
- * and would thin the glyph on a 2× display but not at 1×. */
+/** The mono seat masks the sheet down to the harness line weight rather than redrawing — the plugin ships
+ * ONE artwork. Compositing, not `feMorphology`: that filter rounds to whole device pixels and thins at 2×. */
 function monoMarkup(id: string): string {
   const hole = `${id}-hole`
   const thin = `${id}-thin`
@@ -48,11 +44,9 @@ function monoMarkup(id: string): string {
     + canvasRect('currentColor', ` mask="url(#${thin})"`)
 }
 
-/** The emblem's props, matching the harness `IconProps` the guide capsule hands it. */
 export interface ContextIconProps {
   size?: number
   className?: string
-  /** The sidebar panel-list seat: the surrounding text colour at the harness line weight, not the palette. */
   mono?: boolean
 }
 
@@ -72,15 +66,12 @@ export function ContextIcon({ size = 20, className, mono = false }: ContextIconP
   )
 }
 
-/** The sidebar panel-list glyph: the emblem in `mono`, so the shell-owned row's hover/active colors paint it
- *  like the shipped rows; the row's label and selected state are the shell's, so owner `active` goes unread. */
+/** The sidebar panel-list glyph: the emblem in `mono`, so the shell row's hover/active colors paint it. */
 export function InsightPanelIcon({ size = 18 }: { size?: number }): ReactElement {
   return <ContextIcon size={size} mono />
 }
 
-/** The tab chip's title seat: the emblem before the label, read through the plugin's own bound translate so
- * the chip follows the locale — not the tab-information hook, which a not-yet-committed tab record can throw
- * on. The label's trailing gutter (`.lc-title-label`) keeps the active chip's fade off the last glyphs. */
+/** The tab chip's title: the plugin's own bound translate (the tab-information hook can throw pre-commit). */
 export function makeContextTabTitle(t: Translate): () => ReactElement {
   return function ContextTabTitle(): ReactElement {
     return (

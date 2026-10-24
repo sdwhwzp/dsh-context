@@ -1,6 +1,3 @@
-// Step brief (src/client/brief.ts): node merge/sort, the per-step brief (response hit, opener scan,
-// mid-turn inputs), and the tooltip reply previews.
-
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { briefNodes, briefOf } from '../../src/client/brief'
@@ -72,7 +69,6 @@ describe('briefOf opener scan', () => {
     const nodes = [surfaceNodeAt(1), surfaceNodeAt(3, { cat: 'assistant' }), surfaceNodeAt(5, { cat: 'tool' }), surfaceNodeAt(7, { cat: 'assistant' })]
     const requests = [req(3, { turn: 1 }), req(7, { turn: 2 })]
     const brief = briefOf(nodes, requests, 1)
-    // The user at seq 1 lies at/below the lower bound (3) and is not found.
     assert.equal(brief?.opener, undefined)
   })
 

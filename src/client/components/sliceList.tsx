@@ -1,18 +1,14 @@
-/** The stats cards' slice rows — the donut's legend: hovering a row lights it and its donut segment together, and vice
- * versa. Preformatted strings in, dumb markup out. */
-
 import { type ReactElement } from 'react'
 
 export interface SliceRow {
   key: string
   color: string
   label: string
-  /** Preformatted leading share ('84%', '<1%', '—'). */
+  /** Preformatted share, e.g. '84%' or '—'. */
   pct: string
-  /** Preformatted secondary line; empty renders no line. */
+  /** Preformatted secondary line; empty omits it. */
   count: string
-  /** A zero-figure slice dims whole; the owning card decides whether its row
-   * still renders (the timing card keeps the zero residual slot). */
+  /** A zero-figure slice dims whole; the owning card decides whether its row still renders. */
   dim?: boolean
 }
 

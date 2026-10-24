@@ -1,7 +1,3 @@
-// FleetView — the Fleet tab root: the agent network card on a page of its own, split out of the Context tab.
-// It reads the same `contextTimeline` head and the same detail source the Context tab does, so every figure it
-// paints must match the card's sidebar mount.
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
@@ -21,8 +17,6 @@ afterEach(() => {
   resetTimelineDetailStores()
 })
 
-/** The outward sessions face: one row, the current session, no subagent. The snapshot object stays identical
- * across reads — the card subscribes through useSyncExternalStore, which loops on a fresh snapshot per read. */
 function selfOnly(id: string) {
   const snapshot = { byId: { [id]: { displayTitle: 'Main Agent', running: false, blank: false, updatedAt: 1 } } }
   return { list: { getSnapshot: (): unknown => snapshot, subscribe: (): (() => void) => () => {} } }
@@ -43,7 +37,6 @@ describe('FleetView — the agent family on its own page', () => {
     assert.ok(text(query(m.container, '.lc-agents')).includes('Agent Network'))
     const self = query(m.container, '.lc-agent-card.lc-agent-self')
     assert.ok(text(self).includes('Main Agent'))
-    // richTimeline carries three steps; the duration is the whole-session timing total.
     assert.equal(query(self, '.lc-agent-meta-text').textContent, '6m27s · 3 steps')
     assert.ok(text(query(m.container, '.lc-foot')).startsWith(DICT_EN['footer'].slice(0, 24)))
     await m.unmount()
@@ -51,7 +44,7 @@ describe('FleetView — the agent family on its own page', () => {
   })
 
   test('the slim head composes the card before the detail collections land', async () => {
-    // The read stays in flight for the whole test: the head's own counters must carry the card.
+    // The read stays in flight for the whole test, so only the head's own counters can carry the card.
     vi.stubGlobal('fetch', () => new Promise(() => {}))
     const ctx = new TestClientCtx({ services: { sessions: selfOnly('sv-slim') } })
     const View = makeView(ctx)
@@ -84,7 +77,6 @@ describe('FleetView — the agent family on its own page', () => {
 
     assert.equal(query(m.container, '.lc-empty').textContent, DICT_EN['loading'], 'first paint names the read')
     await until(() => text(m.container).includes(DICT_EN['detail.loadFailed']), 'the failure never surfaced')
-    // The note's retry refires the read; it keeps failing, so the note stands rather than the page going blank.
     const before = reads
     await click(query(m.container, '.lc-br-retry'))
     await until(() => reads > before, 'the retry never refired the read')
@@ -98,7 +90,7 @@ describe('FleetView — the agent family on its own page', () => {
     const View = makeView(ctx)
     const m = await mount(h(View, {
       sessionId: 'sv-gate',
-      useProjection: projectionsFor(timeline({ unsupported: { current: '0.1.0', minimum: '0.2.0' } })),
+      useProjection: projectionsFor(timeline({ unsupported: { current: '0.1.0', minimum: '0.2.0-rc.2' } })),
     }))
 
     assert.ok(query(m.container, '.lc-gate-card') !== null, 'the gate names the unsupported harness here as well')

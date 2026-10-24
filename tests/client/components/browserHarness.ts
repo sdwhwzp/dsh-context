@@ -4,14 +4,13 @@ import { makeContextBrowser, type ContextBrowserProps } from '../../../src/clien
 import { makeStackedBar } from '../../../src/client/components/stackedBar'
 import { createContextSettings } from '../../../src/client/settings'
 import type { ContextHeaders, ContextTimeline, HeaderEpochContent, RequestRecord } from '../../../src/shared/types'
-import { makeKit, query, queryAll, type Mounted } from '../helpers/kit'
+import { makeKit, query, queryAll, text, type Mounted } from '../helpers/kit'
 
 export const kit = makeKit()
 export const settings = createContextSettings()
 export const Browser = makeContextBrowser(kit, makeStackedBar(kit), settings)
 
-// Tests that arm the fetch-on-miss retry with a deliberately failing fetcher
-// silence the production `console.warn` the failure legitimately emits.
+// Failing-fetcher tests silence the production `console.warn` the failure legitimately emits.
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -48,7 +47,11 @@ export function elemRows(m: Mounted): HTMLElement[] {
   return queryAll(m.container, '.lc-br-elem-row')
 }
 
-/** Type into the tool-schema search box like a real user (native setter + input event). */
+export function filterStat(m: Mounted): string {
+  return text(query(m.container, '.lc-br-filter-stat'))
+}
+
+/** Native setter + input event, so React's controlled-input tracker sees the change. */
 export async function typeToolSearch(m: Mounted, value: string): Promise<void> {
   await act(async () => {
     const input = query<HTMLInputElement>(m.container, '.lc-br-tool-search')
@@ -70,9 +73,7 @@ export function props(over: Partial<ContextBrowserProps>): ContextBrowserProps {
   return { data: tl({}), headers: null, ...over }
 }
 
-/** Pair metadata-only `contextHeaders` with a fetchHeader serving per-epoch
- * CONTENT — the lazy-load contract the browser consumes: the projection
- * carries boundaries and token prices, the content arrives on demand. */
+/** Metadata-only `headers` plus per-epoch content: the lazy-load contract the browser consumes. */
 export function withEpochContent(
   headers: ContextHeaders,
   contents: Record<number, HeaderEpochContent>,

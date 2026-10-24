@@ -1,13 +1,5 @@
-/**
- * The Context Insights page's data layer, derived off the root-scope `useSessions`
- * snapshot: every session-list row already carries the host's
- * `contextTimeline` and `contextActivity`, so the panel reads every session's
- * insight without opening a log.
- *
- * Subagent-origin sessions never list (the workspace browser's exclusion), so
- * each row folds its whole descendant subtree, and one family scope feeds the
- * card, KPI band, chart, and heatmap.
- */
+/** The Insights page's data layer over the root-scope `useSessions` snapshot: each row already carries
+ * the host's projections and folds its whole descendant subtree (subagent-origin rows never list). */
 
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
 import { dayKeyOf, endOfDayKey, startOfDayKey } from '../shared/days'
@@ -16,7 +8,7 @@ import { billedParts } from './categories'
 import { cacheHitPercent } from './format'
 import { estimateSessionCost, mergeCostUsage } from './cost'
 import type { CostCurrency, ModelBook } from './cost'
-import { agentRowOf } from './agentTree'
+import { agentRowOf, familyChildrenOf, type AgentRow } from './agentTree'
 import { activityOf, asRecord, timelineOf, type ClientCtx, type SessionsFace } from './services'
 import type { ActivityDay, ContextActivity, ContextTimeline, DefaultOverviewRange, SessionCostUsage, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
 
@@ -27,7 +19,6 @@ export interface OverviewRow {
   updatedAt: number
   running: boolean
   current: boolean
-  /** Whether the workspace registry archived this session: the coverage picker's split line. */
   archived: boolean
   timeline: ContextTimeline | null
   /** The TEAM's merged daily ledger: this session's own plus every descendant subagent's. */
@@ -36,13 +27,11 @@ export interface OverviewRow {
   family: (ContextTimeline | null)[]
   /** Every subtree member's daily ledger, self first and aligned with {@link family}. */
   familyActivity?: (ContextActivity | null)[]
-  /** The subtree's merged billed usage; null when nothing was billed. */
   familyCost: SessionCostUsage | null
 }
 
-/** The guarded standard-prop read behind both snapshot readers. Called
- * unconditionally at the top of the panel: the seat is a hook, and the
- * identity selector keeps the snapshot reference-stable for useMemo. */
+/** Hook-order safe: the seat runs unconditionally at the top of the panel; the identity selector keeps
+ * the snapshot reference-stable for useMemo. */
 function standardSnapshotOf(seat: unknown): unknown {
   if (typeof seat !== 'function') return null
   try {
@@ -60,14 +49,11 @@ export function workspacesSnapshotOf(props: { useWorkspaces?: unknown }): unknow
   return standardSnapshotOf(props.useWorkspaces)
 }
 
-/** Session id → workspace title, read off the registry's own membership lists
- * rather than guessed from paths. A session no workspace claims has no crumb
- * group: "Ungrouped" is a container, not a name to print. */
+/** Session id → claiming workspace title; an unclaimed session has no group ("Ungrouped" is not a name to print). */
 export function sessionGroupsOf(snapshot: unknown): Record<string, string> | null {
   const state = asRecord(snapshot)
   if (state === null || !Array.isArray(state.items)) return null
   const groups: Record<string, string> = {}
-  // Widened: a Record index read can miss at runtime.
   const claimed: Record<string, string | undefined> = groups
   for (const item of state.items) {
     const workspace = asRecord(item)
@@ -96,12 +82,11 @@ export interface GroupCount {
   count: number
 }
 
-/** The group chips' counts, in registry order with the ungrouped bucket last,
- * computed over the already scoped rows so each chip mirrors the user's scope; a group with no row in scope drops out. */
+/** The group chips' counts, in registry order with the ungrouped bucket last, over the already-scoped rows; a group with no scoped row
+ * drops out. */
 export function groupCountsOf(rows: readonly OverviewRow[], snapshot: unknown): GroupCount[] {
   const state = asRecord(snapshot)
   if (state === null || !Array.isArray(state.items)) return []
-  // Session id → claiming workspace title (first claim wins, same as the crumbs).
   const claimed = new Map<string, string>()
   const titles: string[] = []
   for (const item of state.items) {
@@ -136,8 +121,7 @@ export function inGroup(row: OverviewRow, group: string, groups: Record<string, 
   return group === UNGROUPED_KEY ? title === undefined : title === group
 }
 
-/** Fail open: an absent seat, a hostile shape, or a throwing accessor tags
- * nothing, so the coverage split keeps every row in the pane's own scope. */
+/** Fail open: an unreadable registry tags nothing, so every row keeps its pane scope. */
 function archivedSetOf(workspaces: unknown): Set<string> {
   try {
     const value = asRecord(workspaces)?.archivedSessionIds
@@ -162,10 +146,7 @@ export function currentSessionOf(state: Record<string, unknown>, byId: Record<st
   return undefined
 }
 
-/** Join the raw session-list snapshot into render-ready rows, or null when it
- * is unusable (distinct from a real empty list). Blank placeholder rows drop
- * out, archived rows are tagged for the coverage picker, and one throwing row
- * costs just itself. */
+/** Null = an unusable snapshot (distinct from a real empty list); blank rows drop out; one throwing row costs just itself. */
 export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): OverviewRow[] | null {
   const state = asRecord(snapshot)
   if (state === null) return null
@@ -180,9 +161,7 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
       const row = asRecord(byId[id])
       if (row === null) continue
       if (row.blank === true) continue
-      // Subagent-origin sessions are the workspace browser's own exclusion:
-      // a plain open() cannot address them (the host demands the durable
-      // parent address), so the overview lists main-line sessions only.
+      // Subagent-origin sessions cannot be addressed by a plain open() (the host demands the parent address), so they never list.
       if (row.origin === 'subagent') continue
       const displayTitle = typeof row.displayTitle === 'string' && row.displayTitle !== '' ? row.displayTitle : undefined
       const title = typeof row.title === 'string' && row.title !== '' ? row.title : undefined
@@ -205,31 +184,25 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
       // A hostile row (throwing accessor) drops whole; the list keeps working.
     }
   }
-  // Mirrors the Context tab's own cost fold (agentTree subagentCostFoldOf):
-  // childrenOf off non-blank rows' parentId, BFS with a seen-set against cycles.
-  const childrenOf = new Map<string, string[]>()
+  // The Context tab's own family edges (agentTree familyChildrenOf): a fork seed's source lineage stays out of its family.
+  const sessionRows = new Map<string, AgentRow>()
   for (const id of Object.keys(byId)) {
     try {
       const row = agentRowOf(byId[id])
-      if (row === null || row.blank || row.parentId === undefined) continue
-      const list = childrenOf.get(row.parentId) ?? []
-      list.push(id)
-      childrenOf.set(row.parentId, list)
+      if (row !== null && !row.blank) sessionRows.set(id, row)
     } catch { /* the hostile row links nobody */ }
   }
+  const childrenOf = familyChildrenOf(sessionRows)
   for (const row of rows) {
     const timelines: (ContextTimeline | null)[] = [row.timeline]
     const activities: (ContextActivity | null)[] = [row.activity]
-    const seen = new Set<string>([row.id])
     const queue = [row.id]
     for (let i = 0; i < queue.length; i++) {
       for (const kid of childrenOf.get(queue[i]) ?? []) {
-        if (seen.has(kid)) continue
-        seen.add(kid)
-        const values = asRecord(asRecord(byId[kid])?.projectionValues)
+        const values = kid.row.projections
         timelines.push(timelineOf(values?.contextTimeline))
         activities.push(activityOf(values?.contextActivity))
-        queue.push(kid)
+        queue.push(kid.id)
       }
     }
     row.family = timelines
@@ -240,12 +213,9 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
   return rows
 }
 
-/** The coverage picker's scopes: 'active' hides archived sessions, 'archived'
- * lists only them, and 'all' folds both. */
 export type OverviewCoverage = 'all' | 'active' | 'archived'
 
-/** The coverage pass every page reader (KPI band, chart, heatmap, grid) shares:
- * one list, so the cards can never disagree with the grid on which sessions count. */
+/** One shared coverage pass so the cards can never disagree with the grid on which sessions count. */
 export function coveredRowsOf(rows: readonly OverviewRow[], coverage: OverviewCoverage): readonly OverviewRow[] {
   return coverage === 'all' ? rows : rows.filter(row => row.archived === (coverage === 'archived'))
 }
@@ -255,8 +225,7 @@ function addDayField(a: number | undefined, b: number | undefined): number | und
   return a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0)
 }
 
-/** Merge several sessions' daily ledgers into one family's: per day the counters and timing
- * totals sum, the pricing records merge, and the skill tables merge name by name. */
+/** Per day the counters and timing totals sum, the pricing records merge, and the skill tables merge name by name. */
 function mergeActivity(members: (ContextActivity | null)[]): ContextActivity | null {
   const days: ContextActivity['days'] = {}
   const byKey: Record<string, ContextActivity['days'][string] | undefined> = days
@@ -310,11 +279,9 @@ function mergeSkillTallies(a: ActivityDay['skills'], b: NonNullable<ActivityDay[
   return out as NonNullable<ActivityDay['skills']>
 }
 
-/** Preset range keys, each a rolling window anchored on `now`. */
 export type OverviewRange = DefaultOverviewRange
 
-/** A resolved scope window: inclusive epoch-ms bounds, each null when that end
- * is open. The presets pin only the start; the calendar picker closes both. */
+/** A resolved scope window: inclusive epoch-ms bounds; null = an open end (the presets pin only the start). */
 export interface RangeWindow {
   start: number | null
   end: number | null
@@ -323,9 +290,7 @@ export interface RangeWindow {
 /** The open window (the "all" preset), frozen because it is handed to every scope reader. */
 export const OPEN_WINDOW: RangeWindow = Object.freeze({ start: null, end: null })
 
-/** A calendar-picked range: two inclusive local day keys, always ordered. Both
- * the picker and {@link dayRangeWindow} sort the pair, so no reader can see a
- * reversed range and an inverted pair cannot filter the page to nothing. */
+/** A calendar-picked range: two inclusive local day keys, always ordered, so no reader can see a reversed range. */
 export interface DayRange {
   from: string
   to: string
@@ -335,9 +300,7 @@ export function orderedDayRange(a: string, b: string): DayRange {
   return a <= b ? { from: a, to: b } : { from: b, to: a }
 }
 
-/** The preset's window (epoch ms). "Today" opens on the local midnight —
- * date-field arithmetic keeps a DST-short or long day exact, where an epoch-ms subtract would drift into the neighbouring day.
- */
+/** The preset's window in epoch ms; "today" opens on local midnight (date-field arithmetic keeps DST days exact). */
 export function rangeWindowOf(range: OverviewRange, now: number): RangeWindow {
   if (range === 'all') return OPEN_WINDOW
   const start = rangeStartOf(range, now)
@@ -353,8 +316,6 @@ function rangeStartOf(range: Exclude<OverviewRange, 'all'>, now: number): number
   return now - (range === '7d' ? 7 : 30) * 86_400_000
 }
 
-/** A picked range's window: the start day's midnight through the end day's last
- * millisecond, so both picked days count whole. Null when a key is malformed — the caller then keeps the preset scope. */
 export function dayRangeWindow(range: DayRange): RangeWindow | null {
   const ordered = orderedDayRange(range.from, range.to)
   const start = startOfDayKey(ordered.from)
@@ -363,16 +324,13 @@ export function dayRangeWindow(range: DayRange): RangeWindow | null {
   return { start, end }
 }
 
-/** Whether a ledger day key falls inside a resolved window. Day-granular on purpose: a preset's
- * rolling floor admits its whole local day, because the ledger cannot split one day. */
+/** Day-granular on purpose: a preset's rolling floor admits its whole local day, because the ledger cannot split one. */
 export function dayInScope(key: string, scope: RangeWindow): boolean {
   const floor = scope.start === null ? null : dayKeyOf(scope.start)
   const ceiling = scope.end === null ? null : dayKeyOf(scope.end)
   return (floor === null || key >= floor) && (ceiling === null || key <= ceiling)
 }
 
-/** A day that contributed anything: billed tokens, a settlement, a turn, a tool run, step time,
- * or a skill load. The range selection admits a session on any of these. */
 function hasActivity(entry: ActivityDay): boolean {
   return entry.tokens > 0 || entry.requests > 0 || (entry.turns ?? 0) > 0
     || (entry.toolCalls ?? 0) > 0 || (entry.wallMs ?? 0) > 0 || entry.skills !== undefined
@@ -380,7 +338,6 @@ function hasActivity(entry: ActivityDay): boolean {
 
 export type OverviewSort = 'recent' | 'tokens' | 'context'
 
-/** The team card's cumulative billed tokens, or null when nothing was billed; the sort and the card stat share this figure. */
 export function billedOf(row: OverviewRow): number | null {
   const totals = usageTotalsOf(row.familyCost)
   return totals?.total ?? null
@@ -391,8 +348,7 @@ export function turnsOf(timeline: ContextTimeline | null): number {
   return timeline.counts?.turns ?? timeline.requests.length
 }
 
-/** The session's first active day (the ledger's earliest key) — the card's
- * creation-date line: the list rows carry no creation time, so the first billed day stands in. */
+/** The ledger's earliest key stands in for a creation date (list rows carry none). */
 export function createdDayOf(activity: ContextActivity | null): string | undefined {
   const days = activity?.days
   if (days === undefined) return undefined
@@ -410,9 +366,8 @@ export function filterRows(
   const query = opts.query.trim().toLowerCase()
   const bounded = opts.scope.start !== null || opts.scope.end !== null
   return rows.filter((row) => {
-    // A bounded scope admits a session on either signal: a daily-ledger day inside the window
-    // (a long run with no new prompt still counts), or a last user prompt inside it (a session
-    // touched in the window but billing nothing). The KPI later sums only the ledger days.
+    // A bounded scope admits on either signal: a ledger day in the window, or a last prompt in it; the KPI
+    // then sums only the ledger days.
     if (bounded) {
       let inScope = (opts.scope.start === null || row.updatedAt >= opts.scope.start)
         && (opts.scope.end === null || row.updatedAt <= opts.scope.end)
@@ -452,10 +407,8 @@ export function sortRows(rows: readonly OverviewRow[], sort: OverviewSort): Over
   return copy
 }
 
-/** The session grid renders this many cards per page. */
 export const OVERVIEW_PAGE_SIZE = 12
 
-/** The requested page clamped into the live range, so a list that shrank between renders keeps the view valid. */
 export function pageOf<T>(rows: readonly T[], page: number): { items: T[]; index: number; count: number } {
   const count = Math.max(1, Math.ceil(rows.length / OVERVIEW_PAGE_SIZE))
   const index = Math.min(Math.max(0, page), count - 1)
@@ -465,23 +418,18 @@ export function pageOf<T>(rows: readonly T[], page: number): { items: T[]; index
 export interface SkillLoadStat {
   name: string
   loads: number
-  /** How many session rows (agent families) loaded it in scope. */
   sessions: number
   last: number
 }
 
 export type SkillSort = 'loads' | 'recent'
 
-/** The scope's ledger-day predicate: the heatmap's pinned day admits exactly
- * that day, else the scope window admits its days whole. */
 function skillDayPredicate(opts: { scope: RangeWindow; day: string | null }): (key: string) => boolean {
   if (opts.day !== null) return key => key === opts.day
   return key => dayInScope(key, opts.scope)
 }
 
-/** The Insights page's skill card data: every scoped row's family ledger folded
- * name by name over the admitted days — loads per name, one loader count per
- * row, the freshest load instant. Ties break on the name. */
+/** The skill card's data: every scoped row's family ledger folded name by name over the admitted days. */
 export function skillLoadsOf(
   rows: readonly OverviewRow[],
   opts: { scope: RangeWindow; day: string | null; sort?: SkillSort },
@@ -510,7 +458,7 @@ export function skillLoadsOf(
       }
     }
   }
-  // Names are unique across rows (the map keys), so the name tiebreak never ties.
+  // Names are map keys, so the name tiebreak never ties.
   const byName = (a: SkillLoadStat, b: SkillLoadStat): number => (a.name < b.name ? -1 : 1)
   const out = [...stats.values()]
   switch (opts.sort ?? 'loads') {
@@ -519,8 +467,6 @@ export function skillLoadsOf(
   }
 }
 
-/** Whether the row's family ledger loaded the named skill within the scope —
- * the drill-down filter behind the skill card's click. */
 export function rowLoadedSkill(
   row: OverviewRow,
   name: string,
@@ -543,8 +489,7 @@ export interface UsageTotals {
   total: number
 }
 
-/** Sum one cost usage's buckets (already sanitized per bucket at the timeline
- * boundary). Null when no side carried a bucket record, so the caller's cells keep their dash rather than a fabricated zero. */
+/** Null (not zero) when no side carried a bucket record, so the caller's cells keep their dash rather than a fabricated zero. */
 export function usageTotalsOf(usage: SessionCostUsage | null | undefined): UsageTotals | null {
   if (usage === null || usage === undefined) return null
   const totals: UsageTotals = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 }
@@ -575,11 +520,9 @@ export interface WindowTotals {
   toolCalls: number
   toolsMs: number
   wallMs: number
-  /** The window's merged pricing records; null when no day carried any. */
   usage: SessionCostUsage | null
 }
 
-/** Fold one daily ledger over a window; every figure rides the ledger's own day keys. */
 export function windowTotalsOf(activity: ContextActivity | null, scope: RangeWindow): WindowTotals {
   let requests = 0
   let turns = 0
@@ -601,37 +544,37 @@ export function windowTotalsOf(activity: ContextActivity | null, scope: RangeWin
   return { requests, turns, toolCalls, toolsMs, wallMs, usage }
 }
 
-/** The range's summed timing totals, folded from the rows' host-folded
- * whole-session totals exactly as the KPI band folds the scalar figures. The
- * additive-optional fields sum their carriers only, so a field no row carries stays absent instead of materializing zeros. */
+/** The rows' team merge of lifetime timing totals — the same scope the KPI band's ledger merges. */
 export function timingSumOf(rows: readonly OverviewRow[]): TimingTotals | null {
   let out: TimingTotals | null = null
   for (const row of rows) {
-    const t = row.timeline?.timing
-    if (t === undefined) continue
-    if (out === null) {
-      out = { ...t, tools: { ...t.tools } }
-      continue
-    }
-    out.wallMs += t.wallMs
-    out.ttftMs += t.ttftMs
-    out.genMs += t.genMs
-    out.calls += t.calls
-    out.toolsMs += t.toolsMs
-    out.toolCalls += t.toolCalls
-    addOptionalOf(out, t, 'reasoningMs')
-    addOptionalOf(out, t, 'reasoningBlocks')
-    addOptionalOf(out, t, 'textMs')
-    addOptionalOf(out, t, 'textBlocks')
-    addOptionalOf(out, t, 'toolArgMs')
-    addOptionalOf(out, t, 'toolArgBlocks')
-    addOptionalOf(out, t, 'speedTokens')
-    addOptionalOf(out, t, 'speedMs')
-    for (const name of Object.keys(t.tools)) {
-      const tool = t.tools[name]
-      const outTools: Record<string, ToolTimingTotals | undefined> = out.tools
-      const prev = outTools[name]
-      out.tools[name] = prev === undefined ? { ...tool } : { calls: prev.calls + tool.calls, ms: prev.ms + tool.ms }
+    for (const member of row.family) {
+      const t = member?.timing
+      if (t === undefined) continue
+      if (out === null) {
+        out = { ...t, tools: { ...t.tools } }
+        continue
+      }
+      out.wallMs += t.wallMs
+      out.ttftMs += t.ttftMs
+      out.genMs += t.genMs
+      out.calls += t.calls
+      out.toolsMs += t.toolsMs
+      out.toolCalls += t.toolCalls
+      addOptionalOf(out, t, 'reasoningMs')
+      addOptionalOf(out, t, 'reasoningBlocks')
+      addOptionalOf(out, t, 'textMs')
+      addOptionalOf(out, t, 'textBlocks')
+      addOptionalOf(out, t, 'toolArgMs')
+      addOptionalOf(out, t, 'toolArgBlocks')
+      addOptionalOf(out, t, 'speedTokens')
+      addOptionalOf(out, t, 'speedMs')
+      for (const name of Object.keys(t.tools)) {
+        const tool = t.tools[name]
+        const outTools: Record<string, ToolTimingTotals | undefined> = out.tools
+        const prev = outTools[name]
+        out.tools[name] = prev === undefined ? { ...tool } : { calls: prev.calls + tool.calls, ms: prev.ms + tool.ms }
+      }
     }
   }
   return out
@@ -653,12 +596,8 @@ export interface TokenPartTotal {
   value: number
 }
 
-/** The range's billed tokens split by category, folded across the rows'
- * families: each member's `billedParts` sum by category while its parts total
- * its own billed figure, so the aggregate total stays the exact merged billed
- * volume. With a scope, each member's usage comes from its daily ledger's
- * admitted days; without one, the lifetime head. Null when nothing billed; a
- * non-finite part drops whole. */
+/** Each member's parts total its own billed figure, so the aggregate stays the exact merged volume;
+ * with a scope usage comes from the ledger's admitted days, else the lifetime head. */
 export function tokenPartsOf(
   rows: readonly OverviewRow[],
   scope?: RangeWindow,
@@ -721,8 +660,8 @@ export function kpisOf(
   currency: CostCurrency,
   scope?: RangeWindow,
 ): OverviewKpis {
-  // Every figure folds the SAME daily ledger over the window; the lifetime heads serve only
-  // callers that pass no scope (or rows with no ledger).
+  // Every figure folds the SAME daily ledger over the window; an unbounded scope (the All preset) reads the family's
+  // lifetime heads instead, so the band's active-time and call cells equal the team timing card beside them.
   let usage: SessionCostUsage | null = null
   let turns = 0
   let toolCalls = 0
@@ -736,19 +675,21 @@ export function kpisOf(
     const windowTotals = scope !== undefined && row.activity !== null ? windowTotalsOf(row.activity, scope) : null
     const rowUsage = windowTotals !== null ? windowTotals.usage : open ? row.familyCost : null
     usage = mergeCostUsage(usage, rowUsage)
-    if (windowTotals !== null) {
+    if (windowTotals !== null && !open) {
       turns += windowTotals.turns
       toolCalls += windowTotals.toolCalls
       toolsMs += windowTotals.toolsMs
       calls += windowTotals.requests
       wallMs += windowTotals.wallMs
     } else if (open) {
-      const timing = row.timeline?.timing
-      turns += turnsOf(row.timeline)
-      toolCalls += timing?.toolCalls ?? 0
-      toolsMs += timing?.toolsMs ?? 0
-      calls += timing?.calls ?? 0
-      wallMs += timing?.wallMs ?? 0
+      for (const member of row.family) {
+        turns += turnsOf(member)
+        const timing = member?.timing
+        toolCalls += timing?.toolCalls ?? 0
+        toolsMs += timing?.toolsMs ?? 0
+        calls += timing?.calls ?? 0
+        wallMs += timing?.wallMs ?? 0
+      }
     }
     // Each sub-line counts the sessions its own figure covers: a session with usage but no book rates feeds the cache-hit rate.
     if (estimateSessionCost(rowUsage, book, currency) !== null) costSessions++
@@ -780,9 +721,7 @@ export interface DayTotals {
   cost: number | null
 }
 
-/** Merge every row's daily ledger into one — the heatmap's and usage chart's
- * data. A day counts only when the family entry carries activity, mirroring
- * the day filter, and prices off the same book and estimator as the KPI band. */
+/** A day counts only when the family entry carries activity (mirrors the day filter); prices off the KPI band's book. */
 export function aggregateDays(
   rows: readonly OverviewRow[],
   book: ModelBook | null | undefined,
@@ -813,7 +752,6 @@ export function aggregateDays(
   }
   const days: Record<string, DayTotals> = {}
   for (const [key, day] of Object.entries(merged)) {
-    // No fee records, or records no book prices, both merge to a null fee.
     days[key] = {
       tokens: day.tokens,
       requests: day.requests,
@@ -824,28 +762,23 @@ export function aggregateDays(
   return days
 }
 
-/** Re-pull the session-list baseline so host-side projection backfills
- * (host/backfill.ts) reach a long-connected browser; failures swallow and the panel renders off the rows it already has. */
+/** Re-pull the session-list baseline so host-side projection backfills (host/backfill.ts) reach a long-connected browser. */
 export function refreshSessions(ctx: ClientCtx): void {
   try {
     const sessions = ctx.get('sessions') as SessionsFace | undefined
     if (sessions === undefined || typeof sessions.refresh !== 'function') return
-    // Promise.resolve absorbs a non-promise return; rejections swallow.
     void Promise.resolve(sessions.refresh()).catch(() => { /* a failed re-pull keeps the stale rows */ })
   } catch { /* hostile service — no refresh */ }
 }
 
-/** Summon the host's projection warm-up (host/backfill.ts): this page is
- * the rows' only reader, so the host defers the corpus-wide cold reads until
- * this surface first opens (one pass per host process). */
+/** The rows' only reader, so the host defers its corpus-wide cold reads (host/backfill.ts) until this page first opens. */
 export function requestActivityBackfill(): void {
   try {
     void fetch(BACKFILL_ROUTE, { method: 'POST' }).catch(() => { /* the rows arrive on a later open */ })
   } catch { /* hostile transport — the panel keeps its rows */ }
 }
 
-/** The row's relative-activity label ("3m ago"), unit-stepped. A future or
- * invalid timestamp reads as "just now" (clock skew is not an error worth a dash). */
+/** A future or invalid timestamp reads as "just now" (clock skew is not an error worth a dash). */
 export function relativeTime(t: (key: string, params?: Record<string, string | number>) => string, updatedAt: number, now: number): string {
   const diff = now - updatedAt
   if (!Number.isFinite(diff) || diff < 60_000) return t('ov.time.now')

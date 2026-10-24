@@ -1,6 +1,3 @@
-// The attachment block (src/client/components/attachments.tsx): the ordered cards and the one-click
-// hand-off to the harness preview column, with a refusal reported on the card itself.
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -51,12 +48,11 @@ describe('the attachment block', () => {
     assert.deepEqual(queryAll(m.container, '.lc-att-ext').map(e => text(e)), ['SVG', 'DOCX', 'MD'])
     assert.equal(queryAll<HTMLImageElement>(m.container, '.lc-att-thumb img').length, 1)
     assert.ok(query<HTMLImageElement>(m.container, '.lc-att-thumb img').src.includes('blob:image-1'))
-    // The image card carries the chat's own facts: raw dims, sent size, token estimate.
     const imageCard = cards[3]
     assert.ok(text(imageCard).includes('3462×1211'), 'raw dimensions')
     assert.ok(text(imageCard).includes('1568×1350 · 146.2 kB'), 'sent dimensions and size')
     assert.ok(text(imageCard).includes('Token') && text(imageCard).includes('≈325'))
-    // A file card keeps its size and what its handle costs: the extension badge already names the type.
+    // A file card keeps its size and handle price; the extension badge already names the type.
     assert.ok(!text(cards[0]).includes('Type'))
     assert.ok(text(cards[0]).includes('Size') && text(cards[0]).includes('2.6 kB'))
     assert.ok(text(cards[0]).includes('Token') && text(cards[0]).includes('≈58'), 'the handle price')
@@ -71,7 +67,6 @@ describe('the attachment block', () => {
       'the image row keeps the vision calculator as its explanation',
     )
     assert.ok(text(cards[3]).includes('Type'), 'an image has no badge, so its type keeps the row')
-    // Every card invites the same one click.
     assert.ok(queryAll(m.container, '.lc-att-hint').every(hint => text(hint).includes('Click to preview')))
     await m.unmount()
   })
@@ -159,7 +154,6 @@ describe('the card click', () => {
     await flush()
     assert.equal(queryAll(m.container, '.lc-att-item')[2].dataset.state, 'failed')
     assert.ok(text(query(queryAll(m.container, '.lc-att-item')[2], '.lc-att-fail')).includes('Preview unavailable'))
-    // A later success clears the note.
     await click(queryAll(m.container, '.lc-att-item')[2])
     settle?.(true)
     await flush()
@@ -210,7 +204,6 @@ describe('the card click', () => {
     settle?.('blob:late')
     await flush()
 
-    // The rejection arm too: both settle paths must stay silent after unmount.
     const failing = await mountSection({ load: lateLoad, attachments: [{ kind: 'image', attachmentId: 'sha256:i8', name: 'late-2.png' }] })
     await failing.unmount()
     reject?.(new Error('denied'))
@@ -225,7 +218,7 @@ describe('the card click', () => {
     await click(cards[0])
     await click(cards[1])
     assert.equal(queryAll(m.container, '.lc-att-item')[1].dataset.state, 'opening')
-    // The FIRST open lands while the second is still pending: its clear must not touch the newer one.
+    // The first open lands while the second is pending: its clear must not touch the newer one.
     settles.get('sha256:f1')?.(true)
     await flush()
     assert.equal(queryAll(m.container, '.lc-att-item')[0].dataset.state, 'idle')

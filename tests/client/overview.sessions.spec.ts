@@ -21,13 +21,11 @@ import { rowOf, win } from './overview.fixtures'
 
 describe('skillLoadsOf', () => {
   const NOW = Date.UTC(2026, 8, 20, 12)
-  /** The local day key `back` days before NOW — TZ-independent. */
   const day = (back: number): string => {
     const key = dayKeyOf(NOW - back * 86_400_000)
     assert.ok(key !== null)
     return key
   }
-  /** A row whose family ledger carries the given day → skill table entries. */
   function rowWith(id: string, days: ContextActivity['days']): OverviewRow {
     return rowOf({ id, activity: { days } })
   }
