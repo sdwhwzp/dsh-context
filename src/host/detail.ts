@@ -7,7 +7,7 @@ import type { FoldBounds } from './config'
 import { type ColdReadGate, makeColdReadGate } from './coldRead'
 import { canReadAccountSession, type ConnectionHostFace, registerPostRoute } from './connection'
 import { applyTimeline } from './fold'
-import { createTimelineState } from './foldState'
+import { type TimelineState, createTimelineState } from './foldState'
 import { buildTimelineDetail } from './foldWire'
 
 export const DETAIL_ROUTE = '/api/dsh-context/detail'
@@ -87,7 +87,8 @@ export function watchDetailChannel(ctx: Context, bounds: FoldBounds, coldReads: 
           // Live session: the registry's current fold state — no second fold, and it is never mutated.
           const state = projections.stateOf(session as never, 'contextTimeline')
           if (state === undefined) return reply({ ok: true, value: null })
-          return reply({ ok: true, value: buildTimelineDetail(state, bounds) })
+          // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- rc.3 erases keyed reads; rc.2 types them.
+          return reply({ ok: true, value: buildTimelineDetail(state as TimelineState, bounds) })
         }
         // Cold session: observe it and fold from its immutable log through the shared cold-read gate; a skip under heap
         // pressure resolves to the same typed null, and an unchanged durable revision re-serves the cached payload.

@@ -39,8 +39,6 @@ export function apply(ctx: Context, config: Config): void {
   // into the normal composition below (docs/compatibility.md §2).
   const harnessVersion = detectHarnessVersion(ctx)
   if (harnessVersion !== undefined && !meetsBaseline(harnessVersion)) {
-    // register() constrains state to the declared SessionProjectionStateMap entry; the gate's opaque empty state is deliberately neither
-    // (nothing is folded) — cast through.
     ctx.sessionProjections.register(createFallbackTimelineDefinition(harnessVersion) as never)
     ctx.sessionProjections.register(createFallbackHeadersDefinition() as never)
     ctx.sessionProjections.register(createFallbackActivityDefinition() as never)
