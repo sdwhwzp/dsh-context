@@ -237,7 +237,7 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
         <div>
           <div className="lc-fa-ctl">
             <ClearableInput
-              className="lc-fa-search focus:border-(--dsw-alias-label-dimmed)"
+              className="lc-fa-search"
               value={query}
               placeholder={t('files.search')}
               clearLabel={t('field.clear')}
@@ -265,8 +265,9 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
           ) : (
             <div className="lc-fa-list" ref={listRef}>
               {rowRange.from > 0 ? <div className="lc-row-pad" style={{ height: Math.max(0, rowRange.from * rowPitch - rowGap) }} aria-hidden="true" /> : null}
-              {shown.slice(rowRange.from, rowRange.to + 1).map((e) => {
+              {shown.slice(rowRange.from, rowRange.to + 1).map((e, i) => {
                 const open = openPath === e.path
+                const alt = (rowRange.from + i) % 2 === 1
                 const display = displayOf(e)
                 const trimmed = display.endsWith('/') ? display.slice(0, -1) : display
                 const slash = trimmed.lastIndexOf('/')
@@ -277,7 +278,7 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
                 const previewable = props.onPreview !== undefined && e.pattern !== true && e.form !== 'dir'
                 const openable = previewable || (abs !== undefined && props.onOpen !== undefined)
                 return (
-                  <div key={e.path} className={'lc-fa-item' + (open ? ' lc-fa-item-on' : '')}>
+                  <div key={e.path} className={'lc-fa-item' + (open ? ' lc-fa-item-on' : '') + (alt ? ' lc-fa-item-alt' : '')}>
                     <button
                       type="button"
                       className="lc-fa-row hover:bg-(--dsw-alias-interactive-bg-hover) @max-[380px]/lc-card:flex-wrap"

@@ -3,7 +3,7 @@ import { JsonTree, MarkdownText, writeClipboard } from '@deepseek-ai/dsh-client-
 import type { JsonTreeLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import { IconCheck, IconChevronDown, IconChevronUp, IconClose, IconCopy, IconSearch } from '../primitives'
 import type { ViewKit } from '../viewkit'
-import { ClearableInput } from './clearableInput'
+import { ClearableInput, isBareEscape } from './clearableInput'
 
 export type RichMode = 'raw' | 'md' | 'json'
 
@@ -45,8 +45,9 @@ export interface RichFind {
 }
 
 const FIND_DEBOUNCE_MS = 150
-/** Cap on rendered marks: a one-character query must not flood the DOM (the counter shows '+' past it). */
-const FIND_MAX_MARKS = 500
+/** Cap on rendered matches: a one-character query must not flood the DOM (the counter shows '+' past it). A match
+ * spanning several text nodes costs one mark per node, so the cap bounds marks at the cap times the body's depth. */
+const FIND_MAX_MATCHES = 500
 
 interface FindMarks {
   count: number
@@ -54,50 +55,70 @@ interface FindMarks {
   restore: () => void
 }
 
-/** Wraps case-insensitive matches in `<mark>`; restore returns the split nodes so React's references survive. */
+function textNodesOf(root: HTMLElement): Text[] {
+  const nodes: Text[] = []
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) nodes.push(node as Text)
+  return nodes
+}
+
+/** Wraps case-insensitive matches in `<mark>`; restore returns the split nodes so React's references survive. The body's
+ *  text nodes join into ONE haystack, so a match crosses token runs and element boundaries alike. It gets one mark per
+ *  text node it covers, and the offsets keep addressing the original characters while the marks are built: a split only
+ *  shortens the split node's head, and the matches are placed right to left, so every later split sits to the right of
+ *  the match being placed. Every mark holds a node created by a split, never an original one, so restore drops them all. */
 function markMatches(root: HTMLElement, query: string, active: number): FindMarks {
   const needle = query.toLowerCase()
-  const texts: Text[] = []
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) texts.push(node as Text)
-  const touched: { node: Text; full: string; created: Node[] }[] = []
-  const marks: HTMLElement[] = []
-  let capped = false
-  for (const textNode of texts) {
-    // CharacterData.data (not nodeValue) is non-nullable, so an empty haystack never matches.
-    const full = textNode.data
-    const created: Node[] = []
-    let rest = textNode
-    let at = full.toLowerCase().indexOf(needle)
-    while (at !== -1) {
-      if (marks.length >= FIND_MAX_MARKS) { capped = true; break }
-      const matchNode = rest.splitText(at)
-      const after = matchNode.splitText(needle.length)
+  const nodes = textNodesOf(root)
+  const starts: number[] = []
+  const ends: number[] = []
+  let text = ''
+  for (const node of nodes) {
+    starts.push(text.length)
+    text += node.data
+    ends.push(text.length)
+  }
+  const lower = text.toLowerCase()
+  const ranges: { from: number; to: number }[] = []
+  for (let at = lower.indexOf(needle); at !== -1 && ranges.length <= FIND_MAX_MATCHES; at = lower.indexOf(needle, at + needle.length)) {
+    ranges.push({ from: at, to: at + needle.length })
+  }
+  const capped = ranges.length > FIND_MAX_MATCHES
+  if (capped) ranges.pop()
+  const full = new Map<Text, string>()
+  const created: Node[] = []
+  const groups: HTMLElement[][] = []
+  for (let index = ranges.length - 1; index >= 0; index--) {
+    const { from, to } = ranges[index]
+    const group: HTMLElement[] = []
+    for (const [at, node] of nodes.entries()) {
+      if (ends[at] <= from || starts[at] >= to) continue
+      const localFrom = Math.max(from, starts[at]) - starts[at]
+      const localTo = Math.min(to, ends[at]) - starts[at]
+      if (!full.has(node)) full.set(node, node.data)
+      const piece = node.splitText(localFrom)
+      const tail = piece.splitText(localTo - localFrom)
       const mark = document.createElement('mark')
       mark.className = 'lc-find-mark'
-      matchNode.before(mark)
-      mark.appendChild(matchNode)
-      marks.push(mark)
-      created.push(mark, after)
-      rest = after
-      at = after.data.toLowerCase().indexOf(needle)
+      piece.before(mark)
+      mark.appendChild(piece)
+      created.push(mark, tail)
+      group.push(mark)
     }
-    if (created.length > 0) touched.push({ node: textNode, full, created })
-    if (capped) break
+    groups[index] = group
   }
-  const on = Math.min(active, marks.length - 1)
+  const on = Math.min(active, ranges.length - 1)
   if (on >= 0) {
-    marks[on].classList.add('lc-find-mark-on')
-    marks[on].scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const group = groups[on]
+    for (const mark of group) mark.classList.add('lc-find-mark-on')
+    group[0].scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }
   return {
-    count: marks.length,
+    count: ranges.length,
     capped,
     restore: () => {
-      for (const { node, full, created } of touched) {
-        node.data = full
-        for (const c of created) c.parentNode?.removeChild(c)
-      }
+      for (const [node, data] of full) node.data = data
+      for (const c of created) c.parentNode?.removeChild(c)
     },
   }
 }
@@ -267,8 +288,9 @@ export function makeRichText(kit: ViewKit): RichKit {
       setActive(a => (count > 0 ? (a + delta + count) % count : 0))
     }, [count])
     const onKey = useCallback((ev: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (ev.nativeEvent.isComposing) return
       if (ev.key === 'Enter') { ev.preventDefault(); step(ev.shiftKey ? -1 : 1) }
-      else if (ev.key === 'Escape') { ev.preventDefault(); setOpen(false) }
+      else if (isBareEscape(ev) && ev.currentTarget.value === '') { ev.preventDefault(); setOpen(false) }
     }, [step])
 
     const findLabel = t('rich.find')
@@ -295,7 +317,7 @@ export function makeRichText(kit: ViewKit): RichKit {
       <div className="lc-find">
         <ClearableInput
           inputRef={inputRef}
-          className="lc-find-input focus:border-(--dsw-alias-label-dimmed)"
+          className="lc-find-input"
           value={query}
           placeholder={t('rich.findPlaceholder')}
           clearLabel={t('field.clear')}

@@ -2,7 +2,7 @@ import { act, createElement as h, useState, type KeyboardEvent as ReactKeyboardE
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { ClearableInput } from '../../../src/client/components/clearableInput'
-import { click, keydown, mount, query, typeText } from '../helpers/kit'
+import { click, keydown, mount, press, query, typeText } from '../helpers/kit'
 
 function Field(props: {
   initial?: string
@@ -29,6 +29,7 @@ describe('ClearableInput', () => {
     assert.equal(m.container.querySelector('.lc-searchbox-x'), null)
     const input = query<HTMLInputElement>(m.container, 'input')
     assert.equal(input.className, 'lc-fa-search')
+    assert.equal(input.getAttribute('data-lc-clearable'), '')
     assert.equal(input.type, 'text')
     assert.equal(input.getAttribute('aria-label'), 'Filter…', 'the placeholder names the field')
     await typeText(input, 'worker')
@@ -51,6 +52,59 @@ describe('ClearableInput', () => {
     assert.equal(input.value, '')
     assert.equal(document.activeElement, input)
     assert.equal(m.container.querySelector('.lc-searchbox-x'), null)
+    await m.unmount()
+  })
+
+  test('Escape clears typed content and stays away from the host overlay', async () => {
+    const m = await mount(h(Field, { initial: 'worker' }))
+    const input = query<HTMLInputElement>(m.container, 'input')
+    const { ev, reachedDocument } = await press(input, { key: 'Escape' })
+    assert.equal(input.value, '')
+    assert.equal(ev.defaultPrevented, true)
+    assert.equal(reachedDocument, false, 'the overlay must not also close')
+    await m.unmount()
+  })
+
+  test('Escape leaves an empty or composing field to the host', async () => {
+    const empty = await mount(h(Field, {}))
+    const emptyInput = query<HTMLInputElement>(empty.container, 'input')
+    const emptyEsc = await press(emptyInput, { key: 'Escape' })
+    assert.equal(emptyEsc.ev.defaultPrevented, false)
+    assert.equal(emptyEsc.reachedDocument, true)
+    await empty.unmount()
+
+    const filled = await mount(h(Field, { initial: 'x' }))
+    const input = query<HTMLInputElement>(filled.container, 'input')
+    const composing = await press(input, { key: 'Escape', isComposing: true })
+    assert.equal(input.value, 'x', 'Escape during IME composition stays with the IME')
+    assert.equal(composing.ev.defaultPrevented, false)
+    assert.equal(composing.reachedDocument, true)
+    await filled.unmount()
+  })
+
+  test('a modified Escape passes through untouched', async () => {
+    const m = await mount(h(Field, { initial: 'x' }))
+    const input = query<HTMLInputElement>(m.container, 'input')
+    const modifiers: KeyboardEventInit[] = [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]
+    for (const init of modifiers) {
+      const { ev, reachedDocument } = await press(input, { key: 'Escape', ...init })
+      assert.equal(input.value, 'x')
+      assert.equal(ev.defaultPrevented, false)
+      assert.equal(reachedDocument, true)
+    }
+    await m.unmount()
+  })
+
+  test("a caller's preventDefault wins over Escape clearing", async () => {
+    const m = await mount(h(Field, {
+      initial: 'x',
+      onKeyDown: (ev: ReactKeyboardEvent<HTMLInputElement>) => { if (ev.key === 'Escape') ev.preventDefault() },
+    }))
+    const input = query<HTMLInputElement>(m.container, 'input')
+    const { ev, reachedDocument } = await press(input, { key: 'Escape' })
+    assert.equal(input.value, 'x')
+    assert.equal(ev.defaultPrevented, true)
+    assert.equal(reachedDocument, true, 'the caller only prevented the default action')
     await m.unmount()
   })
 

@@ -19,9 +19,9 @@ describe('rowWindowFor', () => {
   })
 })
 
-function Probe(props: { count: number; enabled: boolean; attachRef?: boolean }) {
+function Probe(props: { count: number; enabled: boolean; attachRef?: boolean; overscan?: number }) {
   const ref = useRef<HTMLDivElement | null>(null)
-  const range = useRowWindow(ref, props.count, 20, props.enabled)
+  const range = useRowWindow(ref, props.count, 20, props.enabled, props.overscan)
   return h('div', {
     ...(props.attachRef === false ? {} : { ref }),
     'data-from': range.from,
@@ -67,6 +67,42 @@ describe('useRowWindow', () => {
       const node = query<HTMLElement>(m.container, 'div')
       assert.equal(node.dataset.from, '0')
       assert.equal(node.dataset.to, '39')
+      await m.unmount()
+    }
+  })
+
+  test('an unmeasurable box keeps the full range as its deps churn', async () => {
+    const m = await mount(h(Probe, { count: 40, enabled: true }))
+    try {
+      // The guard re-runs against a state that already holds the full range: the printed window must not move.
+      await m.update(h(Probe, { count: 40, enabled: true, overscan: 4 }))
+      const node = query<HTMLElement>(m.container, 'div')
+      assert.equal(node.dataset.from, '0')
+      assert.equal(node.dataset.to, '39')
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  test('a scroll frame that moves nothing leaves the window where it is', async () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return 1 })
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    const m = await mount(h(Probe, { count: 50, enabled: true }))
+    try {
+      const el = query<HTMLElement>(m.container, 'div')
+      Object.defineProperty(el, 'clientHeight', { configurable: true, value: 100 })
+      await m.update(h(Probe, { count: 51, enabled: true }))
+      await until(() => query<HTMLElement>(m.container, 'div').dataset.to !== '50', 'window measured')
+      el.scrollTop = 200
+      await act(async () => { el.dispatchEvent(new Event('scroll')) })
+      await act(async () => { frames[0](0) })
+      const moved = { from: el.dataset.from, to: el.dataset.to }
+      await act(async () => { el.dispatchEvent(new Event('scroll')) })
+      await act(async () => { frames[0](0) })
+      assert.deepEqual({ from: el.dataset.from, to: el.dataset.to }, moved, 'the same row range is reused')
+    } finally {
+      vi.unstubAllGlobals()
       await m.unmount()
     }
   })

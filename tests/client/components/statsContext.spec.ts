@@ -419,7 +419,37 @@ describe('StatsContext', () => {
     }))
     await flush()
     assert.ok(headsOf(m.container).totals[3] === '1/—')
-    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[1]).includes('unavailable'))
+    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[1]).includes('Not priced: future-provider / mystery-model'))
+    await m.unmount()
+  })
+
+  test('an ambiguous book face names the disagreement instead of an outage', async () => {
+    setModelPricesLoader(() => Promise.resolve({
+      a: { models: { x: { cost: { input: 1, output: 2 } } } },
+      b: { models: { x: { cost: { input: 2, output: 3 } } } },
+    }))
+    const m = await mount(h(StatsContext, {
+      counts: NO_COUNTS,
+      files: NO_FILES,
+      tools: [],
+      cost: { gateway: { x: { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+      locale: 'en',
+    }))
+    await flush()
+    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[1]).includes('has 2 models.dev entries with different rates'))
+    await m.unmount()
+  })
+
+  test('an inferred maker price says it is a reference estimate', async () => {
+    const m = await mount(h(StatsContext, {
+      counts: NO_COUNTS,
+      files: NO_FILES,
+      tools: [],
+      cost: { 'future-provider': { 'deepseek-v4-flash': { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+      locale: 'en',
+    }))
+    await flush()
+    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[1]).includes('reference estimate'))
     await m.unmount()
   })
 
@@ -616,7 +646,7 @@ describe('StatsContext — the subagent split (injected seat)', () => {
     assert.equal(headsOf(m.container).totals[3], '1.0M/$0.30')
     assert.deepEqual(rowsOf(flowNodes(m.container)[4]), ['Current Agent1.0M/$0.30', 'Subagents × 1?1/—'])
     const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
-    assert.ok(tips[2].includes('unavailable'))
+    assert.ok(tips[2].includes('Not priced: future / mystery-model'))
     await m.unmount()
   })
 
@@ -869,16 +899,11 @@ describe('the ledger figure', () => {
   }
 
   test('dsh-spend wins over the local estimate and brings its own currency', async () => {
-    // The local estimate would price this usage in USD for an English locale;
-    // the ledger answered in CNY, so the cell shows the ledger's money.
     const m = await mount(h(StatsContext, { counts, files: NO_FILES, tools: [], cost: COST, spend, locale: 'en' }))
     assert.ok(text(m.container).includes('¥12.50'))
-    // The tooltip lists what the ledger priced, not the local rate table.
     const tip = text(query(m.container, '.lc-stat-tip-prices'))
     assert.ok(tip.includes('deepseek-v4-flash'))
     assert.ok(tip.includes('GLM-5.3-Flash'), 'a provider the local table cannot price still appears')
-    // The split reports what the money was charged on — billed tokens, all
-    // four streams summed — and never a call tally.
     assert.ok(tip.includes('1.2M tokens'), tip)
     assert.ok(tip.includes('110.0k tokens'), tip)
     await m.unmount()
@@ -897,7 +922,6 @@ describe('the ledger figure', () => {
     for (const value of [null, undefined, { ...spend, cost: null }]) {
       const m = await mount(h(StatsContext, { counts, files: NO_FILES, tools: [], cost: COST, spend: value, locale: 'en' }))
       await flush()
-      // Peak uncached tokens use twice the book's off-peak rate.
       assert.ok(text(m.container).includes('$0.30'))
       await m.unmount()
     }

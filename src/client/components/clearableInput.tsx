@@ -14,11 +14,56 @@ export interface ClearableInputProps {
   inputRef?: RefObject<HTMLInputElement>
 }
 
+export function isClearableField(target: EventTarget | null): target is HTMLInputElement | HTMLTextAreaElement {
+  return (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)
+    && target.dataset.lcClearable !== undefined
+}
+
+export function ownsClearEscape(target: EventTarget | null): boolean {
+  return isClearableField(target) && target.value !== ''
+}
+
+export function isBareEscape(ev: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>): boolean {
+  return ev.key === 'Escape' && !ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey
+}
+
+/** ESC clears typed content and stays in the field; an empty field lets ESC reach the host overlay. */
+export function clearOnEscape(
+  ev: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+  clear: () => void,
+): void {
+  if (!isBareEscape(ev) || ev.nativeEvent.isComposing || !ownsClearEscape(ev.target)) return
+  ev.preventDefault()
+  ev.stopPropagation()
+  clear()
+}
+
+/** The shared clear control: its wrapper owns the position; the owner only supplies the label and action. */
+export function ClearButton(props: { label: string; onClick: () => void; className?: string }): ReactElement {
+  return (
+    <button
+      type="button"
+      className={'lc-searchbox-x' + (props.className !== undefined ? ' ' + props.className : '')}
+      title={props.label}
+      aria-label={props.label}
+      onMouseDown={(ev) => { ev.preventDefault() }}
+      onClick={props.onClick}
+    >
+      <IconClose size={10} />
+    </button>
+  )
+}
+
 /** The wrapper is the flex item; base.css sizes it off the input class, so a new field needs its own wrapper rule. */
 export function ClearableInput(props: ClearableInputProps): ReactElement {
   const ownRef = useRef<HTMLInputElement>(null)
   const ref = props.inputRef ?? ownRef
   const filled = props.value !== ''
+  const handleKeyDown = (ev: KeyboardEvent<HTMLInputElement>): void => {
+    props.onKeyDown?.(ev)
+    if (ev.defaultPrevented) return
+    clearOnEscape(ev, () => { props.onChange('') })
+  }
   return (
     <span className={'lc-searchbox' + (filled ? ' lc-searchbox-on' : '')}>
       <input
@@ -28,20 +73,12 @@ export function ClearableInput(props: ClearableInputProps): ReactElement {
         value={props.value}
         placeholder={props.placeholder}
         aria-label={props.label ?? props.placeholder}
+        data-lc-clearable=""
         onChange={(ev) => { props.onChange(ev.target.value) }}
-        onKeyDown={props.onKeyDown}
+        onKeyDown={handleKeyDown}
       />
       {filled ? (
-        <button
-          type="button"
-          className="lc-searchbox-x"
-          title={props.clearLabel}
-          aria-label={props.clearLabel}
-          onMouseDown={(ev) => { ev.preventDefault() }}
-          onClick={() => { props.onChange(''); ref.current?.focus() }}
-        >
-          <IconClose size={10} />
-        </button>
+        <ClearButton label={props.clearLabel} onClick={() => { props.onChange(''); ref.current?.focus() }} />
       ) : null}
     </span>
   )

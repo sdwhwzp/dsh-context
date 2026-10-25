@@ -90,7 +90,7 @@ export function RowToolbar(props: {
   return (
     <div className="lc-br-toolctl">
       <ClearableInput
-        className="lc-br-tool-search focus:border-(--dsw-alias-label-dimmed)"
+        className="lc-br-tool-search"
         value={props.value}
         placeholder={props.placeholder}
         clearLabel={props.clearLabel}

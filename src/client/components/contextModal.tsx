@@ -133,7 +133,7 @@ export function makeContextModal(
             <div className="lc-modal-card lc-modal-fill" onClick={(ev) => { ev.stopPropagation() }}>
               <div className="lc-modal-head">
                 <span className="lc-modal-title">{t('tab.context')}</span>
-                <button className="lc-modal-close hover:text-(--dsw-alias-label-primary) hover:bg-(--dsw-alias-bg-layer-2)" aria-label={t('cmd.close')} onClick={close}>×</button>
+                <button className="lc-modal-close hover:text-(--dsw-alias-label-primary) hover:bg-(--dsw-alias-interactive-bg-hover)" aria-label={t('cmd.close')} onClick={close}>×</button>
               </div>
 
               {data === null || head === null ? (

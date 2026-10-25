@@ -94,6 +94,8 @@ The top row uses a 3:1 flex split between Context Stats and Plugin Info when bot
 | **Context Events** | When and why the window changed. |
 | **File Activity** | What the agent *did* to your files. |
 
+The cost estimate follows one documented rule set: [How model pricing is mapped](docs/model-pricing-mapping.md).
+
 The headline occupancy and composition read the **same official token-meter projections as the chat composer's context ring** (`contextPressure` / `contextBreakdown`), so the figures always match what the ring tells you — the card's percentage is that same occupancy, printed with one decimal.
 
 The **Context Stats** card's Agent Network cell (the billed tokens and estimated cost of the whole family) jumps to the **Fleet** tab. Its Input / Output pills are jump links too: **Human Inputs** opens the **Context Browser** on your messages, and **Read / Written / Searched / Images** land on the **File Activity** card with that kind picked.

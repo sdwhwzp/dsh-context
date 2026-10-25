@@ -280,7 +280,7 @@ export function makeTrendChart(kit: ViewKit): (props: TrendChartProps) => ReactE
     const riseCls = props.rise ? RISE_CLASS : ''
     return (
       <div
-        className={'lc-bar hover:bg-(--dsw-alias-bg-layer-2)'
+        className={'lc-bar hover:bg-(--dsw-alias-interactive-bg-hover)'
           + (props.selected ? ' lc-bar-selected' : '')
           + (props.hovered ? ' lc-bar-hovered' : '')
           + (props.inTurn ? ' lc-bar-in-turn' : '')}
@@ -596,7 +596,9 @@ export function makeTrendChart(kit: ViewKit): (props: TrendChartProps) => ReactE
     const windowed = requests.length > TREND_WINDOW_MIN
     const windowOverscan = dnaOn ? DNA_WINDOW_OVERSCAN : WINDOW_OVERSCAN_BARS
     const windowHysteresis = dnaOn ? DNA_WINDOW_HYSTERESIS : WINDOW_HYSTERESIS_BARS
-    const [barWindow, setBarWindow] = useState<BarWindow>(() => initialBarWindow(requests.length))
+    // A DNA mount seeds the tight window directly: seeding the default one mounts ~4x the bars (each a lazy band
+    // assembly) for a single pre-paint commit, then throws them away for the tight window.
+    const [barWindow, setBarWindow] = useState<BarWindow>(() => initialBarWindow(requests.length, windowOverscan))
     const barWindowRef = useRef(barWindow)
     useLayoutEffect(() => { barWindowRef.current = barWindow }, [barWindow])
     const winRafRef = useRef<number | null>(null)

@@ -13,14 +13,12 @@ export function pricesBookOf(value: unknown): ModelBook | null {
   const data = asRecord(value)
   if (data === null || Array.isArray(data)) return null
   const book: ModelPrices = {}
-  const npmOf: Record<string, string | null> = {}
+  const canonicalOf: Record<string, Record<string, string>> = {}
   for (const providerId of Object.keys(data)) {
     const provider = asRecord(data[providerId])
     if (provider === null) continue
     const modelList = asRecord(provider.models)
     if (modelList === null) continue
-    const npm: unknown = provider.npm
-    npmOf[providerId] = typeof npm === 'string' ? npm : null
     const models: Record<string, PriceTriple> = {}
     for (const id of Object.keys(modelList)) {
       const model = asRecord(modelList[id])
@@ -35,10 +33,15 @@ export function pricesBookOf(value: unknown): ModelBook | null {
         write: rateOf(cost.cache_write) ?? miss,
         out,
       }
+      const canonical = model?.['canonical_model_id']
+      if (typeof canonical === 'string' && canonical.length > 0) {
+        const branch = canonicalOf[providerId] ?? (canonicalOf[providerId] = {})
+        branch[id] = canonical
+      }
     }
     if (Object.keys(models).length > 0) book[providerId] = models
   }
-  return { prices: book, index: priceIndexOf(book, npmOf) }
+  return { prices: book, index: priceIndexOf(book, canonicalOf) }
 }
 
 export interface ModelPricesSnap {

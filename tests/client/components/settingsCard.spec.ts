@@ -1,10 +1,10 @@
-import { createElement as h } from 'react'
+import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { makePluginConfigCard } from '../../../src/client/components/settingsCard'
 import type { SettingsState } from '../../../src/client/settings'
 import { DICT_EN } from '../../../src/client/i18n'
-import { blur, click, focus, keydown, makeKit, mount, query, queryAll, text, typeText } from '../helpers/kit'
+import { blur, click, focus, keydown, makeKit, mount, press, query, queryAll, text, typeText } from '../helpers/kit'
 
 const kit = makeKit()
 const PluginConfigCard = makePluginConfigCard(kit)
@@ -24,6 +24,9 @@ function menuItems(): HTMLElement[] {
 
 /** The auto-overview row's option labels (the shared step-count template). */
 const stepsLabel = (n: number): string => DICT_EN['settings.overviewAutoSteps'].replace('{n}', String(n))
+
+const clearOf = (area: HTMLTextAreaElement): HTMLElement | null =>
+  area.closest('.lc-settings-textrow')?.querySelector('.lc-settings-textx') ?? null
 
 describe('PluginConfigCard (the Plugins-page seat)', () => {
   test('renders nothing without a settings hook or when the namespace is unavailable', async () => {
@@ -287,12 +290,66 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
   })
 
   test('ready+readonly: disabled selects and the read-only note', async () => {
-    const m = await mount(h(PluginConfigCard, { useContextSettings: hookFor(stateOf({ writable: false })) }))
+    const m = await mount(h(PluginConfigCard, { useContextSettings: hookFor(stateOf({ writable: false, promptPrefix: 'served' })) }))
     const note = query(m.container, '.lc-settings-note')
     assert.equal(note.getAttribute('role'), 'status')
     assert.equal(text(note), DICT_EN['settings.readOnly'])
     assert.ok(queryAll<HTMLButtonElement>(m.container, '.lc-settings-select').every(s => s.disabled))
     assert.ok(queryAll<HTMLTextAreaElement>(m.container, '.lc-settings-textarea').every(t => t.disabled))
+    assert.equal(m.container.querySelector('.lc-settings-textx'), null, 'disabled rows hide the clear control')
+    await m.unmount()
+  })
+
+  test('prompt text rows: the × clears the draft, keeps focus, and commits empty on blur', async () => {
+    const calls: [string, string][] = []
+    const m = await mount(h(PluginConfigCard, {
+      useContextSettings: hookFor(stateOf({ promptPrefix: 'served' })),
+      set: (field, value) => { calls.push([field, value]) },
+    }))
+    const textareas = queryAll<HTMLTextAreaElement>(m.container, '.lc-settings-textarea')
+    const clear = clearOf(textareas[0]) as HTMLButtonElement
+    assert.equal(textareas[0].getAttribute('data-lc-clearable'), '')
+    assert.equal(clear.getAttribute('aria-label'), DICT_EN['field.clear'])
+    assert.equal(clear.title, DICT_EN['field.clear'])
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    await act(async () => { clear.dispatchEvent(down) })
+    assert.equal(down.defaultPrevented, true, 'the press never steals focus from the textarea')
+    await click(clear)
+    assert.equal(textareas[0].value, '')
+    assert.equal(document.activeElement, textareas[0])
+    assert.equal(clearOf(textareas[0]), null)
+    await blur(textareas[0])
+    assert.deepEqual(calls, [['promptPrefix', '']], 'the cleared draft commits on blur')
+    await m.unmount()
+  })
+
+  test('prompt text rows: Escape clears typed content before the dialog sees it', async () => {
+    const calls: [string, string][] = []
+    const m = await mount(h(PluginConfigCard, {
+      useContextSettings: hookFor(stateOf({ promptSuffix: 'served' })),
+      set: (field, value) => { calls.push([field, value]) },
+    }))
+    const area = queryAll<HTMLTextAreaElement>(m.container, '.lc-settings-textarea')[1]
+    assert.equal(area.getAttribute('data-lc-clearable'), '')
+    await focus(area)
+    await typeText(area, 'Sign as Atlas.')
+    assert.ok(clearOf(area), 'typing keeps the control present')
+    const composing = await press(area, { key: 'Escape', isComposing: true })
+    assert.equal(area.value, 'Sign as Atlas.', 'Escape during IME composition stays with the IME')
+    assert.equal(composing.ev.defaultPrevented, false)
+    assert.equal(composing.reachedDocument, true)
+
+    const esc = await press(area, { key: 'Escape' })
+    assert.equal(area.value, '')
+    assert.equal(esc.ev.defaultPrevented, true)
+    assert.equal(esc.reachedDocument, false, 'the settings dialog must not also close')
+    assert.equal(clearOf(area), null)
+
+    const emptyEsc = await press(area, { key: 'Escape' })
+    assert.equal(emptyEsc.ev.defaultPrevented, false, 'an empty field lets Escape close the dialog')
+    assert.equal(emptyEsc.reachedDocument, true)
+    await blur(area)
+    assert.deepEqual(calls, [['promptSuffix', '']], 'the cleared suffix commits on blur')
     await m.unmount()
   })
 

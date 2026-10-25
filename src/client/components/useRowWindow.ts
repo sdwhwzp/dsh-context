@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from 'react'
+import { useLayoutEffect, useState, type RefObject } from 'react'
 
 export const ROW_WINDOW_OVERSCAN = 8
 
@@ -20,8 +20,13 @@ export function rowWindowFor(
   return { from, to: Math.max(from, to) }
 }
 
+/** Nothing measured yet: the caller's spacers still reserve the list's full height, and the layout effect fills the
+ *  window before the browser paints. */
+const UNMEASURED: RowRange = { from: 0, to: -1 }
+
 /** Renders only the rows a fixed-row-height scroller shows: full height via caller-owned spacers, every readout in the
- * model, and the window shifts only across row boundaries. Disabled/unmeasured lists render in full. */
+ * model, and the window shifts only across row boundaries. Disabled or unmeasurable lists render in full; an enabled
+ * one renders nothing but the spacers until the layout effect measures it. */
 export function useRowWindow(
   ref: RefObject<HTMLElement | null>,
   count: number,
@@ -30,18 +35,24 @@ export function useRowWindow(
   overscan: number = ROW_WINDOW_OVERSCAN,
 ): RowRange {
   const full: RowRange = { from: 0, to: Math.max(0, count - 1) }
-  const [range, setRange] = useState<RowRange>(full)
-  useEffect(() => {
+  const [range, setRange] = useState<RowRange | null>(null)
+  // A LAYOUT effect: an enabled list must never commit in full first — one post-paint measure mounts every row of a
+  // long session's DNA feed (thousands of nodes) just to unmount them again, the toggle's dominant cost.
+  useLayoutEffect(() => {
     const el = ref.current
-    if (el === null || !enabled || el.clientHeight <= 0) {
-      setRange(current => (current.from === 0 && current.to === Math.max(0, count - 1) ? current : full))
+    if (!enabled) {
+      setRange(null)
+      return
+    }
+    if (el === null || el.clientHeight <= 0) {
+      setRange(current => (current !== null && current.from === full.from && current.to === full.to ? current : full))
       return
     }
     let frame = 0
     const update = (): void => {
       frame = 0
       const next = rowWindowFor(el.scrollTop, el.clientHeight, rowHeight, count, overscan)
-      setRange(current => (current.from === next.from && current.to === next.to ? current : next))
+      setRange(current => (current !== null && current.from === next.from && current.to === next.to ? current : next))
     }
     const schedule = (): void => {
       if (frame === 0) frame = requestAnimationFrame(update)
@@ -59,5 +70,5 @@ export function useRowWindow(
       observer?.disconnect()
     }
   }, [ref, count, rowHeight, enabled, overscan, full.from, full.to])
-  return enabled ? range : full
+  return enabled ? (range ?? UNMEASURED) : full
 }

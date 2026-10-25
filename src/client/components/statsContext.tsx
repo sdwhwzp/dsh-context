@@ -7,20 +7,21 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import type { ContextEventRecord, ContextTimeline, RequestRecord, SessionCostUsage, SurfaceNode, TimelineCounts } from '../../shared/types'
-import { estimateSessionCost, billedTokensOf, formatCost, formatPriceRate, mergeCostUsage, priceFaceOf, toCurrency } from '../cost'
-import type { CostCurrency, ModelBook, PriceFace } from '../cost'
+import { estimateSessionCost, billedTokensOf, formatCost, formatPriceRate, mergeCostUsage, priceLookupsOf, toCurrency } from '../cost'
+import type { CostCurrency, ModelBook, PriceFace, PriceMiss } from '../cost'
 import { sessionsFaceOf, subagentCostFoldOf } from '../agentTree'
 import type { AgentHeads } from '../agentHeads'
 import { useSessionsSnapshot } from '../agentHeads'
 import type { Translate } from '../i18n'
 import { useModelPrices } from '../modelPrices'
-import { asRecord, spendTokensOf, type ClientCtx } from '../services'
+import { spendTokensOf, type ClientCtx } from '../services'
 import type { SessionSpend } from '../services'
 import { formatSpendCost, spendDisplayCurrency } from '../spendMoney'
 import { isDeepSeekProvider } from '../../shared/providers'
 import type { ViewKit } from '../viewkit'
 
 interface PriceRow { key: string; face: PriceFace }
+interface PriceMissRow { key: string; provider: string; model: string; miss: PriceMiss }
 
 const BANDS: readonly (readonly [keyof PriceFace['rate'], string])[] = [
   ['hit', 'stats.costHit'],
@@ -29,22 +30,16 @@ const BANDS: readonly (readonly [keyof PriceFace['rate'], string])[] = [
   ['out', 'stats.costOut'],
 ]
 
-function priceRowsOf(usage: SessionCostUsage | undefined, book: ModelBook | null): PriceRow[] {
-  if (usage === undefined || book === null) return []
+function pricesOf(usage: SessionCostUsage | undefined, book: ModelBook | null): { rows: PriceRow[]; misses: PriceMissRow[] } {
+  if (usage === undefined || book === null) return { rows: [], misses: [] }
   const rows: PriceRow[] = []
-  for (const provider of Object.keys(usage)) {
-    const models = asRecord(usage[provider])
-    /* v8 ignore next 1 -- the fold's inputs are mergeCostUsage's own output
-       (hostile branches dropped at the merge), so a non-record branch never
-       reaches here; the guard stays for the helper's own contract. */
-    if (models === null) continue
-    for (const model of Object.keys(models)) {
-      const face = priceFaceOf(book, provider, model)
-      if (face === null) continue
-      rows.push({ key: provider + '/' + model, face })
-    }
+  const misses: PriceMissRow[] = []
+  for (const lookup of priceLookupsOf(usage, book)) {
+    const key = lookup.provider + '/' + lookup.model
+    if (lookup.face !== null) rows.push({ key, face: lookup.face })
+    else misses.push({ key, provider: lookup.provider, model: lookup.model, miss: lookup.miss })
   }
-  return rows
+  return { rows, misses }
 }
 
 /** Inline counter derivation; the host's split-generation counts match it by construction (fold.ts buildTimelineHead). */
@@ -305,14 +300,12 @@ export function makeStatsContext(
     const cost = priced === null ? estimateSessionCost(usage, book, currency) : null
     const subCost = estimateSessionCost(subUsage, book, currency)
     const fmtRate = (usd: number): string => formatPriceRate(toCurrency(usd, currency), currency)
-    const rows = priceRowsOf(usage, book)
-    const subRows = priceRowsOf(subUsage ?? undefined, book)
+    const priceState = pricesOf(usage, book)
+    const subPriceState = pricesOf(subUsage ?? undefined, book)
+    const rows = priceState.rows
+    const subRows = subPriceState.rows
     const deepseek = usage !== undefined && Object.keys(usage).some(p => isDeepSeekProvider(p))
     const subDeepseek = subUsage !== null && Object.keys(subUsage).some(p => isDeepSeekProvider(p))
-    // Folded usage with no priced row (book not loaded, or it carries none of this scope's models): say so instead of a bare dash.
-    const unpriced = rows.length === 0 && usage !== undefined && Object.keys(usage).length > 0
-      && (failed || book !== null)
-    const subUnpriced = subRows.length === 0 && subUsage !== null && (failed || book !== null)
     const pricesBlock = (blocks: PriceRow[]): ReactNode =>
       blocks.length > 0 ? (
         <span key="prices" className="lc-stat-tip-prices">
@@ -331,6 +324,22 @@ export function makeStatsContext(
           ))}
         </span>
       ) : null
+    const missesBlock = (misses: PriceMissRow[]): ReactNode =>
+      misses.length > 0 ? (
+        <span key="misses" className="lc-stat-tip-prices">
+          {misses.map(m => (
+            <span key={m.key} className="lc-stat-tip-row">
+              {m.miss.reason === 'ambiguous'
+                ? t('stats.costAmbiguous', { p: m.provider, m: m.model, n: String(m.miss.candidates) })
+                : t('stats.costNotListed', { p: m.provider, m: m.model })}
+            </span>
+          ))}
+        </span>
+      ) : null
+    const inferredNote = (blocks: PriceRow[]): ReactNode =>
+      blocks.some(r => r.face.via === 'canonical-maker' || r.face.via === 'family' || r.face.via === 'index')
+        ? <span key="inferred">{t('stats.costInferredNote')}</span>
+        : null
     const notes = (deep: boolean): ReactElement[] =>
       [
         currency === 'cny' ? <span key="cny">{t('stats.costTipCny')}</span> : null,
@@ -356,17 +365,19 @@ export function makeStatsContext(
         t('stats.costTip'),
         <span key="billed" className="lc-stat-tip-row">{t('stats.billedTip')}</span>,
         pricesBlock(rows),
+        missesBlock(priceState.misses),
+        inferredNote(rows),
         ...notes(deepseek),
-        unpriced ? <span key="unavailable">{t('stats.costUnavailable')}</span> : null,
+        failed ? <span key="unavailable">{t('stats.costUnavailable')}</span> : null,
       ]
-    // The subagents' own share: scope explanation, its own price table, then
-    // the outage note when the subagents' models priced against nothing.
     const subTip: ReactNode = [
       t('stats.subCostTip'),
       <span key="billed" className="lc-stat-tip-row">{t('stats.billedTip')}</span>,
       pricesBlock(subRows),
+      missesBlock(subPriceState.misses),
+      inferredNote(subRows),
       ...notes(subDeepseek),
-      subUnpriced ? <span key="unavailable">{t('stats.costUnavailable')}</span> : null,
+      failed ? <span key="unavailable">{t('stats.costUnavailable')}</span> : null,
     ]
     const flowRef = useRef<HTMLDivElement | null>(null)
     const nodeEls = useRef(new Map<FlowNodeKey, HTMLDivElement>())

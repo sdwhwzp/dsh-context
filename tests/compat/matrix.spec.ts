@@ -305,6 +305,12 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
       }
     })
 
+    test('client: the command panel\'s coloring seam', () => {
+      for (const { file, needle, what } of baseline.client.codeHighlight) {
+        assert.equal(staging.dshHasString(baseline.tag, needle, file), true, `${what} (${needle})`)
+      }
+    })
+
     test('client: the icon seams resolve on this generation (primitives.ts)', () => {
       for (const name of staging.ICON_SEAMS) {
         const present = staging.dshHasString(baseline.tag, name, 'packages/client/ui-primitives/src/**')

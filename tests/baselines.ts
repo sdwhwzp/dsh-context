@@ -48,6 +48,9 @@ export interface ClientSeam {
     tabsSlotFile: string
     tabsSlotNeedle: string
   }
+  /** The command panel's coloring seam: the primitives' lazy shiki highlighter, the boot grammar that colors a shell
+   *  command's first render, and the token sheet its `--shiki-*` runs resolve against. */
+  codeHighlight: readonly { file: string; needle: string; what: string }[]
   /** The first-level panel seam: the layout's keyed `main` slot and the sidebar's `sidebar.panellist` list, addressed by one shared id. */
   insightPage: {
     panellistFile: string
@@ -207,6 +210,12 @@ function baseline(id: BaselineId, tag: string, session: string, line: { cordis?:
         sessionsFile: 'packages/api/session-controller/src/client/contract/sessions.ts',
         sessionsOpen: false,
       },
+      codeHighlight: [
+        { file: 'packages/client/ui-primitives/src/code-highlighting.ts', needle: 'useCodeHighlighter', what: 'the highlighter hook the panel binds' },
+        { file: 'packages/client/ui-primitives/src/markdown/highlight.ts', needle: "lang: 'shellscript'", what: 'the shell grammar is pre-tokenized at boot' },
+        { file: 'packages/client/ui-primitives/src/markdown/highlight.ts', needle: '@shikijs/langs/powershell', what: 'the pwsh grammar loads through the lazy table' },
+        { file: 'packages/client/ui-theme/src/styles/shiki.css', needle: 'shiki-token-function', what: 'the token sheet the runs resolve against' },
+      ],
       subagentAddress: {
         file: 'packages/api/session-controller/src/client/sessions/manager.ts',
         needle: 'subagentAddress',

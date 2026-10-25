@@ -1,5 +1,5 @@
 .lc-agents-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-.lc-agents-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
+.lc-agents-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--dsw-alias-bg-layer-2); border: var(--lc-line-fine, 1px solid var(--dsw-alias-border-l1)); color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
 .lc-agents-chip-on { color: var(--dsw-alias-state-success-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent); }
 /* With overscroll.ts: a swipe past the stage edge must not chain into browser history. 560px mirrors
    STAGE_H in agentGraph.tsx; a long family scrolls here instead of stretching the page, and Show all lifts the cap. */
@@ -32,8 +32,8 @@
   flex-direction: column;
   /* Worst-case content totals ~115px; clip the stray pixel rather than bleed onto the link channel. */
   overflow: hidden;
-  background: var(--dsw-alias-bg-layer-2);
-  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--lc-subpanel-bg);
+  border: var(--lc-line-fine, 1px solid var(--dsw-alias-border-l2));
   border-radius: 10px;
   outline: none;
   transition: border-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out),
@@ -98,9 +98,9 @@
 .lc-inspector[data-pinned] { border-color: color-mix(in srgb, var(--dsw-alias-brand-primary, var(--color-blue-500)) 45%, var(--dsw-alias-border-l2)); }
 .lc-inspector-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .lc-inspector-actions { margin-left: auto; display: inline-flex; gap: 6px; }
-.lc-inspector-btn { border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-brand-primary, var(--color-blue-500)); font-size: 10.5px; line-height: 1.4; padding: 1px 8px; border-radius: 999px; cursor: pointer; font-family: inherit; }
+.lc-inspector-btn { border: var(--lc-line-strong, 1px solid var(--dsw-alias-border-l1)); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-brand-primary, var(--color-blue-500)); font-size: 10.5px; line-height: 1.4; padding: 1px 8px; border-radius: 999px; cursor: pointer; font-family: inherit; }
 .lc-inspector-btn:hover { border-color: var(--dsw-alias-brand-primary, var(--color-blue-500)); }
-.lc-inspector-section { margin-top: 8px; padding-top: 7px; border-top: 1px dashed var(--dsw-alias-border-l2); }
+.lc-inspector-section { margin-top: 8px; padding-top: 7px; border-top: var(--lc-line-dashed, 1px dashed var(--dsw-alias-border-l2)); }
 .lc-inspector-caption { font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); margin-bottom: 5px; }
 .lc-inspector-member { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .lc-inspector-member-name { color: var(--dsw-alias-brand-primary, var(--color-blue-500)); }
@@ -117,14 +117,14 @@
 .lc-inspector-comm { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 11px; }
 .lc-inspector-comm-peer { border: 0; background: transparent; padding: 0; font: inherit; color: var(--dsw-alias-brand-primary, var(--color-blue-500)); cursor: pointer; }
 .lc-inspector-comm-text { flex-basis: 100%; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; white-space: pre-wrap; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-.lc-agents-inspector { margin-top: 10px; padding: 7px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); font-size: 12px; }
+.lc-agents-inspector { margin-top: 10px; padding: 7px 10px; border: var(--lc-line-fine, 1px solid var(--dsw-alias-border-l2)); border-radius: 8px; background: var(--lc-subpanel-bg); font-size: 12px; }
 .lc-agents-inspector-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
 .lc-agents-inspector-name { color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
-.lc-agents-badge { flex: none; font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); }
+.lc-agents-badge { flex: none; font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--dsw-alias-bg-layer-1); border: var(--lc-line-fine, 1px solid var(--dsw-alias-border-l1)); color: var(--dsw-alias-label-secondary); }
 .lc-agents-badge-on { color: var(--dsw-alias-state-success-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent); }
 .lc-agents-inspector-stats { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lc-agents-inspector-open { margin-left: auto; flex: none; color: var(--dsw-alias-brand-primary, var(--color-blue-500)); }
-.lc-agents-inspector-parts { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--dsw-alias-border-l2); font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.lc-agents-inspector-parts { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; padding-top: 6px; border-top: var(--lc-line-dashed, 1px dashed var(--dsw-alias-border-l2)); font-size: 11px; color: var(--dsw-alias-label-secondary); }
 .lc-agents-part { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .lc-agents-part i { width: 7px; height: 7px; border-radius: 2px; }
 .lc-agents-part em { font-style: normal; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); font-variant-numeric: tabular-nums; }

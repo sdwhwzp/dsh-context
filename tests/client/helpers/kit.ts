@@ -158,6 +158,22 @@ export async function keydown(key: string, target: HTMLElement | Window = window
   })
 }
 
+export async function press(
+  target: HTMLElement,
+  init: KeyboardEventInit,
+): Promise<{ ev: KeyboardEvent; reachedDocument: boolean }> {
+  let reachedDocument = false
+  const listener = (): void => { reachedDocument = true }
+  document.addEventListener('keydown', listener)
+  const ev = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
+  try {
+    await act(async () => { target.dispatchEvent(ev) })
+  } finally {
+    document.removeEventListener('keydown', listener)
+  }
+  return { ev, reachedDocument }
+}
+
 export function wheel(el: Element, deltaX: number, deltaY: number): boolean {
   const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX, deltaY })
   el.dispatchEvent(event)

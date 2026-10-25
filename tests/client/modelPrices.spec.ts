@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, test, vi } from 'vitest'
 import { getModelPricesSnap, pricesBookOf, resetModelPrices, setModelPricesLoader, subscribeModelPrices } from '../../src/client/modelPrices'
 import type { ModelPricesSnap } from '../../src/client/modelPrices'
-import { priceOf } from '../../src/client/cost'
 
 const FIXTURE = {
   deepseek: {
@@ -60,25 +59,27 @@ describe('pricesBookOf', () => {
     assert.equal(book?.prices.deepseek?.['deepseek-v4-pro']?.write, 0.435)
   })
 
-  test('the resolution index carries the vendor flag from the npm package', () => {
-    const book = pricesBookOf(FIXTURE)
-    const cands = new Map([...book?.index.byModel.get('claude-sonnet-5') ?? []].map(c => [c.pid, c]))
-    assert.equal(cands.get('anthropic')?.primary, true, '@ai-sdk/anthropic is anthropic itself')
-    assert.equal(cands.get('gateway')?.primary, false, 'the generic package is a mirror')
-    assert.equal(cands.get('foreign')?.primary, false, '@ai-sdk/openai does not make foreign OpenAI')
-    assert.deepEqual(priceOf(book, 'claude', 'claude-sonnet-5'), { hit: 0.2, miss: 2, write: 2.5, out: 10 })
-  })
-
-  test('a non-string npm is not a vendor flag', () => {
-    const book = pricesBookOf({ odd: { npm: 7, models: { m: { cost: { input: 1, output: 2 } } } } })
-    assert.deepEqual([...book?.index.byModel.get('m') ?? []], [{ pid: 'odd', mid: 'm', rate: { hit: 1, miss: 1, write: 1, out: 2 }, primary: false }])
+  test('canonical ids join the branch index and mark its labs', () => {
+    const book = pricesBookOf({
+      p: {
+        models: {
+          a: { cost: { input: 1, output: 2 }, canonical_model_id: 'lab/a' },
+          b: { cost: { input: 3, output: 4 }, canonical_model_id: 'lab/b' },
+          c: { cost: { input: 5, output: 6 } },
+        },
+      },
+    })
+    const branch = book?.index.branches.get('p')
+    assert.equal(branch?.labs.size, 1)
+    assert.deepEqual(branch?.byExact.get('a')?.[0], { pid: 'p', mid: 'a', rate: { hit: 1, miss: 1, write: 1, out: 2 }, canonical: 'lab/a', lab: 'lab' })
+    assert.equal(branch?.byExact.get('c')?.[0]?.canonical, undefined)
   })
 
   test('a payload that is not a record prices null; an empty one prices an empty book', () => {
     assert.equal(pricesBookOf(null), null)
     assert.equal(pricesBookOf('x'), null)
     assert.equal(pricesBookOf([FIXTURE]), null)
-    assert.deepEqual(pricesBookOf({}), { prices: {}, index: { byModel: new Map() } })
+    assert.deepEqual(pricesBookOf({}), { prices: {}, index: { byModel: new Map(), byNormalized: new Map(), branches: new Map() } })
   })
 })
 

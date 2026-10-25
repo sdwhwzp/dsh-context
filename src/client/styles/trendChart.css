@@ -22,7 +22,7 @@
 .lc-chart-scroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-gutter: stable; padding-bottom: var(--dsh-scrollbar-width, 8px); }
 /* The 2px padding reserves the hover outline's ink beyond the edge bars, which the scroller would otherwise clip. */
 .lc-chart { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 130px; padding: 18px 2px 0; box-sizing: border-box; width: max-content; min-width: 100%; }
-.lc-grid { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--dsw-alias-border-l2); pointer-events: none; }
+.lc-grid { position: absolute; left: 0; right: 0; border-top: var(--lc-line-dashed, 1px dashed var(--dsw-alias-border-l2)); pointer-events: none; }
 .lc-grid-top { top: 18px; }
 .lc-grid-q3 { top: 46px; }
 .lc-grid-mid { top: 74px; }

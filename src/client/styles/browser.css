@@ -12,9 +12,9 @@
 .lc-br-bar-dna .lc-stacked-seg { background-image: linear-gradient(to right, transparent calc(100% - min(0.5px, 12.5%)), var(--dsw-alias-bg-layer-1) 0); }
 .lc-br-bar { display: flex; align-items: stretch; gap: 10px; }
 .lc-br-bar-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.lc-br-map-btn { flex: none; display: flex; align-items: center; justify-content: center; width: 34px; height: auto; padding: 0; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); cursor: pointer; transition: color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out), border-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out), background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
+.lc-br-map-btn { flex: none; display: flex; align-items: center; justify-content: center; width: 34px; height: auto; padding: 0; border: var(--lc-line-strong, 1px solid var(--dsw-alias-border-l2)); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); cursor: pointer; transition: color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out), border-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out), background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-br-map-btn svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.2; }
-.lc-br-map-btn:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l1); }
+.lc-br-map-btn:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l4); background: var(--dsw-alias-interactive-bg-hover); }
 .lc-br-map-btn-on, .lc-br-map-btn-on:hover { color: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent); }
 
 /* The block map (a measured squarified treemap in browserTreemap.tsx) keeps the height it opens at: opened rows
@@ -37,7 +37,7 @@
 .lc-map-num { font-size: 10px; color: var(--dsw-alias-label-secondary); line-height: 1.2; font-variant-numeric: tabular-nums; }
 .lc-map-tip { display: flex; flex-direction: column; max-width: 240px; padding: 5px 8px; line-height: 1.45; white-space: nowrap; }
 .lc-map-tip-on { opacity: 1; }
-.lc-br-pick { font: inherit; font-size: 12px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 6px; padding: 3px 6px; max-width: 240px; }
+.lc-br-pick { font: inherit; font-size: 12px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); border: var(--lc-line-strong, 1px solid var(--dsw-alias-border-l2)); border-radius: 6px; padding: 3px 6px; max-width: 240px; }
 .lc-br-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--dsw-alias-label-secondary); }
 .lc-br-meta b { color: var(--dsw-alias-label-primary); }
 .lc-br-meta .lc-est { margin-left: auto; }
@@ -48,7 +48,7 @@
 .lc-br-flat { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
 /* A feed row's 1-based prompt position: the model's k-th message after the header. */
 .lc-br-pos { flex: none; font-size: 11px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
-.lc-br-cat { border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); overflow: hidden; }
+.lc-br-cat { border: var(--lc-line-fine, 1px solid var(--dsw-alias-border-l2)); border-radius: 8px; background: var(--lc-subpanel-bg); overflow: hidden; }
 .lc-br-cat-empty { opacity: 0.55; }
 /* The row stays ONE line: counts change as the hovered step moves, and a wrapped row would resize the card mid-scrub; the figures keep their width and the name ellipsizes. */
 .lc-br-cat-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; padding: 7px 10px; cursor: pointer; text-align: left; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
@@ -69,14 +69,14 @@
 .lc-br-delta-down, .lc-br-tdelta-down { color: var(--dsw-alias-state-error-primary); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 15%, transparent); }
 .lc-br-tokens-grp { flex: none; min-width: 0; display: inline-flex; align-items: center; gap: 4px; }
 .lc-br-pct { flex: none; width: 36px; text-align: right; color: var(--dsw-alias-label-secondary); font-size: 12px; }
-.lc-br-body { border-top: 1px solid var(--dsw-alias-border-l1); padding: 4px 6px; display: flex; flex-direction: column; gap: 2px; }
+.lc-br-body { border-top: var(--lc-line-fine, 1px solid var(--dsw-alias-border-l1)); padding: 4px 6px; display: flex; flex-direction: column; gap: 2px; }
 .lc-br-elem { border-radius: 6px; }
 /* `of` counts rows only: a toolbar or note never shifts the stripe's phase. */
-.lc-br-elem:nth-child(even of .lc-br-elem):not(.lc-br-elem-on) { background: color-mix(in srgb, var(--dsw-alias-interactive-bg-hover) 60%, transparent); }
+.lc-br-elem:nth-child(even of .lc-br-elem):not(.lc-br-elem-on) { background: var(--lc-list-stripe); }
 .lc-br-elem-on { background: var(--dsw-alias-interactive-bg-active); }
 .lc-br-elem-row { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; padding: 5px 6px; cursor: pointer; text-align: left; border-radius: 6px; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-br-err-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-state-error-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent); }
-.lc-br-tag { min-width: 0; font-size: 11px; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); border-radius: 4px; padding: 0 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-br-tag { min-width: 0; font-size: 11px; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-1); border: var(--lc-line-fine, 1px solid var(--dsw-alias-border-l2)); border-radius: 4px; padding: 0 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lc-br-tags { min-width: 0; display: inline-flex; align-items: center; gap: 4px; }
 .lc-br-tool-plugin { font-size: 12px; border-radius: 6px; color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); border-color: transparent; }
 .lc-br-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

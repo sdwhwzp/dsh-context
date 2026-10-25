@@ -1,6 +1,9 @@
-import { memo, useEffect, useMemo, useRef, useState, type ComponentType, type MouseEvent, type ReactElement, type ReactNode } from 'react'
+import { memo, Fragment, useEffect, useMemo, useRef, useState, type ComponentType, type MouseEvent, type ReactElement, type ReactNode } from 'react'
+import { useCodeHighlighter } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { HighlightSpan } from '@deepseek-ai/dsh-client-ui-primitives'
 import { attentionOf, byLatest, bySlowest, durationOf, matchesFilter, matchesQuery, previewTextOf, programsOf, resultTextOf, surfaceSeqOf, tallyOfCommands, viewsOf } from '../commands'
 import type { Command, CommandFilter, CommandSort, CommandView } from '../commands'
+import { grammarOfTool, highlightRuns } from '../commandHighlight'
 import type { ContentFetcher } from '../services'
 import { nameColorOf } from '../nameColor'
 import type { CommandStats } from '../../shared/types'
@@ -28,6 +31,24 @@ export interface CommandPanelProps {
   fetchContent?: ContentFetcher
   state?: DetailState
   onRetry?: () => void
+}
+
+/** Command text as its highlight runs (one span per run), or the plain text when no run set reached the renderer. The
+ *  runs carry the text verbatim, so browser find, select-all, the copy control and the panel's find lens all read the
+ *  same characters they would without coloring. */
+function CmdText(props: { text: string; runs: readonly HighlightSpan[][] | undefined }): ReactElement {
+  const { runs } = props
+  if (runs === undefined) return <>{props.text}</>
+  return (
+    <>
+      {runs.map((line, index) => (
+        <Fragment key={index}>
+          {index === 0 ? null : '\n'}
+          {line.map((run, at) => <span key={at} style={run.style}>{run.text}</span>)}
+        </Fragment>
+      ))}
+    </>
+  )
 }
 
 export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps> {
@@ -79,6 +100,15 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
   return memo(function CommandPanel(props: CommandPanelProps): ReactElement {
     // The memo must not block a locale switch: the tick re-renders on it even when the props are reference-stable.
     kit.useLocaleTick()
+    // One binding per shell grammar, held for the mount; a lazy grammar (powershell) colors its rows on the load tick,
+    // which the hook's own store subscription drives, and stays plain until then.
+    const highlightShell = useCodeHighlighter('bash')
+    const highlightPwsh = useCodeHighlighter('powershell')
+    const runsOf = (tool: string, text: string): readonly HighlightSpan[][] | undefined => {
+      const grammar = grammarOfTool(tool)
+      if (grammar === undefined) return undefined
+      return highlightRuns(grammar === 'bash' ? highlightShell : highlightPwsh, grammar, text)
+    }
     const { commands } = props
     const [filter, setFilter] = useState<CommandFilter>('all')
     const [sort, setSort] = useState<CommandSort>('latest')
@@ -203,7 +233,11 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     // search threshold with a stale query, and an invisible box cannot be cleared.
     const shownPrograms = programs.length > 6 && pq !== '' ? programs.filter(p => p.name.toLowerCase().includes(pq)) : programs
 
-    const rail = commands.length > 0 ? (
+    const loadingChannel = commands.length === 0 && props.state === 'loading'
+    const failedChannel = commands.length === 0 && props.state === 'failed'
+    const showRail = !loadingChannel && !failedChannel
+    const totalTime = commands.length === 0 ? '0' : fmtDuration(tally.ms)
+    const rail = showRail ? (
       <div className="lc-cmd-rail">
         <div className="lc-cmd-rail-sec">
           <div className="lc-cmd-rail-h">{t('cmds.rail.summary')}</div>
@@ -213,7 +247,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
               <b>{fmt(tally.failed)}</b>
               <span>{t('cmds.rail.failed')}{tally.runs > 0 ? ' · ' + kit.fmtShare(tally.failed, tally.runs) : ''}</span>
             </div>
-            <div className="lc-cmd-kpi lc-cmd-kpi-time"><b>{fmtDuration(tally.ms)}</b><span>{t('cmds.rail.totalTime')}</span></div>
+            <div className="lc-cmd-kpi lc-cmd-kpi-time"><b>{totalTime}</b><span>{t('cmds.rail.totalTime')}</span></div>
             <div className="lc-cmd-kpi lc-cmd-kpi-bg"><b>{fmt(tally.bg)}</b><span>{t('cmds.rail.background')}</span></div>
           </div>
         </div>
@@ -236,44 +270,46 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
             ))}
           </div>
         ) : null}
-        <div className="lc-cmd-rail-sec lc-cmd-progs">
-          <div className="lc-cmd-rail-h lc-cmd-progs-h">
-            <span title={t('cmds.rail.topScope')}>{t('cmds.rail.top', { n: programs.length })}</span>
-            {programs.length > 6 ? (
-              <ClearableInput
-                className="lc-cmd-prog-search"
-                type="search"
-                value={progQuery}
-                placeholder={t('cmds.rail.topSearch')}
-                clearLabel={t('field.clear')}
-                onChange={setProgQuery}
-              />
-            ) : null}
+        {programs.length > 0 ? (
+          <div className="lc-cmd-rail-sec lc-cmd-progs">
+            <div className="lc-cmd-rail-h lc-cmd-progs-h">
+              <span title={t('cmds.rail.topScope')}>{t('cmds.rail.top', { n: programs.length })}</span>
+              {programs.length > 6 ? (
+                <ClearableInput
+                  className="lc-cmd-prog-search"
+                  type="search"
+                  value={progQuery}
+                  placeholder={t('cmds.rail.topSearch')}
+                  clearLabel={t('field.clear')}
+                  onChange={setProgQuery}
+                />
+              ) : null}
+            </div>
+            <div className="lc-cmd-progs-list" role="group" aria-label={t('cmds.rail.top', { n: programs.length })}>
+              {shownPrograms.map((p) => {
+                const color = nameColorOf(p.name)
+                const share = Math.round(p.n / totalPrograms * 100)
+                return (
+                  <button
+                    key={p.name}
+                    type="button"
+                    className="lc-cmd-prog"
+                    title={t('cmds.rail.topTip', { name: p.name })}
+                    onClick={() => { setQuery(p.name) }}
+                  >
+                    <i className="lc-cmd-prog-dot" style={{ background: color }} />
+                    <span className="lc-cmd-prog-name">{p.name}</span>
+                    <span className="lc-cmd-prog-n">{'×' + fmt(p.n)}</span>
+                    <span className="lc-cmd-prog-share">{share}%</span>
+                    {/* The underline bar is relative to the heaviest program (the Skills list's idiom). */}
+                    <i className="lc-cmd-prog-bar" style={{ width: `calc(${Math.round(p.n / topProgramN * 100)}% - ${Math.round(p.n / topProgramN * 12)}px)`, background: color }} />
+                  </button>
+                )
+              })}
+              {shownPrograms.length === 0 ? <div className="lc-cmd-prog-none">{t('cmds.noMatch')}</div> : null}
+            </div>
           </div>
-          <div className="lc-cmd-progs-list" role="group" aria-label={t('cmds.rail.top', { n: programs.length })}>
-            {shownPrograms.map((p) => {
-              const color = nameColorOf(p.name)
-              const share = Math.round(p.n / totalPrograms * 100)
-              return (
-                <button
-                  key={p.name}
-                  type="button"
-                  className="lc-cmd-prog"
-                  title={t('cmds.rail.topTip', { name: p.name })}
-                  onClick={() => { setQuery(p.name) }}
-                >
-                  <i className="lc-cmd-prog-dot" style={{ background: color }} />
-                  <span className="lc-cmd-prog-name">{p.name}</span>
-                  <span className="lc-cmd-prog-n">{'×' + fmt(p.n)}</span>
-                  <span className="lc-cmd-prog-share">{share}%</span>
-                  {/* The underline bar is relative to the heaviest program (the Skills list's idiom). */}
-                  <i className="lc-cmd-prog-bar" style={{ width: `calc(${Math.round(p.n / topProgramN * 100)}% - ${Math.round(p.n / topProgramN * 12)}px)`, background: color }} />
-                </button>
-              )
-            })}
-            {shownPrograms.length === 0 ? <div className="lc-cmd-prog-none">{t('cmds.noMatch')}</div> : null}
-          </div>
-        </div>
+        ) : null}
       </div>
     ) : null
 
@@ -359,7 +395,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
             trailing={resultCard === null ? factsEl : undefined}
           >
             {rec.description !== undefined ? <div className="lc-cmd-why">{rec.description}</div> : null}
-            <pre className="lc-cmd-full">{rec.cmd}{rec.cmdTruncated === true ? ' …' : ''}</pre>
+            <pre className="lc-cmd-full"><CmdText text={rec.cmd} runs={runsOf(rec.tool, rec.cmd)} />{rec.cmdTruncated === true ? ' …' : ''}</pre>
           </FindCard>
           {resultCard}
         </div>
@@ -387,7 +423,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
             <span className="lc-cmd-cmd">
               {rec.tool !== 'bash' ? <span className="lc-cmd-tool">{rec.tool === 'run_code' ? t('cmds.tool.code') : rec.tool}</span> : null}
               {rec.codeMode === true && rec.tool === 'bash' ? <span className="lc-cmd-tool">{t('cmds.tool.nested')}</span> : null}
-              {view.preview}
+              <CmdText text={view.preview} runs={runsOf(rec.tool, view.preview)} />
             </span>
             <span className="lc-cmd-badges">
               {view.shape.lines > 1 ? <span className="lc-cmd-badge">{t('cmds.lines', { n: view.shape.lines })}</span> : null}
@@ -449,7 +485,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
           <div className="lc-cmd-main">
             <div className="lc-cmd-ctl">
               <ClearableInput
-                className="lc-fa-search focus:border-(--dsw-alias-label-dimmed)"
+                className="lc-fa-search"
                 value={query}
                 placeholder={t('cmds.search')}
                 clearLabel={t('field.clear')}
@@ -472,9 +508,9 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
             {props.floor !== undefined && commands.length > 0 ? (
               <div className="lc-cmd-floor">{t('cmds.coverage', { n: fmt(commands.length) })}</div>
             ) : null}
-            {commands.length === 0 && props.state === 'loading' ? (
+            {loadingChannel ? (
               <DetailNote state="loading" className="lc-empty lc-lane" />
-            ) : commands.length === 0 && props.state === 'failed' && props.onRetry !== undefined ? (
+            ) : failedChannel ? (
               <DetailNote state="failed" onRetry={props.onRetry} className="lc-empty lc-lane" />
             ) : shown.length === 0 ? (
               <div className="lc-empty lc-lane">{t(commands.length === 0 ? 'cmds.empty' : 'cmds.noMatch')}</div>

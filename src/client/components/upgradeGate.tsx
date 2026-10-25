@@ -36,7 +36,7 @@ export function makeUpgradeGate(kit: ViewKit): (props: UpgradeGateProps) => Reac
         <div className="lc-modal-card lc-gate-card" onClick={(ev) => { ev.stopPropagation() }}>
           <div className="lc-modal-head">
             <span className="lc-modal-title">{t('gate.title')}</span>
-            <button className="lc-modal-close hover:text-(--dsw-alias-label-primary) hover:bg-(--dsw-alias-bg-layer-2)" aria-label={t('cmd.close')} onClick={close}>×</button>
+            <button className="lc-modal-close hover:text-(--dsw-alias-label-primary) hover:bg-(--dsw-alias-interactive-bg-hover)" aria-label={t('cmd.close')} onClick={close}>×</button>
           </div>
           <div className="lc-gate-body">{t('gate.body', { minimum: props.minimum })}</div>
           <div className="lc-gate-versions">

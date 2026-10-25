@@ -386,7 +386,7 @@ describe('useRichFind', () => {
     await m.unmount()
   })
 
-  test('Escape folds the bar and clears the marks; the body text is byte-identical afterwards', async () => {
+  test('Escape clears the query and marks first, then folds the bar; the body text is byte-identical afterwards', async () => {
     vi.useFakeTimers()
     const source = 'Alpha beta ALPHA other'
     const m = await mount(h(FindHarness, { text: source }))
@@ -396,11 +396,63 @@ describe('useRichFind', () => {
     assert.equal(queryAll(m.container, '.lc-find-mark').length, 2)
     assert.equal(rawText(m.container), source, 'marks never alter the copyable source text')
     await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', shiftKey: true, bubbles: true, cancelable: true }))
+    })
+    assert.equal(input.value, 'alpha', 'a modified Escape does not clear')
+    assert.equal(queryAll(m.container, '.lc-find').length, 1, 'nor does it fold the bar')
+    await act(async () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     })
-    assert.equal(queryAll(m.container, '.lc-find').length, 0)
+    assert.equal(input.value, '', 'the typed query is cleared first')
+    assert.equal(queryAll(m.container, '.lc-find').length, 1, 'the bar stays open for a fresh query')
     assert.equal(queryAll(m.container, '.lc-find-mark').length, 0)
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    })
+    assert.equal(queryAll(m.container, '.lc-find').length, 0, 'an empty field folds the bar')
     assert.equal(rawText(m.container), source, 'the restore rebuilt the exact original text nodes')
+    await m.unmount()
+  })
+
+  test('an empty Find passes composing and modified Escape through without folding', async () => {
+    const m = await mount(h(FindHarness, { text: 'alpha beta' }))
+    try {
+      const input = await openFind(m.container)
+      for (const init of [{ isComposing: true }, { altKey: true }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }]) {
+        const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init })
+        await act(async () => { input.dispatchEvent(ev) })
+        assert.equal(ev.defaultPrevented, false, `Escape passes through: ${JSON.stringify(init)}`)
+        assert.equal(queryAll(m.container, '.lc-find').length, 1, 'the empty Find stays open')
+        assert.equal(input.value, '')
+        assert.equal(document.activeElement, input, 'composition keeps its input')
+      }
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  test('a match spanning two text nodes is marked across both, and the restore rebuilds them', async () => {
+    vi.useFakeTimers()
+    const Body = () => h('div', {},
+      h('span', { style: { color: 'red' } }, 'alpha '),
+      h('span', {}, 'beta gamma'))
+    function SplitHarness() {
+      const find = useRichFind('alpha beta gamma', 'raw')
+      return h('div', {}, find.button, find.bar,
+        h('div', { key: find.bodyKey, ref: find.bodyRef, className: 'split-body' }, h(Body, {})))
+    }
+    const m = await mount(h(SplitHarness, {}))
+    const input = await openFind(m.container)
+    await type(input, 'alpha beta')
+    await settle()
+    const marks = queryAll(m.container, '.lc-find-mark')
+    assert.deepEqual(marks.map(x => x.textContent), ['alpha ', 'beta'], 'one mark per text node the match covers')
+    assert.equal(query(m.container, '.lc-find-count').textContent, '1/1', 'the pieces count as one match')
+    assert.ok(marks.every(mark => mark.className.includes('lc-find-mark-on')), 'every piece of the active match carries the active tone')
+    await type(input, '')
+    const body = query(m.container, '.split-body')
+    assert.equal(queryAll(body, '.lc-find-mark').length, 0)
+    assert.deepEqual(queryAll(body, 'span').map(span => span.textContent), ['alpha ', 'beta gamma'], 'the split nodes are back in one piece each')
     await m.unmount()
   })
 

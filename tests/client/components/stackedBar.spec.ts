@@ -1,7 +1,7 @@
 import { createElement as h, useState } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { makeLegend, makeStackedBar } from '../../../src/client/components/stackedBar'
+import { makeLegend, makeStackedBar, SEGMENT_ANIMATION_MAX } from '../../../src/client/components/stackedBar'
 import type { PartsPart } from '../../../src/client/categories'
 import type { ContextReserve } from '../../../src/client/reserve'
 import { click, hover, makeKit, mount, query, queryAll, tipRows, unhover } from '../helpers/kit'
@@ -477,5 +477,26 @@ describe('StackedBar minBand floor', () => {
     const m2 = await mount(h(StackedBar, { parts: [part('assistant', 60), part('user', 40)], minBand: 1 }))
     assert.deepEqual(queryAll(m2.container, '.lc-stacked-seg').map(s => s.style.width), ['60%', '40%'])
     await m2.unmount()
+  })
+
+  test('past the segment cap the entrance animation is dropped, band for band', async () => {
+    const few = await mount(h(StackedBar, { parts: [part('user', 4), part('system', 3), part('assistant', 2), part('inject', 1)] }))
+    assert.ok(queryAll(few.container, '.lc-stacked-seg').every(s => s.className.includes('animate-lc-stacked-in')))
+    await few.unmount()
+
+    const atCap = Array.from({ length: SEGMENT_ANIMATION_MAX }, (_, i) => part('n' + String(i), 10))
+    const capped = await mount(h(StackedBar, { parts: atCap }))
+    const cappedSegs = queryAll(capped.container, '.lc-stacked-seg')
+    assert.ok(cappedSegs.every(s => s.className.includes('animate-lc-stacked-in')))
+    assert.equal(capped.container.querySelectorAll('.lc-stacked-seg')[0].getAttribute('style')?.includes('--lc-i'), true)
+    await capped.unmount()
+
+    const many = Array.from({ length: SEGMENT_ANIMATION_MAX + 1 }, (_, i) => part('n' + String(i), 10))
+    const m = await mount(h(StackedBar, { parts: many }))
+    const segs = queryAll(m.container, '.lc-stacked-seg')
+    assert.equal(segs.length, many.length)
+    assert.deepEqual(segs.filter(s => /animate-/.test(s.className)), [])
+    assert.equal(segs[0].getAttribute('style')?.includes('--lc-i'), false, 'no stagger delay left behind')
+    await m.unmount()
   })
 })

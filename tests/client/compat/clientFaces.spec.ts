@@ -34,6 +34,8 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', async () => {
     IconCopyOutlineRegular: () => React.createElement('span', null),
     IconCheckOutlineRegular: () => React.createElement('span', null),
     IconSettingsOutlineMedium: () => React.createElement('span', null),
+    // The coloring hook's plain fallback: `undefined` runs render the command text uncolored.
+    useCodeHighlighter: () => () => undefined,
     writeClipboard: async () => true,
   }
 })

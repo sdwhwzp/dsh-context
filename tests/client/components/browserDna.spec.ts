@@ -1,4 +1,4 @@
-import { act, createElement as h, useState } from 'react'
+import { act, createElement as h, Profiler, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import assert from 'node:assert/strict'
@@ -71,7 +71,7 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     await m.unmount()
   })
 
-  test('the filter summary is populated before the DNA feed leaves its first-paint skeleton', async () => {
+  test('the feed paints its windowed rows and the filter summary on the first paint', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
@@ -80,12 +80,55 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
       flushSync(() => {
         root.render(h(Browser, props({ data: dnaData, headers: dnaHeaders, dna: true, onDnaChange: () => {} })))
       })
-      assert.ok(query(container, '.lc-br-flat[aria-hidden="true"]'), 'the ready effect has not run yet')
+      // No skeleton stage: the rows and the summary come from the model at render time.
       assert.equal(text(query(container, '.lc-br-filter-stat')), '×6 ≈275')
+      assert.equal(queryAll(container, '.lc-br-flat > .lc-br-elem').length, 6, 'rows, then the header groups')
     } finally {
       await act(async () => { root.unmount() })
       container.remove()
       silent.mockRestore()
+    }
+  })
+
+  test('enabling DNA after a disabled-pane resize never commits the whole feed', async () => {
+    let width = 300
+    const observers = new Set<{ notify: () => void }>()
+    class Observer {
+      constructor(readonly notify: () => void) {}
+      observe(): void { observers.add(this) }
+      disconnect(): void { observers.delete(this) }
+    }
+    vi.stubGlobal('ResizeObserver', Observer)
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
+      return this.classList.contains('lc-br-scroll') ? width : 0
+    })
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
+      return this.classList.contains('lc-br-scroll') ? 360 : 0
+    })
+    const data = tl({
+      current: { ...dnaData.current, user: 200, total: 200 },
+      nodes: Array.from({ length: 200 }, (_, i) => surfaceNode({ seq: i + 2, tokens: 1 })),
+    })
+    const commits: number[] = []
+    const view: { container?: HTMLElement } = {}
+    const render = (dna: boolean) => h(Profiler, {
+      id: 'feed',
+      onRender: () => { if (view.container) commits.push(queryAll(view.container, '.lc-br-flat > .lc-br-elem').length) },
+    }, h(Browser, props({ data, dna, onDnaChange: () => {} })))
+    const m = await mount(render(true))
+    view.container = m.container
+    try {
+      assert.equal(flatRows(m).length, 200, 'a narrow pane uses wrapping rows without a fixed pitch')
+      await m.update(render(false))
+      width = 500
+      await act(async () => { for (const observer of observers) observer.notify() })
+      commits.length = 0
+      await m.update(render(true))
+      assert.ok(commits.some(count => count > 0), 'the measured wide window contains rows')
+      assert.ok(commits.every(count => count <= 30), `every wide commit is bounded: ${commits.join(', ')}`)
+    } finally {
+      await m.unmount()
+      vi.unstubAllGlobals()
     }
   })
 

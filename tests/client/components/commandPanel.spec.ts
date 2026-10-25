@@ -123,6 +123,63 @@ describe('CommandPanel — rendering', () => {
   })
 })
 
+describe('CommandPanel — command coloring', () => {
+  test('the collapsed row and the expanded command carry the harness token runs', async () => {
+    const m = await mount(h(Panel, { commands: [cmd(1, { cmd: 'git status --short', resultSeq: 51 })] }))
+    try {
+      const preview = query(m.container, '.lc-cmd-cmd')
+      const runs = queryAll(preview, 'span')
+      assert.ok(runs.length > 1, 'a span per token run')
+      assert.equal(runs[0].style.color, 'var(--shiki-token-function)')
+      assert.equal(text(preview), 'git status --short', 'the runs carry the preview verbatim')
+
+      await click(query(m.container, '.lc-cmd-row'))
+      const full = query(m.container, '.lc-cmd-full')
+      assert.ok(queryAll(full, 'span').length > 1, 'the detail colors the whole command')
+      assert.equal(text(full), 'git status --short')
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  test('the expanded command keeps its source newlines between the colored lines', async () => {
+    const source = "cd /repo && python3 - <<'PY'\nprint('hi')\nPY"
+    const m = await mount(h(Panel, { commands: [cmd(1, { cmd: source, resultSeq: 51 })] }))
+    try {
+      await click(query(m.container, '.lc-cmd-row'))
+      const full = query(m.container, '.lc-cmd-full')
+      assert.equal(text(full), source, 'the runs carry the command text verbatim')
+      assert.ok(queryAll(full, 'span').length > 3, 'every line carries its token runs')
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  test('a tool the panel does not color, and an over-long line, render plain', async () => {
+    const long = 'x'.repeat(1001)
+    const m = await mount(h(Panel, {
+      commands: [
+        cmd(1, { tool: 'run_code', cmd: 'return 1 + 1' }),
+        cmd(2, { cmd: long }),
+        cmd(3, { tool: 'pwsh', cmd: 'Get-ChildItem -Recurse' }),
+      ],
+    }))
+    try {
+      // Latest first: the pwsh run leads, then the over-long line, then the code-mode program.
+      const rows = queryAll(m.container, '.lc-cmd-cmd')
+      // The pwsh grammar loads lazily: the preview text reads the same colored or plain.
+      assert.ok(text(rows[0]).endsWith('Get-ChildItem -Recurse'), 'the pwsh preview renders')
+      assert.equal(queryAll(rows[1], 'span').length, 0)
+      assert.equal(text(rows[1]), long)
+      assert.equal(queryAll(rows[2], '.lc-cmd-tool').length, 1)
+      assert.ok(text(rows[2]).endsWith('return 1 + 1'), 'the code program stays plain')
+      assert.equal(queryAll(rows[2], '.lc-cmd-tool + span').length, 0, 'no token runs follow the tool tag')
+    } finally {
+      await m.unmount()
+    }
+  })
+})
+
 describe('CommandPanel — filtering, search, sort', () => {
   test('the chips filter the list and toggle back off', async () => {
     const m = await mount(h(Panel, { commands: richCommands() }))
@@ -371,10 +428,15 @@ describe('CommandPanel — the summary rail', () => {
     }
   })
 
-  test('the rail hides when the log is empty and when nothing is notable', async () => {
+  test('an empty log shows a zero summary and a blank list; a quiet log keeps the real rail', async () => {
     const empty = await mount(h(Panel, { commands: [] }))
     try {
-      assert.equal(queryAll(empty.container, '.lc-cmd-rail').length, 0)
+      assert.ok(query(empty.container, '.lc-cmd-rail') !== null, 'the summary renders with real zeroes')
+      assert.deepEqual(queryAll(empty.container, '.lc-cmd-kpi b').map(b => text(b)), ['0', '0', '0', '0'])
+      assert.equal(queryAll(empty.container, '.lc-cmd-progs').length, 0, 'no empty program ranking')
+      assert.equal(queryAll(empty.container, '.lc-cmd-attn').length, 0, 'no attention section without notable items')
+      assert.equal(queryAll(empty.container, '.lc-cmd-item').length, 0, 'the list stays blank')
+      assert.ok(text(empty.container).includes('No commands executed in this session'))
     } finally {
       await empty.unmount()
     }
@@ -382,6 +444,7 @@ describe('CommandPanel — the summary rail', () => {
     try {
       assert.ok(query(quiet.container, '.lc-cmd-rail') !== null, 'the summary still renders')
       assert.equal(queryAll(quiet.container, '.lc-cmd-attn').length, 0, 'no attention section without notable items')
+      assert.ok(query(quiet.container, '.lc-cmd-progs') !== null, 'a non-empty log still ranks programs')
     } finally {
       await quiet.unmount()
     }
@@ -489,15 +552,23 @@ describe('CommandPanel — the result block', () => {
       await click(query(cards[0], '.lc-find-btn'))
       const input = query<HTMLInputElement>(cards[0], '.lc-find-input')
       assert.equal(document.activeElement, input, 'the find input takes focus on open')
-      await act(async () => {
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-        setter?.call(input, 'status')
-        input.dispatchEvent(new Event('input', { bubbles: true }))
-      })
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)) })
+      const find = async (value: string): Promise<void> => {
+        await act(async () => {
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+          setter?.call(input, value)
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+        })
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)) })
+      }
+      await find('status')
       assert.equal(query(cards[0], '.lc-find-count')?.textContent, '1/1', 'one match in the command card')
       assert.ok(query(cards[0], '.lc-find-mark') !== null, 'the match is marked in the command body')
       assert.equal(queryAll(cards[1], '.lc-find').length, 0, 'the lens stays scoped to its own card')
+      // The colored body leaves the command's tokens in separate runs; a phrase crossing them still matches.
+      await find('git status')
+      assert.equal(query(cards[0], '.lc-find-count')?.textContent, '1/1', 'the phrase matches across token runs')
+      assert.ok(queryAll(cards[0], '.lc-find-mark').length > 1, 'one mark per run the phrase covers')
+      assert.equal(queryAll(cards[0], '.lc-find-mark').map(x => text(x)).join(''), 'git status')
     } finally {
       await m.unmount()
     }
@@ -584,14 +655,23 @@ describe('CommandPanel — empty and channel states', () => {
     const loading = await mount(h(Panel, { commands: [], state: 'loading' }))
     try {
       assert.equal(queryAll(loading.container, '.lc-detail-note, .lc-empty').length > 0, true)
+      assert.equal(queryAll(loading.container, '.lc-cmd-rail').length, 0, 'a pending channel owns the full width')
     } finally {
       await loading.unmount()
     }
     const failed = await mount(h(Panel, { commands: [], state: 'failed', onRetry: () => {} }))
     try {
       assert.equal(queryAll(failed.container, 'button').length > 0, true, 'the retry note carries a button')
+      assert.equal(queryAll(failed.container, '.lc-cmd-rail').length, 0, 'a failed channel owns the full width')
     } finally {
       await failed.unmount()
+    }
+    const failedNoRetry = await mount(h(Panel, { commands: [], state: 'failed' }))
+    try {
+      assert.ok(text(failedNoRetry.container).includes('History failed to load'), 'no retry still reads as a failure')
+      assert.equal(queryAll(failedNoRetry.container, '.lc-cmd-rail').length, 0)
+    } finally {
+      await failedNoRetry.unmount()
     }
   })
 

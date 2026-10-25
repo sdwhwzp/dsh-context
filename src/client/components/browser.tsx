@@ -145,9 +145,9 @@ export function makeContextBrowser(
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const flatIndexRef = useRef<Map<string, number>>(new Map())
     // The DNA flat feed can carry thousands of sub-row-sized items: the rows region is a fixed-pitch scroller, so only
-    // the visible window renders once the card is wide enough for single-line rows.
-    const [flatWide, setFlatWide] = useState(false)
-    const [flatReady, setFlatReady] = useState(false)
+    // the visible window renders — but only where rows stay single-line. Optimistic by default so a wide card's first
+    // commit never mounts the whole list; the layout effect below turns it off for a narrow pane, before paint.
+    const [flatWide, setFlatWide] = useState(true)
     const focusScrollRef = useRef(false)
     /** Windowed DNA feeds unmount off-window rows, so a key-driven reveal first scrolls its window into place. */
     const revealFlatKey = useCallback((key: string): boolean => {
@@ -732,22 +732,17 @@ export function makeContextBrowser(
         breakdown.system, undefined, systemBodyOf(sys), false, null, stampFor(sys.seq),
         { onHover: (over) => { setRowDnaKey(over ? 'system' : null) } })
 
-    /* v8 ignore start -- jsdom has no layout/ResizeObserver: the wide gate and the first-paint skeleton are live-only. */
-    useEffect(() => {
-      if (!dna) {
-        setFlatReady(false)
-        return
-      }
+    /* v8 ignore start -- jsdom has no layout/ResizeObserver: the wide gate is live-only. */
+    useLayoutEffect(() => {
       const el = scrollRef.current
       if (el === null) return
       const sync = (): void => { setFlatWide(el.clientWidth >= 380) }
       sync()
-      setFlatReady(true)
       if (typeof ResizeObserver !== 'function') return
       const observer = new ResizeObserver(sync)
       observer.observe(el)
       return () => { observer.disconnect() }
-    }, [dna])
+    }, [])
     /* v8 ignore stop */
 
     interface FlatEntry {
@@ -790,7 +785,7 @@ export function makeContextBrowser(
     }
     const flatRowsModel = dna ? flatRows() : null
     // 28px row + 2px flat gap: the pad formula reproduces the full feed height while only the viewport renders.
-    const flatRange = useRowWindow(scrollRef, flatRowsModel?.entries.length ?? 0, 30, dna && flatReady && flatWide && openElem === null)
+    const flatRange = useRowWindow(scrollRef, flatRowsModel?.entries.length ?? 0, 30, dna && flatWide && openElem === null)
     // A non-DNA render never shows this model; the local keeps the JSX branch-free (the DNA branch owns the rows).
     const flat = flatRowsModel ?? { entries: [] as FlatEntry[], tail: [] as ReactElement[], count: 0, tokens: 0 }
     /** The DNA feed: every assembled item as one flat row list, newest row first; header groups close the list. */
@@ -914,27 +909,24 @@ export function makeContextBrowser(
 
         <div className="lc-br-scroll" ref={scrollRef}>
           {dna
-            ? (!flatReady
-              /* v8 ignore next 2 -- first paint only; jsdom flushes effect work before assertions. */
-              ? <div className="lc-br-flat" style={{ minHeight: 320 }} aria-hidden="true" />
-              : (
-                <div className="lc-br-flat">
-                  {flatRange.from > 0 ? <div className="lc-row-pad" style={{ height: Math.max(0, flatRange.from * FLAT_ROW_PITCH - 2) }} aria-hidden="true" /> : null}
-                  {flat.entries.slice(flatRange.from, flatRange.to + 1).map(({ r, pos }) => messageRow(r, (
-                    <>
-                      {catChip(r.n.cat)}
-                      <span className="lc-br-pos">#{fmt(pos)}</span>
-                      {rowTagNode(r.tag, r.tagNames)}
-                    </>
-                  ), (over) => { setRowDnaKey(over ? 'n' + String(r.n.seq) : null) }))}
-                  {flatRange.to < flat.entries.length - 1
-                    ? <div className="lc-row-pad" style={{ height: Math.max(0, (flat.entries.length - 1 - flatRange.to) * FLAT_ROW_PITCH - 2) }} aria-hidden="true" />
-                    : null}
-                  {/* Header groups are the feed's tail: render them AFTER the bottom pad so they stay at the end. */}
-                  {flat.tail}
-                  {flat.count === 0 ? <div className="lc-br-note">{t('browser.rowNoMatch')}</div> : null}
-                </div>
-              ))
+            ? (
+              <div className="lc-br-flat">
+                {flatRange.from > 0 ? <div className="lc-row-pad" style={{ height: Math.max(0, flatRange.from * FLAT_ROW_PITCH - 2) }} aria-hidden="true" /> : null}
+                {flat.entries.slice(flatRange.from, flatRange.to + 1).map(({ r, pos }) => messageRow(r, (
+                  <>
+                    {catChip(r.n.cat)}
+                    <span className="lc-br-pos">#{fmt(pos)}</span>
+                    {rowTagNode(r.tag, r.tagNames)}
+                  </>
+                ), (over) => { setRowDnaKey(over ? 'n' + String(r.n.seq) : null) }))}
+                {flatRange.to < flat.entries.length - 1
+                  ? <div className="lc-row-pad" style={{ height: Math.max(0, (flat.entries.length - 1 - flatRange.to) * FLAT_ROW_PITCH - 2) }} aria-hidden="true" />
+                  : null}
+                {/* Header groups are the feed's tail: render them AFTER the bottom pad so they stay at the end. */}
+                {flat.tail}
+                {flat.count === 0 ? <div className="lc-br-note">{t('browser.rowNoMatch')}</div> : null}
+              </div>
+            )
             : (
               <div className="lc-br-cats">
                 {CATS.map((c) => {

@@ -6,6 +6,10 @@ import type { ViewKit } from '../viewkit'
 /** Entrance-stagger cap: a long DNA band list joins within the cap (`stackedBar.css` delays by `--lc-i`). */
 const STAGGER_CAP = 8
 
+/** Above this many parts the entrance animation is dropped: past it a band is under ~1.5px on the narrowest pane, so
+ *  the scale-in cannot be seen, while thousands of CSS animations cost the DNA toggle a few hundred ms of style work. */
+export const SEGMENT_ANIMATION_MAX = 256
+
 interface ReserveMask {
   key: 'headroom' | 'output'
   label: string
@@ -59,6 +63,7 @@ export function makeStackedBar(kit: ViewKit): (props: StackedBarProps) => ReactE
     // Segments with their BAR-unit widths, floored in occupied units: pinned bands take the floor, the rest rescale.
     // The floor ≤ 100/N keeps one band unpinned, so `restRaw` never divides by zero.
     const visible = total > 0 ? props.parts.filter(p => p.value > 0) : []
+    const animate = visible.length <= SEGMENT_ANIMATION_MAX
     const widths = ((): number[] => {
       if (minBand === 0 || visible.length < 2) return visible.map(p => p.value / scale * 100)
       const shares = visible.map(p => p.value / total * 100)
@@ -195,8 +200,8 @@ export function makeStackedBar(kit: ViewKit): (props: StackedBarProps) => ReactE
             return (
               <div
                 key={p.key}
-                className={'lc-stacked-seg animate-lc-stacked-in motion-reduce:animate-none' + (on ? ' lc-stacked-seg-on' : '') + (pickKey !== undefined ? ' lc-stacked-seg-pick' : '')}
-                style={{ width: `${widths[i]}%`, backgroundColor: p.color, '--lc-i': Math.min(i, STAGGER_CAP) } as CSSProperties}
+                className={'lc-stacked-seg' + (animate ? ' animate-lc-stacked-in motion-reduce:animate-none' : '') + (on ? ' lc-stacked-seg-on' : '') + (pickKey !== undefined ? ' lc-stacked-seg-pick' : '')}
+                style={{ width: `${widths[i]}%`, backgroundColor: p.color, ...(animate ? { '--lc-i': Math.min(i, STAGGER_CAP) } : {}) }}
                 onMouseEnter={() => { if (props.onHoverKey !== undefined) props.onHoverKey(p.key) }}
                 onClick={pickKey !== undefined ? () => { pickKey(p.key) } : undefined}
               />
