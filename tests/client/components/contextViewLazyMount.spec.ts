@@ -59,7 +59,7 @@ describe('ContextView below-fold lazy mount', () => {
         })),
         useChat: (selector => selector({ legacy: { nodes: [] } })) as UseChatLike,
       }))
-      const pill = queryAll(second.container, '.lc-flow-pill').find(el => text(el).startsWith(DICT_EN['files.kind.read']))
+      const pill = queryAll(second.container, '.lc-ledger-in-chips .lc-ledger-chip').find(el => text(el).startsWith(DICT_EN['files.kind.read']))
       assert.ok(pill !== undefined)
       await click(pill)
       await flush()

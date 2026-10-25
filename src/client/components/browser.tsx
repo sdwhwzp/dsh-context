@@ -191,7 +191,7 @@ export function makeContextBrowser(
       setSel(catFocus.step ?? 'live')
       setCat(catFocus.cat)
       setOpenElem(null)
-      setRowQuery('')
+      setRowQuery(catFocus.query ?? '')
       setRowKind(catFocus.kind ?? null)
       if (props.onCatFocusHandled !== undefined) props.onCatFocusHandled()
     }, [catFocus, props.onCatFocusHandled, onOpenCat, dna])

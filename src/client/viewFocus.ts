@@ -1,5 +1,6 @@
 /** Chat → Context jump relay: the clicked reply's request seq is consumed once the target view's projection data is in. */
 
+import { useEffect, useState } from 'react'
 import { asRecord, type ClientCtx } from './services'
 import { SIDEBAR_CONTEXT_KIND } from './sidebar'
 
@@ -23,6 +24,40 @@ export function takeContextFocus(sessionId: string): number | null {
   if (seq === undefined) return null
   pendingFocus.delete(sessionId)
   return seq
+}
+
+/** Stats → Fleet member highlight relay: the roster chip's member id is the RESTING pick every subscribed view
+ *  adopts (the tab, its own graph, the sidebar copy), so no consumer can eat another's pick. */
+
+const memberFocus = new Map<string, string>()
+
+const memberListeners = new Set<() => void>()
+
+export function requestFleetMemberFocus(sessionId: string, memberId: string): void {
+  memberFocus.set(sessionId, memberId)
+  for (const listener of memberListeners) listener()
+}
+
+/** The latest pick for a session; absent = nothing picked yet. */
+export function currentFleetMemberFocus(sessionId: string): string | null {
+  return memberFocus.get(sessionId) ?? null
+}
+
+export function subscribeFleetMemberFocus(listener: () => void): () => void {
+  memberListeners.add(listener)
+  return () => { memberListeners.delete(listener) }
+}
+
+/** The resting member highlight a view renders: adopted on mount and on every later pick. */
+export function useFleetMemberFocus(sessionId: string | undefined): string | null {
+  const [id, setId] = useState<string | null>(null)
+  useEffect(() => {
+    if (sessionId === undefined || sessionId === '') return undefined
+    const sync = (): void => { setId(currentFleetMemberFocus(sessionId)) }
+    sync()
+    return subscribeFleetMemberFocus(sync)
+  }, [sessionId])
+  return id
 }
 
 /** `ctx.sidebarRight.openTab` (the column expands in the same step); any absence or hostility reports

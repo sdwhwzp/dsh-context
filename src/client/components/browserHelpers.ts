@@ -7,6 +7,8 @@ export interface CatFocus {
   kind?: RowKind
   /** The step to show; absent lands on the live surface. */
   step?: number
+  /** The row text-lens the opened category opens with (the tool jumps seed the tool's name). */
+  query?: string
 }
 
 export function countOf(asm: Assembled, byCat: Partial<Record<Category, SurfaceNode[]>>, c: string): number {

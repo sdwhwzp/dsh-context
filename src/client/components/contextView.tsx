@@ -14,7 +14,7 @@ import { makeAttachmentOpener } from '../attachmentSource'
 import { activityOf, activityOfOps, locateStepOf, previewAddressOf, surfaceSeqOf } from '../fileActivity'
 import type { SessionSpend } from '../services'
 import type { FileEntry, FileOp } from '../fileActivity'
-import { commandsOf, surfaceSeqOf as commandSurfaceSeqOf } from '../commands'
+import { commandsOf, programsOf, tallyOfCommands, viewsOf, surfaceSeqOf as commandSurfaceSeqOf } from '../commands'
 import type { Command } from '../commands'
 import type { ContextSettings } from '../settings'
 import { overviewThresholdOf } from '../settings'
@@ -47,7 +47,7 @@ import { useLazyMount } from './useLazyMount'
 import { trendBandsOf } from '../dna'
 import type { TrendBand } from '../dna'
 
-import { activateViewTab, openContextSidebar, subscribeContextFocus, takeContextFocus } from '../viewFocus'
+import { activateViewTab, openContextSidebar, requestFleetMemberFocus, subscribeContextFocus, takeContextFocus, useFleetMemberFocus } from '../viewFocus'
 import { revealInScrollParent } from '../revealScroll'
 import { makeErrorBoundary } from './errorBoundary'
 
@@ -292,12 +292,15 @@ export function makeContextView(
     // One-shot kind request from the stats board's file pills.
     const [filterFocus, setFilterFocus] = useState<FileFilter | null>(null)
     const clearFilterFocus = useCallback(() => { setFilterFocus(null) }, [])
+    // The command lane's one-shot pick: the program the Command Executions card opens its query lens with.
+    const [commandFocus, setCommandFocus] = useState<string | null>(null)
+    const clearCommandFocus = useCallback(() => { setCommandFocus(null) }, [])
 
     // Below-the-fold cards: keep the first commit to the cards the reader sees, then mount the event/file row in an
     // idle slice once it nears the conversation viewport; the two skeleton cards reserve the row height.
     const [belowFoldRef, belowFoldMounted] = useLazyMount(filterFocus !== null)
     // The command panel sits below the event/file row as its own full-width lazy block.
-    const [cmdsRef, cmdsMounted] = useLazyMount()
+    const [cmdsRef, cmdsMounted] = useLazyMount(commandFocus !== null)
     // The browser card is visible but heavy (assembled rows for the current step): paint its card-shaped skeleton in
     // the first commit, then fill it in the next idle slice so the open's commit stays small.
     const [browserRef, browserMounted] = useLazyMount()
@@ -353,6 +356,19 @@ export function makeContextView(
     const onTeamClick = useCallback((): void => {
       if (!activateViewTab(t('tab.fleet'))) openContextSidebar(ctx)
     }, [t])
+    // The tool lane's pick: the browser's tool-results row opens with the tool's name in its text lens.
+    const onToolPick = useCallback((tool: string): void => {
+      setCatFocus({ cat: 'tool', query: tool })
+      revealCard(rootRef.current, '.lc-col-browser')
+    }, [])
+    // The roster's pick: the Fleet tab (or the sidebar fallback) opens with that member's card lit. The sidebar copy
+    // of this view reads the same broadcast, so its inline graph lights too.
+    const focusMember = useFleetMemberFocus(typeof sessionId === 'string' ? sessionId : undefined)
+    const onMemberPick = useCallback((id: string): void => {
+      onTeamClick()
+      /* v8 ignore next 1 -- a served roster always carries the session id; the guard only backs up a direct call. */
+      if (typeof sessionId === 'string' && sessionId !== '') requestFleetMemberFocus(sessionId, id)
+    }, [onTeamClick, sessionId])
 
     // Restore the saved position in a layout effect, so the chat's bottom-anchored position never flashes in first.
     useLayoutEffect(() => {
@@ -425,6 +441,11 @@ export function makeContextView(
       if (filterFocus === null || !belowFoldMounted) return
       revealCard(rootRef.current, '.lc-fa-card')
     }, [filterFocus, belowFoldMounted])
+
+    useEffect(() => {
+      if (commandFocus === null || !cmdsMounted) return
+      revealCard(rootRef.current, '.lc-cmd-card')
+    }, [commandFocus, cmdsMounted])
 
     // Chat → Context jump, leg 1: pick up the relay request once per mount, then subscribe — the sidebar landing
     // keeps this view mounted.
@@ -519,6 +540,16 @@ export function makeContextView(
       return cachedByData(data, 'commands', () => commandsOf(records, data.archive))
     }, [data])
     const workspace = typeof ctx.get === 'function' ? workspaceOf(ctx, typeof sessionId === 'string' ? sessionId : undefined) : undefined
+    // The stats card's command lane: the whole-log run tally (host-served, else the retained list's own) and the
+    // retained log's top programs.
+    const commandBoard = useMemo(() => {
+      if (commandList.length === 0) return { runs: 0, top: [] as [string, number][] }
+      const stats = data?.commandStats ?? tallyOfCommands(commandList)
+      const top = programsOf(viewsOf(commandList, workspace)).slice(0, 3).map(p => [p.name, p.n] as [string, number])
+      return { runs: stats.runs, top }
+    }, [commandList, data, workspace])
+    // The lane's chips only offer the jump when the card can serve it (the collection exists on this host).
+    const hasCommands = commandList.length > 0
     // The capability is an async RPC answer, so file names stay inert until the probe settles.
     const [canOpenPaths, setCanOpenPaths] = useState(false)
     useEffect(() => {
@@ -845,9 +876,12 @@ export function makeContextView(
         {inSidebar ? null : (
           <div className="lc-cols lc-head">
             <StatsContext counts={counts} humanInputs={data.humanInputs} answers={data.answers} toolCalls={data.toolCalls}
-              files={ioTotals} tools={toolTally}
+              files={ioTotals} tools={toolTally} commands={commandBoard}
               cost={data.cost} spend={spend} locale={activeLocale} sessionId={typeof sessionId === 'string' ? sessionId : undefined}
-              onJump={onJump} onTeamClick={hasFamilyView ? onTeamClick : undefined} />
+              onJump={onJump} onTeamClick={hasFamilyView ? onTeamClick : undefined}
+              onToolPick={onToolPick}
+              onCommandPick={hasCommands ? setCommandFocus : undefined}
+              onMemberPick={hasFamilyView ? onMemberPick : undefined} />
             <PluginInfo />
           </div>
         )}
@@ -912,6 +946,7 @@ export function makeContextView(
             /* Keyed like the trend faces: a session switch resets the panel's filter/query/expanded-row state. */
             <CommandPanel key={sessionId} commands={commandList} stats={data.commandStats} floor={data.commandsFloor}
               workspace={workspace} stampOf={opStampOf} onLocate={locateCommand} fetchContent={fetchContent}
+              focusQuery={commandFocus} onFocusQueryHandled={clearCommandFocus}
               state={source.detailState} onRetry={source.retryDetail} />
           ) : (
             <div className="lc-card lc-col flex-1 min-w-[min(360px,100%)] lc-deferred-skeleton" style={{ minHeight: 320 }} aria-hidden="true" />
@@ -923,6 +958,7 @@ export function makeContextView(
           <AgentGraph
             sessionId={typeof sessionId === 'string' ? sessionId : undefined}
             self={agentSelfOf(data, pressure, breakdown, usage)}
+            focusId={focusMember}
           />
         ) : null}
 

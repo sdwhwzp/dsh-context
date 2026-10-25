@@ -12,6 +12,7 @@ import { teamMemberOf, teamOf } from '../fleetTeam'
 import { useModelPrices } from '../modelPrices'
 import type { ClientCtx, SessionStandardProps } from '../services'
 import { CONTEXT_VIEW_ID, openChildAsideVia, openSessionVia, projectionOf, seedConversationViewVia, unsupportedOf } from '../services'
+import { useFleetMemberFocus } from '../viewFocus'
 import { useContextSession } from '../sessionData'
 import type { ViewKit } from '../viewkit'
 import type { FleetDetail } from '../../shared/types'
@@ -60,6 +61,8 @@ export function makeFleetView(
     const details = useFleetDetails()
     const [hoverId, setHoverId] = useState<string | null>(null)
     const [pinnedId, setPinnedId] = useState<string | null>(null)
+    // The stats card's roster pick: the resting member highlight the graph renders until a hover takes over.
+    const focusMember = useFleetMemberFocus(sessionId)
     // The boards' cap rides the network card: the task card grows with the graph and bottoms out at its own default
     // otherwise. Measure the card's rendered height (last child's offset + card padding); when the members column
     // stretches the card, the subtraction returns the task card's current height, so the cap cannot grow the row it measures.
@@ -251,6 +254,7 @@ export function makeFleetView(
                       team={team}
                       pinnedId={pinnedId}
                       hoverId={hoverId}
+                      focusId={focusMember}
                       onHover={setHoverId}
                       onSelect={select}
                       inspector={false}

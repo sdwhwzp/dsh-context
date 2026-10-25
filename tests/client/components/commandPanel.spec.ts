@@ -181,6 +181,35 @@ describe('CommandPanel — command coloring', () => {
 })
 
 describe('CommandPanel — filtering, search, sort', () => {
+  test('a focus query seeds the lens once and hands the slot back', async () => {
+    const handled: string[] = []
+    const m = await mount(h(Panel, {
+      commands: richCommands(),
+      focusQuery: 'vitest',
+      onFocusQueryHandled: () => { handled.push('vitest') },
+    }))
+    try {
+      assert.equal(rowTexts(m.container).length, 1, 'the seeded lens narrows to the program')
+      assert.ok(rowTexts(m.container)[0].includes('vitest'))
+      assert.equal(query<HTMLInputElement>(m.container, 'input.lc-fa-search').value, 'vitest', 'the box shows the lens')
+      assert.deepEqual(handled, ['vitest'], 'the slot is handed back')
+      // A later pick fires again through the same seed.
+      await m.update(h(Panel, {
+        commands: richCommands(),
+        focusQuery: 'python3',
+        onFocusQueryHandled: () => { handled.push('python3') },
+      }))
+      assert.equal(rowTexts(m.container).length, 1)
+      assert.ok(rowTexts(m.container)[0].includes('python3'))
+      assert.deepEqual(handled, ['vitest', 'python3'])
+      // The lens is user-owned once applied: dropping the seed leaves it as-is.
+      await m.update(h(Panel, { commands: richCommands() }))
+      assert.equal(rowTexts(m.container).length, 1, 'the seeded lens persists')
+    } finally {
+      await m.unmount()
+    }
+  })
+
   test('the chips filter the list and toggle back off', async () => {
     const m = await mount(h(Panel, { commands: richCommands() }))
     try {

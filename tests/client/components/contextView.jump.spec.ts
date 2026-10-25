@@ -1,7 +1,7 @@
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test, vi } from 'vitest'
-import { requestContextFocus, takeContextFocus } from '../../../src/client/viewFocus'
+import { requestContextFocus, requestFleetMemberFocus, takeContextFocus, currentFleetMemberFocus } from '../../../src/client/viewFocus'
 import { DICT_EN } from '../../../src/client/i18n'
 import { TestClientCtx } from '../helpers/harness'
 import { click, flush, mount, query, queryAll, text } from '../helpers/kit'
@@ -126,7 +126,7 @@ describe('ContextView — the stats board\'s pill jumps', () => {
       const View = makeView(new TestClientCtx())
       const m = await mountInScroller(h(View, { sessionId: 'sv-pilljump', useProjection: projectionsFor(jumpTimeline()) }), scroller)
       const pill = (label: string): HTMLElement => {
-        const hit = queryAll(m.container, '.lc-flow-pill').find(el => text(el).startsWith(label))
+        const hit = queryAll(m.container, '.lc-ledger-in-chips .lc-ledger-chip').find(el => text(el).startsWith(label))
         if (hit === undefined) throw new Error(`pill not found: ${label}`)
         return hit
       }
@@ -138,7 +138,7 @@ describe('ContextView — the stats board\'s pill jumps', () => {
         return hit
       }
 
-      await click(pill(DICT_EN['stats.humanInputs']))
+      await click(pill(DICT_EN['stats.user']))
       await flush()
       const open = queryAll(m.container, '.lc-br-cat-row.lc-br-cat-open')
       assert.equal(open.length, 1)
@@ -152,7 +152,7 @@ describe('ContextView — the stats board\'s pill jumps', () => {
       assert.equal(queryAll(fileCard, '.lc-fa-row').length, 1, 'the read filter narrows the list')
       assert.equal(scroller.scrollTop, 600, 'the File Activity card scrolled to the scrollport top')
 
-      await click(pill(DICT_EN['files.kind.write']))
+      await click(pill(DICT_EN['stats.fileWrite']))
       await flush()
       assert.ok(chip(DICT_EN['files.kind.write']).className.includes('lc-gran-on'))
       assert.ok(!chip(DICT_EN['files.kind.read']).className.includes('lc-gran-on'), 'the previous jump is replaced')
@@ -160,6 +160,102 @@ describe('ContextView — the stats board\'s pill jumps', () => {
     } finally {
       gBCR.mockRestore()
     }
+  })
+})
+
+describe('ContextView — the stats board\'s lower-lane jumps', () => {
+  /** Two programs on the bash tool: python3 twice (top), git once. */
+  function commandTimeline(): ReturnType<typeof timeline> {
+    return timeline({
+      commands: [
+        { seq: 11, time: T0, tool: 'bash', cmd: 'python3 build.py', start: T0, end: T0 + 100, status: 'completed', err: false },
+        { seq: 12, time: T0 + 1000, tool: 'bash', cmd: 'git status --short', start: T0 + 1000, end: T0 + 1100, status: 'completed', err: false },
+      ],
+    })
+  }
+
+  test('a command chip mounts the lazy card, seeds its lens, and scrolls it in', async () => {
+    const scroller = overflowingScroller(1200)
+    const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const inScroller = !this.hasAttribute('data-conversation-scroll')
+      const top = this.hasAttribute('data-conversation-scroll') ? 100
+        : this.classList.contains('lc-cmd-card') ? 700 : 0
+      return { top: inScroller ? top - scroller.scrollTop : top } as DOMRect
+    })
+    try {
+      const View = makeView(new TestClientCtx())
+      const m = await mountInScroller(h(View, { sessionId: 'sv-cmdjump', useProjection: projectionsFor(commandTimeline()) }), scroller)
+      const chip = queryAll(m.container, '.lc-ledger-in-body2 .lc-ledger-chip').find(el => text(el).startsWith('python3'))
+      assert.ok(chip !== undefined)
+      await click(chip)
+      await flush()
+      const card = query(m.container, '.lc-cmd-card')
+      assert.equal(query<HTMLInputElement>(card, 'input.lc-fa-search').value, 'python3', 'the seeded lens shows in the box')
+      assert.equal(queryAll(card, '.lc-cmd-row').length, 1, 'the lens narrows to the program')
+      assert.equal(scroller.scrollTop, 600, 'the command card scrolled to the scrollport top')
+      await m.unmount()
+    } finally {
+      gBCR.mockRestore()
+    }
+  })
+
+  test('a tool chip opens the tool-results category with the tool lens seeded', async () => {
+    const scroller = overflowingScroller(1200)
+    const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const inScroller = !this.hasAttribute('data-conversation-scroll')
+      const top = this.hasAttribute('data-conversation-scroll') ? 100
+        : this.classList.contains('lc-col-browser') ? 450 : 0
+      return { top: inScroller ? top - scroller.scrollTop : top } as DOMRect
+    })
+    try {
+      const View = makeView(new TestClientCtx())
+      const m = await mountInScroller(h(View, { sessionId: 'sv-tooljump', useProjection: projectionsFor(richTimeline()) }), scroller)
+      const chip = queryAll(m.container, '.lc-ledger-out-chips .lc-ledger-chip').find(el => text(el).startsWith('bash'))
+      assert.ok(chip !== undefined)
+      await click(chip)
+      await flush()
+      const open = queryAll(m.container, '.lc-br-cat-row.lc-br-cat-open')
+      assert.equal(open.length, 1)
+      assert.ok(text(open[0]).includes(DICT_EN['cat.tool']), 'the tool-results category opens')
+      const lens = open[0].parentElement?.querySelector<HTMLInputElement>('.lc-br-tool-search')
+      assert.ok(lens !== null && lens !== undefined)
+      assert.equal(lens.value, 'bash', 'the lens carries the tool name')
+      assert.equal(scroller.scrollTop, 350, 'the browser card scrolled to the scrollport top')
+      await m.unmount()
+    } finally {
+      gBCR.mockRestore()
+    }
+  })
+
+  test('a member chip fires the roster pick and relays it to the Fleet channel', async () => {
+    const snapshot = {
+      byId: {
+        'sv-memberpick': { displayTitle: 'Main', running: true, updatedAt: 10, projectionValues: { contextTimeline: timeline() } },
+        worker: { parentId: 'sv-memberpick', origin: 'subagent', running: true, updatedAt: 8, projectionValues: { contextTimeline: timeline(), subagent: { mode: 'one-shot', label: 'worker-bee' } } },
+      },
+    }
+    const ctx = new TestClientCtx({ services: { sessions: { list: { getSnapshot: (): unknown => snapshot, subscribe: (): (() => void) => () => {} } } } })
+    const View = makeView(ctx)
+    const m = await mount(h(View, { sessionId: 'sv-memberpick', useProjection: projectionsFor(timeline()) }))
+    await flush()
+    const chip = queryAll(m.container, '.lc-ledger-out-body2 .lc-ledger-chip').find(el => text(el).includes('worker-bee'))
+    assert.ok(chip !== undefined, 'the roster spells out the served member')
+    await click(chip)
+    await flush()
+    assert.equal(currentFleetMemberFocus('sv-memberpick'), 'worker', 'the pick rests on the shared Fleet channel')
+    await m.unmount()
+    ctx.dispose()
+  })
+
+  test('a member pick relayed before the view mounts is adopted on mount and broadcast to later picks', async () => {
+    requestFleetMemberFocus('sv-memberleg', 'worker')
+    const View = makeView(new TestClientCtx())
+    const m = await mount(h(View, { sessionId: 'sv-memberleg', useProjection: projectionsFor(timeline()) }))
+    await flush()
+    assert.equal(currentFleetMemberFocus('sv-memberleg'), 'worker', 'the pick stays adoptable by every view')
+    await act(async () => { requestFleetMemberFocus('sv-memberleg', 'grand') })
+    assert.equal(currentFleetMemberFocus('sv-memberleg'), 'grand', 'the later pick replaces the resting value')
+    await m.unmount()
   })
 })
 

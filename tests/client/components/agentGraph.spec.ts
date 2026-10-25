@@ -301,6 +301,25 @@ describe('AgentGraph — the family tree', () => {
     await m.unmount()
   })
 
+  test('an external focusId lights the member card and its lineage; a hover takes precedence', async () => {
+    const face = new FakeSessions(family())
+    const View = makeView(face)
+    const m = await mount(h(View, { sessionId: 'root', self: selfStats(), focusId: 'done' }))
+    const done = query(m.container, '[data-agent="done"]')
+    assert.ok(done.classList.contains('lc-agent-hover'), 'the focused card lights like a pointed-at one')
+    assert.ok(done.classList.contains('lc-agent-on'), 'its lineage lights too')
+    assert.ok(query(m.container, '[data-agent="root"]').classList.contains('lc-agent-on'))
+    assert.ok(query(m.container, '.lc-agents-canvas').classList.contains('lc-agents-focus'))
+    assert.equal(queryAll(m.container, 'g.lc-agents-on').length, 1)
+
+    await hover(query(m.container, '[data-agent="worker"]'))
+    assert.ok(!done.classList.contains('lc-agent-hover'), 'the live hover takes the slot')
+    assert.ok(query(m.container, '[data-agent="worker"]').classList.contains('lc-agent-hover'))
+    await unhover(query(m.container, '[data-agent="worker"]'))
+    assert.ok(done.classList.contains('lc-agent-hover'), 'the resting focus returns after the sweep')
+    await m.unmount()
+  })
+
   test('list updates re-render the tree live', async () => {
     const face = new FakeSessions({ root: { displayTitle: 'Main', running: false, updatedAt: 1 } })
     const View = makeView(face)

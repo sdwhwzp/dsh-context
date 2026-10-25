@@ -66,7 +66,7 @@ describe('ContextView — the agent network card\'s own session', () => {
     try {
       const View = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }))
       const m = await mount(h(View, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
-      await click(query(m.container, '.lc-flow-team'))
+      await click(query(m.container, '.lc-strip-cost'))
       assert.equal(fleetClicks, 1, 'the served Fleet tab is activated')
       await m.unmount()
       fleet.remove()
@@ -80,13 +80,13 @@ describe('ContextView — the agent network card\'s own session', () => {
     const sidebar = { openTab: (kind: string): void => { opened.push(kind) } }
     const View = makeView(new TestClientCtx({ services: { sessions: selfOnly(), sidebarRight: sidebar } }))
     const m = await mount(h(View, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
-    await click(query(m.container, '.lc-flow-team'))
+    await click(query(m.container, '.lc-strip-cost'))
     assert.deepEqual(opened, ['dsh-context'], 'the sidebar panel whose Context tab holds the card')
     await m.unmount()
 
     const bare = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }))
     const m2 = await mount(h(bare, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
-    await click(query(m2.container, '.lc-flow-team'))
+    await click(query(m2.container, '.lc-strip-cost'))
     await m2.unmount()
   })
 
@@ -97,7 +97,7 @@ describe('ContextView — the agent network card\'s own session', () => {
     const View = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }), settings)
     const m = await mount(h(View, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
 
-    const cell = query(m.container, '.lc-flow-team')
+    const cell = query(m.container, '.lc-strip-cost')
     assert.equal(cell.getAttribute('role'), null)
     assert.equal(cell.getAttribute('tabindex'), null)
     await click(cell)

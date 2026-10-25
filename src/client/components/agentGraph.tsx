@@ -33,6 +33,8 @@ export interface AgentGraphProps {
   pinnedId?: string | null
   /** Controlled hover (the Fleet tab lifts it so the list rows light graph nodes too). */
   hoverId?: string | null
+  /** A one-shot external highlight (the stats roster's member pick): the card and its lineage light until a hover takes over. */
+  focusId?: string | null
   onHover?: (id: string | null) => void
   /** Set on the Fleet tab: a card click selects (ring + cross-panel linkage) instead of jumping. */
   onSelect?: (id: string) => void
@@ -70,6 +72,8 @@ export function makeAgentGraph(
     // A new session starts collapsed; the expanded preference belongs to the family it was set on.
     useEffect(() => { setShowAll(false) }, [sessionId])
     const hoverId = props.hoverId !== undefined ? props.hoverId : internalHover
+    // The external focus is the resting highlight: any live hover takes precedence over it.
+    const focusId = hoverId ?? (props.focusId ?? null)
     const onHover = props.onHover ?? setInternalHover
     // The shared price book (the stats board's own store): a card's cost estimate appears once the book lands, never blocks it.
     const { book } = useModelPrices()
@@ -77,6 +81,16 @@ export function makeAgentGraph(
 
     // Re-layout whenever the stage's visible width changes (sidebar toggles, resizes, split views).
     const stageRef = useRef<HTMLDivElement | null>(null)
+    // A tall family scrolls inside the stage, so the externally focused card is brought into view before it lights.
+    const heardFocus = props.focusId ?? null
+    useEffect(() => {
+      if (heardFocus === null) return
+      /* v8 ignore next 1 -- the stage renders whenever the card does; the ref is set before effects run. */
+      const card = stageRef.current?.querySelector<HTMLElement>(`[data-agent="${CSS.escape(heardFocus)}"]`) ?? null
+      /* v8 ignore next 1 -- jsdom ships no scrollIntoView; the live stage scrolls the card to its center. */
+      if (card === null || typeof card.scrollIntoView !== 'function') return
+      card.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, [heardFocus])
     const [stageWidth, setStageWidth] = useState(0)
     const [stageHeight, setStageHeight] = useState(0)
     useEffect(() => {
@@ -115,13 +129,13 @@ export function makeAgentGraph(
     const current = forest.nodes.find(n => n.isCurrent) ?? forest.nodes[0]
     const pinnedId = props.pinnedId ?? null
     const pinnedNode = pinnedId !== null ? byId.get(pinnedId) : undefined
-    const hoverNode = hoverId !== null ? byId.get(hoverId) : undefined
+    const hoverNode = focusId !== null ? byId.get(focusId) : undefined
     const inspected = pinnedNode ?? hoverNode ?? current
     const runningCount = forest.nodes.filter(n => n.running).length
     let totalTokens = 0
     for (const n of forest.nodes) totalTokens += n.head !== null ? n.head.tokens : 0
 
-    const lit = lineageOf(forest, hoverId)
+    const lit = lineageOf(forest, focusId)
 
     const open = (id: string): void => {
       if (id === current.id) return
@@ -255,7 +269,7 @@ export function makeAgentGraph(
                       y={point.y}
                       width={layout.cardW}
                       index={index}
-                      hovered={hoverId === node.id}
+                      hovered={focusId === node.id}
                       on={lit !== null && lit.has(node.id)}
                       pinned={pinnedId === node.id}
                       onHover={onHover}

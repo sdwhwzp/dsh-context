@@ -5,6 +5,7 @@ import { makeFleetView } from '../../../src/client/components/fleetView'
 import { makeAgentHeads } from '../../../src/client/agentHeads'
 import { DICT_EN } from '../../../src/client/i18n'
 import { resetTimelineDetailStores } from '../../../src/client/timelineSource'
+import { requestFleetMemberFocus, currentFleetMemberFocus } from '../../../src/client/viewFocus'
 import { TestClientCtx, asClientCtx } from '../helpers/harness'
 import { click, makeKit, mount, query, queryAll, text, until } from '../helpers/kit'
 import { makeScroller, mountInScroller, projectionsFor, richTimeline, timeline } from './contextViewHarness'
@@ -105,6 +106,24 @@ describe('FleetView — the agent family on its own page', () => {
 
     assert.equal(queryAll(m.container, '.lc-agents').length, 0)
     assert.ok(text(query(m.container, '.lc-foot')).startsWith(DICT_EN['footer'].slice(0, 24)))
+    await m.unmount()
+    ctx.dispose()
+  })
+
+  test("the stats card's roster pick lights the relayed member card", async () => {
+    const id = 'sv-fleet-pick'
+    const snapshot = {
+      byId: {
+        [id]: { displayTitle: 'Main Agent', running: true, updatedAt: 10, projectionValues: { contextTimeline: richTimeline() } },
+        worker: { parentId: id, origin: 'subagent', running: true, updatedAt: 8, projectionValues: { contextTimeline: richTimeline(), subagent: { mode: 'continuable', label: 'worker-bee' } } },
+      },
+    }
+    const ctx = new TestClientCtx({ services: { sessions: { list: { getSnapshot: (): unknown => snapshot, subscribe: (): (() => void) => () => {} } } } })
+    const View = makeView(ctx)
+    const m = await mount(h(View, { sessionId: id, useProjection: projectionsFor(richTimeline({ timing: TIMING })) }))
+    requestFleetMemberFocus(id, 'worker')
+    await until(() => query(m.container, '[data-agent="worker"]').classList.contains('lc-agent-hover'), 'the relay never lit the member')
+    assert.equal(currentFleetMemberFocus(id), 'worker', 'the resting pick is shared')
     await m.unmount()
     ctx.dispose()
   })

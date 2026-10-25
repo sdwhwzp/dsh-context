@@ -27,6 +27,9 @@ export interface CommandPanelProps {
   stampOf?: (seq: number) => { turn: number; step: number } | null
   /** Reveal the run's result message in the Context Browser; absent = no reveal affordance. */
   onLocate?: (rec: Command) => void
+  /** A one-shot text lens the panel opens with (the stats card's command pick seeds the program's name). */
+  focusQuery?: string | null
+  onFocusQueryHandled?: () => void
   /** On-demand content for one surface-node seq; absent = the detail serves no result block. */
   fetchContent?: ContentFetcher
   state?: DetailState
@@ -198,6 +201,15 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
       setQuery(patch.query ?? '')
       setSort(patch.sort ?? 'latest')
     }
+    // The stats card's pick is one-shot: hand the slot back so the same program can fire again.
+    const focusQuery = props.focusQuery
+    useEffect(() => {
+      if (focusQuery === undefined || focusQuery === null) return
+      setFilter('all')
+      setQuery(focusQuery)
+      setSort('latest')
+      props.onFocusQueryHandled?.()
+    }, [focusQuery, props.onFocusQueryHandled])
 
     interface AttentionRow {
       key: string
