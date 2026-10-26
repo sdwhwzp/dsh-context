@@ -34,7 +34,7 @@ import { makePluginInfo } from './pluginInfo'
 import { makeUpgradeGate } from './upgradeGate'
 import { makeRequestDetail } from './requestDetail'
 import { countsOfRecords, makeStatsContext, makeSubagentCost, toolTallyOf } from './statsContext'
-import type { StatsJump } from './statsContext'
+import type { StatsEventKind, StatsJump } from './statsContext'
 import { makeStatsTiming } from './statsTiming'
 import { makeStatsTokens } from './statsTokens'
 import { makeLegend, makeStackedBar } from './stackedBar'
@@ -47,7 +47,7 @@ import { useLazyMount } from './useLazyMount'
 import { trendBandsOf } from '../dna'
 import type { TrendBand } from '../dna'
 
-import { activateViewTab, openContextSidebar, requestFleetMemberFocus, subscribeContextFocus, takeContextFocus, useFleetMemberFocus } from '../viewFocus'
+import { activateViewTab, openContextSidebar, subscribeContextFocus, takeContextFocus, useFleetMemberFocus } from '../viewFocus'
 import { revealInScrollParent } from '../revealScroll'
 import { makeErrorBoundary } from './errorBoundary'
 
@@ -292,13 +292,19 @@ export function makeContextView(
     // One-shot kind request from the stats board's file pills.
     const [filterFocus, setFilterFocus] = useState<FileFilter | null>(null)
     const clearFilterFocus = useCallback(() => { setFilterFocus(null) }, [])
+    // The stats events tile's one-shot reveal: filter the Context Events card to that kind and scroll to it.
+    const [eventsFocus, setEventsFocus] = useState(0)
+    const onEventsClick = useCallback((kind: StatsEventKind): void => {
+      setPickedKinds([kind])
+      setEventsFocus(n => n + 1)
+    }, [])
     // The command lane's one-shot pick: the program the Command Executions card opens its query lens with.
     const [commandFocus, setCommandFocus] = useState<string | null>(null)
     const clearCommandFocus = useCallback(() => { setCommandFocus(null) }, [])
 
     // Below-the-fold cards: keep the first commit to the cards the reader sees, then mount the event/file row in an
     // idle slice once it nears the conversation viewport; the two skeleton cards reserve the row height.
-    const [belowFoldRef, belowFoldMounted] = useLazyMount(filterFocus !== null)
+    const [belowFoldRef, belowFoldMounted] = useLazyMount(filterFocus !== null || eventsFocus > 0)
     // The command panel sits below the event/file row as its own full-width lazy block.
     const [cmdsRef, cmdsMounted] = useLazyMount(commandFocus !== null)
     // The browser card is visible but heavy (assembled rows for the current step): paint its card-shaped skeleton in
@@ -361,14 +367,7 @@ export function makeContextView(
       setCatFocus({ cat: 'tool', query: tool })
       revealCard(rootRef.current, '.lc-col-browser')
     }, [])
-    // The roster's pick: the Fleet tab (or the sidebar fallback) opens with that member's card lit. The sidebar copy
-    // of this view reads the same broadcast, so its inline graph lights too.
     const focusMember = useFleetMemberFocus(typeof sessionId === 'string' ? sessionId : undefined)
-    const onMemberPick = useCallback((id: string): void => {
-      onTeamClick()
-      /* v8 ignore next 1 -- a served roster always carries the session id; the guard only backs up a direct call. */
-      if (typeof sessionId === 'string' && sessionId !== '') requestFleetMemberFocus(sessionId, id)
-    }, [onTeamClick, sessionId])
 
     // Restore the saved position in a layout effect, so the chat's bottom-anchored position never flashes in first.
     useLayoutEffect(() => {
@@ -441,6 +440,11 @@ export function makeContextView(
       if (filterFocus === null || !belowFoldMounted) return
       revealCard(rootRef.current, '.lc-fa-card')
     }, [filterFocus, belowFoldMounted])
+
+    useEffect(() => {
+      if (eventsFocus === 0 || !belowFoldMounted) return
+      revealCard(rootRef.current, '.lc-events-card')
+    }, [eventsFocus, belowFoldMounted])
 
     useEffect(() => {
       if (commandFocus === null || !cmdsMounted) return
@@ -545,7 +549,7 @@ export function makeContextView(
     const commandBoard = useMemo(() => {
       if (commandList.length === 0) return { runs: 0, top: [] as [string, number][] }
       const stats = data?.commandStats ?? tallyOfCommands(commandList)
-      const top = programsOf(viewsOf(commandList, workspace)).slice(0, 3).map(p => [p.name, p.n] as [string, number])
+      const top = programsOf(viewsOf(commandList, workspace)).map(p => [p.name, p.n] as [string, number])
       return { runs: stats.runs, top }
     }, [commandList, data, workspace])
     // The lane's chips only offer the jump when the card can serve it (the collection exists on this host).
@@ -881,7 +885,7 @@ export function makeContextView(
               onJump={onJump} onTeamClick={hasFamilyView ? onTeamClick : undefined}
               onToolPick={onToolPick}
               onCommandPick={hasCommands ? setCommandFocus : undefined}
-              onMemberPick={hasFamilyView ? onMemberPick : undefined} />
+              onEventsClick={onEventsClick} />
             <PluginInfo />
           </div>
         )}
@@ -903,7 +907,7 @@ export function makeContextView(
 
         <div className="lc-cols" ref={belowFoldRef}>
           {belowFoldMounted ? (<>
-            <div className="lc-card lc-col flex-1 min-w-[min(360px,100%)]">
+            <div className="lc-card lc-events-card lc-col flex-1 min-w-[min(360px,100%)]">
               <div className="lc-card-title">
                 <span className="lc-card-title-text">{t('events.title')}</span>
                 <div className="lc-kinds @max-[380px]/lc-card:flex-wrap">

@@ -3,27 +3,9 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { makeCommandPanel } from '../../../src/client/components/commandPanel'
 import type { Command } from '../../../src/client/commands'
-import { makeKit, mount, query, queryAll, text, click } from '../helpers/kit'
+import { mount, query, queryAll, text, click } from '../helpers/kit'
 import type { ConversationNodeLike } from '../../../src/client/services'
-
-const kit = makeKit()
-const Panel = makeCommandPanel(kit)
-
-const T0 = 1700000000000
-
-function cmd(seq: number, over: Partial<Command> = {}): Command {
-  return {
-    seq,
-    time: T0 + seq * 1000,
-    tool: 'bash',
-    cmd: 'git status',
-    start: T0 + seq * 1000,
-    end: T0 + seq * 1000 + 100,
-    status: 'completed',
-    err: false,
-    ...over,
-  }
-}
+import { Panel, T0, chipCounts, cmd, kit, rowTexts, typeSearch } from './commandPanelHarness'
 
 function richCommands(): Command[] {
   return [
@@ -49,19 +31,6 @@ function richCommands(): Command[] {
       resultSeq: 54,
     }),
   ]
-}
-
-function rowTexts(container: ParentNode): string[] {
-  return queryAll(container, '.lc-cmd-row').map(r => text(r))
-}
-
-async function typeSearch(container: ParentNode, value: string): Promise<void> {
-  const input = query<HTMLInputElement>(container, 'input.lc-fa-search')
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-    setter?.call(input, value)
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-  })
 }
 
 describe('CommandPanel — rendering', () => {
@@ -238,17 +207,114 @@ describe('CommandPanel — filtering, search, sort', () => {
     }
   })
 
-  test('search narrows by command, description and cwd', async () => {
+  test('search narrows the list without moving the program ranking', async () => {
     const m = await mount(h(Panel, { commands: richCommands(), workspace: '/repo' }))
     try {
+      const progs = () => queryAll(m.container, '.lc-cmd-prog').map(p => text(p))
+      const ranking = progs()
+      assert.equal(ranking.length, 4, 'richCommands has four programs')
       await typeSearch(m.container, 'vitest')
       assert.equal(rowTexts(m.container).length, 1)
+      assert.deepEqual(chipCounts(m.container), ['1', '1', '1', '0'], 'the chips count the search scope')
+      assert.deepEqual(progs(), ranking, 'the ranking does not follow the search')
       await typeSearch(m.container, 'affected')
       assert.equal(rowTexts(m.container).length, 1)
       await typeSearch(m.container, '/repo')
       assert.equal(rowTexts(m.container).length, 2, 'the cwd match joins the command match')
+      assert.deepEqual(chipCounts(m.container), ['2', '0', '0', '0'])
+      assert.deepEqual(progs(), ranking, 'the cwd search does not move the ranking')
       await typeSearch(m.container, 'nothing-matches')
       assert.ok(text(m.container).includes('No commands match the current filters'))
+      assert.deepEqual(chipCounts(m.container), ['0', '0', '0', '0'])
+      assert.deepEqual(progs(), ranking, 'an empty search result keeps the ranking')
+      assert.equal(queryAll(m.container, '.lc-cmd-attn').length, 0, 'no attention rows under the search')
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  test('the chips count the filtered rows; the ranking stays global', async () => {
+    const commands: Command[] = [
+      cmd(1, { cmd: 'cat README.md' }),
+      cmd(2, { cmd: 'echo hi && cat package.json' }),
+      cmd(3, { cmd: 'cat missing.txt', status: 'failed', exit: 1, start: T0 + 3000, end: T0 + 15000 }),
+      cmd(4, { cmd: 'sleep 20', status: 'running', background: true, end: undefined }),
+      cmd(5, { cmd: 'ls -la' }),
+    ]
+    const m = await mount(h(Panel, { commands }))
+    try {
+      const progs = () => queryAll(m.container, '.lc-cmd-prog').map(p => text(p))
+      const ranking = progs()
+      assert.equal(ranking.length, 4, 'cat, echo, sleep, ls')
+      assert.ok(ranking.some(p => p.startsWith('cat') && p.includes('×2') && p.includes('40%')))
+      await typeSearch(m.container, 'cat')
+      assert.equal(rowTexts(m.container).length, 3)
+      assert.deepEqual(chipCounts(m.container), ['3', '1', '1', '0'], 'the chips count the search matches')
+      assert.deepEqual(progs(), ranking, 'the search does not move the ranking')
+      // Attention follows the search: the slow failed cat, not the background sleep.
+      const attn = queryAll(m.container, '.lc-cmd-attn-row').map(r => text(r))
+      assert.ok(attn.some(r => r.includes('Slowest') && r.includes('cat missing.txt')))
+      assert.ok(attn.some(r => r.includes('Failing') && r.includes('cat')))
+      assert.ok(!attn.some(r => r.includes('Background')))
+      // A program click drills the list by head identity; the ranking stays global and the row is marked.
+      const progBtn = (name: string) => {
+        const hit = queryAll(m.container, '.lc-cmd-prog').find(b => text(b).startsWith(name))
+        if (hit === undefined) throw new Error(`program row not found: ${name}`)
+        return hit
+      }
+      await click(progBtn('cat'))
+      assert.equal(rowTexts(m.container).length, 2, 'the two cat-headed runs, not the echo chain')
+      assert.ok(rowTexts(m.container).some(r => r.includes('cat README.md')))
+      assert.ok(rowTexts(m.container).some(r => r.includes('cat missing.txt')))
+      assert.deepEqual(progs(), ranking, 'the pick does not move the ranking')
+      assert.deepEqual(chipCounts(m.container), ['2', '1', '1', '0'], 'the chips count the picked scope')
+      assert.ok(progBtn('cat').className.includes('lc-cmd-prog-on'))
+      assert.equal(progBtn('cat').getAttribute('aria-pressed'), 'true')
+      assert.ok((progBtn('cat').getAttribute('title') ?? '').includes('Clear'))
+      assert.equal(query<HTMLInputElement>(m.container, 'input.lc-fa-search').value, 'cat', 'the pick keeps the text lens')
+      // The chain row's head is echo, so picking echo swaps the drilled row.
+      await click(progBtn('echo'))
+      assert.equal(rowTexts(m.container).length, 1)
+      assert.ok(rowTexts(m.container)[0].includes('echo hi && cat package.json'))
+      assert.deepEqual(chipCounts(m.container), ['1', '0', '0', '0'])
+      assert.equal(progBtn('cat').getAttribute('aria-pressed'), 'false')
+      assert.ok((progBtn('cat').getAttribute('title') ?? '').includes('Filter'))
+      // A search edit keeps the pick: the list narrows within it, and the ranking still does not move.
+      await typeSearch(m.container, 'package')
+      assert.equal(rowTexts(m.container).length, 1)
+      assert.equal(progBtn('echo').getAttribute('aria-pressed'), 'true', 'the pick survives the search')
+      assert.deepEqual(progs(), ranking)
+      await typeSearch(m.container, 'cat')
+      assert.equal(rowTexts(m.container).length, 1, 'still the echo-headed chain')
+      // Clicking the marked row clears the pick; the list returns to the search scope.
+      await click(progBtn('echo'))
+      assert.equal(rowTexts(m.container).length, 3)
+      assert.equal(queryAll(m.container, '.lc-cmd-prog-on').length, 0)
+      assert.deepEqual(chipCounts(m.container), ['3', '1', '1', '0'])
+      // A chip keeps the pick and narrows within it.
+      await click(progBtn('cat'))
+      assert.equal(rowTexts(m.container).length, 2)
+      const failedChip = queryAll(m.container, '.lc-cmd-chips .lc-gran-btn').find(b => text(b).startsWith('Failed'))
+      assert.ok(failedChip !== undefined)
+      await click(failedChip)
+      assert.equal(rowTexts(m.container).length, 1, 'the failed cat run')
+      assert.equal(progBtn('cat').getAttribute('aria-pressed'), 'true', 'the chip keeps the pick')
+      assert.deepEqual(chipCounts(m.container), ['2', '1', '1', '0'])
+      // A vanished pick clears itself when the retained log drops the program.
+      const allChip = queryAll(m.container, '.lc-cmd-chips .lc-gran-btn').find(b => text(b).startsWith('All'))
+      assert.ok(allChip !== undefined)
+      await click(allChip)
+      assert.equal(rowTexts(m.container).length, 2)
+      await m.update(h(Panel, {
+        commands: [
+          cmd(2, { cmd: 'echo hi && cat package.json' }),
+          cmd(4, { cmd: 'sleep 20', status: 'running', background: true, end: undefined }),
+          cmd(5, { cmd: 'ls -la' }),
+        ],
+      }))
+      assert.equal(queryAll(m.container, '.lc-cmd-prog-on').length, 0, 'the vanished pick clears')
+      assert.equal(rowTexts(m.container).length, 1, 'the echo chain matches the search again')
+      assert.equal(queryAll(m.container, '.lc-cmd-prog').length, 3, 'the new retained log re-ranks')
     } finally {
       await m.unmount()
     }
@@ -348,177 +414,6 @@ describe('CommandPanel — the row detail and actions', () => {
   })
 })
 
-describe('CommandPanel — the summary rail', () => {
-  function railCommands(): Command[] {
-    return [
-      cmd(1, { cmd: 'cd /repo && git status', resultSeq: 51 }),
-      cmd(2, { cmd: 'cd /repo && git diff', resultSeq: 52 }),
-      cmd(3, { cmd: 'cd /repo && git status', resultSeq: 53 }),
-      cmd(4, {
-        cmd: 'cd /repo && pnpm exec vitest run tests/client/components/commandPanel.spec.ts --reporter=verbose',
-        status: 'failed',
-        exit: 1,
-        start: T0 + 4000,
-        end: T0 + 94000,
-        resultSeq: 54,
-      }),
-      cmd(5, { cmd: 'pnpm dev', status: 'running', background: true, end: undefined }),
-    ]
-  }
-
-  test('the rail shows the KPIs, the top programs, and the attention items', async () => {
-    const m = await mount(h(Panel, {
-      commands: railCommands(),
-      workspace: '/repo',
-      stats: { runs: 4, failed: 1, ms: 95000, bg: 1 },
-    }))
-    try {
-      const rail = query(m.container, '.lc-cmd-rail')
-      const txt = text(rail)
-      assert.ok(txt.includes('Summary'))
-      assert.ok(txt.includes('Programs · 2'), 'two distinct programs (git, pnpm)')
-      assert.ok(txt.includes('Attention'))
-      assert.ok(txt.includes('git'), 'git tops the program ranking')
-      assert.ok(txt.includes('Slowest'))
-      assert.ok(txt.includes('Failing'))
-      assert.ok(txt.includes('Repeats'))
-      assert.ok(txt.includes('Background'))
-      // The share label is the program's share of ALL listed runs: git ×3 of 5 → 60%.
-      const gitRow = queryAll(m.container, '.lc-cmd-prog').find(b => text(b).startsWith('git'))
-      assert.ok(gitRow !== undefined)
-      assert.ok(text(gitRow).includes('60%'))
-    } finally {
-      await m.unmount()
-    }
-  })
-
-  test('with two failing programs, the Failing row lands on exactly its own program’s failures', async () => {
-    const commands: Command[] = [
-      cmd(1, { cmd: 'vitest run a', status: 'failed', exit: 1 }),
-      cmd(2, { cmd: 'vitest run b', status: 'failed', exit: 1 }),
-      cmd(3, { cmd: 'eslint src', status: 'failed', exit: 2 }),
-      cmd(4, { cmd: 'git status' }),
-    ]
-    const m = await mount(h(Panel, { commands }))
-    try {
-      // vitest fails twice, eslint once: the rail names vitest.
-      const failing = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Failing'))
-      assert.ok(failing !== undefined)
-      assert.ok(text(failing).includes('vitest'))
-      await click(failing)
-      const rows = queryAll(m.container, '.lc-cmd-row')
-      assert.equal(rows.length, 2, 'only vitest’s failures show')
-      assert.ok(rows.every(r => r.textContent.includes('vitest')))
-    } finally {
-      await m.unmount()
-    }
-  })
-
-  test('an attention click drives the list lens; a program click searches it', async () => {
-    const m = await mount(h(Panel, { commands: railCommands(), workspace: '/repo' }))
-    try {
-      const rowTextsNow = () => queryAll(m.container, '.lc-cmd-row').map(r => text(r))
-      // Slowest → the slow sort: the 90s vitest run tops the list.
-      const slowestBtn = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Slowest'))
-      assert.ok(slowestBtn !== undefined)
-      await click(slowestBtn)
-      assert.ok(rowTextsNow()[0].includes('vitest'))
-      // Failing → the failed filter.
-      const failingBtn = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Failing'))
-      assert.ok(failingBtn !== undefined)
-      await click(failingBtn)
-      assert.equal(rowTextsNow().length, 1)
-      assert.ok(rowTextsNow()[0].includes('vitest'))
-      const latestChip = queryAll(m.container, '.lc-fa-sort .lc-gran-btn').find(b => text(b).startsWith('Latest'))
-      assert.ok(latestChip?.className.includes('lc-gran-on'), 'the previous slowest sort is cleared')
-      // Repeats → search the repeated command, clearing the previous failed filter.
-      const repeatsBtn = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Repeats'))
-      assert.ok(repeatsBtn !== undefined)
-      await click(repeatsBtn)
-      const withRepeats = rowTextsNow()
-      assert.equal(withRepeats.length, 2, 'the lens clears the failed filter; both git status runs show')
-      assert.ok(withRepeats.every(r => r.includes('git status')))
-      const allChip = queryAll(m.container, '.lc-cmd-chips .lc-gran-btn').find(b => text(b).startsWith('All'))
-      assert.ok(allChip?.className.includes('lc-gran-on'), 'the All chip is active again')
-      // A program row click filters the list to that program (git status ×2 + git diff ×1).
-      const gitBtn = queryAll(m.container, '.lc-cmd-prog').find(b => text(b).startsWith('git'))
-      assert.ok(gitBtn !== undefined)
-      await click(gitBtn)
-      assert.equal(rowTextsNow().length, 3)
-      // The Background attention row drives its chip too, clearing the previous search.
-      const bgBtn = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Background'))
-      assert.ok(bgBtn !== undefined)
-      await click(bgBtn)
-      assert.equal(rowTextsNow().length, 1)
-      assert.ok(rowTextsNow()[0].includes('pnpm dev'))
-      assert.equal(query<HTMLInputElement>(m.container, '.lc-fa-search')?.value, '', 'the previous search is cleared')
-    } finally {
-      await m.unmount()
-    }
-  })
-
-  test('an empty log shows a zero summary and a blank list; a quiet log keeps the real rail', async () => {
-    const empty = await mount(h(Panel, { commands: [] }))
-    try {
-      assert.ok(query(empty.container, '.lc-cmd-rail') !== null, 'the summary renders with real zeroes')
-      assert.deepEqual(queryAll(empty.container, '.lc-cmd-kpi b').map(b => text(b)), ['0', '0', '0', '0'])
-      assert.equal(queryAll(empty.container, '.lc-cmd-progs').length, 0, 'no empty program ranking')
-      assert.equal(queryAll(empty.container, '.lc-cmd-attn').length, 0, 'no attention section without notable items')
-      assert.equal(queryAll(empty.container, '.lc-cmd-item').length, 0, 'the list stays blank')
-      assert.ok(text(empty.container).includes('No commands executed in this session'))
-    } finally {
-      await empty.unmount()
-    }
-    const quiet = await mount(h(Panel, { commands: [cmd(1, { start: 0, end: 50 })] }))
-    try {
-      assert.ok(query(quiet.container, '.lc-cmd-rail') !== null, 'the summary still renders')
-      assert.equal(queryAll(quiet.container, '.lc-cmd-attn').length, 0, 'no attention section without notable items')
-      assert.ok(query(quiet.container, '.lc-cmd-progs') !== null, 'a non-empty log still ranks programs')
-    } finally {
-      await quiet.unmount()
-    }
-  })
-
-  test('a long program ranking gets its own search; the duration column heats with wall time', async () => {
-    const commands: Command[] = ['grep', 'git', 'pnpm', 'node', 'python3', 'cat', 'sed'].flatMap((prog, i) =>
-      Array.from({ length: i + 1 }, (_, j) => cmd(i * 10 + j, { cmd: `${prog} task-${j}` })))
-    const m = await mount(h(Panel, {
-      commands: [
-        ...commands,
-        cmd(100, { cmd: 'grep fast', start: 0, end: 500 }),
-        cmd(101, { cmd: 'grep one-sec', start: 0, end: 1500 }),
-        cmd(102, { cmd: 'grep slow-ish', start: 0, end: 15_000 }),
-        cmd(103, { cmd: 'grep very-slow', start: 0, end: 90_000 }),
-      ],
-    }))
-    try {
-      // Seven programs clear the search threshold.
-      const search = query<HTMLInputElement>(m.container, '.lc-cmd-prog-search')
-      assert.ok(search !== undefined)
-      assert.equal(queryAll(m.container, '.lc-cmd-prog').length, 7, 'all programs listed, not just a top cut')
-      await act(async () => {
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-        setter?.call(search, 'gi')
-        search.dispatchEvent(new Event('input', { bubbles: true }))
-      })
-      assert.equal(queryAll(m.container, '.lc-cmd-prog').length, 1, 'git alone survives the rail search')
-      await act(async () => {
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-        setter?.call(search, 'nothing-matches')
-        search.dispatchEvent(new Event('input', { bubbles: true }))
-      })
-      assert.ok(query(m.container, '.lc-cmd-prog-none') !== null, 'the no-match note renders')
-      // The duration heat tiers land on the rows.
-      const durClass = (label: string) => queryAll(m.container, '.lc-cmd-row').find(r => r.textContent.includes(label))?.querySelector('.lc-cmd-dur')?.className ?? ''
-      assert.ok(durClass('fast').endsWith('lc-cmd-dur'))
-      assert.ok(durClass('one-sec').includes('lc-cmd-dur-1'))
-      assert.ok(durClass('slow-ish').includes('lc-cmd-dur-2'))
-      assert.ok(durClass('very-slow').includes('lc-cmd-dur-3'))
-    } finally {
-      await m.unmount()
-    }
-  })
-})
 
 describe('CommandPanel — the result block', () => {
   const RESULT: ConversationNodeLike = { kind: 'tool', seq: 52, content: [{ type: 'text', text: 'progress 21:40\nVERDICT: PASS' }] }

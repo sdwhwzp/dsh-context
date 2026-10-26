@@ -7,19 +7,19 @@ import type { SessionCostUsage } from '../../../src/shared/types'
 import { flush, makeKit, mount, query, queryAll, text } from '../helpers/kit'
 
 const kit = makeKit()
-const StatsContext = makeStatsContext(kit, () => ({ usage: null, count: 0, members: [] }))
-const StatsContextZh = makeStatsContext(makeKit('zh'), () => ({ usage: null, count: 0, members: [] }))
+const StatsContext = makeStatsContext(kit, () => ({ usage: null, count: 0 }))
+const StatsContextZh = makeStatsContext(makeKit('zh'), () => ({ usage: null, count: 0 }))
 const NO_FILES = { reads: 0, writes: 0, searches: 0, images: 0 }
 const COST: SessionCostUsage = {
   'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
 }
 
 function teamOf(container: HTMLElement): string {
-  return text(query(container, '.lc-strip-team .lc-strip-pair'))
+  return text(query(container, '.lc-ledger-team-head .lc-strip-pair'))
 }
 
 function costCellsOf(container: HTMLElement): string[] {
-  return queryAll(container, '.lc-strip-cost .lc-strip-cell').map(el =>
+  return queryAll(container, '.lc-ledger-out-body2 .lc-strip-cell').map(el =>
     (el.querySelector('i')?.textContent ?? '') + (el.querySelector('.lc-strip-pair')?.textContent ?? ''),
   )
 }
@@ -52,8 +52,8 @@ describe('the ledger figure', () => {
   test('dsh-spend wins over the local estimate and brings its own currency', async () => {
     const m = await mount(h(StatsContext, { counts, files: NO_FILES, tools: [], cost: COST, spend, locale: 'en' }))
     assert.equal(teamOf(m.container), '1.3M/¥12.50')
-    assert.equal(queryAll(m.container, '.lc-strip-team a').length, 0)
-    const tip = text(query(m.container, '.lc-strip-team .lc-stat-tip-prices'))
+    assert.equal(queryAll(m.container, '.lc-ledger-team-head a').length, 0)
+    const tip = text(query(m.container, '.lc-ledger-team-head .lc-stat-tip-prices'))
     assert.ok(tip.includes('deepseek-v4-flash'))
     assert.ok(tip.includes('GLM-5.3-Flash'), 'a provider the local table cannot price still appears')
     assert.ok(tip.includes('1.2M tokens'), tip)
@@ -62,7 +62,7 @@ describe('the ledger figure', () => {
   })
 
   test('the ledger family total is not increased by the separate subagent estimate', async () => {
-    const Stats = makeStatsContext(kit, () => ({ usage: COST, count: 1, members: [] }))
+    const Stats = makeStatsContext(kit, () => ({ usage: COST, count: 1 }))
     const m = await mount(h(Stats, { counts, files: NO_FILES, tools: [], cost: COST, spend, locale: 'en' }))
     await flush()
     assert.equal(teamOf(m.container), '1.3M/¥12.50')
@@ -93,7 +93,7 @@ describe('the ledger figure', () => {
     const m = await mount(h(StatsContextZh, { counts, files: NO_FILES, tools: [], cost: COST, spend: usd, locale: 'zh' }))
     const shown = teamOf(m.container)
     assert.equal(shown, '7.7M/¥1.42')
-    const tip = text(query(m.container, '.lc-strip-team .lc-stat-tip-prices'))
+    const tip = text(query(m.container, '.lc-ledger-team-head .lc-stat-tip-prices'))
     assert.ok(tip.includes('¥1.42'), tip)
     assert.ok(!tip.includes('$0.1992'), 'the base-currency amount never reaches the split')
     assert.ok(tip.includes('7.7M tokens'), tip)
@@ -117,7 +117,7 @@ describe('the ledger figure', () => {
     }
     const m = await mount(h(StatsContextZh, { counts, files: NO_FILES, tools: [], cost: COST, spend: family, locale: 'zh' }))
     assert.equal(teamOf(m.container), '54.3M/¥8.55')
-    const tip = text(query(m.container, '.lc-strip-team .lc-stat-tip-prices'))
+    const tip = text(query(m.container, '.lc-ledger-team-head .lc-stat-tip-prices'))
     for (const model of ['deepseek-v4-flash-vision-exp', 'deepseek-v4.1-flash-expires-on-0910', 'glm-5v-turbo']) {
       assert.ok(tip.includes(model), `${model} missing from ${tip}`)
     }
@@ -142,7 +142,7 @@ describe('the ledger figure', () => {
       spend: { cost: 1, currency: 'USD', rates: { USD: 1, CNY: 7.13 }, sessions: 1, ...usage(1, 0, 0, 0), byModel: [{ model: null, provider: null, cost: 1, ...usage(1, 0, 0, 0) }] },
       locale: 'zh',
     }))
-    assert.ok(text(query(m.container, '.lc-strip-team .lc-stat-tip-prices')).includes('—'))
+    assert.ok(text(query(m.container, '.lc-ledger-team-head .lc-stat-tip-prices')).includes('—'))
     await m.unmount()
   })
 })

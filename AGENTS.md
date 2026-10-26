@@ -49,6 +49,7 @@ Complete ALL of these before ANY commit:
       -------------------------|---------|----------|---------|---------|-------------------
       -------------------------|---------|----------|---------|---------|-------------------
       ```
+    - If any file is not 100% covered, the File and Uncovered Line #s columns shows the missing line numbers.
   - The `pre-commit` hook runs this same gate, and a green run stamps the worktree into `.tmp/check.stamp`, so a commit of unchanged content skips it; `pnpm run check --full` forces a full re-run.
 
 ## Layout & responsive

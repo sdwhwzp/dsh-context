@@ -114,8 +114,10 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     }
     const { commands } = props
     const [filter, setFilter] = useState<CommandFilter>('all')
+    const [failuresOnly, setFailuresOnly] = useState(false)
     const [sort, setSort] = useState<CommandSort>('latest')
     const [query, setQuery] = useState('')
+    const [programPick, setProgramPick] = useState<string | null>(null)
     const [openSeq, setOpenSeq] = useState<number | null>(null)
     // The expanded row's result content, read once per target seq through the shared content fetcher (it caches);
     // `miss` is a seq outside the loaded window, `empty` a node with no text blocks, `failed` a rejected read.
@@ -140,23 +142,36 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     }, [openTarget, props.fetchContent])
 
     const q = query.trim().toLowerCase()
-    // Past the threshold the list windows; below it every matched row stays in the DOM for browser find and select-all.
     const views = useMemo(() => viewsOf(commands, props.workspace), [commands, props.workspace])
+    // The chip counts describe the search + picked-program scope (what picking a chip would show); the chip then
+    // narrows the list. The program ranking stays global, so none of the right-side filters move it.
+    const searched = useMemo(() => views.filter(view => matchesQuery(view.rec, q, view.program)), [views, q])
+    const picked = useMemo(
+      () => (programPick === null ? searched : searched.filter(view => view.program === programPick)),
+      [searched, programPick],
+    )
+    const scoped = useMemo(
+      () => picked.filter(view => matchesFilter(view.rec, filter) && (!failuresOnly || matchesFilter(view.rec, 'failed'))),
+      [picked, filter, failuresOnly],
+    )
     const shown = useMemo(
-      () => views
-        .filter(view => matchesFilter(view.rec, filter) && matchesQuery(view.rec, q, view.program))
-        .sort((a, b) => (sort === 'slowest' ? bySlowest(a.rec, b.rec) : byLatest(a.rec, b.rec))),
-      [views, filter, q, sort],
+      () => scoped.slice().sort((a, b) => (sort === 'slowest' ? bySlowest(a.rec, b.rec) : byLatest(a.rec, b.rec))),
+      [scoped, sort],
     )
     const tally = props.stats ?? tallyOfCommands(commands)
     const counts = useMemo(() => ({
-      all: commands.length,
-      failed: commands.filter(r => matchesFilter(r, 'failed')).length,
-      slow: commands.filter(r => matchesFilter(r, 'slow')).length,
-      background: commands.filter(r => matchesFilter(r, 'background')).length,
-    }), [commands])
+      all: picked.length,
+      failed: picked.filter(view => matchesFilter(view.rec, 'failed')).length,
+      slow: picked.filter(view => matchesFilter(view.rec, 'slow')).length,
+      background: picked.filter(view => matchesFilter(view.rec, 'background')).length,
+    }), [picked])
     const programs = useMemo(() => programsOf(views), [views])
-    const attention = useMemo(() => attentionOf(views), [views])
+    const attention = useMemo(() => attentionOf(scoped), [scoped])
+    // A trimmed or refreshed log can drop a picked program; clearing the pick keeps the list from sticking empty.
+    useEffect(() => {
+      if (programPick === null || programs.some(p => p.name === programPick)) return
+      setProgramPick(null)
+    }, [programPick, programs])
 
     const listRef = useRef<HTMLDivElement | null>(null)
     const [rowPitch, setRowPitch] = useState(0)
@@ -195,8 +210,10 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
       const first = previewTextOf(cmd, props.workspace)
       return first.length > 34 ? first.slice(0, 34) + '…' : first
     }
-    /** An attention row is an exclusive lens: it clears the previous filter, query and sort before applying its own. */
-    const applyLens = (patch: { filter?: CommandFilter; query?: string; sort?: CommandSort }): void => {
+    /** Replacement attention lenses reset the current filter, query, sort and program pick. */
+    const applyLens = (patch: { filter?: CommandFilter; query?: string; sort?: CommandSort; program?: string | null }): void => {
+      setFailuresOnly(false)
+      setProgramPick(patch.program ?? null)
       setFilter(patch.filter ?? 'all')
       setQuery(patch.query ?? '')
       setSort(patch.sort ?? 'latest')
@@ -205,6 +222,8 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     const focusQuery = props.focusQuery
     useEffect(() => {
       if (focusQuery === undefined || focusQuery === null) return
+      setFailuresOnly(false)
+      setProgramPick(null)
       setFilter('all')
       setQuery(focusQuery)
       setSort('latest')
@@ -226,8 +245,18 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     }
     if (attention.failing !== undefined) {
       const f = attention.failing
-      // The click lands on exactly the named program's failures (the query lens covers program identity).
-      attentionRows.push({ key: 'failing', label: t('cmds.rail.failing'), value: f.program, n: '×' + fmt(f.count), apply: () => { applyLens({ filter: 'failed', query: f.program }) } })
+      attentionRows.push({
+        key: 'failing',
+        label: t('cmds.rail.failing'),
+        value: f.program,
+        n: '×' + fmt(f.count),
+        apply: () => {
+          setProgramPick(f.program)
+          setFailuresOnly(filter === 'slow' || filter === 'background')
+          if (filter === 'all') setFilter('failed')
+          setSort('latest')
+        },
+      })
     }
     if (attention.repeats !== undefined) {
       const r = attention.repeats
@@ -241,9 +270,10 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     const totalPrograms = Math.max(1, programs.reduce((sum, p) => sum + p.n, 0))
     const topProgramN = Math.max(1, ...programs.map(p => p.n))
     const pq = progQuery.trim().toLowerCase()
-    // The query applies only while its input is visible — a trimmed log could drop the program count past the
-    // search threshold with a stale query, and an invisible box cannot be cleared.
-    const shownPrograms = programs.length > 6 && pq !== '' ? programs.filter(p => p.name.toLowerCase().includes(pq)) : programs
+    // A query keeps its input visible below the threshold: a trimmed or refreshed log can drop the ranking under
+    // it, and an invisible box cannot be cleared. The picked program stays visible so the highlight never disappears.
+    const showProgSearch = programs.length > 6 || pq !== ''
+    const shownPrograms = programs.filter(p => p.name === programPick || pq === '' || p.name.toLowerCase().includes(pq))
 
     const loadingChannel = commands.length === 0 && props.state === 'loading'
     const failedChannel = commands.length === 0 && props.state === 'failed'
@@ -252,7 +282,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     const rail = showRail ? (
       <div className="lc-cmd-rail">
         <div className="lc-cmd-rail-sec">
-          <div className="lc-cmd-rail-h">{t('cmds.rail.summary')}</div>
+          <div className="lc-cmd-rail-h" title={t('cmds.rail.summaryTip')}>{t('cmds.rail.summary')}</div>
           <div className="lc-cmd-kpis">
             <div className="lc-cmd-kpi"><b>{fmt(tally.runs)}</b><span>{t('cmds.rail.runs')}</span></div>
             <div className="lc-cmd-kpi lc-cmd-kpi-fail">
@@ -286,7 +316,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
           <div className="lc-cmd-rail-sec lc-cmd-progs">
             <div className="lc-cmd-rail-h lc-cmd-progs-h">
               <span title={t('cmds.rail.topScope')}>{t('cmds.rail.top', { n: programs.length })}</span>
-              {programs.length > 6 ? (
+              {showProgSearch ? (
                 <ClearableInput
                   className="lc-cmd-prog-search"
                   type="search"
@@ -305,9 +335,10 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
                   <button
                     key={p.name}
                     type="button"
-                    className="lc-cmd-prog"
-                    title={t('cmds.rail.topTip', { name: p.name })}
-                    onClick={() => { setQuery(p.name) }}
+                    className={'lc-cmd-prog' + (programPick === p.name ? ' lc-cmd-prog-on' : '')}
+                    title={t(programPick === p.name ? 'cmds.rail.topTipOn' : 'cmds.rail.topTip', { name: p.name })}
+                    aria-pressed={programPick === p.name}
+                    onClick={() => { setProgramPick(cur => (cur === p.name ? null : p.name)) }}
                   >
                     <i className="lc-cmd-prog-dot" style={{ background: color }} />
                     <span className="lc-cmd-prog-name">{p.name}</span>
@@ -483,8 +514,11 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
               <button
                 key={f}
                 type="button"
-                className={'lc-gran-btn lc-cmd-chip-' + f + (filter === f ? ' lc-gran-on' : '')}
-                onClick={() => { setFilter(cur => (cur === f ? 'all' : f)) }}
+                className={'lc-gran-btn lc-cmd-chip-' + f + (filter === f || (failuresOnly && f === 'failed') ? ' lc-gran-on' : '')}
+                onClick={() => {
+                  setFailuresOnly(false)
+                  setFilter(cur => (cur === f ? 'all' : f))
+                }}
               >
                 {t('cmds.filter.' + f)}
                 <b className="lc-fa-n">{fmt(counts[f])}</b>

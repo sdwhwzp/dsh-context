@@ -49,7 +49,7 @@ describe('ContextView — the agent network card\'s own session', () => {
     await m.unmount()
   })
 
-  test("the stats board's family cell opens the Fleet tab, else the panel that keeps the card", async () => {
+  test("the stats board's Fleet section opens the Fleet tab, else the panel that keeps the card", async () => {
     const bar = document.createElement('div')
     const tab = (label: string): HTMLButtonElement => {
       const b = document.createElement('button')
@@ -66,7 +66,7 @@ describe('ContextView — the agent network card\'s own session', () => {
     try {
       const View = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }))
       const m = await mount(h(View, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
-      await click(query(m.container, '.lc-strip-cost'))
+      await click(query(m.container, '.lc-ledger-team-head'))
       assert.equal(fleetClicks, 1, 'the served Fleet tab is activated')
       await m.unmount()
       fleet.remove()
@@ -80,24 +80,24 @@ describe('ContextView — the agent network card\'s own session', () => {
     const sidebar = { openTab: (kind: string): void => { opened.push(kind) } }
     const View = makeView(new TestClientCtx({ services: { sessions: selfOnly(), sidebarRight: sidebar } }))
     const m = await mount(h(View, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
-    await click(query(m.container, '.lc-strip-cost'))
+    await click(query(m.container, '.lc-ledger-team-head'))
     assert.deepEqual(opened, ['dsh-context'], 'the sidebar panel whose Context tab holds the card')
     await m.unmount()
 
     const bare = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }))
     const m2 = await mount(h(bare, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
-    await click(query(m2.container, '.lc-strip-cost'))
+    await click(query(m2.container, '.lc-ledger-team-head'))
     await m2.unmount()
   })
 
-  test('with neither view served the family cell is a plain figure, never a dead button', async () => {
+  test('with neither view served the Fleet section is a plain figure, never a dead button', async () => {
     const settings = createContextSettings()
     settings.set('defaultPlacement', 'tab')
     settings.set('fleetTab', 'hide')
     const View = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }), settings)
     const m = await mount(h(View, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
 
-    const cell = query(m.container, '.lc-strip-cost')
+    const cell = query(m.container, '.lc-ledger-team-head')
     assert.equal(cell.getAttribute('role'), null)
     assert.equal(cell.getAttribute('tabindex'), null)
     await click(cell)

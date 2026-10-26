@@ -1,14 +1,14 @@
 /**
- * The four-lane session ledger uses host projection counts. Authorized
+ * The session ledger uses host projection counts. Authorized
  * dsh-spend quotes supply the family cost and currency; without a quote,
  * models.dev supplies estimates. Agent-share estimates remain separate.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import type { ContextEventRecord, ContextTimeline, RequestRecord, SessionCostUsage, SurfaceNode, TimelineCounts } from '../../shared/types'
 import { estimateSessionCost, billedTokensOf, formatCost, formatPriceRate, mergeCostUsage, priceLookupsOf, toCurrency } from '../cost'
 import type { CostCurrency, ModelBook, PriceFace, PriceMiss } from '../cost'
-import { agentForestOf, familyHue, sessionsFaceOf, subagentCostFoldOf } from '../agentTree'
+import { sessionsFaceOf, subagentCostFoldOf } from '../agentTree'
 import { useSessionsSnapshot } from '../agentHeads'
 import type { AgentHeads } from '../agentHeads'
 import type { Translate } from '../i18n'
@@ -63,8 +63,6 @@ export function countsOfRecords(requests: readonly RequestRecord[], events: read
 export interface SubagentStats {
   usage: SessionCostUsage | null
   count: number
-  /** The DESCENDANT roster in family order — the same subtree the count folds: id, label, family hue. */
-  members: { id: string; label: string; family: number }[]
 }
 
 export function makeSubagentCost(
@@ -79,35 +77,6 @@ export function makeSubagentCost(
       () => subagentCostFoldOf(snapshot, sessionId, landed),
       [snapshot, sessionId, landed],
     )
-    // The forest anchors at the TOPMOST ancestor, so the roster walks the edges DOWN from the current session —
-    // the same subtree `subagentCostFoldOf` counts, never a parent's siblings.
-    const members = useMemo(() => {
-      const forest = agentForestOf(snapshot, sessionId)
-      if (forest === null || sessionId === undefined || sessionId === '') return []
-      const byId = new Map(forest.nodes.map(n => [n.id, n]))
-      const children = new Map<string, string[]>()
-      for (const e of forest.edges) {
-        const kids = children.get(e.from)
-        if (kids === undefined) children.set(e.from, [e.to])
-        else kids.push(e.to)
-      }
-      const out: { id: string; label: string; family: number }[] = []
-      const queue = [sessionId]
-      const seen = new Set(queue)
-      for (let i = 0; i < queue.length; i++) {
-        for (const kid of children.get(queue[i]) ?? []) {
-          /* v8 ignore next 3 -- agentForestOf's edge set is cycle-free. */
-          if (seen.has(kid)) continue
-          seen.add(kid)
-          const node = byId.get(kid)
-          /* v8 ignore next 1 -- every edge target is one of that forest's nodes. */
-          if (node === undefined) continue
-          out.push({ id: node.id, label: node.label, family: node.family })
-          queue.push(kid)
-        }
-      }
-      return out
-    }, [snapshot, sessionId])
     // Same value → same state: the identity bail-out keeps a settled replay on every snapshot tick from looping.
     useEffect(() => {
       for (const id of fold.cold) {
@@ -116,11 +85,13 @@ export function makeSubagentCost(
         }).catch(() => {})
       }
     }, [fold, heads])
-    return { usage: fold.usage, count: fold.count, members }
+    return { usage: fold.usage, count: fold.count }
   }
 }
 
-const EVENT_PILLS: readonly { kind: 'inject' | 'compaction' | 'prune'; tally: 'injects' | 'compactions' | 'prunes'; cls: string }[] = [
+export type StatsEventKind = 'inject' | 'compaction' | 'prune'
+
+const EVENT_PILLS: readonly { kind: StatsEventKind; tally: 'injects' | 'compactions' | 'prunes'; cls: string }[] = [
   { kind: 'inject', tally: 'injects', cls: 'lc-kind-inject' },
   { kind: 'compaction', tally: 'compactions', cls: 'lc-kind-compaction' },
   { kind: 'prune', tally: 'prunes', cls: 'lc-kind-prune' },
@@ -183,8 +154,8 @@ interface StatsContextProps {
   onToolPick?: (tool: string) => void
   /** The command lane's chip pick: filter that program in the Command Executions card. */
   onCommandPick?: (program: string) => void
-  /** The roster's chip pick: highlight that member in the Agent Network. */
-  onMemberPick?: (id: string) => void
+  /** The events tile's per-kind jump: reveal the Context Events card filtered to that kind. */
+  onEventsClick?: (kind: StatsEventKind) => void
   toolCalls?: number
   files: { reads: number; writes: number; searches: number; images: number }
   tools: readonly (readonly [string, number])[]
@@ -212,11 +183,67 @@ const TOOL_SHADE = (rank: number): string =>
   `color-mix(in srgb, var(--color-teal-500) ${Math.max(38, 100 - rank * 21)}%, transparent)`
 const TOOL_REST = 'color-mix(in srgb, var(--color-neutral-500) 40%, transparent)'
 
-/** The subagents lane spells out at most four names by ROSTER POSITION; the tail folds into the "+N" chip. */
-const SUB_MEMBERS_MAX = 4
-
 /** The tool lane's own gap, mirrored from `.lc-ledger-chips` in stats.css so the fit arithmetic matches the rendered box. */
 const CHIP_GAP = 3
+
+/** Widest leading run of chips that fits the row. `alwaysMore` reserves the tail chip even when nothing is hidden
+ *  (the tool lane's colour key); otherwise every chip shows when it fits and only the overflow folds. */
+function useFittedChips(tally: readonly unknown[], alwaysMore: boolean) {
+  const count = tally.length
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const gaugeRef = useRef<HTMLDivElement | null>(null)
+  const chipGaugeRef = useRef<HTMLDivElement | null>(null)
+  const [shown, setShown] = useState(count)
+
+  const fit = useCallback(() => {
+    const count = tally.length
+    const row = rowRef.current
+    const gauge = gaugeRef.current
+    const chipGauge = chipGaugeRef.current
+    /* v8 ignore next 3 -- the gauges always render, so their refs are set whenever the row is. */
+    if (row === null || gauge === null || chipGauge === null) return
+    const width = row.getBoundingClientRect().width
+    // Nothing measurable (a hidden pane, jsdom, a top-only rect stub): show the whole tally rather than guessing a subset.
+    if (!(width > 0)) {
+      setShown(count)
+      return
+    }
+    const widths = Array.from(gauge.children, el => el.getBoundingClientRect().width)
+    const chips = Array.from(chipGauge.children, el => el.getBoundingClientRect().width)
+    if (!alwaysMore) {
+      let total = 0
+      for (let i = 0; i < count; i++) total += widths[i] + (i === 0 ? 0 : CHIP_GAP)
+      if (total <= width) {
+        setShown(count)
+        return
+      }
+    }
+    // Widest set that fits WITH the chip it would carry, top down: measuring the live chip would feed the pass its own output.
+    let pills = 0
+    for (let n = Math.min(widths.length, chips.length - 1); n >= 0; n--) {
+      let total = chips[count - n] + n * CHIP_GAP
+      for (let i = 0; i < n; i++) total += widths[i]
+      if (total <= width) {
+        pills = n
+        break
+      }
+    }
+    setShown(prev => (prev === pills ? prev : pills))
+  }, [tally, alwaysMore])
+
+  // Re-weigh on a new tally; the ResizeObserver covers a pane drag, which changes no prop.
+  useLayoutEffect(fit, [fit])
+  /* v8 ignore start -- jsdom exposes no ResizeObserver. */
+  useEffect(() => {
+    const row = rowRef.current
+    if (row === null || typeof ResizeObserver !== 'function') return
+    const observer = new ResizeObserver(fit)
+    observer.observe(row)
+    return () => { observer.disconnect() }
+  }, [fit])
+  /* v8 ignore stop */
+  return { shown, rowRef, gaugeRef, chipGaugeRef }
+}
 
 interface ToolChipsProps {
   tools: readonly (readonly [string, number])[]
@@ -229,10 +256,7 @@ interface ToolChipsProps {
  *  the "+N" chip, so the lane's height depends on the card's width alone and nothing is clipped. */
 function ToolChips(props: ToolChipsProps): ReactElement {
   const { tools, onPick, t, fmt } = props
-  const rowRef = useRef<HTMLDivElement | null>(null)
-  const gaugeRef = useRef<HTMLDivElement | null>(null)
-  const chipGaugeRef = useRef<HTMLDivElement | null>(null)
-  const [shown, setShown] = useState(tools.length)
+  const { shown, rowRef, gaugeRef, chipGaugeRef } = useFittedChips(tools, true)
 
   const chip = (name: string, n: number, rank: number, hint = false): ReactElement => {
     const wire = hint && onPick !== undefined ? pickWire(t('stats.toolJump'), () => { onPick(name) }) : undefined
@@ -248,45 +272,6 @@ function ToolChips(props: ToolChipsProps): ReactElement {
       </span>
     )
   }
-
-  const fit = useCallback(() => {
-    const row = rowRef.current
-    const gauge = gaugeRef.current
-    const chipGauge = chipGaugeRef.current
-    /* v8 ignore next 3 -- the gauges always render, so their refs are set whenever the row is. */
-    if (row === null || gauge === null || chipGauge === null) return
-    const width = row.getBoundingClientRect().width
-    // Nothing measurable (a hidden pane, jsdom, a top-only rect stub): show the whole tally rather than guessing a subset.
-    if (!(width > 0)) {
-      setShown(tools.length)
-      return
-    }
-    const widths = Array.from(gauge.children, el => el.getBoundingClientRect().width)
-    const chips = Array.from(chipGauge.children, el => el.getBoundingClientRect().width)
-    // Widest set that fits WITH the chip it would carry, top down: measuring the live chip would feed the pass its own output.
-    let pills = 0
-    for (let n = Math.min(widths.length, chips.length - 1); n >= 0; n--) {
-      let total = chips[tools.length - n] + n * CHIP_GAP
-      for (let i = 0; i < n; i++) total += widths[i]
-      if (total <= width) {
-        pills = n
-        break
-      }
-    }
-    setShown(prev => (prev === pills ? prev : pills))
-  }, [tools])
-
-  // Re-weigh on a new tally; the ResizeObserver covers a pane drag, which changes no prop.
-  useLayoutEffect(fit, [fit])
-  /* v8 ignore start -- jsdom exposes no ResizeObserver. */
-  useEffect(() => {
-    const row = rowRef.current
-    if (row === null || typeof ResizeObserver !== 'function') return
-    const observer = new ResizeObserver(fit)
-    observer.observe(row)
-    return () => { observer.disconnect() }
-  }, [fit])
-  /* v8 ignore stop */
 
   const shownTools = tools.slice(0, shown)
   return (
@@ -305,6 +290,54 @@ function ToolChips(props: ToolChipsProps): ReactElement {
               <span className="lc-ledger-chip-label">{t('stats.toolsMore', { n: k })}</span>
             </span>
           ))}
+        </div>
+      </span>
+    </div>
+  )
+}
+
+interface CommandChipsProps {
+  commands: readonly (readonly [string, number])[]
+  onPick?: (program: string) => void
+  t: Translate
+  fmt: (n: number) => string
+}
+
+/** The command lane fills its single row: every program fits until the width runs out, then only the tail folds
+ *  into the "+N" chip. Nothing is click-to-expand. */
+function CommandChips(props: CommandChipsProps): ReactElement {
+  const { commands, onPick, t, fmt } = props
+  const { shown, rowRef, gaugeRef, chipGaugeRef } = useFittedChips(commands, false)
+
+  const chip = (name: string, n: number, hint: boolean): ReactElement => {
+    const wire = hint && onPick !== undefined ? pickWire(t('stats.commandJump'), () => { onPick(name) }) : undefined
+    return (
+      <span
+        key={name}
+        className={'lc-ledger-chip' + (wire !== undefined ? ' lc-ledger-chip-btn' : '')}
+        {...(wire ?? { title: name })}
+      >
+        <i style={{ background: TOOL_SHADE(1) }} />
+        <span className="lc-ledger-chip-label">{name}</span>
+        <b>{fmt(n)}</b>
+      </span>
+    )
+  }
+  const more = (hidden: number, key?: string): ReactElement => (
+    <span key={key} className="lc-ledger-chip lc-ledger-chip-more">
+      <i style={{ background: TOOL_REST }} />
+      <span className="lc-ledger-chip-label">{t('stats.toolsMore', { n: hidden })}</span>
+    </span>
+  )
+
+  return (
+    <div className="lc-ledger-chips lc-ledger-in-body2" ref={rowRef}>
+      {commands.slice(0, shown).map(([name, n]) => chip(name, n, true))}
+      {shown < commands.length ? more(commands.length - shown) : null}
+      <span className="lc-ledger-gauge" aria-hidden="true">
+        <div className="lc-ledger-chips" ref={gaugeRef}>{commands.map(([name, n]) => chip(name, n, false))}</div>
+        <div className="lc-ledger-chips" ref={chipGaugeRef}>
+          {Array.from({ length: commands.length + 1 }, (_, k) => more(k, String(k)))}
         </div>
       </span>
     </div>
@@ -452,29 +485,12 @@ export function makeStatsContext(
     const figure = (key: 'skills' | 'answers', value: number, label: string): ReactElement => {
       const wire = jumpWire(key)
       return (
-        <span key={key} className={'lc-core-kv' + (wire === undefined ? '' : ' lc-core-kv-btn')} {...(wire ?? {})}>
+        <span key={key} className={'lc-core-kv lc-core-kv-' + key + (wire === undefined ? '' : ' lc-core-kv-btn')} {...(wire ?? {})}>
           <b>{fmt(value)}</b>
           <i>{label}</i>
         </span>
       )
     }
-    /** One lower-lane chip: the two lanes differ only in their dot colour, figures and pick wire. */
-    const laneChip = (
-      key: string,
-      wire: JumpWire | undefined,
-      opts: { color: string; label: string; count?: string; title: string },
-    ): ReactElement => (
-      <span
-        key={key}
-        className={'lc-ledger-chip' + (wire !== undefined ? ' lc-ledger-chip-btn' : '')}
-        {...(wire ?? { title: opts.title })}
-      >
-        <i style={{ background: opts.color }} />
-        <span className="lc-ledger-chip-label">{opts.label}</span>
-        {opts.count !== undefined ? <b>{opts.count}</b> : null}
-      </span>
-    )
-    /** An empty lower lane still holds one chip line, so the left and right stacks stay level. */
     const emptyChip = (key: string): ReactElement => (
       <span key={key} className="lc-ledger-chip lc-ledger-chip-dim">
         <span className="lc-ledger-chip-label">{t('stats.laneEmpty')}</span>
@@ -495,14 +511,14 @@ export function makeStatsContext(
     const teamPair = pair(familyTokens, priced !== null ? priced.money(priced.cost) : costText)
     const openTeam = props.onTeamClick
     const onTeamClick = (ev: MouseEvent): void => {
-      if ((ev.target as HTMLElement).closest('a') !== null) return
+      if ((ev.target as HTMLElement).closest('a, button') !== null) return
       openTeam?.()
     }
-    const onTeamKeyDown = (ev: KeyboardEvent): void => {
-      if (ev.key !== 'Enter' && ev.key !== ' ') return
-      ev.preventDefault()
-      openTeam?.()
-    }
+    const costRow = (key: string, content: ReactNode): ReactElement => (
+      openTeam === undefined
+        ? <span key={key} className="lc-strip-cell lc-ledger-cost-row lc-stat-tipped group/tip">{content}</span>
+        : <button key={key} type="button" className="lc-strip-cell lc-ledger-cost-row lc-ledger-cost-row-btn lc-stat-tipped group/tip" onClick={openTeam}>{content}</button>
+    )
     return (
       <div className="lc-card flex-[3] min-w-[min(360px,100%)]">
         <div className="lc-card-title">
@@ -512,108 +528,100 @@ export function makeStatsContext(
           <div className="lc-ledger">
             <div className="lc-ledger-head lc-ledger-in-head">
               <span className="lc-ledger-label">{t('stats.io')}</span>
-              <span className="lc-ledger-sep" aria-hidden="true">·</span>
               <b className="lc-ledger-total">{fmt(ioTotal)}</b>
             </div>
             <div className="lc-core">
               <span className="lc-core-label">{t('stats.session')}</span>
               <span className="lc-core-kvs lc-core-kvs-main">
-                <span className="lc-core-kv lc-core-kv-lg"><b>{fmt(props.counts.steps)}</b><i>{t('stats.steps')}</i></span>
-                <span className="lc-core-kv lc-core-kv-lg"><b>{fmt(props.counts.turns)}</b><i>{t('stats.turns')}</i></span>
+                <span className="lc-core-kv lc-core-kv-turns"><b>{fmt(props.counts.turns)}</b><i>{t('stats.turns')}</i></span>
+                <span className="lc-core-kv lc-core-kv-steps"><b>{fmt(props.counts.steps)}</b><i>{t('stats.steps')}</i></span>
               </span>
               <span className="lc-core-kvs">
                 {figure('skills', props.counts.skills ?? 0, t('stats.skills'))}
                 {figure('answers', props.answers ?? 0, t('stats.answers'))}
               </span>
+              <span className="lc-core-kv lc-core-kv-events">
+                <i>{t('stats.events')}</i>
+                <span className="lc-core-kv-events-list">
+                  {EVENT_PILLS.map((p, index) => {
+                    const n = props.counts[p.tally]
+                    const wire = props.onEventsClick === undefined
+                      ? undefined
+                      : pickWire(t('stats.eventsKindJump', { kind: t('kind.' + p.kind) }), () => { props.onEventsClick?.(p.kind) })
+                    return (
+                      <Fragment key={p.kind}>
+                        {index > 0 ? <span className="lc-core-kv-sep" aria-hidden="true">/</span> : null}
+                        <span
+                          className={'lc-kind ' + p.cls + ' lc-core-kv-event'
+                            + (wire === undefined ? '' : ' lc-core-kv-event-btn')
+                            + (n === 0 ? ' lc-ledger-chip-dim' : '')}
+                          data-kind={p.kind}
+                          {...(wire ?? {})}
+                        >
+                          {t('kind.' + p.kind)}
+                          <b>{fmt(n)}</b>
+                        </span>
+                      </Fragment>
+                    )
+                  })}
+                </span>
+              </span>
             </div>
             <div className="lc-ledger-head lc-ledger-out-head">
               <span className="lc-ledger-label">{t('stats.toolCalls')}</span>
-              <span className="lc-ledger-sep" aria-hidden="true">·</span>
               <b className="lc-ledger-total">{fmt(toolTotal)}</b>
             </div>
             <ToolChips tools={props.tools} onPick={props.onToolPick} t={t} fmt={fmt} />
             <div className="lc-ledger-head lc-ledger-in-head2">
               <span className="lc-ledger-label">{t('stats.commands')}</span>
-              <span className="lc-ledger-sep" aria-hidden="true">·</span>
               <b className="lc-ledger-total">{fmt(props.commands?.runs ?? 0)}</b>
             </div>
-            <div className="lc-ledger-head lc-ledger-out-head2">
-              <span className="lc-ledger-label">{t('stats.subagents')}</span>
-              <span className="lc-ledger-sep" aria-hidden="true">·</span>
-              <b className="lc-ledger-total">{fmt(sub.count)}</b>
-            </div>
-            <div className="lc-ledger-chips lc-ledger-in-body2">
-              {commandTop.length === 0
-                ? emptyChip('in')
-                : commandTop.map(([name, n]) => laneChip(name, props.onCommandPick !== undefined
-                  ? pickWire(t('stats.commandJump'), () => { props.onCommandPick?.(name) })
-                  : undefined, { color: TOOL_SHADE(1), label: name, count: fmt(n), title: name }))}
-            </div>
-            <div className="lc-ledger-chips lc-ledger-out-body2">
-              {sub.members.length === 0
-                ? emptyChip('out')
-                : sub.members.slice(0, SUB_MEMBERS_MAX).map(m => laneChip(m.id, props.onMemberPick !== undefined
-                  ? pickWire(m.label, () => { props.onMemberPick?.(m.id) })
-                  : undefined, { color: familyHue(m.family), label: m.label, title: m.label }))}
-              {sub.members.length > SUB_MEMBERS_MAX ? (
-                <span className="lc-ledger-chip lc-ledger-chip-more" title={sub.members.slice(SUB_MEMBERS_MAX).map(m => m.label).join(' · ')}>
-                  <i style={{ background: TOOL_REST }} />
-                  <span className="lc-ledger-chip-label">{t('stats.membersMore', { n: sub.members.length - SUB_MEMBERS_MAX })}</span>
+            <div className="lc-ledger-team">
+              <div
+                className={'lc-ledger-head lc-ledger-out-head2 lc-ledger-team-head lc-ledger-cost-row lc-stat-tipped' + (openTeam === undefined ? '' : ' lc-ledger-cost-row-btn')}
+                onClick={openTeam === undefined ? undefined : onTeamClick}
+              >
+                <span className="lc-strip-cell lc-ledger-team-pair group/tip">
+                  <i>
+                    {openTeam === undefined
+                      ? <span className="lc-ledger-label">{t('stats.fleet')}</span>
+                      : <button type="button" className="lc-ledger-label lc-ledger-team-open" onClick={openTeam}>{t('stats.fleet')}</button>}
+                    <i className="lc-stat-q group-hover/tip:text-(--dsw-alias-label-primary) group-hover/tip:border-(--dsw-alias-label-primary)" aria-hidden="true">?</i>
+                  </i>
+                  <span className="lc-ledger-total">
+                    {costHref === undefined ? teamPair : <a className="lc-strip-link" href={costHref} target="_blank" rel="noreferrer noopener">{teamPair}</a>}
+                  </span>
                 </span>
-              ) : null}
+                <span className="lc-tip lc-stat-tip group-hover/tip:opacity-100" role="tooltip" aria-hidden="true">{costTip}</span>
+              </div>
+              <div className="lc-ledger-out-body2">
+                {costRow('own', <>
+                  <i>
+                    {t('stats.currentAgent')}
+                    <i className="lc-stat-q group-hover/tip:text-(--dsw-alias-label-primary) group-hover/tip:border-(--dsw-alias-label-primary)" aria-hidden="true">?</i>
+                  </i>
+                  {pair(ownTokens, ownText)}
+                  <span className="lc-tip lc-stat-tip group-hover/tip:opacity-100" role="tooltip" aria-hidden="true">{ownTip}</span>
+                </>)}
+                {costRow('subs', <>
+                  <i>
+                    {t('stats.teamSubs', { n: sub.count })}
+                    <i className="lc-stat-q group-hover/tip:text-(--dsw-alias-label-primary) group-hover/tip:border-(--dsw-alias-label-primary)" aria-hidden="true">?</i>
+                  </i>
+                  {pair(subTokens, subText)}
+                  <span className="lc-tip lc-stat-tip group-hover/tip:opacity-100" role="tooltip" aria-hidden="true">{subTip}</span>
+                </>)}
+              </div>
             </div>
+            {commandTop.length === 0
+              ? <div className="lc-ledger-chips lc-ledger-in-body2">{emptyChip('in')}</div>
+              : <CommandChips commands={commandTop} onPick={props.onCommandPick} t={t} fmt={fmt} />}
             <div className="lc-ledger-chips lc-ledger-in-chips">
               {chip('inputs', t('stats.user'), props.humanInputs ?? 0, IO_COLOR.inputs, { jump: 'inputs', tip: t('stats.userTip') })}
               {chip('read', t('stats.fileRead'), props.files.reads, IO_COLOR.read, { jump: 'read', title: t('stats.filesJump') })}
               {chip('write', t('stats.fileWrite'), props.files.writes, IO_COLOR.write, { jump: 'write', title: t('stats.filesJump') })}
               {props.files.searches > 0 ? chip('search', t('stats.fileSearch'), props.files.searches, IO_COLOR.search, { jump: 'search', title: t('stats.filesJump') }) : null}
               {props.files.images > 0 ? chip('image', t('stats.fileImage'), props.files.images, IO_COLOR.image, { jump: 'image', title: t('stats.filesJump') }) : null}
-            </div>
-          </div>
-          <div className="lc-strip">
-            <div className="lc-strip-group">
-              <span className="lc-strip-label">{t('stats.events')}</span>
-              {EVENT_PILLS.map((p) => {
-                const n = props.counts[p.tally]
-                return (
-                  <span key={p.kind} className={'lc-kind ' + p.cls + (n === 0 ? ' lc-ledger-chip-dim' : '')}>
-                    {t('kind.' + p.kind)}
-                    <b>{fmt(n)}</b>
-                  </span>
-                )
-              })}
-            </div>
-            <div
-              className="lc-strip-cost"
-              role={openTeam === undefined ? undefined : 'button'}
-              tabIndex={openTeam === undefined ? undefined : 0}
-              onClick={openTeam === undefined ? undefined : onTeamClick}
-              onKeyDown={openTeam === undefined ? undefined : onTeamKeyDown}
-            >
-              <span className="lc-strip-cell lc-stat-tipped group/tip">
-                <i>
-                  {t('stats.currentAgent')}
-                  <i className="lc-stat-q group-hover/tip:text-(--dsw-alias-label-primary) group-hover/tip:border-(--dsw-alias-label-primary)" aria-hidden="true">?</i>
-                </i>
-                {pair(ownTokens, ownText)}
-                <span className="lc-tip lc-stat-tip group-hover/tip:opacity-100" role="tooltip">{ownTip}</span>
-              </span>
-              <span className="lc-strip-cell lc-stat-tipped group/tip">
-                <i>
-                  {t('stats.teamSubs', { n: sub.count })}
-                  <i className="lc-stat-q group-hover/tip:text-(--dsw-alias-label-primary) group-hover/tip:border-(--dsw-alias-label-primary)" aria-hidden="true">?</i>
-                </i>
-                {pair(subTokens, subText)}
-                <span className="lc-tip lc-stat-tip group-hover/tip:opacity-100" role="tooltip">{subTip}</span>
-              </span>
-              <span className="lc-strip-cell lc-strip-team lc-stat-tipped group/tip">
-                <i>
-                  {t('stats.team')}
-                  <i className="lc-stat-q group-hover/tip:text-(--dsw-alias-label-primary) group-hover/tip:border-(--dsw-alias-label-primary)" aria-hidden="true">?</i>
-                </i>
-                {costHref === undefined ? teamPair : <a className="lc-strip-link" href={costHref} target="_blank" rel="noreferrer noopener">{teamPair}</a>}
-                <span className="lc-tip lc-stat-tip group-hover/tip:opacity-100" role="tooltip">{costTip}</span>
-              </span>
             </div>
           </div>
         </div>

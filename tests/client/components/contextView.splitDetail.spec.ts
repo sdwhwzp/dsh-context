@@ -48,8 +48,8 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
     const View = makeView(ctx)
     const m = await mount(h(View, { sessionId: 'sv-slim', useProjection: projectionsFor(slimHead()) }))
 
-    const values = queryAll(m.container, '.lc-core b').map(el => text(el))
-    assert.deepEqual(values, ['3', '1', '0', '0'], 'steps/turns/skills/answers from the head counters')
+    const values = queryAll(m.container, '.lc-core-kv:not(.lc-core-kv-events) b').map(el => text(el))
+    assert.deepEqual(values, ['1', '3', '0', '0'], 'turns/steps/skills/answers from the head counters')
     assert.ok(text(m.container).includes(DICT_EN['detail.loading']))
     assert.equal(queryAll(m.container, '.lc-bar').length, 0, 'the chart waits for the detail')
     assert.equal(queryAll(m.container, '.lc-br-pick option').length, 1, 'the picker holds only the live row')
@@ -107,7 +107,7 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
       return parent
     }
 
-    const cells = queryAll(m.container, '.lc-core-kv-btn')
+    const cells = queryAll(m.container, '.lc-core-kv-btn:not(.lc-core-kv-events)')
     assert.equal(cells.length, 2)
     await click(cells[1])
     await flush()

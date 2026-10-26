@@ -136,8 +136,7 @@ export interface ProgramCount {
   n: number
 }
 
-/** The rail's program ranking over the RETAINED list (the floor note already scopes a trimmed log): every program,
- * most-run first with a stable name tie-break. */
+/** The rail's program ranking: every program among the given views, most-run first with a stable name tie-break. */
 export function programsOf(views: readonly CommandView[]): ProgramCount[] {
   const counts = new Map<string, number>()
   for (const view of views) counts.set(view.program, (counts.get(view.program) ?? 0) + 1)
@@ -146,7 +145,7 @@ export function programsOf(views: readonly CommandView[]): ProgramCount[] {
     .sort((a, b) => (b.n - a.n) || (a.name < b.name ? -1 : 1))
 }
 
-/** The rail's Attention facts over the retained list; each key drives a list lens in the card. */
+/** The rail's Attention facts among the given views; each key drives a list lens in the card. */
 export interface CommandAttention {
   /** The slowest settled run (only when it crossed the second mark). */
   slowest?: { cmd: string; ms: number }

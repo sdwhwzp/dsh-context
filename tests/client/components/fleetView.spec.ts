@@ -110,7 +110,7 @@ describe('FleetView — the agent family on its own page', () => {
     ctx.dispose()
   })
 
-  test("the stats card's roster pick lights the relayed member card", async () => {
+  test('a relayed member pick lights that member card', async () => {
     const id = 'sv-fleet-pick'
     const snapshot = {
       byId: {

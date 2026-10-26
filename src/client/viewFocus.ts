@@ -26,8 +26,8 @@ export function takeContextFocus(sessionId: string): number | null {
   return seq
 }
 
-/** Stats → Fleet member highlight relay: the roster chip's member id is the RESTING pick every subscribed view
- *  adopts (the tab, its own graph, the sidebar copy), so no consumer can eat another's pick. */
+/** Fleet member highlight channel: one resting pick per session that every subscribed view adopts (the tab, its own
+ *  graph, the sidebar copy), so no consumer can eat another's pick. */
 
 const memberFocus = new Map<string, string>()
 

@@ -2,19 +2,18 @@
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi, beforeEach } from 'vitest'
-import { countsOfRecords, makeStatsContext, makeSubagentCost, toolTallyOf } from '../../../src/client/components/statsContext'
+import { makeStatsContext, makeSubagentCost } from '../../../src/client/components/statsContext'
 import type { SubagentStats } from '../../../src/client/components/statsContext'
-import { familyHue } from '../../../src/client/agentTree'
 import { DICT_EN } from '../../../src/client/i18n'
 import { makeAgentHeads } from '../../../src/client/agentHeads'
 import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
-import type { ContextEventRecord, ContextTimeline, RequestRecord, SessionCostUsage, SurfaceNode } from '../../../src/shared/types'
+import type { ContextTimeline, SessionCostUsage } from '../../../src/shared/types'
 import { TestClientCtx, asClientCtx } from '../helpers/harness'
 import { click, flush, makeKit, mount, query, queryAll, text } from '../helpers/kit'
 
 const kit = makeKit()
 const kitZh = makeKit('zh')
-const NO_SUB = (): SubagentStats => ({ usage: null, count: 0, members: [] })
+const NO_SUB = (): SubagentStats => ({ usage: null, count: 0 })
 const StatsContext = makeStatsContext(kit, NO_SUB)
 const StatsContextZh = makeStatsContext(kitZh, NO_SUB)
 
@@ -31,22 +30,6 @@ const COST: SessionCostUsage = {
 const NO_FILES = { reads: 0, writes: 0, searches: 0, images: 0 }
 const NO_COUNTS = { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 }
 
-function req(turn?: number): RequestRecord {
-  return {
-    time: 0, seq: 0, system: 0, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 0,
-    ...(turn !== undefined ? { turn } : {}),
-  }
-}
-
-function ev(kind: ContextEventRecord['kind']): ContextEventRecord {
-  return { seq: 0, time: 0, kind }
-}
-
-/** A skill-tagged inject event the way the host fold stamps it (fold.ts). */
-function skillEv(name: string): ContextEventRecord {
-  return { seq: 0, time: 0, kind: 'inject', form: 'instructions', sub: 'skill', name }
-}
-
 /** One lane's VISIBLE chips as 'label+figure' strings; the off-flow gauge (the fit's hidden measuring copy) never
  *  shows, so it is not part of what a reader sees. */
 function chipsOf(row: HTMLElement): string[] {
@@ -55,9 +38,14 @@ function chipsOf(row: HTMLElement): string[] {
 }
 
 function costCellsOf(container: HTMLElement): string[] {
-  return queryAll(container, '.lc-strip-cost .lc-strip-cell').map(el =>
+  return queryAll(container, '.lc-ledger-team .lc-strip-cell').map(el =>
     (el.querySelector('i')?.textContent ?? '') + (el.querySelector('.lc-strip-pair')?.textContent ?? ''),
   )
+}
+
+function costTipOf(container: HTMLElement, scope: 'team' | 'own' | 'sub'): string {
+  const index = scope === 'team' ? 0 : scope === 'own' ? 1 : 2
+  return text(queryAll(container, '.lc-ledger-team .lc-stat-tip')[index])
 }
 
 beforeEach(() => {
@@ -69,61 +57,8 @@ afterEach(() => {
   resetModelPrices()
 })
 
-describe('countsOfRecords (the inline generation derivation)', () => {
-  test('tallies distinct turns, records, the three priced event kinds, and the distinct loaded skills', () => {
-    const counts = countsOfRecords(
-      [req(1), req(1), req(2), req()],
-      [
-        ev('inject'), ev('inject'), ev('inject'), ev('compaction'), ev('compaction'), ev('prune'), ev('model'), ev('mode'),
-        // Skill loads and a `/name` invocation count by DISTINCT name; the
-        // available-skills catalog digest rides an untagged inject event and never lands in the tally.
-        skillEv('grilling'), skillEv('grilling'), skillEv('ponytail'),
-        { ...ev('inject'), name: 'available-skills' },
-        { ...ev('inject'), sub: 'skill' },
-        { ...ev('inject'), sub: 'skill', name: 5 } as unknown as ContextEventRecord,
-      ],
-    )
-    // Only the three priced event kinds appear; every inject rides kind 'inject' — only the skills
-    // TALLY filters by the tag (catalog digest and hostile shapes included).
-    assert.deepEqual(counts, { turns: 3, steps: 4, injects: 9, compactions: 2, prunes: 1, skills: 2 })
-  })
-
-  test('empty collections tally zero', () => {
-    assert.deepEqual(countsOfRecords([], []), { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0, skills: 0 })
-  })
-})
-
-describe('toolTallyOf (the live-surface per-tool tally)', () => {
-  const node = (cat: SurfaceNode['cat'], tool?: string): SurfaceNode => ({ seq: 0, cat, tokens: 0, ...(tool !== undefined ? { tool } : {}) })
-
-  test('folds the host predicate: tool results, plus skill nodes carrying a tool', () => {
-    const tally = toolTallyOf([
-      node('tool', 'read'), node('tool', 'read'), node('tool', 'bash'),
-      node('skill', 'run_code'), // a skill node carrying a tool counts
-      node('skill'), // a bare skill node does not
-      node('user'), node('assistant'),
-      node('tool'), // an unnamed result counts toward the head figure but rides no pill
-    ])
-    assert.deepEqual(tally, [['read', 2], ['bash', 1], ['run_code', 1]])
-  })
-
-  test('sorts count-desc then name-asc, skipping hostile shapes', () => {
-    const tally = toolTallyOf([
-      node('tool', 'bash'), node('tool', 'read'), node('tool', 'read'),
-      { seq: 0, cat: 'tool', tokens: 0, tool: 5 } as unknown as SurfaceNode,
-      node('tool', ''),
-    ])
-    assert.deepEqual(tally, [['read', 2], ['bash', 1]])
-  })
-
-  test('count ties break name-asc in either insertion order', () => {
-    assert.deepEqual(toolTallyOf([node('tool', 'zed'), node('tool', 'apple')]), [['apple', 1], ['zed', 1]])
-    assert.deepEqual(toolTallyOf([node('tool', 'apple'), node('tool', 'zed')]), [['apple', 1], ['zed', 1]])
-  })
-})
-
 describe('StatsContext', () => {
-  /** jsdom has no layout, so the tool lane shows the whole tally. Stubbing widths lets the fit run for real: a chip
+  /** jsdom has no layout, so the chips show the whole tally. Stubbing widths lets the fit run for real: a chip
    *  is sized by its label's length, and the "+N" chip by its own. */
   function stubWidths(chipWidth: number, moreWidth: number, rowWidth: number): () => void {
     const real = Element.prototype.getBoundingClientRect
@@ -132,7 +67,7 @@ describe('StatsContext', () => {
       const isChip = this.classList.contains('lc-ledger-chip')
       const isRow = this.classList.contains('lc-ledger-chips')
       if (!isChip && !isRow) return real.call(this)
-      if (isRow) return this.classList.contains('lc-ledger-out-chips') ? rect(rowWidth) : real.call(this)
+      if (isRow) return rect(rowWidth)
       return rect(this.classList.contains('lc-ledger-chip-more') ? moreWidth : chipWidth)
     }
     return () => { Element.prototype.getBoundingClientRect = real }
@@ -166,7 +101,39 @@ describe('StatsContext', () => {
     }
   })
 
-  test('the ledger paints the two lanes, the hinge, and the bottom strip', async () => {
+  test('the command lane fills the row and folds only what does not fit', async () => {
+    const restore = stubWidths(100, 40, 260)
+    try {
+      const m = await mount(h(StatsContext, {
+        counts: NO_COUNTS, files: NO_FILES, tools: [],
+        commands: { runs: 9, top: [['python3', 3], ['git', 2], ['grep', 2], ['node', 1], ['npm', 1]] },
+        locale: 'en',
+      }))
+      await flush()
+      assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python33', 'git2', '+3 more'], 'two programs fit beside the tail chip')
+      await m.unmount()
+    } finally {
+      restore()
+    }
+  })
+
+  test('a wide command lane spells out every program with no overflow chip', async () => {
+    const restore = stubWidths(100, 40, 900)
+    try {
+      const m = await mount(h(StatsContext, {
+        counts: NO_COUNTS, files: NO_FILES, tools: [],
+        commands: { runs: 9, top: [['python3', 3], ['git', 2], ['grep', 2], ['node', 1], ['npm', 1]] },
+        locale: 'en',
+      }))
+      await flush()
+      assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python33', 'git2', 'grep2', 'node1', 'npm1'])
+      await m.unmount()
+    } finally {
+      restore()
+    }
+  })
+
+  test('the ledger paints the two lanes, the KPI row with its events tile, and the Team costs', async () => {
     const m = await mount(h(StatsContext, {
       counts: { turns: 3, steps: 4, injects: 3, compactions: 2, prunes: 1, skills: 2 },
       humanInputs: 7,
@@ -180,8 +147,8 @@ describe('StatsContext', () => {
     }))
     await flush()
     assert.ok(text(m.container).includes('Context Stats'))
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-label').map(el => el.textContent), ['Input / Output', 'Tool Calls', 'Command Executions', 'Subagents'])
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['23', '12', '626', '0'])
+    assert.deepEqual(queryAll(m.container, '.lc-ledger-label').map(el => el.textContent), ['Input / Output', 'Tool Calls', 'Command Executions', 'Fleet'])
+    assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['23', '12', '626', '1.0M/$0.30'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python3212'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-chips')), ['User?7', 'Read9', 'Write2', 'Search4', 'Image1'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read8', 'bash3', 'grep2', 'edit1', 'glob1', '+0 more'])
@@ -189,13 +156,15 @@ describe('StatsContext', () => {
     const inertCmdChip = query(m.container, '.lc-ledger-in-body2 .lc-ledger-chip')
     assert.equal(inertCmdChip.getAttribute('role'), null, 'the command chip stays inert without the relay')
     assert.equal(inertCmdChip.getAttribute('title'), 'python3', 'the name rides the native title')
-    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-body2')), ['None yet'], 'the empty subagents lane holds its line')
+    assert.equal(queryAll(m.container, '.lc-ledger-out-body2 > .lc-strip-cell').length, 2, 'Current Agent and Subagents each hold one cost row')
+    assert.equal(queryAll(m.container, '.lc-ledger-out-body2 .lc-ledger-chip').length, 0, 'the cost rows replace the roster chips')
+    assert.equal(queryAll(m.container, '.lc-strip-cost').length, 0, 'the old bottom-right cost area is gone')
     const core = query(m.container, '.lc-core')
     assert.equal(query(core, '.lc-core-label')?.textContent, 'Current Session')
-    assert.deepEqual(queryAll(core, '.lc-core-kv').map(el => (el.querySelector('b')?.textContent ?? '') + (el.querySelector('i')?.textContent ?? '')), ['4Steps', '3Turns', '2Skill Loads', '3Answers'])
-    assert.equal(queryAll(m.container, '.lc-strip-group .lc-kind').length, 3)
-    assert.equal(queryAll(m.container, '.lc-strip-group .lc-kind.lc-ledger-chip-dim').length, 0)
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?1.0M/$0.30', 'Subagents × 0?0/—', 'Team?1.0M/$0.30'])
+    assert.deepEqual(queryAll(core, '.lc-core-kv:not(.lc-core-kv-events)').map(el => (el.querySelector('b')?.textContent ?? '') + (el.querySelector('i')?.textContent ?? '')), ['3Turns', '4Steps', '2Skill Loads', '3Answers'])
+    assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind').length, 3)
+    assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind.lc-ledger-chip-dim').length, 0)
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?1.0M/$0.30', 'Current Agent?1.0M/$0.30', 'Subagents × 0?0/—'])
     assert.equal(queryAll(m.container, '.lc-stat-tip').length, 4, 'the user chip, own-cell, sub-row, and family tips')
     await m.unmount()
   })
@@ -208,12 +177,13 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['0', '0', '0', '0'])
+    assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['0', '0', '0', '0/—'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-chips')), ['User?0', 'Read0', 'Write0'], 'search/image chips only when they happened')
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['+0 more'], 'the overflow chip always renders, so the lane reads as a figure')
+    assert.equal(queryAll(m.container, '.lc-ledger-in-body2 .lc-ledger-chip-more').length, 0, 'no command overflow control appears without extra programs')
     assert.equal(queryAll(m.container, '.lc-ledger-in-chips .lc-ledger-chip-dim').length, 3, 'every zero chip dims')
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?0/—', 'Subagents × 0?0/—', 'Team?0/—'])
-    assert.equal(queryAll(m.container, '.lc-strip-group .lc-kind.lc-ledger-chip-dim').length, 3, 'the zero event kinds dim too')
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
+    assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind.lc-ledger-chip-dim').length, 3, 'the zero event kinds dim too')
     await m.unmount()
   })
 
@@ -240,9 +210,9 @@ describe('StatsContext', () => {
     }))
     await flush()
     const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
-    assert.equal(tips.length, 4, 'the user chip, own-cell, sub-row, and family tips')
-    assert.ok(tips[0].includes('question answerings'), 'the user chip tip explains its tally')
-    const costTip = tips[3]
+    assert.equal(tips.length, 4, 'the user chip plus the three team-cost tips')
+    assert.ok(tips.includes(DICT_EN['stats.userTip']), 'the user chip tip explains its tally')
+    const costTip = costTipOf(m.container, 'team')
     assert.ok(costTip.includes('every descendant subagent session'), 'the cost tip names the family scope — all levels')
     assert.ok(costTip.includes('billed total'), 'the tip glosses the token face too')
     assert.ok(costTip.includes('Per-1M-token rates:'))
@@ -267,7 +237,7 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    const ownTip = text(queryAll(m.container, '.lc-stat-tip')[1])
+    const ownTip = costTipOf(m.container, 'own')
     assert.ok(ownTip.includes('current agent session alone'), 'the own tip scopes the figure to the session itself')
     assert.ok(ownTip.includes('Per-1M-token rates:'))
     assert.ok(ownTip.includes('for deepseek · deepseek-v4-flash.'))
@@ -283,7 +253,7 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[3])
+    const costTip = costTipOf(m.container, 'team')
     assert.ok(costTip.includes('Priced as listed on models.dev for zhipuai · glm-5.3-flash.'))
     assert.ok(!costTip.includes('DeepSeek'), 'the DeepSeek scheme note stays out of other providers’ bubbles')
     assert.ok(costTip.includes('Uncached input $0.07'))
@@ -338,10 +308,10 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[3])
+    const costTip = costTipOf(m.container, 'team')
     assert.ok(costTip.includes('for deepseek · deepseek-v4-flash.'))
     assert.ok(costTip.includes('for zhipuai · glm-5.3-flash.'))
-    assert.deepEqual(costCellsOf(m.container)[2], 'Team?3.0M/$0.45')
+    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?3.0M/$0.45')
     await m.unmount()
   })
 
@@ -356,14 +326,14 @@ describe('StatsContext', () => {
     }))
     await flush()
     assert.ok(text(m.container).includes('上下文统计'))
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-label').map(el => el.textContent), ['输入输出', '工具调用', '命令执行', '子 Agent'])
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['3', '2', '0', '0'])
+    assert.deepEqual(queryAll(m.container, '.lc-ledger-label').map(el => el.textContent), ['输入输出', '工具调用', '命令执行', '编队'])
+    assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['3', '2', '0', '1.0M/¥2.00'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-chips')), ['用户?0', '读取2', '写入1'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read2', '其他 +0'])
     assert.equal(query(m.container, '.lc-core-label')?.textContent, '当前会话')
     const core = query(m.container, '.lc-core')
-    assert.deepEqual(queryAll(core, '.lc-core-kv').map(el => (el.querySelector('b')?.textContent ?? '') + (el.querySelector('i')?.textContent ?? '')), ['1步数', '1轮次', '5技能加载', '4模型回复'])
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[3])
+    assert.deepEqual(queryAll(core, '.lc-core-kv:not(.lc-core-kv-events)').map(el => (el.querySelector('b')?.textContent ?? '') + (el.querySelector('i')?.textContent ?? '')), ['1轮次', '1步数', '5技能加载', '4模型回复'])
+    const costTip = costTipOf(m.container, 'team')
     assert.ok(costTip.includes('含当前智能体及所有层级的子智能体'), 'the cost tip names the family scope too — all levels')
     assert.ok(costTip.includes('每百万 Token 价格'))
     assert.ok(costTip.includes('挂牌价为谷时价'), 'the zh tip says the listed rates are off-peak')
@@ -377,43 +347,29 @@ describe('StatsContext', () => {
     await m.unmount()
   })
 
-  test('the lower lanes list the top commands and the subagent roster, and their chips jump', async () => {
+  test('the lower lanes show commands, family costs, and jump command and tool chips', async () => {
     const SUB: SessionCostUsage = {
       'zai-coding-cn': { 'glm-5.3-flash': { peak: { uncached: 2_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
     }
     const picks: string[] = []
     const toolPicks: string[] = []
-    const memberPicks: string[] = []
-    const Stats = makeStatsContext(kit, () => ({
-      usage: SUB,
-      count: 5,
-      members: [
-        { id: 's1', label: 'scout', family: 1 },
-        { id: 's2', label: 'builder', family: 2 },
-        { id: 's3', label: 'reviewer', family: 3 },
-        { id: 's4', label: 'tester', family: 4 },
-        { id: 's5', label: 'fifth', family: 5 },
-      ],
-    }))
+    const Stats = makeStatsContext(kit, () => ({ usage: SUB, count: 5 }))
     const m = await mount(h(Stats, {
       counts: NO_COUNTS,
       files: NO_FILES,
       tools: [['read', 8]],
-      commands: { runs: 626, top: [['python3', 212], ['git', 88], ['grep', 40]] },
+      commands: { runs: 626, top: [['python3', 212], ['git', 88], ['grep', 40], ['node', 20], ['npm', 10]] },
       cost: COST,
       locale: 'en',
       onToolPick: (tool) => { toolPicks.push(tool) },
       onCommandPick: (program) => { picks.push(program) },
-      onMemberPick: (id) => { memberPicks.push(id) },
     }))
     await flush()
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-label').map(el => el.textContent), ['Input / Output', 'Tool Calls', 'Command Executions', 'Subagents'])
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['0', '8', '626', '5'])
-    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python3212', 'git88', 'grep40'])
-    const subs = queryAll(m.container, '.lc-ledger-out-body2 .lc-ledger-chip').map(el => el.querySelector('.lc-ledger-chip-label')?.textContent)
-    assert.deepEqual(subs, ['scout', 'builder', 'reviewer', 'tester', '+1 more'], 'four names spell out, the tail folds')
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?1.0M/$0.30', 'Subagents × 5?2.0M/$0.15', 'Team?3.0M/$0.45'])
-    // Every jumpable chip carries its hint and fires on click and keyboard.
+    assert.deepEqual(queryAll(m.container, '.lc-ledger-label').map(el => el.textContent), ['Input / Output', 'Tool Calls', 'Command Executions', 'Fleet'])
+    assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['0', '8', '626', '3.0M/$0.45'])
+    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python3212', 'git88', 'grep40', 'node20', 'npm10'], 'every program fits the unmeasured row')
+    assert.equal(queryAll(m.container, '.lc-ledger-out-body2 .lc-ledger-chip').length, 0, 'no roster chips remain below Team')
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?3.0M/$0.45', 'Current Agent?1.0M/$0.30', 'Subagents × 5?2.0M/$0.15'])
     const cmdChips = queryAll(m.container, '.lc-ledger-in-body2 .lc-ledger-chip')
     assert.equal(cmdChips[0].getAttribute('title'), DICT_EN['stats.commandJump'])
     await click(cmdChips[2])
@@ -425,17 +381,6 @@ describe('StatsContext', () => {
     toolChips[0].dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
     toolChips[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }))
     assert.deepEqual(toolPicks, ['read', 'read'])
-    const memberChips = queryAll(m.container, '.lc-ledger-out-body2 .lc-ledger-chip')
-    assert.equal(memberChips[0].getAttribute('title'), 'scout', 'the full name rides the native title')
-    const probe = document.createElement('i')
-    probe.style.background = familyHue(1)
-    assert.equal((memberChips[0].querySelector('i') as HTMLElement).style.background, probe.style.background, 'the dot carries the member family hue')
-    assert.equal(memberChips[4].getAttribute('title'), 'fifth', 'the overflow chip lists the folded names')
-    await click(memberChips[0])
-    memberChips[3].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    assert.deepEqual(memberPicks, ['s1', 's4'])
-    // The overflow and placeholder chips stay inert.
-    assert.equal(memberChips[4].getAttribute('role'), null)
     await m.unmount()
   })
 
@@ -449,7 +394,7 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container)[2], 'Team?1.0M/—')
+    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?1.0M/—')
     assert.ok(!text(m.container).includes('unavailable'), 'a pending fetch is not a failure')
     await m.unmount()
   })
@@ -464,8 +409,8 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container)[2], 'Team?1.0M/—')
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[3])
+    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?1.0M/—')
+    const costTip = costTipOf(m.container, 'team')
     assert.ok(costTip.includes('unavailable'))
     assert.ok(!costTip.includes('Per-1M-token rates'))
     await m.unmount()
@@ -488,8 +433,8 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container)[2], 'Team?3.0M/$0.60')
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[3])
+    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?3.0M/$0.60')
+    const costTip = costTipOf(m.container, 'team')
     assert.ok(costTip.includes('Cache input $0.00'), 'the table lists the book rates once, whatever the billed buckets')
     assert.ok(costTip.includes('Uncached input $0.15'))
     assert.ok(costTip.includes('peak windows'), 'the peak-window footnote explains the bucket split')
@@ -506,8 +451,8 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container)[2], 'Team?1/—')
-    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[3]).includes('Not priced: future-provider / mystery-model'))
+    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?1/—')
+    assert.ok(costTipOf(m.container, 'team').includes('Not priced: future-provider / mystery-model'))
     await m.unmount()
   })
 
@@ -524,7 +469,7 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[3]).includes('has 2 models.dev entries with different rates'))
+    assert.ok(costTipOf(m.container, 'team').includes('has 2 models.dev entries with different rates'))
     await m.unmount()
   })
 
@@ -537,7 +482,7 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    assert.ok(text(queryAll(m.container, '.lc-stat-tip')[3]).includes('reference estimate'))
+    assert.ok(costTipOf(m.container, 'team').includes('reference estimate'))
     await m.unmount()
   })
 
@@ -559,41 +504,75 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    const costTip = text(queryAll(m.container, '.lc-stat-tip')[3])
+    const costTip = costTipOf(m.container, 'team')
     assert.ok(costTip.includes('glm-5.3-flash'))
     assert.ok(!costTip.includes('junk'))
     assert.ok(!costTip.includes('|'))
-    assert.deepEqual(costCellsOf(m.container)[2], 'Team?2.0M/$0.15')
+    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?2.0M/$0.15')
     await m.unmount()
   })
 
-  test('the family cell hands its jump to the caller; the price link stays out of it', async () => {
+  test('the Fleet section hands its jump to the caller; the price link stays out of it', async () => {
     let opened = 0
     const m = await mount(h(StatsContext, {
       counts: NO_COUNTS, files: NO_FILES, tools: [], cost: COST, locale: 'en',
       onTeamClick: () => { opened += 1 },
     }))
     await flush()
-    const cost = query(m.container, '.lc-strip-cost')
-    assert.equal(cost.getAttribute('role'), 'button')
-    await click(cost)
+    const head = query(m.container, '.lc-ledger-team-head')
+    const tip = query(head, '.lc-stat-tip')
+    assert.ok(tip.closest('.lc-stat-tipped') === head, 'the pricing tooltip is positioned against its Fleet header')
+    assert.equal(head.getAttribute('role'), null, 'the header is not a button wrapping the provider link')
+    const open = query(m.container, 'button.lc-ledger-team-open')
+    assert.equal(open.tagName, 'BUTTON')
+    await click(open)
     assert.equal(opened, 1)
+    await click(head)
+    assert.equal(opened, 2, 'the header body opens the view too')
     await click(query(m.container, 'a.lc-strip-link'))
-    assert.equal(opened, 1)
-    cost.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    assert.equal(opened, 2)
-    cost.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }))
-    assert.equal(opened, 2)
+    assert.equal(opened, 2, 'the provider link keeps its own activation')
+    await click(open)
+    assert.equal(opened, 3)
+    const rows = queryAll(m.container, '.lc-ledger-out-body2 > .lc-strip-cell')
+    assert.deepEqual(rows.map(el => el.tagName), ['BUTTON', 'BUTTON'], 'each split row is a Fleet jump')
+    await click(rows[0])
+    assert.equal(opened, 4)
+    await click(rows[1])
+    assert.equal(opened, 5)
     await m.unmount()
   })
 
-  test('without a caller the family cell is a plain figure, never a dead button', async () => {
+  test('without a caller the Fleet section is a plain figure, never a dead button', async () => {
     const m = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], cost: COST, locale: 'en' }))
-    const cost = query(m.container, '.lc-strip-cost')
+    const cost = query(m.container, '.lc-ledger-team-head')
     assert.equal(cost.getAttribute('role'), null)
     assert.equal(cost.getAttribute('tabindex'), null)
+    assert.equal(queryAll(m.container, '.lc-ledger-team-open').length, 0, 'no dead button without the view relay')
+    assert.equal(queryAll(m.container, '.lc-ledger-out-body2 button').length, 0, 'the split rows stay figures too')
     await click(cost)
-    cost.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await m.unmount()
+  })
+
+  test('each event kind jumps to the card filtered to that kind on click and keyboard', async () => {
+    const opened: string[] = []
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 1, steps: 2, injects: 3, compactions: 2, prunes: 1, skills: 0 },
+      files: NO_FILES, tools: [], locale: 'en',
+      onEventsClick: (kind) => { opened.push(kind) },
+    }))
+    await flush()
+    const entries = queryAll(m.container, '.lc-core-kv-event-btn')
+    assert.equal(queryAll(m.container, '.lc-core-kv-sep').length, 2, 'the slash separators hold the three kinds apart')
+    assert.deepEqual(entries.map(el => el.getAttribute('data-kind')), ['inject', 'compaction', 'prune'])
+    assert.equal(entries[0].getAttribute('title'), DICT_EN['stats.eventsKindJump'].replace('{kind}', 'Inject'))
+    await click(entries[0])
+    assert.deepEqual(opened, ['inject'])
+    entries[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    assert.deepEqual(opened, ['inject', 'prune'])
+    entries[1].dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+    assert.deepEqual(opened, ['inject', 'prune', 'compaction'])
+    entries[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }))
+    assert.deepEqual(opened, ['inject', 'prune', 'compaction'])
     await m.unmount()
   })
 
@@ -654,6 +633,8 @@ describe('StatsContext', () => {
     await flush()
     const cells = queryAll(m.container, '.lc-core-kv')
     assert.ok(cells.every(c => c.getAttribute('role') === null && !c.className.includes('lc-core-kv-btn')))
+    const events = queryAll(m.container, '.lc-core-kv-event')
+    assert.ok(events.every(e => e.getAttribute('role') === null && !e.className.includes('lc-core-kv-event-btn')))
     const chips = queryAll(m.container, '.lc-ledger-chip')
     assert.ok(chips.every(c => c.getAttribute('role') === null && !c.className.includes('lc-ledger-chip-btn')))
     await m.unmount()
@@ -666,7 +647,7 @@ describe('StatsContext — the subagent split (injected seat)', () => {
   }
 
   test('the family figure merges the subagent usage in; the split cells price each share alone', async () => {
-    const Stats = makeStatsContext(kit, () => ({ usage: SUB, count: 2, members: [] }))
+    const Stats = makeStatsContext(kit, () => ({ usage: SUB, count: 2 }))
     const m = await mount(h(Stats, {
       counts: NO_COUNTS,
       files: NO_FILES,
@@ -675,18 +656,19 @@ describe('StatsContext — the subagent split (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?1.0M/$0.30', 'Subagents × 2?2.0M/$0.15', 'Team?3.0M/$0.45'])
-    const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
-    assert.ok(tips[3].includes('for deepseek · deepseek-v4-flash.'))
-    assert.ok(tips[3].includes('for zhipuai · glm-5.3-flash.'))
-    assert.ok(tips[2].includes('every descendant subagent session'))
-    assert.ok(tips[2].includes('all levels'), 'the sub tip spells out the subtree covers all levels')
-    assert.ok(tips[2].includes('for zhipuai · glm-5.3-flash.'), 'the sub tip carries its own price table')
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?3.0M/$0.45', 'Current Agent?1.0M/$0.30', 'Subagents × 2?2.0M/$0.15'])
+    const teamTip = costTipOf(m.container, 'team')
+    assert.ok(teamTip.includes('for deepseek · deepseek-v4-flash.'))
+    assert.ok(teamTip.includes('for zhipuai · glm-5.3-flash.'))
+    const subTip = costTipOf(m.container, 'sub')
+    assert.ok(subTip.includes('every descendant subagent session'))
+    assert.ok(subTip.includes('all levels'), 'the sub tip spells out the subtree covers all levels')
+    assert.ok(subTip.includes('for zhipuai · glm-5.3-flash.'), 'the sub tip carries its own price table')
     await m.unmount()
   })
 
   test('subagent usage alone (no own cost) still prices the family and dashes the own cell', async () => {
-    const Stats = makeStatsContext(kit, () => ({ usage: SUB, count: 1, members: [] }))
+    const Stats = makeStatsContext(kit, () => ({ usage: SUB, count: 1 }))
     const m = await mount(h(Stats, {
       counts: NO_COUNTS,
       files: NO_FILES,
@@ -694,7 +676,7 @@ describe('StatsContext — the subagent split (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?0/—', 'Subagents × 1?2.0M/$0.15', 'Team?2.0M/$0.15'])
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?2.0M/$0.15', 'Current Agent?0/—', 'Subagents × 1?2.0M/$0.15'])
     await m.unmount()
   })
 
@@ -702,7 +684,7 @@ describe('StatsContext — the subagent split (injected seat)', () => {
     const deepseekSub: SessionCostUsage = {
       'deepseek-official': { 'deepseek-v4-flash': { off: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
     }
-    const Stats = makeStatsContext(kit, () => ({ usage: deepseekSub, count: 1, members: [] }))
+    const Stats = makeStatsContext(kit, () => ({ usage: deepseekSub, count: 1 }))
     const m = await mount(h(Stats, {
       counts: NO_COUNTS,
       files: NO_FILES,
@@ -710,15 +692,14 @@ describe('StatsContext — the subagent split (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container)[2], 'Team?1.0M/$0.15')
-    const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
-    assert.ok(tips[3].includes('peak windows'))
-    assert.ok(tips[2].includes('peak windows'), 'the sub tip explains the scheme its own figure rides')
+    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?1.0M/$0.15')
+    assert.ok(costTipOf(m.container, 'team').includes('peak windows'))
+    assert.ok(costTipOf(m.container, 'sub').includes('peak windows'), 'the sub tip explains the scheme its own figure rides')
     await m.unmount()
   })
 
   test('a sub usage the book cannot price dashes the sub cell and notes the outage in its tip', async () => {
-    const Stats = makeStatsContext(kit, () => ({ usage: { future: { 'mystery-model': { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } }, count: 1, members: [] }))
+    const Stats = makeStatsContext(kit, () => ({ usage: { future: { 'mystery-model': { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } }, count: 1 }))
     const m = await mount(h(Stats, {
       counts: NO_COUNTS,
       files: NO_FILES,
@@ -727,9 +708,8 @@ describe('StatsContext — the subagent split (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?1.0M/$0.30', 'Subagents × 1?1/—', 'Team?1.0M/$0.30'])
-    const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
-    assert.ok(tips[2].includes('Not priced: future / mystery-model'))
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?1.0M/$0.30', 'Current Agent?1.0M/$0.30', 'Subagents × 1?1/—'])
+    assert.ok(costTipOf(m.container, 'sub').includes('Not priced: future / mystery-model'))
     await m.unmount()
   })
 
@@ -741,7 +721,7 @@ describe('StatsContext — the subagent split (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?0/—', 'Subagents × 0?0/—', 'Team?0/—'])
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
     assert.ok(!text(m.container).includes('unavailable'))
     await m.unmount()
   })
@@ -816,7 +796,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       sessionId: 'root',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?0/—', 'Subagents × 2?2.0M/$0.15', 'Team?2.0M/$0.15'])
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?2.0M/$0.15', 'Current Agent?0/—', 'Subagents × 2?2.0M/$0.15'])
     assert.deepEqual(calls, ['cold'], 'only the timeline-less relative fetched')
     await act(async () => {
       face.setState({
@@ -845,7 +825,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       })
     })
     await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?0/—', 'Subagents × 2?4.0M/$0.30', 'Team?4.0M/$0.30'])
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?4.0M/$0.30', 'Current Agent?0/—', 'Subagents × 2?4.0M/$0.30'])
     await m.unmount()
   })
 
@@ -869,7 +849,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     }))
     await flush()
     assert.deepEqual(calls, ['cold'])
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?0/—', 'Subagents × 1?0/—', 'Team?0/—'])
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 1?0/—'])
     await act(async () => {
       face.setState({ root: { running: false, updatedAt: 1 }, cold: { parentId: 'root', origin: 'subagent', updatedAt: 2 } })
     })
@@ -905,7 +885,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     }))
     await flush()
     assert.deepEqual(calls, ['headless', 'absent'])
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?0/—', 'Subagents × 2?0/—', 'Team?0/—'])
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 2?0/—'])
     // A later tick re-attaches to the settled nulls without re-fetching.
     await act(async () => {
       face.setState({
@@ -919,7 +899,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     await m.unmount()
   })
 
-  test('the roster roams the DESCENDANT subtree only, matching the header count', async () => {
+  test('the Subagents row counts the DESCENDANT subtree only', async () => {
     const { seat } = makeSeat({
       root: { running: false, updatedAt: 1, projectionValues: { contextTimeline: head() } },
       kid: { parentId: 'root', origin: 'subagent', updatedAt: 2, projectionValues: { contextTimeline: head(), subagent: { mode: 'one-shot', label: 'kid-label' } } },
@@ -935,9 +915,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       sessionId: 'kid',
     }))
     await flush()
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent)[3], '1', 'the count folds the subtree below the current session')
-    const roster = queryAll(m.container, '.lc-ledger-out-body2 .lc-ledger-chip').map(el => el.querySelector('.lc-ledger-chip-label')?.textContent)
-    assert.deepEqual(roster, ['grand-label'], 'never the parent or a sibling')
+    assert.deepEqual(queryAll(m.container, '.lc-ledger-team .lc-strip-cell').map(el => text(el))[2].startsWith('Subagents × 1'), true, 'the count folds the subtree below the current session, never the parent or a sibling')
     await m.unmount()
   })
 
@@ -952,7 +930,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       sessionId: 'root',
     }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?0/—', 'Subagents × 0?0/—', 'Team?0/—'])
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
     await m.unmount()
   })
 
@@ -973,7 +951,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     }))
     await flush()
     assert.deepEqual(calls, [])
-    assert.deepEqual(costCellsOf(m.container), ['Current Agent?0/—', 'Subagents × 0?0/—', 'Team?0/—'])
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
     await m.unmount()
   })
 })
