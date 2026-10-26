@@ -16,29 +16,26 @@ function day(over: Partial<DayTotals> = {}): DayTotals {
 }
 
 describe('usageWindowOf', () => {
-  test('walks today and the six days before it, oldest first', () => {
+  test('walks today and the six days before it, oldest first; a corrupt today key reads as an empty window', () => {
     assert.deepEqual(usageWindowOf(TODAY), [
       '2026-09-10', '2026-09-11', '2026-09-12', '2026-09-13', '2026-09-14', '2026-09-15', '2026-09-16',
     ])
-  })
-
-  test('a corrupt today key reads as an empty window (the card degrades to its note)', () => {
     assert.deepEqual(usageWindowOf('junk'), [])
   })
 })
 
 describe('OverviewUsage', () => {
-  test('an all-empty window renders the empty note, no bars', async () => {
-    const m = await mount(h(OverviewUsage, { days: {}, currency: 'usd', today: TODAY }))
-    assert.ok(text(m.container).includes('No usage in the last 7 days'))
-    assert.equal(queryAll(m.container, '.lc-ov-usage-bar').length, 0)
-    await m.unmount()
-  })
-
-  test('a corrupt today key degrades to the empty note', async () => {
-    const m = await mount(h(OverviewUsage, { days: { '2026-09-16': day({ tokens: 5 }) }, currency: 'usd', today: 'junk' }))
-    assert.ok(text(m.container).includes('No usage in the last 7 days'))
-    await m.unmount()
+  test('an all-empty window or a corrupt today key renders the empty note, no bars', async () => {
+    const cases: { days: Record<string, DayTotals>; today: string }[] = [
+      { days: {}, today: TODAY },
+      { days: { '2026-09-16': day({ tokens: 5 }) }, today: 'junk' },
+    ]
+    for (const props of cases) {
+      const m = await mount(h(OverviewUsage, { currency: 'usd', ...props }))
+      assert.ok(text(m.container).includes('No usage in the last 7 days'))
+      assert.equal(queryAll(m.container, '.lc-ov-usage-bar').length, 0)
+      await m.unmount()
+    }
   })
 
   test('seven columns draw, out-of-window days are ignored, and the key names both series', async () => {
@@ -83,7 +80,7 @@ describe('OverviewUsage', () => {
     await m.unmount()
   })
 
-  test('the frame: five gridlines with a solid baseline, and tick rails off the same maxima', async () => {
+  test('the frame: gridlines share the bars’ box, with a solid baseline, and tick rails off the same maxima', async () => {
     const m = await mount(h(OverviewUsage, {
       days: {
         '2026-09-16': day({ tokens: 1000, cost: 1 }),
@@ -92,9 +89,10 @@ describe('OverviewUsage', () => {
       currency: 'usd',
       today: TODAY,
     }))
-    assert.equal(queryAll(m.container, '.lc-ov-usage-line').length, 5)
-    assert.ok(query(m.container, '.lc-ov-usage-line-0') !== null)
-    const baseline = query(m.container, '.lc-ov-usage-line-0') as HTMLElement
+    const cols = query(m.container, '.lc-ov-usage-cols')
+    assert.equal(queryAll(cols, '.lc-ov-usage-line').length, 5)
+    assert.equal(queryAll(m.container, '.lc-ov-usage-grid > .lc-ov-usage-line').length, 0)
+    const baseline = query(cols, '.lc-ov-usage-line-0') as HTMLElement
     assert.equal(baseline.style.bottom, '0%')
     const left = queryAll(m.container, '.lc-ov-usage-rail-l .lc-ov-usage-tick').map(el => el.textContent)
     const right = queryAll(m.container, '.lc-ov-usage-rail-r .lc-ov-usage-tick').map(el => el.textContent)
@@ -147,21 +145,6 @@ describe('OverviewUsage', () => {
     // The label is the tokens bar's own child, so it rides that bar's height; cost bars never carry one.
     assert.equal(queryAll(m.container, '.lc-ov-usage-bar.lc-ov-usage-tokens .lc-ov-usage-value').length, 2)
     assert.equal(queryAll(m.container, '.lc-ov-usage-cost .lc-ov-usage-value').length, 0)
-    await m.unmount()
-  })
-
-  test('the gridlines share the bars’ box, so the label headroom never shifts the scale', async () => {
-    const m = await mount(h(OverviewUsage, {
-      days: { '2026-09-16': day({ tokens: 1000, cost: 1 }), '2026-09-15': day({ tokens: 500, cost: 0.5 }) },
-      currency: 'usd',
-      today: TODAY,
-    }))
-    // `bottom: N%` only reads the bar scale while the gridlines resolve against the same box the bars
-    // fill — the plot above them takes the headroom the labels need.
-    const cols = query(m.container, '.lc-ov-usage-cols')
-    assert.equal(queryAll(cols, '.lc-ov-usage-line').length, 5)
-    assert.equal(queryAll(m.container, '.lc-ov-usage-grid > .lc-ov-usage-line').length, 0)
-    assert.equal((query(cols, '.lc-ov-usage-line-0') as HTMLElement).style.bottom, '0%')
     await m.unmount()
   })
 })

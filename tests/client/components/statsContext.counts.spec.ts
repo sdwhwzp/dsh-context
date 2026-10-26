@@ -36,9 +36,6 @@ describe('countsOfRecords (the inline generation derivation)', () => {
     // Only the three priced event kinds appear; every inject rides kind 'inject' — only the skills
     // TALLY filters by the tag (catalog digest and hostile shapes included).
     assert.deepEqual(counts, { turns: 3, steps: 4, injects: 9, compactions: 2, prunes: 1, skills: 2 })
-  })
-
-  test('empty collections tally zero', () => {
     assert.deepEqual(countsOfRecords([], []), { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0, skills: 0 })
   })
 })
@@ -57,16 +54,13 @@ describe('toolTallyOf (the live-surface per-tool tally)', () => {
     assert.deepEqual(tally, [['read', 2], ['bash', 1], ['run_code', 1]])
   })
 
-  test('sorts count-desc then name-asc, skipping hostile shapes', () => {
+  test('sorts count-desc then name-asc, ties breaking name-asc in either insertion order, skipping hostile shapes', () => {
     const tally = toolTallyOf([
       node('tool', 'bash'), node('tool', 'read'), node('tool', 'read'),
       { seq: 0, cat: 'tool', tokens: 0, tool: 5 } as unknown as SurfaceNode,
       node('tool', ''),
     ])
     assert.deepEqual(tally, [['read', 2], ['bash', 1]])
-  })
-
-  test('count ties break name-asc in either insertion order', () => {
     assert.deepEqual(toolTallyOf([node('tool', 'zed'), node('tool', 'apple')]), [['apple', 1], ['zed', 1]])
     assert.deepEqual(toolTallyOf([node('tool', 'apple'), node('tool', 'zed')]), [['apple', 1], ['zed', 1]])
   })

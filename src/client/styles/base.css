@@ -101,8 +101,11 @@ body:not([data-ds-dark-theme]) .lc-stat { box-shadow: var(--lc-shadow-tile); }
 :is(.lc-ov-cover, .lc-fleet-sort, .lc-br-pick) { transition: border-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 :is(.lc-ov-cover, .lc-fleet-sort, .lc-br-pick):focus { outline: none; border-color: var(--dsw-alias-state-business-primary); }
 .lc-foot { color: var(--dsw-alias-label-secondary); font-size: 12px; margin-top: 4px; }
-/* Hides the composer while a plugin surface owns the pane, but keeps it for approval/question/plan-review prompts. */
-[data-conversation-scroll]:has(.lc-root) > [data-composer-seat]:not(:has([data-approval-key], [data-question-key], [data-plan-review-key])) { display: none; }
+/* Hides the composer while a plugin surface owns the pane, but keeps it for approval/question/plan-review prompts.
+   `data-lc-surface` is set by useConversationSurface: a `:has(.lc-root)` ancestor test revalidates the whole transcript
+   on every mutation, which measurably stalls a long session on tab switches. */
+[data-conversation-scroll][data-lc-surface] > [data-composer-seat]:not(:has([data-approval-key], [data-question-key], [data-plan-review-key])) { display: none; }
 /* The harness's transcript-width drag handles are FOLLOWING SIBLINGS of the shared scroller, so `~` is required
-   (a descendant combinator matches nothing); hidden while `.lc-root` or `.lc-modal-backdrop` is mounted. */
-[data-conversation-scroll]:has(.lc-root, .lc-modal-backdrop) ~ [data-width-handle] { display: none; }
+   (a descendant combinator matches nothing); hidden for a plugin pane or the /context modal. */
+[data-conversation-scroll][data-lc-surface] ~ [data-width-handle],
+[data-conversation-scroll][data-lc-modal] ~ [data-width-handle] { display: none; }

@@ -35,14 +35,18 @@ function bigTimeline() {
   return timeline({ requests, nodes })
 }
 
+function mountBig(sessionId: string) {
+  const View = makeViewNoAutoOverview()
+  return mount(h(View, {
+    sessionId,
+    useProjection: projectionsFor(bigTimeline()),
+    useChat: (selector => selector({ legacy: { nodes: [] } })) as UseChatLike,
+  }))
+}
+
 describe('ContextView lazy DNA bands', () => {
-  test('a long log builds DNA bands only for the rendered window', async () => {
-    const View = makeViewNoAutoOverview()
-    const m = await mount(h(View, {
-      sessionId: 'sv-lazy-dna',
-      useProjection: projectionsFor(bigTimeline()),
-      useChat: (selector => selector({ legacy: { nodes: [] } })) as UseChatLike,
-    }))
+  test('a long log assembles DNA bands only for the rendered window, in total and delta mode', async () => {
+    const m = await mountBig('sv-lazy-dna')
     try {
       await act(async () => { buttonByText(m.container, kit.t('trend.dna')).click() })
       await flush()
@@ -50,26 +54,13 @@ describe('ContextView lazy DNA bands', () => {
       assert.ok(dnaBars.length > 0, 'DNA bars render from the lazy accessor')
       assert.ok(dnaBars.length < 600, `only the window is assembled (${dnaBars.length})`)
       assert.equal(queryAll(m.container, '.lc-cat-seg').length, 0)
-    } finally {
-      await m.unmount()
-    }
-  })
 
-  test('delta mode on a long log reads the axis sequentially and paints only the window', async () => {
-    const View = makeViewNoAutoOverview()
-    const m = await mount(h(View, {
-      sessionId: 'sv-lazy-dna-delta',
-      useProjection: projectionsFor(bigTimeline()),
-      useChat: (selector => selector({ legacy: { nodes: [] } })) as UseChatLike,
-    }))
-    try {
-      await act(async () => { buttonByText(m.container, kit.t('trend.dna')).click() })
       await act(async () => { buttonByText(m.container, kit.t('gran.delta')).click() })
       await flush()
-      const bars = queryAll(m.container, '.lc-bar-dna')
-      assert.ok(bars.length > 0)
-      // The whole-log axis walk must not turn into whole-log DOM: only the rendered window carries bands.
-      assert.ok(bars.length < 600, `only the window paints a band (${bars.length})`)
+      const deltaBars = queryAll(m.container, '.lc-bar-dna')
+      assert.ok(deltaBars.length > 0)
+      // The whole-log axis walk must not turn into whole-log DOM: only the rendered window paints a band.
+      assert.ok(deltaBars.length < 600, `only the window paints a band (${deltaBars.length})`)
     } finally {
       await m.unmount()
     }

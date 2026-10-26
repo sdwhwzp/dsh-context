@@ -32,10 +32,21 @@ function stubObserver(): { records: ObserverRecord[]; restore: () => void } {
 }
 
 describe('useLazyMount', () => {
-  test('mounts immediately when IntersectionObserver is unavailable', async () => {
-    const m = await mount(h(Probe, {}))
-    assert.equal(query(m.container, '[data-mounted]')?.getAttribute('data-mounted'), 'yes')
-    await m.unmount()
+  test('mounts immediately without an observer or when forced, never observing', async () => {
+    const immediate = await mount(h(Probe, {}))
+    assert.equal(query(immediate.container, '[data-mounted]')?.getAttribute('data-mounted'), 'yes')
+    await immediate.unmount()
+
+    const observer = stubObserver()
+    try {
+      const forced = await mount(h(Probe, { force: true }))
+      assert.equal(query(forced.container, '[data-mounted]')?.getAttribute('data-mounted'), 'yes')
+      await forced.unmount()
+      assert.equal(observer.records.length, 0)
+    } finally {
+      observer.restore()
+      vi.unstubAllGlobals()
+    }
   })
 
   test('re-observes a reattached placeholder (a hidden sidebar copy comes back)', async () => {
@@ -50,19 +61,6 @@ describe('useLazyMount', () => {
       await m.update(h(Probe, { attachRef: true }))
       assert.equal(observer.records.length, 2, 'a reattach observes again')
       await m.unmount()
-    } finally {
-      observer.restore()
-      vi.unstubAllGlobals()
-    }
-  })
-
-  test('force mounts without waiting for the observer (a pending jump)', async () => {
-    const observer = stubObserver()
-    try {
-      const m = await mount(h(Probe, { force: true }))
-      assert.equal(query(m.container, '[data-mounted]')?.getAttribute('data-mounted'), 'yes')
-      await m.unmount()
-      assert.equal(observer.records.length, 0)
     } finally {
       observer.restore()
       vi.unstubAllGlobals()

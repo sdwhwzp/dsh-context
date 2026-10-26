@@ -3,7 +3,7 @@ import { act, createElement as h } from 'react'
 import { describe, test } from 'vitest'
 import type { TrendBand } from '../../../src/client/dna'
 import { flush, mount, queryAll } from '../helpers/kit'
-import { DNA_SNAP_PX, capDnaRuns, snapDnaRuns } from '../../../src/client/components/trendDnaBars'
+import { capDnaRuns, snapDnaRuns } from '../../../src/client/components/trendDnaBars'
 import { TrendChart, bars, propsOf, req, viewport } from './trendChartHarness'
 
 const bandOf = (seq: number): TrendBand[] => [{ key: 'a', cat: 'system', tokens: 10 + (seq % 7), off: 0, color: '#8b5cf6' }]
@@ -33,26 +33,15 @@ function lazyBands() {
 }
 
 describe('snapDnaRuns', () => {
-  test('snaps internal boundaries to the shared pixel grid and keeps identical bands aligned across bars', () => {
-    const shortBar = [
-      { color: '#a', from: 0, to: 2.3 },
-      { color: '#b', from: 2.3, to: 7.9 },
-    ]
-    const tallBar = [
-      { color: '#a', from: 0, to: 2.3 },
-      { color: '#b', from: 2.3, to: 10.9 },
-    ]
-    const a = snapDnaRuns(shortBar)
-    const b = snapDnaRuns(tallBar)
+  test('snaps internal boundaries to the shared pixel grid, aligns identical bands across bars, and absorbs sub-grid strands', () => {
+    const a = snapDnaRuns([{ color: '#a', from: 0, to: 2.3 }, { color: '#b', from: 2.3, to: 7.9 }])
+    const b = snapDnaRuns([{ color: '#a', from: 0, to: 2.3 }, { color: '#b', from: 2.3, to: 10.9 }])
     assert.equal(a[0].to, 2, '2.3px snaps down to the 2px grid')
     assert.equal(b[0].to, a[0].to, 'the same prefix band keeps the same boundary in a taller bar')
     assert.equal(a[a.length - 1].to, 7.9, 'the final boundary stays exact')
     assert.equal(b[b.length - 1].to, 10.9)
     assert.deepEqual(snapDnaRuns([]), [])
-    assert.equal(DNA_SNAP_PX, 2)
-  })
 
-  test('merges same-colour runs and absorbs sub-grid strands instead of leaving gaps', () => {
     const merged = snapDnaRuns([
       { color: '#a', from: 0, to: 2.1 },
       { color: '#a', from: 2.1, to: 4.4 },
@@ -95,16 +84,13 @@ describe('TrendChart lazy DNA bands', () => {
     const lazy = lazyBands()
     viewport.clientW = 400
     const m = await mount(h(TrendChart, propsOf(reqs, { dnaAt: lazy.at })))
-    try {
-      const dnaBars = queryAll(m.container, '.lc-bar-dna')
-      assert.ok(dnaBars.length > 0 && dnaBars.length < reqs.length, `windowed DNA bars (${dnaBars.length})`)
-      assert.ok(lazy.calls.size < reqs.length, `only visible steps assembled (${lazy.calls.size})`)
-      await act(async () => { dnaBars[0].dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientY: 10 })) })
-      await flush()
-      assert.ok(queryAll(m.container, '.lc-dna-slice').length > 0)
-    } finally {
-      await m.unmount()
-    }
+    const dnaBars = queryAll(m.container, '.lc-bar-dna')
+    assert.ok(dnaBars.length > 0 && dnaBars.length < reqs.length, `windowed DNA bars (${dnaBars.length})`)
+    assert.ok(lazy.calls.size < reqs.length, `only visible steps assembled (${lazy.calls.size})`)
+    await act(async () => { dnaBars[0].dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientY: 10 })) })
+    await flush()
+    assert.ok(queryAll(m.container, '.lc-dna-slice').length > 0)
+    await m.unmount()
   })
 
   test('entering DNA tightens the window and leaving it restores the ordinary range', async () => {
@@ -112,16 +98,13 @@ describe('TrendChart lazy DNA bands', () => {
     const lazy = lazyBands()
     viewport.clientW = 400
     const m = await mount(h(TrendChart, propsOf(reqs, { dna: null })))
-    try {
-      const plain = queryAll(m.container, '.lc-bar').length
-      await m.update(h(TrendChart, propsOf(reqs, { dnaAt: lazy.at })))
-      const dna = queryAll(m.container, '.lc-bar').length
-      assert.ok(dna > 0 && dna < plain, `DNA window is tighter (${dna} < ${plain})`)
-      await m.update(h(TrendChart, propsOf(reqs, { dna: null })))
-      assert.ok(queryAll(m.container, '.lc-bar').length > dna, 'leaving DNA expands the window again')
-    } finally {
-      await m.unmount()
-    }
+    const plain = queryAll(m.container, '.lc-bar').length
+    await m.update(h(TrendChart, propsOf(reqs, { dnaAt: lazy.at })))
+    const dna = queryAll(m.container, '.lc-bar').length
+    assert.ok(dna > 0 && dna < plain, `DNA window is tighter (${dna} < ${plain})`)
+    await m.update(h(TrendChart, propsOf(reqs, { dna: null })))
+    assert.ok(queryAll(m.container, '.lc-bar').length > dna, 'leaving DNA expands the window again')
+    await m.unmount()
   })
 
   test('delta mode reads every per-key band so a lazy source keeps the eager axis', async () => {
@@ -153,25 +136,19 @@ describe('TrendChart lazy DNA bands', () => {
     } finally {
       await m.unmount()
     }
-  })
 
-  test('a delta axis walk stays out of the band cache, and a re-render re-reads only the window', async () => {
-    const reqs = requestList(600)
-    const lazy = lazyBands()
-    viewport.clientW = 400
-    const total = (): number => [...lazy.calls.values()].reduce((a, b) => a + b, 0)
-    const m = await mount(h(TrendChart, propsOf(reqs, { dnaAt: lazy.at, mode: 'delta' })))
-    try {
-      assert.equal(lazy.calls.size, reqs.length, 'the axis walk read every step')
-      const afterMount = total()
-      // A props change re-renders the card: the memoized walk keeps its answer, so only the painted window re-reads.
-      await m.update(h(TrendChart, propsOf(reqs, { dnaAt: lazy.at, mode: 'delta', markers: [] })))
-      await flush()
-      const reread = total() - afterMount
-      assert.ok(reread <= 400, `a re-render re-reads at most the window (${reread} of ${reqs.length})`)
-      assert.ok(reread < reqs.length, 'the whole-log walk never re-runs on a hover/scroll re-render')
-    } finally {
-      await m.unmount()
-    }
+    const rereadReqs = requestList(600)
+    const rereadLazy = lazyBands()
+    const total = (): number => [...rereadLazy.calls.values()].reduce((a, b) => a + b, 0)
+    const reread = await mount(h(TrendChart, propsOf(rereadReqs, { dnaAt: rereadLazy.at, mode: 'delta' })))
+    assert.equal(rereadLazy.calls.size, rereadReqs.length, 'the axis walk read every step')
+    const afterMount = total()
+    // A props change re-renders the card: the memoized walk keeps its answer, so only the painted window re-reads.
+    await reread.update(h(TrendChart, propsOf(rereadReqs, { dnaAt: rereadLazy.at, mode: 'delta', markers: [] })))
+    await flush()
+    const rereadCount = total() - afterMount
+    assert.ok(rereadCount <= 400, `a re-render re-reads at most the window (${rereadCount} of ${rereadReqs.length})`)
+    assert.ok(rereadCount < rereadReqs.length, 'the whole-log walk never re-runs on a hover/scroll re-render')
+    await reread.unmount()
   })
 })

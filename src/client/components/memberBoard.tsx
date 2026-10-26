@@ -4,7 +4,7 @@
 import { useMemo, useState, type CSSProperties, type ReactElement } from 'react'
 import { IconPanelLeftOutlineRegular, IconRightUpOutlineRegular, IconUserOutlineRegular, IconUsersOutlineRegular, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentForest, AgentNode } from '../agentTree'
-import { familyHue, fmtDurationCompact, modelLabelOf } from '../agentTree'
+import { BRAND_HUE, familyHue, fmtDurationCompact, modelLabelOf } from '../agentTree'
 import { familyOthersOf, tasksOfOwner, type FleetTeam } from '../fleetTeam'
 import type { FleetDetail, FleetMemberInfo } from '../../shared/types'
 import type { ViewKit } from '../viewkit'
@@ -37,8 +37,6 @@ export interface MemberBoardProps {
 
 /** One card's hue: the lead carries the brand color, every other card a golden-angled hue —
  * teammates by roster order, other agents by their level-1 family (the graph's link hue). */
-export const BRAND_HUE = 'var(--dsw-alias-brand-primary, var(--color-blue-500))'
-
 export function memberStyle(hue: string): CSSProperties {
   return { '--lc-member-hue': hue } as CSSProperties
 }

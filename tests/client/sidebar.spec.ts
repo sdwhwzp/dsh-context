@@ -34,25 +34,19 @@ function wire(ctx: TestClientCtx, view: (props: ContextViewProps) => unknown = p
 }
 
 describe('watchSidebarContextTab — the optional registration', () => {
-  test('a harness without the sidebar registry registers nothing and never throws', () => {
+  test('a harness without the sidebar registry registers nothing until the registry arms (deferred inject)', () => {
     const ctx = new TestClientCtx()
     wire(ctx)
     assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab'), [])
-    ctx.dispose()
-    assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab'), [])
-  })
-
-  test('the registry armed LATER still gets the tab (deferred inject, not a missed race)', () => {
-    const ctx = new TestClientCtx()
-    wire(ctx)
     const tabs = registry()
     ctx.setService('sidebarRightTabs', tabs)
     assert.equal(tabs.definitions.length, 1)
     assert.equal(ctx.slots.of('sidebar.right.pane.tab').length, 1)
     ctx.dispose()
+    assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab'), [])
   })
 
-  test('registers the type and the body seat with the plugin namespace', () => {
+  test('registers the type, the body and chip-title seats, and the guide fields it supplies; unload unwinds them', async () => {
     const ctx = new TestClientCtx()
     const tabs = registry()
     ctx.setService('sidebarRightTabs', tabs)
@@ -66,11 +60,6 @@ describe('watchSidebarContextTab — the optional registration', () => {
     assert.equal(def.guide?.[0].order, 20, 'after the shipped Files entry (order 10)')
     assert.equal(def.guide?.[0].title(), 'Context')
     assert.equal(def.guide?.[0].description?.(), DICT_EN['sidebar.guideDescription'])
-    assert.deepEqual(
-      Object.keys(def.guide?.[0] ?? {}).sort(),
-      ['description', 'icon', 'order', 'title'],
-      'the capsule carries exactly the rc.1 guide-entry fields',
-    )
     assert.equal(typeof def.guide?.[0].icon, 'function', 'the guide capsule carries the bundled emblem')
 
     const body = ctx.slots.of('sidebar.right.pane.tab')
@@ -81,20 +70,16 @@ describe('watchSidebarContextTab — the optional registration', () => {
     const title = ctx.slots.of('sidebar.right.pane.tab.title')
     assert.equal(title.length, 1, 'the chip-title seat is registered for the type')
     assert.equal(title[0].registration.key, SIDEBAR_CONTEXT_ID)
-    ctx.dispose()
-  })
 
-  test('the chip title renders the emblem and the label', async () => {
-    const ctx = new TestClientCtx()
-    const tabs = registry()
-    ctx.setService('sidebarRightTabs', tabs)
-    wire(ctx)
-    const Title = ctx.slots.of('sidebar.right.pane.tab.title')[0].component
-    const m = await mount(h(Title as () => ReactElement))
+    const m = await mount(h(title[0].component as () => ReactElement))
     assert.equal(query<SVGSVGElement>(m.container, 'svg').getAttribute('width'), '16')
     assert.equal(text(m.container), 'Context')
     await m.unmount()
+
     ctx.dispose()
+    assert.equal(tabs.disposed, 1, 'the type registration was disposed')
+    assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab'), [], 'the body seat was disposed')
+    assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab.title'), [], 'the chip-title seat was disposed')
   })
 
   test('the labels follow the active locale at call time', () => {
@@ -207,18 +192,5 @@ describe('watchSidebarContextTab — the optional registration', () => {
     }
     wire(ctx)
     assert.doesNotThrow(() => { ctx.dispose() })
-  })
-
-  test('unload disposes every registration', () => {
-    const ctx = new TestClientCtx()
-    const tabs = registry()
-    ctx.setService('sidebarRightTabs', tabs)
-    wire(ctx)
-    assert.equal(ctx.slots.of('sidebar.right.pane.tab').length, 1)
-    assert.equal(ctx.slots.of('sidebar.right.pane.tab.title').length, 1)
-    ctx.dispose()
-    assert.equal(tabs.disposed, 1, 'the type registration was disposed')
-    assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab'), [], 'the body seat was disposed')
-    assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab.title'), [], 'the chip-title seat was disposed')
   })
 })

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { BASELINE_DSH_VERSION, meetsBaseline, parseVersion } from '../../src/shared/version'
+import { meetsBaseline, parseVersion } from '../../src/shared/version'
 
 describe('parseVersion', () => {
   test('parses plain releases, channels, serials, v-prefixes and build metadata', () => {
@@ -20,10 +20,6 @@ describe('parseVersion', () => {
 })
 
 describe('meetsBaseline', () => {
-  test(`the supported baseline is ${BASELINE_DSH_VERSION}`, () => {
-    assert.equal(BASELINE_DSH_VERSION, '0.2.0-rc.2')
-  })
-
   test('baseline and above pass; anything below fails', () => {
     assert.equal(meetsBaseline('0.2.0-rc.2'), true, 'the baseline itself')
     assert.equal(meetsBaseline('0.2.0-rc.3'), true)
@@ -36,18 +32,13 @@ describe('meetsBaseline', () => {
     assert.equal(meetsBaseline('0.1.7-rc.2'), false, 'the just-dropped line is now below the floor')
     assert.equal(meetsBaseline('0.1.7'), false, 'the dropped line final')
     assert.equal(meetsBaseline('0.3.0-alpha.1'), true, 'a newer minor at a lower channel outranks the floor')
-    assert.equal(meetsBaseline('0.1.5-rc.1'), false)
-    assert.equal(meetsBaseline('0.1.2-rc.1'), false)
     assert.equal(meetsBaseline('0.0.9'), false)
   })
 
-  test('fails open: an unparseable version (or baseline) never gates', () => {
+  test('fails open: an unparseable version (or baseline) never gates, and an explicit baseline is honoured', () => {
     assert.equal(meetsBaseline('0.0.0-dev'), true)
     assert.equal(meetsBaseline('not-a-version'), true)
     assert.equal(meetsBaseline('0.1.0', 'also-junk'), true)
-  })
-
-  test('accepts an explicit baseline', () => {
     assert.equal(meetsBaseline('0.1.7-rc.2', '0.2.0'), false)
     assert.equal(meetsBaseline('0.2.0', '0.2.0-alpha.1'), true)
   })

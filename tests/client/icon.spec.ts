@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { ContextIcon, makeContextTabTitle } from '../../src/client/icon'
+import { ContextIcon, InsightPanelIcon, makeContextTabTitle } from '../../src/client/icon'
 import { makeKit, mount, query, queryAll, text } from './helpers/kit'
 
 describe('ContextIcon', () => {
@@ -28,6 +28,14 @@ describe('ContextIcon', () => {
     assert.equal(svg.getAttribute('width'), '20')
     assert.equal(svg.getAttribute('height'), '20')
     assert.equal(svg.getAttribute('class'), null)
+    await m.unmount()
+  })
+
+  test('the panel-list glyph defaults to the mono seat at 18px', async () => {
+    const m = await mount(h(InsightPanelIcon))
+    const svg = query<SVGSVGElement>(m.container, 'svg')
+    assert.equal(svg.getAttribute('width'), '18')
+    assert.ok(svg.innerHTML.includes('currentColor'), 'the mono mask inks the sheet')
     await m.unmount()
   })
 

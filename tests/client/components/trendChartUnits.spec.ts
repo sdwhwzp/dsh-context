@@ -7,7 +7,7 @@ import { click, mount, query, queryAll } from '../helpers/kit'
 import { TrendChart, bars, propsOf, req } from './trendChartHarness'
 
 describe('aggregateByTurn', () => {
-  test('collapses a run of same-turn steps into its last record tagged with the step count', () => {
+  test('same-turn steps collapse into the last record, turnless requests pool under 0, and an empty history aggregates to nothing', () => {
     const agg = aggregateByTurn([
       req(1, { turn: 1, step: 0 }),
       req(2, { turn: 1, step: 1, total: 500 }),
@@ -18,30 +18,20 @@ describe('aggregateByTurn', () => {
     assert.equal(agg[0].stepCount, 2)
     assert.equal(agg[0].total, 500)
     assert.equal(agg[1].stepCount, 1)
-  })
 
-  test('turnless requests share turn 0; a turnless run breaks at the first stamped turn', () => {
-    const agg = aggregateByTurn([req(1, { turn: undefined }), req(2, { turn: undefined })])
-    assert.equal(agg.length, 1)
-    assert.equal(agg[0].stepCount, 2)
-    const mixed = aggregateByTurn([req(1, { turn: undefined }), req(2, { turn: 1 })])
-    assert.equal(mixed.length, 2)
-  })
-
-  test('an empty history aggregates to nothing', () => {
+    const turnless = aggregateByTurn([req(1, { turn: undefined }), req(2, { turn: undefined })])
+    assert.equal(turnless.length, 1)
+    assert.equal(turnless[0].stepCount, 2)
+    assert.equal(aggregateByTurn([req(1, { turn: undefined }), req(2, { turn: 1 })]).length, 2, 'a turnless run breaks at the first stamped turn')
     assert.deepEqual(aggregateByTurn([]), [])
-  })
 
-  test('the duration overlay\'s ms sums across a turn\'s steps; absent only when no step carried one', () => {
-    const agg = aggregateByTurn([
+    const durationAgg = aggregateByTurn([
       req(1, { turn: 1, step: 0, activeMs: 1000 }),
       req(2, { turn: 1, step: 1, activeMs: 2500 }),
       req(3, { turn: 2, step: 0, activeMs: 800 }),
     ])
-    assert.equal(agg[0].activeMs, 3500, 'the turn bar carries its steps\' summed active time')
-    assert.equal(agg[1].activeMs, 800, 'a single-step turn keeps its own figure')
-
-    // A step without a stamp contributes nothing but keeps the run's known share.
+    assert.equal(durationAgg[0].activeMs, 3500, 'the turn bar carries its steps\' summed active time')
+    assert.equal(durationAgg[1].activeMs, 800, 'a single-step turn keeps its own figure')
     const partial = aggregateByTurn([req(1, { turn: 1, activeMs: 1000 }), req(2, { turn: 1 })])
     assert.equal(partial[0].activeMs, 1000)
     const none = aggregateByTurn([req(1, { turn: 1 }), req(2, { turn: 1 })])
@@ -60,10 +50,7 @@ describe('turnStepsOf', () => {
     assert.equal(stepsOf(1), 2)
     assert.equal(stepsOf(2), 1)
     assert.equal(stepsOf(undefined), 1, 'turnless records read the pooled 0 key')
-  })
-
-  test('a turn outside the list answers 1 instead of missing', () => {
-    assert.equal(turnStepsOf([req(1, { turn: 1 })])(9), 1)
+    assert.equal(stepsOf(9), 1, 'a turn outside the list answers 1 instead of missing')
     assert.equal(turnStepsOf([])(1), 1)
   })
 })
@@ -91,20 +78,16 @@ describe('TrendChart entrance rise', () => {
     assert.equal(slot(stacks[20]), '20')
     assert.equal(slot(stacks[24]), '20')
     await m.unmount()
-  })
 
-  test('delta arms share their bar rise stagger slot', async () => {
     const r1 = req(1, { turn: 1, step: 0 })
     const r2 = req(2, { turn: 1, step: 1, system: 50, user: 60 })
-    const m = await mount(h(TrendChart, propsOf([r1, r2], { mode: 'delta' })))
-    const ups = queryAll(m.container, '.lc-bar-up')
-    const downs = queryAll(m.container, '.lc-bar-down')
-    assert.equal(slot(ups[0]), '0')
-    assert.equal(slot(ups[1]), '1')
-    assert.equal(slot(downs[1]), '1')
+    const delta = await mount(h(TrendChart, propsOf([r1, r2], { mode: 'delta' })))
+    const ups = queryAll(delta.container, '.lc-bar-up')
+    const downs = queryAll(delta.container, '.lc-bar-down')
+    assert.deepEqual([slot(ups[0]), slot(ups[1]), slot(downs[1])], ['0', '1', '1'], 'delta arms share their bar rise stagger slot')
     // The first bar diffs against nothing, so it grows no down arm.
     assert.equal(queryAll(downs[0], 'div').length, 0)
-    await m.unmount()
+    await delta.unmount()
   })
 
   test('switching granularity remounts every bar so the entrance rise replays', async () => {
@@ -129,29 +112,21 @@ describe('TrendChart entrance rise', () => {
 })
 
 describe('attachMarkers', () => {
-  test('attaches each boundary event to the first request logged after it', () => {
+  test('each boundary event attaches to the first request logged after it; stray, non-boundary, or repeated events attach nowhere', () => {
     const reqs = [req(5), req(10)]
     const ev: ContextEventRecord = { seq: 7, time: 0, kind: 'compaction' }
     const markers = attachMarkers(reqs, [ev])
     assert.equal(markers.length, 2)
     assert.equal(markers[0], undefined)
     assert.equal(markers[1], ev)
-  })
-
-  test('events after the whole log, and non-boundary kinds, attach nowhere', () => {
-    const reqs = [req(5), req(10)]
     // `new Array(n)` leaves holes: an event that never matches assigns no index at all.
     assert.equal(Object.keys(attachMarkers(reqs, [{ seq: 99, time: 0, kind: 'prune' }])).length, 0)
     assert.equal(Object.keys(attachMarkers(reqs, [{ seq: 1, time: 0, kind: 'inject' }])).length, 0)
     assert.equal(attachMarkers([], [{ seq: 1, time: 0, kind: 'compaction' }]).length, 0)
-  })
-
-  test('the first event to claim a request index wins', () => {
-    const reqs = [req(5), req(10)]
     const first: ContextEventRecord = { seq: 1, time: 0, kind: 'compaction' }
     const second: ContextEventRecord = { seq: 2, time: 0, kind: 'prune' }
-    const markers = attachMarkers(reqs, [first, second])
-    assert.equal(markers[0], first)
-    assert.equal(markers[1], undefined)
+    const repeated = attachMarkers(reqs, [first, second])
+    assert.equal(repeated[0], first)
+    assert.equal(repeated[1], undefined)
   })
 })

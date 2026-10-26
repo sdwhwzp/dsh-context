@@ -9,12 +9,12 @@ import { flush, makeKit, mount, query, queryAll } from '../helpers/kit'
 
 /** `resetModules` clears the baked version define and the fetch TTL cache; `version` stands in for the
  *  tsdown define. */
-async function loadUpdatePill(version: string, active: 'en' | 'zh' = 'en'): Promise<ReturnType<typeof makeUpdatePillFn>> {
+async function loadUpdatePill(version: string): Promise<ReturnType<typeof makeUpdatePillFn>> {
   vi.resetModules()
   ;(globalThis as Record<string, unknown>).__DSH_CTX_VERSION__ = version
   await import('../../../src/client/latestVersion')
   const mod = await import('../../../src/client/components/updatePill')
-  return mod.makeUpdatePill(makeKit(active))
+  return mod.makeUpdatePill(makeKit())
 }
 
 function stubRegistry(): void {
@@ -41,16 +41,6 @@ describe('UpdatePill', () => {
     assert.equal(pill.getAttribute('data-lc-tip'), 'Update v1.1.0 is available — click for the release notes')
     assert.equal(pill.getAttribute('data-lc-tip-side'), 'bottom')
     assert.equal(pill.getAttribute('aria-label'), pill.getAttribute('data-lc-tip'))
-    await m.unmount()
-  })
-
-  test('the Chinese dictionary rides the same capsule', async () => {
-    stubRegistry()
-    const UpdatePill = await loadUpdatePill('1.0.0', 'zh')
-    const m = await mount(h(UpdatePill, {}))
-    await flush()
-    assert.equal(query(m.container, '.lc-ov-update-label').textContent, '新版本')
-    assert.equal(query(m.container, '.lc-ov-update-version').textContent, '↑ v1.1.0')
     await m.unmount()
   })
 

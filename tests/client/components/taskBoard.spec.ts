@@ -1,7 +1,7 @@
 
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
-import { describe, test } from 'vitest'
+import { describe, test, vi } from 'vitest'
 import { TaskBoard, type TaskBoardProps } from '../../../src/client/components/taskBoard'
 import { makeRichText } from '../../../src/client/components/richText'
 import type { AgentForest, AgentNode } from '../../../src/client/agentTree'
@@ -88,6 +88,13 @@ describe('TaskBoard — the owner-grouped board', () => {
     assert.equal(queryAll(m.container, '.lc-tasks-group-head .lc-member-icon').length, 1)
     assert.equal(queryAll(m.container, '.lc-team-task-head .lc-member-icon').length, 3)
     await m.unmount()
+
+    const lead = teamOf({
+      tasks: [{ id: 'task-9', subject: 'steer', description: '', status: 'in_progress', ownerName: 'lead', blockedBy: [], writeScopes: [], ready: false, warnings: [] }],
+    })
+    const leadMount = await mount(h(TaskBoard, propsOf({ team: lead, forest: null })))
+    assert.ok(query(leadMount.container, '.lc-tasks-group-head .lc-member-icon')?.getAttribute('style')?.includes('--lc-member-hue: var(--dsw-alias-brand-primary'))
+    await leadMount.unmount()
   })
 
   test('delegation rows read as tasks: status badge, clamped subject, live run figures', async () => {
@@ -131,6 +138,16 @@ describe('TaskBoard — the owner-grouped board', () => {
     assert.equal(queryAll(m.container, '[data-task="s2"] .lc-ts-card').length, 1, 'the agent box still boards')
     await click(query(m.container, '[data-task="s3"]'))
     assert.equal(queryAll(m.container, '[data-task="s3"] .lc-team-task-desc').length, 0)
+
+    const bare = teamOf()
+    bare.tasks[1] = { ...bare.tasks[1], ownerName: undefined } as never
+    const unowned = await mount(h(TaskBoard, propsOf({ team: bare })))
+    assert.equal(queryAll(unowned.container, '[data-task="task-1"] .lc-team-task-desc').length, 1)
+    await click(query(unowned.container, '[data-task="task-1"]'))
+    assert.equal(queryAll(unowned.container, '[data-task="task-1"] .lc-team-task-desc').length, 0, 'the clamp gives way to the box')
+    assert.ok(text(query(unowned.container, '[data-task="task-1"] .lc-ts-card')).includes('Parse the spec into the internal shape.'))
+    assert.ok(text(unowned.container).includes(DICT_EN['fleet.taskUnowned']))
+    await unowned.unmount()
     await m.unmount()
   })
 
@@ -157,6 +174,13 @@ describe('TaskBoard — the owner-grouped board', () => {
     assert.ok(text(row).includes('Schema parser landed.'), 'the owner’s final report-back boards')
     await click(query(row, '.lc-team-task-box-agent .lc-team-task-owner'))
     assert.deepEqual([...pins], ['w1'])
+    await click(query(row, '.lc-team-task-owner'))
+    assert.deepEqual([...pins], ['w1', 'w1'])
+    const heads = queryAll(m.container, '.lc-tasks-group-head .lc-team-task-owner')
+    await click(heads.find(head => text(head) === 'ghost') as HTMLElement)
+    assert.deepEqual([...pins], ['w1', 'w1'], 'an off-roster group head never pins')
+    await click(heads.find(head => text(head) === 'worker-bee') as HTMLElement)
+    assert.deepEqual([...pins], ['w1', 'w1', 'w1'])
     await click(row)
     assert.equal(queryAll(row, '.lc-ts-card').length, 0)
     await act(async () => { row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
@@ -171,7 +195,7 @@ describe('TaskBoard — the owner-grouped board', () => {
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     })
     assert.ok(query(row, '.lc-ts-card') !== null)
-    assert.deepEqual([...pins], ['w1'])
+    assert.deepEqual([...pins], ['w1', 'w1', 'w1'])
 
     const blocked = query(m.container, '[data-task="task-2"]')
     await click(query(blocked, '.lc-team-task-dep'))
@@ -184,7 +208,8 @@ describe('TaskBoard — the owner-grouped board', () => {
     await unhover(ghost)
     assert.deepEqual([...hovers], ['w1', null, null, null], 'an off-roster owner hovers null')
     assert.equal(queryAll(ghost, '.lc-ts-card').length, 0, 'no agent box without an owner')
-    assert.deepEqual([...pins], ['w1'])
+    await click(query(ghost, '.lc-team-task-owner'))
+    assert.deepEqual([...pins], ['w1', 'w1', 'w1'], 'an off-roster owner chip never pins')
 
     const scout = query(m.container, '[data-task="s1"]')
     await hover(scout)
@@ -192,7 +217,7 @@ describe('TaskBoard — the owner-grouped board', () => {
     await unhover(scout)
     assert.deepEqual([...hovers], ['w1', null, null, null, 's1', null])
     await click(query(scout, '.lc-team-task-box-agent .lc-team-task-owner'))
-    assert.deepEqual([...pins], ['w1', 's1'])
+    assert.deepEqual([...pins], ['w1', 'w1', 'w1', 's1'])
     await m.unmount()
   })
 
@@ -219,29 +244,6 @@ describe('TaskBoard — the owner-grouped board', () => {
     await clearing.unmount()
   })
 
-  test('the lead’s own band carries the brand hue and the users glyph', async () => {
-    const lead = teamOf({
-      tasks: [{ id: 'task-9', subject: 'steer', description: '', status: 'in_progress', ownerName: 'lead', blockedBy: [], writeScopes: [], ready: false, warnings: [] }],
-    })
-    const m = await mount(h(TaskBoard, propsOf({ team: lead, forest: null })))
-    assert.ok(query(m.container, '.lc-tasks-group-head .lc-member-icon')?.getAttribute('style')?.includes('--lc-member-hue: var(--dsw-alias-brand-primary'))
-    await m.unmount()
-  })
-
-  test('the owner chip pins the member; an owner off the roster is inert', async () => {
-    const pins = new Array<string | null>()
-    const m = await mount(h(TaskBoard, propsOf({ onPinMember: id => { pins.push(id) } })))
-    const owners = queryAll(m.container, '.lc-team-task-owner')
-    await click(owners[0])
-    await click(owners[1])
-    await click(owners[2])
-    await click(owners[3])
-    assert.deepEqual([...pins], ['w1', 'w1'], 'the ghost head and chip never pin')
-    await m.unmount()
-  })
-})
-
-describe('TaskBoard — the team task DAG', () => {
   test('the pending pool reads ready-first; the dependency line carries the blocker’s own dot', async () => {
     const m = await mount(h(TaskBoard, propsOf({ ownerFilter: null })))
     const worker = queryAll(m.container, '.lc-tasks-group')[0]
@@ -293,20 +295,27 @@ describe('TaskBoard — the team task DAG', () => {
     await agentFocus.unmount()
   })
 
-  test('the team description clamps into the row; the unowned badge stands in', async () => {
+  test('opening a task brings its card and clicked row to the front', async () => {
     const m = await mount(h(TaskBoard, propsOf()))
-    assert.equal(queryAll(m.container, '[data-task="task-1"] .lc-team-task-desc').length, 1)
-    assert.equal(queryAll(m.container, '[data-task="task-1"] .lc-ts-card').length, 0)
-    await click(query(m.container, '[data-task="task-1"]'))
-    assert.equal(queryAll(m.container, '[data-task="task-1"] .lc-team-task-desc').length, 0, 'the clamp gives way to the box')
-    assert.ok(text(query(m.container, '[data-task="task-1"] .lc-ts-card')).includes('Parse the spec into the internal shape.'))
+    const row = query<HTMLElement>(m.container, '[data-task="task-1"]')
+    const body = query<HTMLElement>(m.container, '.lc-tasks-body')
+    Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 500 })
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 200 })
+    Object.defineProperty(body, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 100 }) as DOMRect })
+    Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 300 }) as DOMRect })
+    const head = row.closest('.lc-tasks-group')?.querySelector<HTMLElement>('.lc-tasks-group-head')
+    assert.ok(head !== null)
+    Object.defineProperty(head, 'getBoundingClientRect', { configurable: true, value: () => ({ height: 30 }) as DOMRect })
+    body.scrollTop = 20
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView')
+    try {
+      await click(row)
+      assert.deepEqual(scroll.mock.calls[0]?.[0], { block: 'start', behavior: 'smooth' }, 'the card scrolls to the front')
+      assert.equal(body.scrollTop, 190, 'the row sits 30px below the sticky group head: 20 + (300 − 100 − 30)')
+    } finally {
+      scroll.mockRestore()
+    }
     await m.unmount()
-
-    const bare = teamOf()
-    bare.tasks[1] = { ...bare.tasks[1], ownerName: undefined } as never
-    const unowned = await mount(h(TaskBoard, propsOf({ team: bare })))
-    assert.ok(text(unowned.container).includes(DICT_EN['fleet.taskUnowned']))
-    await unowned.unmount()
   })
 })
 
@@ -349,53 +358,47 @@ describe("TaskBoard — the opened card's full read", () => {
     assert.ok(!text(done).includes(DICT_EN['fleet.tasks.replyFull']))
     assert.ok(/\d{1,2}:\d{2}:\d{2}/.test(text(done)), 'the clock is back on a landed read')
     await landed.unmount()
-  })
 
-  test('a failed full read keeps the excerpt under the unavailable note', async () => {
-    const excerpt = { detail: { lastReply: { time: 1_700_000_000_000, text: 'cut…' }, messages: [], truncated: true } }
-    const m = await mount(h(TaskBoard, propsOf({
-      detailOf: () => excerpt,
+    const cut = { detail: { lastReply: { time: 1_700_000_000_000, text: 'cut…' }, messages: [], truncated: true } }
+    const broken = await mount(h(TaskBoard, propsOf({
+      detailOf: () => cut,
       fullOf: () => ({ detail: null, pending: false }),
       onOpenOwner: () => {},
     })))
-    await click(query(m.container, '[data-task="s2"]'))
-    const card = queryAll(m.container, '[data-task="s2"] .lc-ts-card').at(-1)!
-    assert.ok(text(card).includes('cut…'))
-    assert.ok(text(card).includes(DICT_EN['fleet.tasks.replyExcerpt']))
-    await m.unmount()
+    await click(query(broken.container, '[data-task="s2"]'))
+    const brokenCard = queryAll(broken.container, '[data-task="s2"] .lc-ts-card').at(-1)!
+    assert.ok(text(brokenCard).includes('cut…'))
+    assert.ok(text(brokenCard).includes(DICT_EN['fleet.tasks.replyExcerpt']))
+    await broken.unmount()
 
     const small = { detail: { lastReply: { time: 1_700_000_000_000, text: 'done' }, messages: [], truncated: false } }
     const plain = await mount(h(TaskBoard, propsOf({ detailOf: () => small, fullOf: () => ({ detail: null, pending: false }) })))
     await click(query(plain.container, '[data-task="s2"]'))
-    const bare = query(plain.container, '[data-task="s2"]')
-    assert.ok(text(bare).includes('done'))
+    assert.ok(text(query(plain.container, '[data-task="s2"]')).includes('done'))
     await plain.unmount()
-  })
 
-  test('the delegation brief upgrades to the full read once it lands', async () => {
     const clipped = { detail: { initialPrompt: 'brief within 1600…', lastReply: { time: 1_700_000_000_000, text: 'ok' }, messages: [], truncated: true } }
-    const fullDetail = { initialPrompt: 'the whole briefing prompt, unwound.', messages: [], truncated: false }
+    const fullBrief = { initialPrompt: 'the whole briefing prompt, unwound.', messages: [], truncated: false }
     const waits = await mount(h(TaskBoard, propsOf({
       detailOf: () => clipped,
       fullOf: () => ({ detail: null, pending: true }),
     })))
-    const row = query(waits.container, '[data-task="s1"]')
-    await click(row)
-    assert.ok(text(row).includes('brief within 1600…'), 'the opened brief keeps the excerpt while waiting')
+    const waitingRow = query(waits.container, '[data-task="s1"]')
+    await click(waitingRow)
+    assert.ok(text(waitingRow).includes('brief within 1600…'), 'the opened brief keeps the excerpt while waiting')
     await waits.unmount()
 
-    const landed = await mount(h(TaskBoard, propsOf({
+    const briefLanded = await mount(h(TaskBoard, propsOf({
       detailOf: () => clipped,
-      fullOf: () => ({ detail: fullDetail, pending: false }),
+      fullOf: () => ({ detail: fullBrief, pending: false }),
     })))
-    const open = query(landed.container, '[data-task="s1"]')
+    const open = query(briefLanded.container, '[data-task="s1"]')
     await click(open)
-    const boxes = queryAll(open, '.lc-ts-card')
-    assert.ok(text(boxes[0]).includes('the whole briefing prompt, unwound.'))
-    assert.ok(!text(boxes[0]).includes('brief within 1600…'), 'the excerpt brief gives way')
+    assert.ok(text(queryAll(open, '.lc-ts-card')[0]).includes('the whole briefing prompt, unwound.'))
+    assert.ok(!text(queryAll(open, '.lc-ts-card')[0]).includes('brief within 1600…'), 'the excerpt brief gives way')
     await click(open)
     assert.ok(text(open).includes('brief within 1600…'), 'the folded row still clamps the excerpt brief')
-    await landed.unmount()
+    await briefLanded.unmount()
   })
 })
 

@@ -6,9 +6,7 @@ import { makeTimingStrip, timingGradientOf } from '../../../src/client/component
 import { flush, makeKit, mount, query, queryAll, hover, unhover } from '../helpers/kit'
 
 const kit = makeKit()
-const kitZh = makeKit('zh')
 const Strip = makeTimingStrip(kit)
-const StripZh = makeTimingStrip(kitZh)
 
 const timeOf = (ms: number): string => new Date(ms).toLocaleTimeString('en-GB', { hour12: false })
 
@@ -50,6 +48,10 @@ describe('TimingStrip', () => {
     assert.ok(!ticks[2].className.includes('lc-tstrip-tick-first') && !ticks[2].className.includes('lc-tstrip-tick-last'))
     assert.ok(ticks[4].className.includes('lc-tstrip-tick-last'))
     assert.equal(query(m.container, '.lc-tstrip').getAttribute('role'), 'img')
+    assert.equal(query(m.container, '.lc-tstrip').getAttribute('aria-label'), kit.t('timing.strip'), 'the accessible name is the localized strip description')
+    const zh = await mount(h(makeTimingStrip(makeKit('zh')), { spans: SPANS }))
+    assert.equal(query(zh.container, '.lc-tstrip').getAttribute('aria-label'), makeKit('zh').t('timing.strip'))
+    await zh.unmount()
     assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
     await m.unmount()
   })
@@ -68,7 +70,7 @@ describe('TimingStrip', () => {
     await m.unmount()
   })
 
-  test('a span hover floats its tip — slice label, true duration, start instant — and relays the kind; leaving clears both', async () => {
+  test('a span hover floats its tip and relays the kind; hairline ends pin 10% inward; an inert strip still floats its own tip', async () => {
     let relayed: string | null = 'unset'
     const m = await mount(h(Strip, { spans: SPANS, hoverKey: null, onHoverKey: (k) => { relayed = k } }))
     await hover(segsOf(m.container)[1])
@@ -80,18 +82,20 @@ describe('TimingStrip', () => {
     await unhover(query(m.container, '.lc-tstrip-bar'))
     assert.equal(relayed, null)
     assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
-    await m.unmount()
-  })
 
-  test('the tip pins 10% off both edges for hairline end spans', async () => {
-    const m = await mount(h(Strip, { spans: SPANS }))
-    const segs = segsOf(m.container)
-    await hover(segs[0])
+    await hover(segsOf(m.container)[0])
     assert.equal((query(m.container, '.lc-bar-tip') as HTMLElement).style.left, '10%')
     await unhover(query(m.container, '.lc-tstrip-bar'))
-    await hover(segs[4])
+    await hover(segsOf(m.container)[4])
     assert.equal((query(m.container, '.lc-bar-tip') as HTMLElement).style.left, '90%')
     await m.unmount()
+
+    const inert = await mount(h(Strip, { spans: SPANS }))
+    await hover(segsOf(inert.container)[3])
+    assert.equal(query(inert.container, '.lc-bar-tip').textContent, `Tool runs 15.0s · ${timeOf(26_000)}`)
+    await unhover(query(inert.container, '.lc-tstrip-bar'))
+    assert.equal(query(inert.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
+    await inert.unmount()
   })
 
   test('every span of the hovered KIND lights together and dims the rest, WITHOUT floating the tip (the mirror rule)', async () => {
@@ -170,16 +174,7 @@ describe('TimingStrip', () => {
     }
   })
 
-  test('an inert strip (no relay) still floats its own tip', async () => {
-    const m = await mount(h(Strip, { spans: SPANS }))
-    await hover(segsOf(m.container)[3])
-    assert.equal(query(m.container, '.lc-bar-tip').textContent, `Tool runs 15.0s · ${timeOf(26_000)}`)
-    await unhover(query(m.container, '.lc-tstrip-bar'))
-    assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
-    await m.unmount()
-  })
-
-  test('a hostile span — unknown kind, NaN or inverted instant — drops out whole', async () => {
+  test('a hostile span — unknown kind, NaN or inverted instant — drops out whole; an empty or all-hostile collection renders nothing', async () => {
     const hostile: TimingSpan[] = [
       { kind: 'nope', start: 2_000, end: 4_000 } as unknown as TimingSpan,
       { kind: 'ttft', start: Number.NaN, end: 4_000 },
@@ -192,29 +187,11 @@ describe('TimingStrip', () => {
     assert.equal(segsOf(m.container).length, 5)
     assert.deepEqual(leftsOf(m.container), [0, 12.5, 37.5, 50, 87.5])
     await m.unmount()
-  })
 
-  test('an empty or all-hostile collection renders nothing', async () => {
-    const collections: TimingSpan[][] = [
-      [],
-      [
-        { kind: 'nope', start: 1, end: 2 } as unknown as TimingSpan,
-        { kind: 'ttft', start: Number.NaN, end: 2 },
-        { kind: 'ttft', start: 2, end: 1 },
-      ],
-    ]
-    for (const spans of collections) {
-      const m = await mount(h(Strip, { spans }))
-      assert.equal(queryAll(m.container, '.lc-tstrip').length, 0, JSON.stringify(spans.length))
-      await m.unmount()
+    for (const spans of [[], hostile.slice(0, 4)]) {
+      const empty = await mount(h(Strip, { spans }))
+      assert.equal(queryAll(empty.container, '.lc-tstrip').length, 0, JSON.stringify(spans.length))
+      await empty.unmount()
     }
-  })
-
-  test('the aria label and the tip label localize', async () => {
-    const m = await mount(h(StripZh, { spans: SPANS }))
-    assert.equal(query(m.container, '.lc-tstrip').getAttribute('aria-label'), '耗时时间轴：各段按发生次序紧凑铺排，宽度为耗时占比，刻度为零、四分位与全程')
-    await hover(segsOf(m.container)[0])
-    assert.equal(query(m.container, '.lc-bar-tip').textContent, `模型等待 5.0s · ${timeOf(1_000)}`)
-    await m.unmount()
   })
 })

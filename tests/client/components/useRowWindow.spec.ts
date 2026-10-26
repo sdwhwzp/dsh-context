@@ -56,7 +56,7 @@ describe('useRowWindow', () => {
     }
   })
 
-  test('stays full when disabled, unmeasured, or the ref is not attached', async () => {
+  test('stays full when disabled, unmeasured, the ref is not attached, or the box stays unmeasurable as deps churn', async () => {
     const cases = [
       h(Probe, { count: 40, enabled: false }),
       h(Probe, { count: 40, enabled: true, attachRef: false }),
@@ -69,12 +69,9 @@ describe('useRowWindow', () => {
       assert.equal(node.dataset.to, '39')
       await m.unmount()
     }
-  })
 
-  test('an unmeasurable box keeps the full range as its deps churn', async () => {
     const m = await mount(h(Probe, { count: 40, enabled: true }))
     try {
-      // The guard re-runs against a state that already holds the full range: the printed window must not move.
       await m.update(h(Probe, { count: 40, enabled: true, overscan: 4 }))
       const node = query<HTMLElement>(m.container, 'div')
       assert.equal(node.dataset.from, '0')
@@ -84,30 +81,7 @@ describe('useRowWindow', () => {
     }
   })
 
-  test('a scroll frame that moves nothing leaves the window where it is', async () => {
-    const frames: FrameRequestCallback[] = []
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return 1 })
-    vi.stubGlobal('cancelAnimationFrame', () => {})
-    const m = await mount(h(Probe, { count: 50, enabled: true }))
-    try {
-      const el = query<HTMLElement>(m.container, 'div')
-      Object.defineProperty(el, 'clientHeight', { configurable: true, value: 100 })
-      await m.update(h(Probe, { count: 51, enabled: true }))
-      await until(() => query<HTMLElement>(m.container, 'div').dataset.to !== '50', 'window measured')
-      el.scrollTop = 200
-      await act(async () => { el.dispatchEvent(new Event('scroll')) })
-      await act(async () => { frames[0](0) })
-      const moved = { from: el.dataset.from, to: el.dataset.to }
-      await act(async () => { el.dispatchEvent(new Event('scroll')) })
-      await act(async () => { frames[0](0) })
-      assert.deepEqual({ from: el.dataset.from, to: el.dataset.to }, moved, 'the same row range is reused')
-    } finally {
-      vi.unstubAllGlobals()
-      await m.unmount()
-    }
-  })
-
-  test('coalesces two scroll events into one frame and applies the latest offset', async () => {
+  test('coalesces two scroll events into one frame, applies the latest offset, and leaves a no-move frame where it is', async () => {
     const frames: FrameRequestCallback[] = []
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return 1 })
     vi.stubGlobal('cancelAnimationFrame', () => {})
@@ -127,47 +101,40 @@ describe('useRowWindow', () => {
       await act(async () => { frames[0](0) })
       await until(() => query<HTMLElement>(m.container, 'div').dataset.from !== '0', 'latest offset applied')
       assert.equal(el.dataset.from, String(10 - ROW_WINDOW_OVERSCAN))
+      const moved = { from: el.dataset.from, to: el.dataset.to }
+      await act(async () => {
+        el.dispatchEvent(new Event('scroll'))
+      })
+      await act(async () => { frames[1](0) })
+      assert.deepEqual({ from: el.dataset.from, to: el.dataset.to }, moved, 'the same row range is reused')
       await m.unmount()
     } finally {
       vi.unstubAllGlobals()
     }
   })
 
-  test('observes pane resizes when ResizeObserver exists', async () => {
+  test('observes pane resizes and cancels a pending animation frame on unmount', async () => {
     const disconnect = vi.fn()
+    const cancel = vi.fn()
     class FakeObserver {
       constructor(private readonly cb: () => void) {}
       observe = (): void => { this.cb() }
       disconnect = disconnect
     }
     vi.stubGlobal('ResizeObserver', FakeObserver)
+    vi.stubGlobal('requestAnimationFrame', () => 7)
+    vi.stubGlobal('cancelAnimationFrame', cancel)
     try {
       const m = await mount(h(Probe, { count: 20, enabled: true }))
       const el = query<HTMLElement>(m.container, 'div')
       Object.defineProperty(el, 'clientHeight', { configurable: true, value: 100 })
       await m.update(h(Probe, { count: 21, enabled: true }))
-      await m.unmount()
-      assert.ok(disconnect.mock.calls.length > 0)
-    } finally {
-      vi.unstubAllGlobals()
-    }
-  })
-
-  test('cancels a pending animation frame on unmount', async () => {
-    const cancel = vi.fn()
-    vi.stubGlobal('requestAnimationFrame', () => 7)
-    vi.stubGlobal('cancelAnimationFrame', cancel)
-    try {
-      const m = await mount(h(Probe, { count: 50, enabled: true }))
-      const el = query<HTMLElement>(m.container, 'div')
-      Object.defineProperty(el, 'clientHeight', { configurable: true, value: 100 })
-      await m.update(h(Probe, { count: 51, enabled: true }))
       await act(async () => { el.dispatchEvent(new Event('scroll')) })
       await m.unmount()
+      assert.ok(disconnect.mock.calls.length > 0)
       assert.ok(cancel.mock.calls.length > 0)
     } finally {
       vi.unstubAllGlobals()
     }
   })
-
 })

@@ -13,21 +13,19 @@ describe('lruTouch', () => {
 })
 
 describe('lruTrim', () => {
-  test('drops the least recently used entries down to the cap, never below it', () => {
+  test('drops the least recently used entries down to the cap and never below it', () => {
     const map = new Map<string, number>()
     for (let i = 0; i < 10; i++) {
       map.set(`k${i}`, i)
       lruTrim(map, 4)
     }
     assert.deepEqual([...map.keys()], ['k6', 'k7', 'k8', 'k9'])
-  })
 
-  test('a map at or under the cap is untouched (a negative bound must never wrap)', () => {
-    const map = new Map<string, number>([['a', 1], ['b', 2]])
-    lruTrim(map, 4)
-    assert.deepEqual([...map.keys()], ['a', 'b'])
-    lruTrim(map, 2)
-    assert.deepEqual([...map.keys()], ['a', 'b'])
+    const small = new Map<string, number>([['a', 1], ['b', 2]])
+    lruTrim(small, 4)
+    assert.deepEqual([...small.keys()], ['a', 'b'])
+    lruTrim(small, 2)
+    assert.deepEqual([...small.keys()], ['a', 'b'])
     const empty = new Map<string, number>()
     lruTrim(empty, 0)
     assert.equal(empty.size, 0)

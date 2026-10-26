@@ -16,33 +16,21 @@ function ev(over: Partial<ContextEventRecord> & { kind: ContextEventRecord['kind
 }
 
 describe('makeEventText.eventLabel', () => {
-  test('compaction counts the replaced messages (absent count folds to 0)', () => {
+  test('compaction counts the replaced messages; prune, model switch, and mode labels resolve', () => {
     assert.equal(eventLabel(ev({ kind: 'compaction', count: 3 })), 'Context compacted (summary replaced 3 messages)')
     assert.equal(eventLabel(ev({ kind: 'compaction' })), 'Context compacted (summary replaced 0 messages)')
-  })
-
-  test('prune has a fixed label', () => {
     assert.equal(eventLabel(ev({ kind: 'prune' })), 'Tool output pruned')
-  })
-
-  test('model switch interpolates from/to, ? for a missing side', () => {
     assert.equal(eventLabel(ev({ kind: 'model', from: 'a', to: 'b' })), 'Model switched: a → b')
     assert.equal(eventLabel(ev({ kind: 'model', from: 'a' })), 'Model switched: a → ?')
     assert.equal(eventLabel(ev({ kind: 'model', to: 'b' })), 'Model switched: ? → b')
-  })
-
-  test('mode labels resolve per name; a missing name resolves to the raw key', () => {
     assert.equal(eventLabel(ev({ kind: 'mode', name: 'plan.on' })), 'Plan mode on')
     assert.equal(eventLabel(ev({ kind: 'mode', name: 'plan.off' })), 'Plan mode off')
     assert.equal(eventLabel(ev({ kind: 'mode' })), 'ev.mode.?')
   })
 
-  test('skill injects name the skill, ? when missing', () => {
+  test('inject labels: skill injects name the skill, plain injects label their form then append name and detail', () => {
     assert.equal(eventLabel(ev({ kind: 'inject', sub: 'skill', name: 'code-review' })), 'Skill injected (code-review)')
     assert.equal(eventLabel(ev({ kind: 'inject', sub: 'skill' })), 'Skill injected (?)')
-  })
-
-  test('plain injects label their form, then append name and detail', () => {
     assert.equal(eventLabel(ev({ kind: 'inject' })), 'Context Injection')
     assert.equal(eventLabel(ev({ kind: 'inject', form: 'notice' })), 'Notice')
     assert.equal(eventLabel(ev({ kind: 'inject', form: 'notice', name: 'hook' })), 'Notice · hook')
@@ -52,15 +40,11 @@ describe('makeEventText.eventLabel', () => {
 })
 
 describe('makeEventText.eventAt', () => {
-  test('boundary events label the gap: same-turn range, cross-turn range, single point', () => {
+  test('boundary events label the gap or their single point; a partial from-side and missing turn/step degrade', () => {
     assert.equal(eventAt(ev({ kind: 'compaction', turn: 2, step: 4, fromTurn: 2, fromStep: 3 })), 'T2 S3→4')
     assert.equal(eventAt(ev({ kind: 'prune', turn: 51, step: 1, fromTurn: 50, fromStep: 8 })), 'T50 S8 → T51 S1')
     assert.equal(eventAt(ev({ kind: 'compaction', turn: 2, step: 3 })), 'T2 S3')
-    // A partial from-side falls back to the single point.
     assert.equal(eventAt(ev({ kind: 'compaction', turn: 2, step: 3, fromTurn: 2 })), 'T2 S3')
-  })
-
-  test('missing turn/step yields null; non-boundary kinds keep their single point', () => {
     assert.equal(eventAt(ev({ kind: 'compaction' })), null)
     assert.equal(eventAt(ev({ kind: 'prune', turn: 1 })), null)
     assert.equal(eventAt(ev({ kind: 'inject', turn: 1, step: 2 })), 'T1 S2')
@@ -69,12 +53,6 @@ describe('makeEventText.eventAt', () => {
 })
 
 describe('EventList', () => {
-  test('renders the empty state', async () => {
-    const m = await mount(h(EventList, { events: [] }))
-    assert.ok(text(m.container).includes('No context events yet'))
-    await m.unmount()
-  })
-
   test('rows render newest first with icons, kinds, labels, positions, tokens, and times', async () => {
     const time = new Date(2024, 0, 2, 3, 4, 5).getTime()
     const events: ContextEventRecord[] = [
@@ -136,7 +114,7 @@ describe('EventList', () => {
     await m.unmount()
   })
 
-  test('a resize while the list is empty (no rows, no root) does not throw', async () => {
+  test('a resize while the list is empty (no rows, no root) does not throw; empty → non-empty → empty stays stable', async () => {
     const m = await mount(h(EventList, { events: [] }))
     await act(async () => {
       window.dispatchEvent(new Event('resize'))
@@ -144,12 +122,15 @@ describe('EventList', () => {
     assert.ok(text(m.container).includes('No context events yet'))
     // The same listener keeps working once rows arrive (root was null at mount).
     await m.update(h(EventList, { events: [ev({ seq: 1, kind: 'prune' })] }))
+    assert.equal(queryAll(m.container, '.lc-event').length, 1)
     const label = query(m.container, '.lc-event-label')
     Object.defineProperty(label, 'scrollWidth', { value: 100, configurable: true })
     await act(async () => {
       window.dispatchEvent(new Event('resize'))
     })
     assert.equal(label.getAttribute('title'), 'Tool output pruned')
+    await m.update(h(EventList, { events: [] }))
+    assert.ok(text(m.container).includes('No context events yet'))
     await m.unmount()
   })
 
@@ -170,17 +151,6 @@ describe('EventList', () => {
     assert.ok(after[0] !== before[0], 'the new event prepends a new row')
     assert.equal(after[1], before[0], 'the previously-newest row keeps its DOM node')
     assert.equal(after[2], before[1], 'the oldest row keeps its DOM node')
-    await m.unmount()
-  })
-
-  test('empty → non-empty transition keeps the hook count stable (issue #12)', async () => {
-    const m = await mount(h(EventList, { events: [] }))
-    assert.ok(text(m.container).includes('No context events yet'))
-    await m.update(h(EventList, { events: [ev({ seq: 1, kind: 'prune' })] }))
-    assert.equal(queryAll(m.container, '.lc-event').length, 1)
-    assert.ok(text(m.container).includes('Tool output pruned'))
-    await m.update(h(EventList, { events: [] }))
-    assert.ok(text(m.container).includes('No context events yet'))
     await m.unmount()
   })
 
@@ -215,38 +185,29 @@ describe('EventList', () => {
     assert.equal(queryAll(plain.container, '.lc-event-jump').length, 0)
     assert.equal(queryAll(plain.container, '.lc-event-label').length, 4)
     await plain.unmount()
-  })
 
-  test('a row the view cannot land on stays a plain label', async () => {
-    const events = [
-      ev({ seq: 1, kind: 'inject', form: 'notice', name: 'hook' }),
-      ev({ seq: 2, kind: 'compaction', count: 2 }),
-    ]
-    const focused: ContextEventRecord[] = []
-    const m = await mount(h(EventList, {
+    const focused2: ContextEventRecord[] = []
+    const guarded = await mount(h(EventList, {
       events,
-      onEventFocus: e => { focused.push(e) },
+      onEventFocus: e => { focused2.push(e) },
       canEventFocus: e => e.kind === 'inject',
     }))
-    const rows = queryAll(m.container, '.lc-event')
-    assert.equal(rows[0].querySelector('.lc-event-jump'), null, 'the compaction has no landing step')
-    assert.equal(query(rows[0], '.lc-event-label').tagName, 'SPAN')
-    assert.equal(query(rows[1], '.lc-event-jump').tagName, 'BUTTON')
-    await click(query(rows[1], '.lc-event-jump'))
-    assert.deepEqual(focused.map(e => e.seq), [1])
-    await m.unmount()
+    const guardedRows = queryAll(guarded.container, '.lc-event')
+    assert.equal(guardedRows[2].querySelector('.lc-event-jump'), null, 'the compaction has no landing step')
+    assert.equal(query(guardedRows[2], '.lc-event-label').tagName, 'SPAN')
+    await click(query(guardedRows[3], '.lc-event-jump'))
+    assert.deepEqual(focused2.map(e => e.seq), [1])
+    await guarded.unmount()
   })
 })
 
 describe('EventList — the split generation detail states', () => {
-  test('a pending detail read shows the loading note instead of the empty claim', async () => {
-    const m = await mount(h(EventList, { events: [], state: 'loading', onRetry: () => {} }))
-    assert.ok(text(m.container).includes(DICT_EN['detail.loading']))
-    assert.ok(!text(m.container).includes('No context events yet'))
-    await m.unmount()
-  })
+  test('a pending read shows the loading note; a failed read arms the retry, or falls back to the empty claim', async () => {
+    const loading = await mount(h(EventList, { events: [], state: 'loading', onRetry: () => {} }))
+    assert.ok(text(loading.container).includes(DICT_EN['detail.loading']))
+    assert.ok(!text(loading.container).includes('No context events yet'))
+    await loading.unmount()
 
-  test('a failed detail read arms the retry button; a failed read without one falls back to the empty claim', async () => {
     let retries = 0
     const m = await mount(h(EventList, { events: [], state: 'failed', onRetry: () => { retries++ } }))
     const retry = query(m.container, '.lc-br-retry')

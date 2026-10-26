@@ -1,3 +1,9 @@
+/** Scroll an element into view when the browser provides the verb; a detached node or jsdom is a no-op. */
+export function scrollIntoViewIfPossible(el: Element | null, options?: ScrollIntoViewOptions): void {
+  if (el === null || typeof el.scrollIntoView !== 'function') return
+  el.scrollIntoView(options)
+}
+
 export function revealInScrollParent(anchor: Element): boolean {
   try {
     for (let el = anchor.parentElement; el !== null && el !== document.body; el = el.parentElement) {
@@ -12,15 +18,28 @@ export function revealInScrollParent(anchor: Element): boolean {
   return false
 }
 
-/** Scroll only the nearest overflowing ancestor INSIDE `card`: the page and the card's fixed head must never move. */
-export function revealRowInCard(card: Element | null, row: Element | null): void {
-  if (card === null || row === null || !card.contains(row)) return
+/** The nearest overflowing scroller between `row` and `card`; null when no ancestor scrolls. */
+function scrollerInCard(card: Element, row: Element): HTMLElement | null {
   let scroller: HTMLElement | null = row.parentElement
   while (scroller !== null && scroller !== card && scroller.scrollHeight <= scroller.clientHeight) {
     scroller = scroller.parentElement
   }
-  /* v8 ignore next 1 -- a contained row's parent chain always reaches the card; the null bound is unreachable. */
-  if (scroller === null || scroller === card) return
+  return scroller === null || scroller === card ? null : scroller
+}
+
+/** Scroll only the nearest overflowing ancestor INSIDE `card` so the row's TOP sits `inset` pixels below the scrollport top. */
+export function alignRowInCard(card: Element | null, row: Element | null, inset = 0): void {
+  if (card === null || row === null || !card.contains(row)) return
+  const scroller = scrollerInCard(card, row)
+  if (scroller === null) return
+  scroller.scrollTop += row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - inset
+}
+
+/** Scroll only the nearest overflowing ancestor INSIDE `card`: the page and the card's fixed head must never move. */
+export function revealRowInCard(card: Element | null, row: Element | null): void {
+  if (card === null || row === null || !card.contains(row)) return
+  const scroller = scrollerInCard(card, row)
+  if (scroller === null) return
   const rb = row.getBoundingClientRect()
   const sb = scroller.getBoundingClientRect()
   // The row only has to reach the scrollport's VISIBLE slice: the pane often extends below the window fold.

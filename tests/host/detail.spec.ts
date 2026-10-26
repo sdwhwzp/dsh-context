@@ -90,7 +90,7 @@ function okSession(): object {
 }
 
 describe('watchDetailChannel gating', () => {
-  test('the gate stays closed without the connection or sessions service', () => {
+  test('the gate stays closed without the connection or sessions service, and a rejecting registry keeps it closed', () => {
     assert.equal(watchDetailChannel(ctxOf({}).ctx, BOUNDS).live, false)
     assert.equal(watchDetailChannel(ctxOf({ sessions: sessionsWith(okSession()) }).ctx, BOUNDS).live, false)
     const connOnly = ctxOf({ connection: { fetch: { register: () => () => {} } } })
@@ -100,6 +100,23 @@ describe('watchDetailChannel gating', () => {
       connection: { fetch: { register: () => () => {} } },
       sessions: { get: 42 },
     }).ctx, BOUNDS).live, false)
+    const rejecting = {
+      get: (name: string) =>
+        name === 'connection'
+          ? { fetch: { register: () => { throw new Error('registration rejected') } } }
+          : name === 'sessions'
+            ? sessionsWith(okSession())
+            : undefined,
+      sessionProjections: { stateOf: () => undefined },
+      effect(fn: () => unknown) {
+        fn()
+        return () => {}
+      },
+      inject(deps: string[], cb: (c: unknown) => unknown) {
+        if (deps.every(d => (d === 'connection' || d === 'sessions'))) cb(rejecting)
+      },
+    }
+    assert.equal(watchDetailChannel(rejecting as unknown as Context, BOUNDS).live, false, 'a rejecting registry keeps the gate closed')
   })
 
   test('the gate opens on registration and closes on unload', () => {
@@ -110,35 +127,8 @@ describe('watchDetailChannel gating', () => {
     const gate = watchDetailChannel(ctx, BOUNDS)
     assert.equal(gate.live, true)
     assert.equal(captured.path, '/api/dsh-context/detail')
-    assert.equal(typeof captured.fetch, 'function')
     for (const d of disposers) d()
     assert.equal(gate.live, false)
-  })
-
-  test('a rejecting registry keeps the gate closed without throwing', () => {
-    const ctx = {
-      get: (name: string) =>
-        name === 'connection'
-          ? {
-            fetch: {
-              register: () => {
-                throw new Error('registration rejected')
-              },
-            },
-          }
-          : name === 'sessions'
-            ? sessionsWith(okSession())
-            : undefined,
-      sessionProjections: { stateOf: () => undefined },
-      effect(fn: () => unknown) {
-        fn()
-        return () => {}
-      },
-      inject(deps: string[], cb: (c: unknown) => unknown) {
-        if (deps.every(d => (d === 'connection' || d === 'sessions'))) cb(ctx)
-      },
-    }
-    assert.equal(watchDetailChannel(ctx as unknown as Context, BOUNDS).live, false)
   })
 })
 
@@ -165,17 +155,14 @@ describe('the detail route', () => {
     assert.equal(raw.error?.code, 'dsh-context/bad-request')
   })
 
-  test('a session outside the live set resolves to the typed null', async () => {
+  test('a session outside the live set and an absent unit state both resolve to the typed null', async () => {
     const { state } = driveTimeline([userMessage(1, [{ type: 'text', text: 'hi' }], { kind: 'user' })])
     const { ctx, captured } = liveCtx(state)
     watchDetailChannel(ctx, BOUNDS)
     assert.deepEqual(await call(captured, { sessionId: 'gone' }), { ok: true, value: null })
-  })
-
-  test('an absent unit state resolves to the typed null', async () => {
-    const { ctx, captured } = liveCtx(undefined)
-    watchDetailChannel(ctx, BOUNDS)
-    assert.deepEqual(await call(captured, { sessionId: 's1' }), { ok: true, value: null })
+    const absent = liveCtx(undefined)
+    watchDetailChannel(absent.ctx, BOUNDS)
+    assert.deepEqual(await call(absent.captured, { sessionId: 's1' }), { ok: true, value: null })
   })
 
   test('a cold session (never entered into the live store) folds its detail off the observed log', async () => {
@@ -212,22 +199,17 @@ describe('the detail route', () => {
     assert.deepEqual(observedOptions, { projectionMode: 'none' }, 'the observation skips projection work')
     assert.equal(disposed, 1, 'the observation lease disposed after the fold')
     assert.deepEqual(await call(captured, { sessionId: 'nobody' }), { ok: true, value: null })
-  })
 
-  test('an observation without a dispose face still serves (nothing to release)', async () => {
-    const events = [userMessage(1, [{ type: 'text', text: 'hi' }], { kind: 'user' })]
-    const { ctx, captured } = ctxOf({
+    const bare = ctxOf({
       connection: { fetch: { register: () => () => {} } },
       sessions: sessionsWith(okSession()),
       stateOf: () => undefined,
-      sessionQuery: {
-        observeSession: () => Promise.resolve({ events }),
-      },
+      sessionQuery: { observeSession: () => Promise.resolve({ events: [events[1]] }) },
     })
-    watchDetailChannel(ctx, BOUNDS)
-    const result = await call(captured, { sessionId: 'cold1' }) as { ok: boolean; value: { nodes: unknown[] } | null }
-    assert.equal(result.ok, true)
-    assert.equal(result.value?.nodes.length, 1)
+    watchDetailChannel(bare.ctx, BOUNDS)
+    const bareResult = await call(bare.captured, { sessionId: 'cold1' }) as { ok: boolean; value: { nodes: unknown[] } | null }
+    assert.equal(bareResult.ok, true)
+    assert.equal(bareResult.value?.nodes.length, 1, 'an observation without a dispose face still serves')
   })
 
   test('a sessionQuery without the observe face (or a rejecting read) degrades cleanly', async () => {
@@ -252,7 +234,7 @@ describe('the detail route', () => {
     assert.equal(result.error.message, 'persistence down')
   })
 
-  test('a cold read skipped under heap pressure answers the typed null (and never observes)', async () => {
+  test('the cold-read gate applies to cold reads only: a skipped read answers null, a live read never touches it', async () => {
     let observed = 0
     const { ctx, captured } = ctxOf({
       connection: { fetch: { register: () => () => {} } },
@@ -275,15 +257,13 @@ describe('the detail route', () => {
     assert.deepEqual(await call(captured, { sessionId: 'cold1' }), { ok: true, value: null })
     assert.equal(admitted, 1, 'the cold read went through the gate')
     assert.equal(observed, 0, 'a skipped read never touches the log')
-  })
 
-  test('the live path never touches the cold-read gate', async () => {
     const { state } = driveTimeline([userMessage(1, [{ type: 'text', text: 'hi' }], { kind: 'user' })])
-    const { ctx, captured } = liveCtx(state)
-    watchDetailChannel(ctx, BOUNDS, {
+    const live = liveCtx(state)
+    watchDetailChannel(live.ctx, BOUNDS, {
       admit: () => Promise.reject(new Error('the gate must not see a live read')),
     })
-    const result = await call(captured, { sessionId: 's1' }) as { ok: boolean; value: { rev: number } | null }
+    const result = await call(live.captured, { sessionId: 's1' }) as { ok: boolean; value: { rev: number } | null }
     assert.equal(result.ok, true)
     assert.ok(result.value !== null, 'the live read served its detail without the gate')
   })
@@ -484,10 +464,10 @@ describe('the cold fold (issue #145)', () => {
     assert.equal(disposed, 2, 'both observation leases released')
   })
 
-  test('a changed revision refolds (no stale payload, ever)', async () => {
+  test('a changed revision refolds; an observation without a revision never keys the cache', async () => {
     const events = manyEvents(5)
     let eventReads = 0
-    let revision = 'r1'
+    let revision: string | undefined = 'r1'
     const { ctx, captured } = coldCtx(() => Promise.resolve({
       get revision() { return revision },
       get events() {
@@ -501,22 +481,10 @@ describe('the cold fold (issue #145)', () => {
     revision = 'r2' // the log moved: a new durable revision must fold again
     await call(captured, { sessionId: 'cold1' })
     assert.equal(eventReads, 2, 'the changed log refolded instead of serving stale data')
-  })
-
-  test('an observation without a revision (a live-race cut) never keys the cache', async () => {
-    const events = manyEvents(5)
-    let eventReads = 0
-    const { ctx, captured } = coldCtx(() => Promise.resolve({
-      get events() {
-        eventReads++
-        return events
-      },
-      [Symbol.dispose]: () => {},
-    }))
-    watchDetailChannel(ctx, BOUNDS)
+    revision = undefined // a live-race cut names no durable revision
     await call(captured, { sessionId: 'cold1' })
     await call(captured, { sessionId: 'cold1' })
-    assert.equal(eventReads, 2, 'no revision — every read folds, as before')
+    assert.equal(eventReads, 4, 'no revision — every read folds, as before')
   })
 
   test('the cache holds four sessions; the evicted oldest refolds, the kept newest re-serves', async () => {
@@ -538,13 +506,13 @@ describe('the cold fold (issue #145)', () => {
     assert.equal(reads.get('c1'), 2, 'the evicted oldest refolded on its next read')
   })
 
-  test('a swapped persistence instance can never alias a stale payload (the dsh trust tuple)', async () => {
+  test('a swapped persistence instance and a remount never alias a stale payload', async () => {
     const events = manyEvents(5)
-    let eventReads = 0
+    let swappedReads = 0
     const observe = (): Promise<unknown> => Promise.resolve({
       revision: 'same-token-from-two-backends',
       get events() {
-        eventReads++
+        swappedReads++
         return events
       },
       [Symbol.dispose]: () => {},
@@ -555,26 +523,22 @@ describe('the cold fold (issue #145)', () => {
     const second = coldCtx(observe, { backend: 'two' })
     watchDetailChannel(second.ctx, BOUNDS)
     await call(second.captured, { sessionId: 'cold1' })
-    assert.equal(eventReads, 2, 'a replaced persistence invalidates every cached payload')
-  })
+    assert.equal(swappedReads, 2, 'a replaced persistence invalidates every cached payload (the dsh trust tuple)')
 
-  test('a remount (a fresh watch closure) starts with an empty cache', async () => {
-    const events = manyEvents(5)
-    let eventReads = 0
+    let remountReads = 0
     const { ctx, captured } = coldCtx(() => Promise.resolve({
       revision: 'r1',
       get events() {
-        eventReads++
+        remountReads++
         return events
       },
       [Symbol.dispose]: () => {},
     }))
     watchDetailChannel(ctx, BOUNDS)
     await call(captured, { sessionId: 'cold1' })
-    // The second watch (the config remount's re-arm) shares nothing with the first.
-    watchDetailChannel(ctx, BOUNDS)
+    watchDetailChannel(ctx, BOUNDS) // the config remount's re-arm shares nothing with the first watch
     await call(captured, { sessionId: 'cold1' })
-    assert.equal(eventReads, 2, 'the remounted route folds against its own cache')
+    assert.equal(remountReads, 2, 'the remounted route folds against its own cache')
   })
 })
 

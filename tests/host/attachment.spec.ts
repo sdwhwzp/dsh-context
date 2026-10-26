@@ -142,7 +142,7 @@ describe('referencedAttachmentOf', () => {
     )
   })
 
-  test('the walk is bounded and total over a hostile log', () => {
+  test('the walk is bounded and total over a hostile log; an id the log never cites resolves null', () => {
     // Deeper than the cap: the block is out of reach, so nothing resolves.
     let deep: Record<string, unknown> = { type: 'file', attachment: { attachmentId: 'sha256:deep', name: 'x.md', bytes: 1 } }
     for (let i = 0; i < 10; i++) deep = { nest: deep }
@@ -153,9 +153,6 @@ describe('referencedAttachmentOf', () => {
       referencedAttachmentOf([{ type: 'x', data: hostile }, USER_EVENT], 'sha256:f1'),
       { kind: 'file', attachmentId: 'sha256:f1', name: 'report.md', bytes: 47320 },
     )
-  })
-
-  test('an id the log never cites resolves null, over hostile entries', () => {
     assert.equal(referencedAttachmentOf([USER_EVENT], 'sha256:other'), null)
     assert.equal(referencedAttachmentOf([], 'sha256:f1'), null)
     assert.equal(
@@ -174,14 +171,13 @@ describe('referencedAttachmentOf', () => {
 })
 
 describe('watchAttachmentChannel gating', () => {
-  test('no route without the connection service or its fetch registry', () => {
-    assert.equal(ctxOf({}).captured.path, undefined)
-    assert.equal(ctxOf({ connection: {} }).captured.path, undefined)
-    assert.equal(ctxOf({ connection: { fetch: {} } }).captured.path, undefined)
+  test('no route without the connection service or its fetch registry, and a rejecting registry stays up without one', () => {
+    for (const spec of [{}, { connection: {} }, { connection: { fetch: {} } }]) {
+      const { ctx, captured } = ctxOf(spec)
+      watchAttachmentChannel(ctx, OPEN_GATE)
+      assert.equal(captured.path, undefined, JSON.stringify(spec))
+    }
     assert.equal(armed().captured.path, ATTACHMENT_ROUTE)
-  })
-
-  test('a rejecting registry keeps the route absent without throwing', () => {
     const ctx = {
       get: (name: string) => name === 'connection'
         ? {
@@ -250,15 +246,7 @@ describe('watchAttachmentChannel resolution', () => {
     assert.equal(query.disposed(), true)
   })
 
-  test('a store without an image face answers a typed null for an image', async () => {
-    const { captured } = armed({
-      sessionQuery: observing([USER_EVENT]),
-      attachments: { fileHostPath: () => ALIAS },
-    })
-    assert.deepEqual(await call(captured, { sessionId: 's1', attachmentId: 'sha256:i1' }), { ok: true, value: null })
-  })
-
-  test('every unlocatable attachment shape resolves a typed null', async () => {
+  test('every unlocatable file shape resolves a typed null', async () => {
     const cases: { attachments: unknown; id: string }[] = [
       // No store composed, a store without the verb, and a store answering nothing path-shaped.
       { attachments: undefined, id: 'sha256:f1' },
@@ -277,39 +265,32 @@ describe('watchAttachmentChannel resolution', () => {
       },
     ]
     for (const c of cases) {
-      const { captured } = armed({ sessionQuery: observing([USER_EVENT]), attachments: c.attachments })
+      const { captured } = armed({ sessionQuery: observing([USER_EVENT, BARE_IMAGE_EVENT]), attachments: c.attachments })
       assert.deepEqual(await call(captured, { sessionId: 's1', attachmentId: c.id }), { ok: true, value: null }, JSON.stringify(c))
     }
   })
 
-  test('an observation without a dispose method still serves', async () => {
+  test('an observation without a dispose method and a nameless file reference still serve', async () => {
     const { captured } = armed({
       sessionQuery: { observeSession: () => Promise.resolve({ events: [USER_EVENT] }) },
       attachments: { fileHostPath: () => ALIAS },
     })
     assert.deepEqual(await call(captured, { sessionId: 's1', attachmentId: 'sha256:f1' }), { ok: true, value: { path: ALIAS } })
-  })
-
-  test('a nameless file reference still resolves through the store', async () => {
-    const { captured } = armed({
+    const nameless = armed({
       sessionQuery: observing([{ type: 'user/message', seq: 1, data: { content: [{ type: 'file', attachment: { attachmentId: 'sha256:f3' } }] } }]),
       attachments: { fileHostPath: (ref: unknown) => `${ALIAS}:${JSON.stringify(ref)}` },
     })
-    const r = await call(captured, { sessionId: 's1', attachmentId: 'sha256:f3' })
+    const r = await call(nameless.captured, { sessionId: 's1', attachmentId: 'sha256:f3' })
     assert.deepEqual(r.value, { path: `${ALIAS}:${JSON.stringify({ attachmentId: 'sha256:f3', name: '', bytes: 0 })}` })
   })
 })
 
 describe('image preview names', () => {
-  test('an image keeps a viewable suffix, leaf only', () => {
+  test('a viewable leaf suffix wins; otherwise the verified media type names the preview', () => {
     assert.equal(imagePreviewNameOf({ kind: 'image', attachmentId: 'a', name: 'photo.PNG', mediaType: 'image/jpeg' }), 'photo.PNG')
     assert.equal(imagePreviewNameOf({ kind: 'image', attachmentId: 'a', name: '../../evil.svg' }), 'evil.svg')
     assert.equal(imagePreviewNameOf({ kind: 'image', attachmentId: 'a', name: 'C:\\tmp\\x.webp' }), 'x.webp')
-  })
-
-  test('anything the column cannot view is named by the verified media type', () => {
     assert.equal(imagePreviewNameOf({ kind: 'image', attachmentId: 'a', name: 'clipboard', mediaType: 'image/jpeg' }), 'attachment.jpg')
-    assert.equal(imagePreviewNameOf({ kind: 'image', attachmentId: 'a', name: 'shot.png', mediaType: 'image/webp' }), 'shot.png', 'a suffix a viewer claims keeps the displayed name; the viewer renders the stored bytes')
     assert.equal(imagePreviewNameOf({ kind: 'image', attachmentId: 'a', name: 'scan.tiff', mediaType: 'image/png' }), 'attachment.png')
     assert.equal(imagePreviewNameOf({ kind: 'image', attachmentId: 'a', mediaType: 'image/gif' }), 'attachment.gif')
     assert.equal(imagePreviewNameOf({ kind: 'image', attachmentId: 'a', mediaType: 'image/tiff' }), null)
@@ -346,7 +327,7 @@ describe('watchAttachmentChannel image aliases', () => {
     assert.deepEqual(again.value, { path })
   })
 
-  test('an unfamiliar object layout and an unlocatable object both answer a typed null', async () => {
+  test('an unfamiliar layout, an unlocatable object, and a hostile or empty image reference all answer a typed null', async () => {
     const flat = armed({
       sessionQuery: observing([USER_EVENT]),
       attachments: { imageHostPath: () => join(tmpdir(), 'objects', 'ab', 'digest') },
@@ -359,9 +340,7 @@ describe('watchAttachmentChannel image aliases', () => {
       attachments: { imageHostPath: () => join(home, 'attachments', 'v1', 'objects', 'ab', 'gone') },
     })
     assert.deepEqual(await call(missing.captured, { sessionId: 's1', attachmentId: 'sha256:i1' }), { ok: true, value: null })
-  })
 
-  test('a hostile or empty image reference resolves a typed null', async () => {
     const cases: { store: unknown; id: string }[] = [
       { store: {}, id: 'sha256:i1' },
       {

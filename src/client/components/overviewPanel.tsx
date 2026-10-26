@@ -244,7 +244,7 @@ export function makeOverviewPanel(
                 </div>
                 <div className="lc-ov-stats">
                   <OverviewTokens tokens={kpi.tokenParts} />
-                  <StatsTiming timing={teamTiming} scope="team" />
+                  <StatsTiming timing={teamTiming} />
                 </div>
                 <div className="lc-ov-body">
                   <div className="lc-ov-left">

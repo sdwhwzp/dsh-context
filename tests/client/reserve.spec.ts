@@ -15,17 +15,14 @@ describe('reserveGeometry', () => {
     assert.equal(reserveGeometry(Number.POSITIVE_INFINITY, 256_000), undefined)
   })
 
-  test('the deepseek defaults: the pressure budget binds, and the trigger is the masks\' left edge', () => {
+  test('the deepseek defaults bind the pressure budget when it is smaller; a small output cap leaves the ratio binding', () => {
     const reserve = reserveGeometry(1_000_000, 256_000)
     assert.deepEqual(reserve, { threshold: 678_464, headroom: COMPACT_HEADROOM_TOKENS, output: 256_000 })
     assert.ok(triggerAtOrLeftOfMasks(reserve!, 1_000_000))
-  })
-
-  test('a small output cap leaves the ratio binding: the trigger detaches, the headroom keeps its true size', () => {
-    const reserve = reserveGeometry(1_000_000, 8_000)
-    assert.deepEqual(reserve, { threshold: 800_000, headroom: COMPACT_HEADROOM_TOKENS, output: 8_000 })
-    assert.equal(reserve!.threshold, Math.floor(1_000_000 * COMPACT_THRESHOLD_RATIO))
-    assert.ok(triggerAtOrLeftOfMasks(reserve!, 1_000_000))
+    const ratio = reserveGeometry(1_000_000, 8_000)
+    assert.deepEqual(ratio, { threshold: 800_000, headroom: COMPACT_HEADROOM_TOKENS, output: 8_000 })
+    assert.equal(ratio!.threshold, Math.floor(1_000_000 * COMPACT_THRESHOLD_RATIO))
+    assert.ok(triggerAtOrLeftOfMasks(ratio!, 1_000_000))
   })
 
   test('an unknown, non-positive, or non-finite output cap reserves no output', () => {

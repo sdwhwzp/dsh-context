@@ -2,13 +2,10 @@
 // rule on every intermediate state (see assertNoAbsentMembers).
 
 import assert from 'node:assert/strict'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Config } from '../../../src/host/config'
 import type { TimelineEvent, TimelineState } from '../../../src/host/fold'
-import type { HeadersState } from '../../../src/host/headers'
-import type { ContextHeaders, ContextTimeline } from '../../../src/shared/types'
+import type { ContextTimeline } from '../../../src/shared/types'
 import { createContextTimelineDefinition } from '../../../src/host/timeline'
-import { createContextHeadersDefinition } from '../../../src/host/headers'
 
 /** The fold's contract takes the core `SessionEvent` union, but the log also carries declaration-merged
  * `compaction/*` events, so it widens to `TimelineEvent`; these faces mirror the supported registry contract via the ONE cast. */
@@ -25,19 +22,8 @@ export interface TimelineDefLike {
   }
 }
 
-export interface HeadersDefLike {
-  key: string
-  init(): HeadersState
-  apply(state: HeadersState, event: TimelineEvent): HeadersState
-  wire: { view(state: HeadersState): ContextHeaders }
-}
-
 export function timelineDef(config?: Config, slim = false): TimelineDefLike {
   return createContextTimelineDefinition(config ?? {}, () => slim) as unknown as TimelineDefLike
-}
-
-export function headersDef(): HeadersDefLike {
-  return createContextHeadersDefinition() as unknown as HeadersDefLike
 }
 
 /** Lossless-JSON probe and detach, inlined with dsh `snapshotJsonValue` semantics (lives in
@@ -123,5 +109,3 @@ export function assertStatesPlainJson(drive: TimelineDrive): void {
 export function assertStable(state: TimelineState, event: TimelineEvent, def = timelineDef()): void {
   assert.equal(def.apply(state, event), state, 'uninteresting events must return the same reference')
 }
-
-export type { SessionEvent }

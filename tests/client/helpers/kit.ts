@@ -1,3 +1,4 @@
+import { afterEach } from 'vitest'
 import { act, type ReactElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { DICT_EN, DICT_ZH } from '../../../src/client/i18n'
@@ -34,6 +35,16 @@ export interface Mounted {
   unmount(): Promise<void>
 }
 
+const mounted = new Set<Mounted>()
+
+export async function cleanupMounts(): Promise<void> {
+  for (const m of [...mounted]) await m.unmount()
+}
+
+// A failed assertion must not leave roots in the shared per-worker jsdom; keeping the hook here (not setup.ts)
+// means only specs that import the kit pay its React import.
+afterEach(cleanupMounts)
+
 export async function mount(el: ReactElement): Promise<Mounted> {
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -41,7 +52,7 @@ export async function mount(el: ReactElement): Promise<Mounted> {
   await act(async () => {
     root.render(el)
   })
-  return {
+  const handle: Mounted = {
     container,
     root,
     async update(next) {
@@ -54,12 +65,29 @@ export async function mount(el: ReactElement): Promise<Mounted> {
         root.unmount()
       })
       container.remove()
+      mounted.delete(handle)
     },
   }
+  mounted.add(handle)
+  return handle
 }
 
 export async function flush(): Promise<void> {
   await act(async () => {})
+}
+
+/** Let timer-driven work land inside act, so React attributes the update to the test. */
+export async function settle(ms: number): Promise<void> {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, ms))
+  })
+}
+
+/** Fire a scroll event inside act (jsdom never fires one from `scrollTop`). */
+export async function fireScroll(el: HTMLElement): Promise<void> {
+  await act(async () => {
+    el.dispatchEvent(new Event('scroll'))
+  })
 }
 
 /** Poll until the predicate holds, one short act() scope per tick, so timer/promise updates are

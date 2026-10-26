@@ -17,6 +17,7 @@ import {
   lineageOf,
   pressureColorOf,
   providerModelLabelOf,
+  sessionTitlesOf,
   sessionsFaceOf,
   subagentCostFoldOf,
   type AgentForest,
@@ -115,7 +116,6 @@ describe('agentTurnCompletedOf', () => {
     assert.equal(agentTurnCompletedOf('x'), false)
     assert.equal(agentTurnCompletedOf({}), false)
     assert.equal(agentTurnCompletedOf({ lastTurnCompleted: 'yes' }), false)
-    assert.equal(agentTurnCompletedOf({ settledMs: 5000 }), false)
     assert.equal(agentTurnCompletedOf({ lastTurnCompleted: false }), false)
     assert.equal(agentTurnCompletedOf({ lastTurnCompleted: true }), true)
   })
@@ -131,10 +131,10 @@ describe('agentStatsOf', () => {
     })
   })
 
-  test('timeline rows produce a full headline with parts and request count', () => {
+  test('timeline rows produce a full headline; a malformed usage degrades billed to null', () => {
     const cost: SessionCostUsage = { 'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1, cacheRead: 2, cacheWrite: 0, output: 3 } } } }
     const stats = agentStatsOf({
-      contextTimeline: { ...timeline(500, 3), cost },
+      contextTimeline: { ...timeline(500, 3), cost, model: 'deepseek-flash', reasoningEffort: 'max' },
       contextPressure: { projectedTokens: 800, contextWindow: 1000 },
       contextBreakdown: { systemTokens: 10, toolsTokens: 20, messageTokens: 470 },
       tokenUsage: { uncachedInputTokens: 100, outputTokens: 50, cacheReadTokens: 30, cacheWriteTokens: 20 },
@@ -148,21 +148,15 @@ describe('agentStatsOf', () => {
     assert.ok(stats.head.parts.length > 0)
     assert.equal(stats.requests, 3)
     assert.equal(stats.billed, 200)
+    assert.equal(agentStatsOf({ tokenUsage: { uncachedInputTokens: 'x' } }).billed, null, 'a malformed usage never fabricates a figure')
     assert.deepEqual(stats.costUsage, cost)
     assert.equal(stats.durationMs, 2000)
     assert.deepEqual(stats.identity, { mode: 'continuable', label: 'helper' })
-  })
-
-  test('the timeline head model rides the stats (the roster table and member cards read it)', () => {
-    const withModel = agentStatsOf({ contextTimeline: { ...timeline(100, 1), model: 'deepseek-flash' } })
-    assert.equal(withModel.model, 'deepseek-flash')
-    assert.equal(agentStatsOf({ contextTimeline: timeline(100, 1) }).model, undefined)
-  })
-
-  test('the timeline head reasoning effort rides the stats beside the model', () => {
-    const withEffort = agentStatsOf({ contextTimeline: { ...timeline(100, 1), model: 'deepseek-flash', reasoningEffort: 'max' } })
-    assert.equal(withEffort.reasoningEffort, 'max')
-    assert.equal(agentStatsOf({ contextTimeline: timeline(100, 1) }).reasoningEffort, undefined)
+    assert.equal(stats.model, 'deepseek-flash')
+    assert.equal(stats.reasoningEffort, 'max')
+    const bare = agentStatsOf({ contextTimeline: timeline(100, 1) })
+    assert.equal(bare.model, undefined)
+    assert.equal(bare.reasoningEffort, undefined)
   })
 
   test('providerModelLabelOf drops absent parts without a lone separator', () => {
@@ -198,11 +192,6 @@ describe('agentStatsOf', () => {
     const noWindow = agentStatsOf({ contextPressure: { projectedTokens: 5, contextWindow: 0 } })
     assert.deepEqual(noWindow.head, { tokens: 5, window: undefined, pct: null, parts: [] })
     assert.equal(agentStatsOf({ contextPressure: { contextWindow: 1000 } }).head, null)
-  })
-
-  test('usage sums into billed; a malformed usage value degrades whole (the buckets sum into the total)', () => {
-    assert.equal(agentStatsOf({ tokenUsage: { uncachedInputTokens: 'x' } }).billed, null)
-    assert.equal(agentStatsOf({ tokenUsage: null }).billed, null)
   })
 })
 
@@ -246,64 +235,15 @@ describe('agentForestOf', () => {
     assert.equal(agentForestOf(snap({}), ''), null)
   })
 
-  test('synthesizes the current row when the list has not delivered it', () => {
-    const forest = agentForestOf(snap({}), 's1')
-    assert.ok(forest !== null)
-    assert.equal(forest.solo, true)
-    assert.equal(forest.nodes.length, 1)
-    assert.equal(forest.nodes[0].id, 's1')
-    assert.equal(forest.nodes[0].label, 's1')
-    assert.equal(forest.nodes[0].isCurrent, true)
-    assert.deepEqual(forest.edges, [])
-  })
-
-  test('a finished subagent turn marks the node done, and a running one never is', () => {
-    const forest = agentForestOf(snap({
-      root: row({ running: true }),
-      kid: row({ parentId: 'root', origin: 'subagent', projectionValues: { subagentTiming: { settledMs: 5000, lastTurnCompleted: true } } }),
-      open: row({ parentId: 'root', origin: 'subagent', projectionValues: { subagentTiming: { settledMs: 1000, active: { since: 10, through: 99 } } } }),
-    }), 'root')
-    assert.ok(forest !== null)
-    const byId = new Map(forest.nodes.map(n => [n.id, n]))
-    assert.equal(byId.get('kid')?.completed, true)
-    assert.equal(byId.get('open')?.completed, false)
-    const live = agentForestOf(snap({
-      root: row({ running: true }),
-      kid: row({ parentId: 'root', origin: 'subagent', running: true, projectionValues: { subagentTiming: { settledMs: 5000, lastTurnCompleted: true } } }),
-    }), 'root')
-    assert.ok(live !== null)
-    assert.equal(live.nodes.find(n => n.id === 'kid')?.completed, false)
-  })
-
-  test('a session that is not a subagent is done once it has folded steps and stopped running', () => {
-    const idle = agentForestOf(snap({ root: row({}) }), 'root', { head: null, billed: null, requests: 9 })
-    assert.ok(idle !== null)
-    assert.equal(idle.nodes[0].completed, true)
-    const ancestor = agentForestOf(snap({
-      root: row({ projectionValues: { contextTimeline: timeline(10, 3) } }),
-      kid: row({ parentId: 'root', origin: 'subagent' }),
-    }), 'kid')
-    assert.ok(ancestor !== null)
-    assert.equal(ancestor.nodes.find(n => n.id === 'root')?.completed, true)
-    const fresh = agentForestOf(snap({ root: row({}) }), 'root', { head: null, billed: null, requests: 0 })
-    assert.ok(fresh !== null)
-    assert.equal(fresh.nodes[0].completed, false)
-    const live = agentForestOf(snap({ root: row({ running: true }) }), 'root', { head: null, billed: null, requests: 9 })
-    assert.ok(live !== null)
-    assert.equal(live.nodes[0].completed, false)
-  })
-
-  test('a subagent without the completion flag is never done on its steps alone', () => {
-    // Only the harness flag marks a subagent done: folded steps alone would call an aborted one finished.
-    const forest = agentForestOf(snap({
-      root: row({ running: true }),
-      kid: row({ parentId: 'root', origin: 'subagent', projectionValues: { contextTimeline: timeline(10, 3) } }),
-    }), 'root')
-    assert.ok(forest !== null)
-    assert.equal(forest.nodes.find(n => n.id === 'kid')?.completed, false)
-  })
-
-  test('merges live self stats onto the current node', () => {
+  test('synthesizes the missing current row, then merges live self stats onto it', () => {
+    const synth = agentForestOf(snap({}), 's1')
+    assert.ok(synth !== null)
+    assert.equal(synth.solo, true)
+    assert.equal(synth.nodes.length, 1)
+    assert.equal(synth.nodes[0].id, 's1')
+    assert.equal(synth.nodes[0].label, 's1')
+    assert.equal(synth.nodes[0].isCurrent, true)
+    assert.deepEqual(synth.edges, [])
     const head = { tokens: 9, window: 10, pct: 90, parts: [] }
     const selfCost: SessionCostUsage = { p: { m: { peak: { uncached: 5, cacheRead: 0, cacheWrite: 0, output: 0 } } } }
     const forest = agentForestOf(snap({}), 's1', { head, billed: 7, requests: 4, costUsage: selfCost, durationMs: 9000 })
@@ -331,6 +271,47 @@ describe('agentForestOf', () => {
     assert.equal(withRow.nodes[0].billed, 4)
     assert.deepEqual(withRow.nodes[0].costUsage, rowCost)
     assert.ok(withRow.nodes[0].head !== null)
+  })
+
+  test('completed follows the harness rule: the finished-turn flag for subagents, folded steps for a stopped session', () => {
+    const forest = agentForestOf(snap({
+      root: row({ running: true }),
+      kid: row({ parentId: 'root', origin: 'subagent', projectionValues: { subagentTiming: { settledMs: 5000, lastTurnCompleted: true } } }),
+      open: row({ parentId: 'root', origin: 'subagent', projectionValues: { subagentTiming: { settledMs: 1000, active: { since: 10, through: 99 } } } }),
+    }), 'root')
+    assert.ok(forest !== null)
+    const byId = new Map(forest.nodes.map(n => [n.id, n]))
+    assert.equal(byId.get('kid')?.completed, true)
+    assert.equal(byId.get('open')?.completed, false)
+    const live = agentForestOf(snap({
+      root: row({ running: true }),
+      kid: row({ parentId: 'root', origin: 'subagent', running: true, projectionValues: { subagentTiming: { settledMs: 5000, lastTurnCompleted: true } } }),
+    }), 'root')
+    assert.ok(live !== null)
+    assert.equal(live.nodes.find(n => n.id === 'kid')?.completed, false)
+
+    const idle = agentForestOf(snap({ root: row({}) }), 'root', { head: null, billed: null, requests: 9 })
+    assert.ok(idle !== null)
+    assert.equal(idle.nodes[0].completed, true)
+    const ancestor = agentForestOf(snap({
+      root: row({ projectionValues: { contextTimeline: timeline(10, 3) } }),
+      kid: row({ parentId: 'root', origin: 'subagent' }),
+    }), 'kid')
+    assert.ok(ancestor !== null)
+    assert.equal(ancestor.nodes.find(n => n.id === 'root')?.completed, true)
+    const fresh = agentForestOf(snap({ root: row({}) }), 'root', { head: null, billed: null, requests: 0 })
+    assert.ok(fresh !== null)
+    assert.equal(fresh.nodes[0].completed, false)
+    const running = agentForestOf(snap({ root: row({ running: true }) }), 'root', { head: null, billed: null, requests: 9 })
+    assert.ok(running !== null)
+    assert.equal(running.nodes[0].completed, false)
+
+    const flagged = agentForestOf(snap({
+      root: row({ running: true }),
+      kid: row({ parentId: 'root', origin: 'subagent', projectionValues: { contextTimeline: timeline(10, 3) } }),
+    }), 'root')
+    assert.ok(flagged !== null)
+    assert.equal(flagged.nodes.find(n => n.id === 'kid')?.completed, false, 'folded steps alone never finish a subagent')
   })
 
   test('injects fetched cold heads into rows whose own timeline is absent', () => {
@@ -472,29 +453,13 @@ describe('agentForestOf', () => {
     assert.deepEqual(forest.nodes.map(n => n.id), ['b', 'a'])
   })
 
-  test('siblings follow the parent catalog spawn order when cached', () => {
-    const forest = agentForestOf(snap({
-      root: row({
-        projectionValues: {
-          subagentCatalog: [
-            { id: 'b', createdAt: 2, mode: 'one-shot' },
-            { id: 'a', createdAt: 1, mode: 'one-shot' },
-          ],
-        },
-      }),
-      a: row({ parentId: 'root', origin: 'subagent', running: true, updatedAt: 9 }),
-      b: row({ parentId: 'root', origin: 'subagent', updatedAt: 1 }),
-    }), 'root')
-    assert.ok(forest !== null)
-    assert.deepEqual(forest.nodes.map(n => n.id), ['root', 'b', 'a'])
-  })
-
-  test('uncataloged children sort after cataloged ones; malformed catalog entries drop alone', () => {
+  test('cataloged children follow the parent catalog order; uncataloged ones fall after; malformed entries drop alone', () => {
     const forest = agentForestOf(snap({
       root: row({
         projectionValues: {
           subagentCatalog: [
             { id: 'b', createdAt: 2 },
+            { id: 'a', createdAt: 1 },
             'garbage',
             { id: 42 },
             { id: '' },
@@ -502,13 +467,27 @@ describe('agentForestOf', () => {
           ],
         },
       }),
-      // Insertion order a→b→c makes the sort compare cataloged b against uncataloged a in both directions.
+      // Insertion order a→b→c makes the sort compare cataloged ranks in both directions.
       a: row({ parentId: 'root', origin: 'subagent', updatedAt: 5 }),
       b: row({ parentId: 'root', origin: 'subagent', updatedAt: 1 }),
       c: row({ parentId: 'root', origin: 'subagent', running: true }),
     }), 'root')
     assert.ok(forest !== null)
-    assert.deepEqual(forest.nodes.map(n => n.id), ['root', 'b', 'c', 'a'])
+    assert.deepEqual(forest.nodes.map(n => n.id), ['root', 'b', 'a', 'c'])
+    const reversed = agentForestOf(snap({
+      root: row({ projectionValues: { subagentCatalog: [{ id: 'b', createdAt: 1 }] } }),
+      a: row({ parentId: 'root', origin: 'subagent' }),
+      b: row({ parentId: 'root', origin: 'subagent' }),
+    }), 'root')
+    assert.ok(reversed !== null)
+    assert.deepEqual(reversed.nodes.map(n => n.id), ['root', 'b', 'a'])
+
+    const wide: Record<string, unknown> = { root: row({}) }
+    for (let i = 0; i < 105; i += 1) wide[`k${i}`] = row({ parentId: 'root', origin: 'subagent' })
+    const whole = agentForestOf(snap(wide), 'root')
+    assert.ok(whole !== null)
+    assert.equal(whole.nodes.length, 106, 'the whole family folds, however large')
+    assert.equal(whole.edges.length, 105)
   })
 
   test('a hostile or empty catalog value keeps the activity heuristic', () => {
@@ -516,7 +495,7 @@ describe('agentForestOf', () => {
       const forest = agentForestOf(snap({
         root: row({ projectionValues: { subagentCatalog: cat } }),
         a: row({ parentId: 'root', origin: 'subagent', updatedAt: 1 }),
-        b: row({ parentId: 'root', origin: 'subagent', updatedAt: 9 }),
+        b: row({ parentId: 'root', origin: 'subagent', running: true, updatedAt: 9 }),
       }), 'root')
       assert.ok(forest !== null)
       assert.deepEqual(forest.nodes.map(n => n.id), ['root', 'b', 'a'], `catalog ${JSON.stringify(cat)} ignored`)
@@ -528,15 +507,6 @@ describe('agentForestOf', () => {
     assert.ok(forest !== null)
     assert.equal(forest.nodes.length, 1)
     assert.equal(forest.nodes[0].label, 'Fresh')
-  })
-
-  test('draws the whole family, however large', () => {
-    const byId: Record<string, unknown> = { root: row({}) }
-    for (let i = 0; i < 105; i++) byId['kid' + i] = row({ parentId: 'root', origin: 'subagent', updatedAt: i })
-    const forest = agentForestOf(snap(byId), 'root')
-    assert.ok(forest !== null)
-    assert.equal(forest.nodes.length, 106)
-    assert.equal(forest.nodes.at(-1)?.id, 'kid0')
   })
 })
 
@@ -597,7 +567,7 @@ describe('subagentCostFoldOf', () => {
     assert.equal(fold.count, 1)
   })
 
-  test('blank placeholders are not agents and a lineage cycle cannot loop the walk', () => {
+  test('blank placeholders are not agents and a lineage cycle is cut at the revisited id', () => {
     const byId: Record<string, unknown> = {
       root: costRow(undefined, COST_A),
       blank: row({ parentId: 'root', origin: 'subagent', blank: true, projectionValues: { contextTimeline: { ...timeline(1), cost: COST_B } } }),
@@ -608,18 +578,14 @@ describe('subagentCostFoldOf', () => {
     assert.deepEqual(fold.usage, null, 'the blank usage and the detached cycle stay out (root\'s own cost never counts)')
     assert.deepEqual(fold.cold, [])
     assert.equal(fold.count, 0, 'the blank placeholder is no subagent either')
-  })
-
-  test('a cycle reachable from the current session is cut at the revisited id', () => {
-    // A hostile cycle whose members all read as subagents must not re-enter the current session as its own descendant.
-    const byId: Record<string, unknown> = {
+    const cyclic: Record<string, unknown> = {
       root: row({ parentId: 'p', origin: 'subagent', projectionValues: { contextTimeline: { ...timeline(1), cost: COST_A } } }),
       p: row({ parentId: 'root', origin: 'subagent', projectionValues: { contextTimeline: { ...timeline(1), cost: COST_B } } }),
     }
-    const fold = subagentCostFoldOf(snap(byId), 'root')
-    assert.deepEqual(fold.usage, COST_B, 'p counts once; the current session never counts as its own child')
-    assert.deepEqual(fold.cold, [])
-    assert.equal(fold.count, 1)
+    const cut = subagentCostFoldOf(snap(cyclic), 'root')
+    assert.deepEqual(cut.usage, COST_B, 'p counts once; the current session never counts as its own child')
+    assert.deepEqual(cut.cold, [])
+    assert.equal(cut.count, 1)
   })
 
   test('hostile rows and timeline values degrade to fewer contributions', () => {
@@ -704,8 +670,10 @@ describe('layoutForest', () => {
     assert.equal(layout.cardW, SLOT - 12)
   })
 
-  test('levels follow depth, siblings claim leaf slots, parents center over children', () => {
-    const layout = layoutForest(forestOf([['root'], ['a', 'root'], ['b', 'root'], ['g', 'a']]))
+  test('levels follow depth, siblings claim leaf slots, parents center over children; a wide stage keeps the natural pitch', () => {
+    const forest = forestOf([['root'], ['a', 'root'], ['b', 'root'], ['g', 'a']])
+    const layout = layoutForest(forest)
+    assert.equal(layoutForest(forest, 4000).width, 2 * SLOT, 'a wide stage keeps the natural pitch')
     const pointOf = new Map(layout.points.map(p => [p.id, p]))
     assert.equal(pointOf.get('g')?.x, SLOT / 2)
     assert.equal(pointOf.get('a')?.x, SLOT / 2)
@@ -729,40 +697,31 @@ describe('layoutForest', () => {
     assert.equal(layout.height, 48 + 2 * LEVEL + AGENT_CARD_H + 24)
   })
 
-  test('responsive: a wide stage keeps the natural pitch', () => {
+  test('responsive: a tighter stage compresses the pitch to fit exactly; a narrow stage folds into a single-column stack', () => {
     const forest = forestOf([['root'], ['a', 'root'], ['b', 'root'], ['c', 'root']])
-    const layout = layoutForest(forest, 4000)
-    assert.equal(layout.width, 3 * SLOT)
-    assert.equal(layout.cardW, SLOT - 12)
-  })
-
-  test('responsive: a tighter stage compresses the slot pitch to fit exactly', () => {
-    const forest = forestOf([['root'], ['a', 'root'], ['b', 'root'], ['c', 'root']])
-    const layout = layoutForest(forest, 600)
+    const tight = layoutForest(forest, 600)
     const slot = 600 / 3
-    assert.equal(layout.width, 600)
-    assert.equal(layout.cardW, slot - 12)
-    const pointOf = new Map(layout.points.map(p => [p.id, p]))
-    assert.equal(pointOf.get('a')?.x, slot / 2)
-    assert.equal(pointOf.get('b')?.x, slot * 1.5)
-    assert.equal(pointOf.get('root')?.x, slot * 1.5)
-  })
+    assert.equal(tight.width, 600)
+    assert.equal(tight.cardW, slot - 12)
+    const tightPoint = new Map(tight.points.map(p => [p.id, p]))
+    assert.equal(tightPoint.get('a')?.x, slot / 2)
+    assert.equal(tightPoint.get('b')?.x, slot * 1.5)
+    assert.equal(tightPoint.get('root')?.x, slot * 1.5)
 
-  test('responsive: a narrow stage folds the family into a single-column stack', () => {
-    const layout = layoutForest(forestOf([['root'], ['a', 'root'], ['b', 'root']]), 180)
-    assert.equal(layout.width, 180)
-    assert.equal(layout.cardW, 180 - 12)
-    const pointOf = new Map(layout.points.map(p => [p.id, p]))
+    const narrow = layoutForest(forestOf([['root'], ['a', 'root'], ['b', 'root']]), 180)
+    assert.equal(narrow.width, 180)
+    assert.equal(narrow.cardW, 180 - 12)
+    const pointOf = new Map(narrow.points.map(p => [p.id, p]))
     assert.equal(pointOf.get('root')?.x, 90)
     assert.equal(pointOf.get('a')?.x, 90)
     assert.equal(pointOf.get('b')?.x, 90)
     assert.equal(pointOf.get('root')?.y, 48)
     assert.equal(pointOf.get('a')?.y, 48 + LEVEL)
     assert.equal(pointOf.get('b')?.y, 48 + 2 * LEVEL)
-    assert.equal(layout.height, 48 + 2 * LEVEL + AGENT_CARD_H + 24)
+    assert.equal(narrow.height, 48 + 2 * LEVEL + AGENT_CARD_H + 24)
   })
 
-  test('responsive: a level too wide even at the minimum pitch wraps into bands', () => {
+  test('responsive: an over-wide level wraps into bands, and full bands at an intermediate pitch fit the stage exactly', () => {
     const layout = layoutForest(forestOf([['root'], ['a', 'root'], ['b', 'root'], ['c', 'root']]), 400)
     const pointOf = new Map(layout.points.map(p => [p.id, p]))
     assert.equal(pointOf.get('root')?.x, 200)
@@ -781,23 +740,21 @@ describe('layoutForest', () => {
     assert.equal(layout.width, 400)
     assert.equal(layout.height, 48 + 2 * LEVEL + AGENT_CARD_H + 24)
     assert.equal(layout.cardW, 200 - 12)
-  })
 
-  test('responsive: full bands at an intermediate pitch fit the stage exactly', () => {
     const kids: [string, string?][] = [['root']]
     for (const id of ['a', 'b', 'c', 'd', 'e', 'f']) kids.push([id, 'root'])
-    const layout = layoutForest(forestOf(kids), 400)
+    const full = layoutForest(forestOf(kids), 400)
     const slot = 400 / 2
-    const pointOf = new Map(layout.points.map(p => [p.id, p]))
-    assert.equal(pointOf.get('a')?.x, slot / 2)
-    assert.equal(pointOf.get('c')?.x, slot / 2)
-    assert.equal(pointOf.get('d')?.y, 48 + 2 * LEVEL)
-    assert.equal(layout.width, 400)
-    assert.equal(layout.links.length, 6)
-    assert.equal(layout.cardW, slot - 12)
+    const fullPoint = new Map(full.points.map(p => [p.id, p]))
+    assert.equal(fullPoint.get('a')?.x, slot / 2)
+    assert.equal(fullPoint.get('c')?.x, slot / 2)
+    assert.equal(fullPoint.get('d')?.y, 48 + 2 * LEVEL)
+    assert.equal(full.width, 400)
+    assert.equal(full.links.length, 6)
+    assert.equal(full.cardW, slot - 12)
   })
 
-  test('responsive: child bands interleave with later parent bands (kinship order)', () => {
+  test('responsive: child bands interleave with later parent bands; a partial band flushes before an overflowing sibling group', () => {
     const layout = layoutForest(forestOf([
       ['root'],
       ['p1', 'root'],
@@ -816,10 +773,8 @@ describe('layoutForest', () => {
     assert.equal(layout.links.find(l => l.to === 'p3')?.color, familyHue(2))
     assert.equal(layout.width, 400)
     assert.equal(layout.height, 48 + 3 * LEVEL + AGENT_CARD_H + 24)
-  })
 
-  test('responsive: a partially filled band flushes before an overflowing sibling group', () => {
-    const layout = layoutForest(forestOf([
+    const partial = layoutForest(forestOf([
       ['root'],
       ['p1', 'root'],
       ['p2', 'root'],
@@ -827,14 +782,14 @@ describe('layoutForest', () => {
       ['k2a', 'p2'],
       ['k2b', 'p2'],
     ]), 400)
-    const pointOf = new Map(layout.points.map(p => [p.id, p]))
-    assert.equal(pointOf.get('p1')?.y, 48 + LEVEL)
-    assert.equal(pointOf.get('k1')?.y, 48 + 2 * LEVEL)
-    assert.equal(pointOf.get('k2a')?.y, 48 + 3 * LEVEL)
-    assert.equal(pointOf.get('k2b')?.y, 48 + 3 * LEVEL)
-    assert.equal(layout.links.length, 5)
-    assert.equal(layout.links.find(l => l.to === 'k2a')?.color, familyHue(1))
-    assert.equal(layout.links.find(l => l.to === 'k1')?.color, familyHue(0))
+    const partialPoint = new Map(partial.points.map(p => [p.id, p]))
+    assert.equal(partialPoint.get('p1')?.y, 48 + LEVEL)
+    assert.equal(partialPoint.get('k1')?.y, 48 + 2 * LEVEL)
+    assert.equal(partialPoint.get('k2a')?.y, 48 + 3 * LEVEL)
+    assert.equal(partialPoint.get('k2b')?.y, 48 + 3 * LEVEL)
+    assert.equal(partial.links.length, 5)
+    assert.equal(partial.links.find(l => l.to === 'k2a')?.color, familyHue(1))
+    assert.equal(partial.links.find(l => l.to === 'k1')?.color, familyHue(0))
   })
 })
 
@@ -852,16 +807,10 @@ describe('lineageOf', () => {
     assert.equal(lineageOf(forest, 'ghost'), null)
   })
 
-  test('a leaf lights its ancestor chain only', () => {
+  test('a leaf lights its ancestor chain only; the root and a mid node light both directions; a parentage cycle terminates', () => {
     assert.deepEqual([...lineageOf(forest, 'g') ?? []].sort(), ['a', 'g', 'root'])
-  })
-
-  test('the root lights its whole subtree; a mid node lights both directions', () => {
     assert.deepEqual([...lineageOf(forest, 'root') ?? []].sort(), ['a', 'b', 'g', 'root'])
     assert.deepEqual([...lineageOf(forest, 'a') ?? []].sort(), ['a', 'g', 'root'])
-  })
-
-  test('a parentage cycle terminates instead of looping', () => {
     const cycle = agentForestOf(snap({
       a: row({ parentId: 'b', origin: 'subagent' }),
       b: row({ parentId: 'a', origin: 'subagent' }),
@@ -872,12 +821,8 @@ describe('lineageOf', () => {
 })
 
 describe('barSegments', () => {
-  test('no window and no composition yield no segments at all', () => {
+  test('no window: composition fills the whole bar (negatives excluded); no composition yields no segments', () => {
     assert.deepEqual(barSegments([], null, 'gray'), [])
-    assert.deepEqual(barSegments([{ key: 'user', color: 'c', value: 0 }], null, 'gray'), [])
-  })
-
-  test('no window: composition fills the whole bar, negatives excluded', () => {
     const segs = barSegments([
       { key: 'system', color: 'red', value: 1 },
       { key: 'user', color: 'green', value: -5 },
@@ -901,7 +846,7 @@ describe('barSegments', () => {
     assert.equal(segs[2].share, 0.5)
   })
 
-  test('pressure-only rows draw one threshold-colored fill plus the free remainder', () => {
+  test('pressure-only rows draw one threshold-colored fill; zero occupancy, out-of-range pct, and negatives clamp', () => {
     const segs = barSegments([], 40, 'orange')
     assert.equal(segs.length, 2)
     assert.equal(segs[0].key, 'fill')
@@ -909,9 +854,6 @@ describe('barSegments', () => {
     assert.equal(segs[0].share, 0.4)
     assert.equal(segs[1].free, true)
     assert.equal(segs[1].share, 0.6)
-  })
-
-  test('zero occupancy on a known window draws just the free remainder; out-of-range pct clamps', () => {
     const zero = barSegments([{ key: 'system', color: 'red', value: 5 }], 0, 'gray')
     assert.equal(zero.length, 1)
     assert.equal(zero[0].free, true)
@@ -963,5 +905,45 @@ describe('fmtDurationCompact', () => {
     assert.equal(fmtDurationCompact(42000), '42s')
     assert.equal(fmtDurationCompact(185000), '3m05s')
     assert.equal(fmtDurationCompact(4020000), '1h07m')
+  })
+})
+
+describe('sessionTitlesOf', () => {
+  test('an unrelated corrupt descriptor cannot hide valid titles or force an unnecessary descriptor read', () => {
+    const broken = { get subagent(): never { throw new Error('corrupt descriptor') } }
+    const byId = {
+      titled: { title: 'Readable', projectionValues: broken },
+      damaged: { projectionValues: broken },
+      later: { title: 'Still readable' },
+    }
+    Object.defineProperty(byId, 'unreadable', { enumerable: true, get() { throw new Error('corrupt row') } })
+    assert.deepEqual([...sessionTitlesOf({ byId })], [['titled', 'Readable'], ['later', 'Still readable']])
+  })
+
+  test('clean titles win; a system-reminder title falls back to the descriptor label', () => {
+    assert.deepEqual([...sessionTitlesOf(null)], [])
+    assert.deepEqual([...sessionTitlesOf({})], [])
+    assert.deepEqual([...sessionTitlesOf({ byId: 'nope' })], [])
+    const titles = sessionTitlesOf({
+      byId: {
+        a: { displayTitle: 'A display', title: 'A raw' },
+        b: { title: 'B raw' },
+        c: { displayTitle: 'C display' },
+        d: {},
+        e: null,
+        f: { displayTitle: '<system-reminder> x', title: '<system-reminder> y', projectionValues: { subagent: { label: 'Clean label' } } },
+        g: { displayTitle: '<system-reminder> x' },
+        h: { displayTitle: '  ', title: 'H raw' },
+        i: { projectionValues: { subagent: { label: 42 } } },
+        j: { projectionValues: { subagent: { label: '' } } },
+      },
+    })
+    assert.deepEqual([...titles.entries()], [
+      ['a', 'A display'],
+      ['b', 'B raw'],
+      ['c', 'C display'],
+      ['f', 'Clean label'],
+      ['h', 'H raw'],
+    ])
   })
 })

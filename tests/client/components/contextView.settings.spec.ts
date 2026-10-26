@@ -27,32 +27,18 @@ describe('ContextView — locale and settings', () => {
   })
 
   test('cost prices in USD by default (no locale service), CNY under zh', async () => {
-    const m1 = await mount(h(makeView(new TestClientCtx()), {
-      sessionId: 'sv-usd',
-      useProjection: projectionsFor(costed),
-    }))
-    await flush()
-    assert.ok(text(m1.container).includes('$'))
-    assert.ok(!text(m1.container).includes('¥'))
-    await m1.unmount()
-
-    const ctxZh = new TestClientCtx({ services: { locale: new TestLocale('zh') } })
-    const m2 = await mount(h(makeView(ctxZh), {
-      sessionId: 'sv-cny',
-      useProjection: projectionsFor(costed),
-    }))
-    await flush()
-    assert.ok(text(m2.container).includes('¥'))
-    await m2.unmount()
-
-    const ctxBare = new TestClientCtx({ services: { locale: {} } })
-    const m3 = await mount(h(makeView(ctxBare), {
-      sessionId: 'sv-bare',
-      useProjection: projectionsFor(costed),
-    }))
-    await flush()
-    assert.ok(text(m3.container).includes('$'))
-    await m3.unmount()
+    const cases = [
+      ['sv-usd', new TestClientCtx(), '$', '¥'],
+      ['sv-cny', new TestClientCtx({ services: { locale: new TestLocale('zh') } }), '¥', '$'],
+      ['sv-bare', new TestClientCtx({ services: { locale: {} } }), '$', '¥'],
+    ] as const
+    for (const [sessionId, ctx, shown, hidden] of cases) {
+      const m = await mount(h(makeView(ctx), { sessionId, useProjection: projectionsFor(costed) }))
+      await flush()
+      assert.ok(text(m.container).includes(shown), `${sessionId}: ${shown}`)
+      assert.ok(!text(m.container).includes(hidden), `${sessionId}: no ${hidden}`)
+      await m.unmount()
+    }
   })
 
   test('mount-time granularity/trend/file-sort defaults come from the bound settings scope', async () => {

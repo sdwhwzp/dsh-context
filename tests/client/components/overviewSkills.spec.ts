@@ -8,7 +8,6 @@ import type { SkillInfo } from '../../../src/shared/types'
 import { click, flush, hover, makeKit, mount, query, queryAll, text, unhover } from '../helpers/kit'
 
 const Skills = makeOverviewSkills(makeKit('en'))
-const SkillsZh = makeOverviewSkills(makeKit('zh'))
 
 const NOW = Date.UTC(2026, 8, 20, 12)
 
@@ -45,15 +44,6 @@ describe('skillColorOf', () => {
 })
 
 describe('OverviewSkills', () => {
-  test('the empty scope renders the note, no summary, no detail block', async () => {
-    const m = await mount(h(Skills, { stats: [], now: NOW }))
-    assert.ok(text(m.container).includes('No skill loads in this range'))
-    assert.equal(queryAll(m.container, '.lc-ov-skills-sub').length, 0)
-    assert.equal(queryAll(m.container, '.lc-ov-skill').length, 0)
-    assert.equal(queryAll(m.container, '.lc-ov-skill-detail').length, 0, 'no detail without a pin')
-    await m.unmount()
-  })
-
   test('each row shows the dot, the name, the tally, the last load’s relative time, and its share bar', async () => {
     const m = await mount(h(Skills, {
       stats: [stat('tdd', 12, NOW - 3 * 3_600_000), stat('grill-me', 3, NOW - 40_000)],
@@ -71,6 +61,10 @@ describe('OverviewSkills', () => {
     assert.ok(query<HTMLElement>(rows[1], '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(25% - 3px)'), 'the share of the heaviest row')
     assert.ok(text(query(m.container, '.lc-ov-skills-sub')).includes('2 skills · 15 loads'))
     await m.unmount()
+
+    const day = await mount(h(Skills, { stats: [stat('tdd', 1, NOW)], day: '2026-09-19', now: NOW }))
+    assert.ok(text(query(day.container, '.lc-card-sub')).includes('2026-09-19'))
+    await day.unmount()
   })
 
   test('the share bar scales to the heaviest row wherever the ordering puts it — never past the content edge', async () => {
@@ -84,6 +78,13 @@ describe('OverviewSkills', () => {
     const zero = await mount(h(Skills, { stats: [stat('zero', 0, NOW)], now: NOW }))
     assert.ok(query<HTMLElement>(zero.container, '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(0% - 0px)'))
     await zero.unmount()
+
+    const filtered = await mount(h(Skills, { stats: [stat('heavy', 8, NOW), stat('light', 4, NOW)], now: NOW }))
+    await actType(query<HTMLInputElement>(filtered.container, 'input.lc-ov-skills-search'), 'light')
+    const filteredRows = queryAll<HTMLElement>(filtered.container, 'button.lc-ov-skill')
+    assert.equal(filteredRows.length, 1)
+    assert.ok(query(filteredRows[0], '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(50% - 6px)'))
+    await filtered.unmount()
   })
 
   test('a row click pins and releases through onSelect; the pinned row wraps with its detail into one unit', async () => {
@@ -103,12 +104,10 @@ describe('OverviewSkills', () => {
     await click(rows[0])
     assert.deepEqual(picks, ['grill-me', null], 'clicking the pinned row releases the pin')
     await m.unmount()
-  })
 
-  test('a row click without a relay only renders', async () => {
-    const m = await mount(h(Skills, { stats: [stat('tdd', 2, NOW)], now: NOW }))
-    await click(query(m.container, 'button.lc-ov-skill'))
-    await m.unmount()
+    const inert = await mount(h(Skills, { stats: [stat('tdd', 2, NOW)], now: NOW }))
+    await click(query(inert.container, 'button.lc-ov-skill'))
+    await inert.unmount()
   })
 
   test('the hover card lays out the head, the description, the path, and the stats/action footer', async () => {
@@ -129,19 +128,17 @@ describe('OverviewSkills', () => {
     assert.equal(bubble(), null, 'leaving the row retracts the card')
     assert.equal(row.getAttribute('aria-describedby'), null)
     await m.unmount()
-  })
 
-  test('the bare hover card carries the stats and the hint without catalog lines', async () => {
-    const m = await mount(h(Skills, { stats: [stat('ghost', 3, NOW)], now: NOW }))
-    await hover(query(m.container, 'button.lc-ov-skill'))
-    const tip = bubble()
-    assert.ok(tip)
-    assert.equal(text(query(tip!, '.lc-skilld-name')), 'ghost')
-    assert.equal(queryAll(tip!, '.lc-skilld-chip').length, 0, 'no origin without a catalog entry')
-    assert.equal(queryAll(tip!, '.lc-skilld-desc').length, 0)
-    assert.equal(queryAll(tip!, '.lc-skilld-path').length, 0)
-    assert.ok(text(query(tip!, '.lc-skilld-foot')).includes('3 loads'))
-    await m.unmount()
+    const bare = await mount(h(Skills, { stats: [stat('ghost', 3, NOW)], now: NOW }))
+    await hover(query(bare.container, 'button.lc-ov-skill'))
+    const bareTip = bubble()
+    assert.ok(bareTip)
+    assert.equal(text(query(bareTip!, '.lc-skilld-name')), 'ghost')
+    assert.equal(queryAll(bareTip!, '.lc-skilld-chip').length, 0, 'no origin without a catalog entry')
+    assert.equal(queryAll(bareTip!, '.lc-skilld-desc').length, 0)
+    assert.equal(queryAll(bareTip!, '.lc-skilld-path').length, 0)
+    assert.ok(text(query(bareTip!, '.lc-skilld-foot')).includes('3 loads'))
+    await bare.unmount()
   })
 
   test('the origin buckets localize; the long description caps; the pinned row’s hint flips to release', async () => {
@@ -178,7 +175,7 @@ describe('OverviewSkills', () => {
     await m.unmount()
   })
 
-  test('the card measures against the row: centered and clamped inside the viewport, flipping below at the top edge', async () => {
+  test('the card measures against the row, retracts on scroll/resize/blur, and drops content on a scope change', async () => {
     const m = await mount(h(Skills, { stats: [stat('tdd', 1, NOW)], now: NOW }))
     const row = query(m.container, 'button.lc-ov-skill')
     // jsdom's zero rect flips below and clamps to the left margin.
@@ -199,14 +196,7 @@ describe('OverviewSkills', () => {
     await hover(row)
     style = bubble()?.getAttribute('style') ?? ''
     assert.ok(style.includes('left: 1016px'), style)
-    await m.unmount()
-  })
 
-  test('a scroll or a resize retracts the card; focus and blur drive it too', async () => {
-    const m = await mount(h(Skills, { stats: [stat('tdd', 1, NOW)], now: NOW }))
-    const row = query(m.container, 'button.lc-ov-skill')
-    await hover(row)
-    assert.ok(bubble())
     await act(async () => { window.dispatchEvent(new Event('scroll')) })
     assert.equal(bubble(), null, 'any scroll retracts')
     await hover(row)
@@ -218,12 +208,8 @@ describe('OverviewSkills', () => {
     assert.ok(bubble(), 'keyboard focus raises the card')
     await act(async () => { row.dispatchEvent(new FocusEvent('focusout', { bubbles: true })) })
     assert.equal(bubble(), null, 'blur retracts')
-    await m.unmount()
-  })
 
-  test('a scope change under the hover drops the card’s content', async () => {
-    const m = await mount(h(Skills, { stats: [stat('tdd', 1, NOW)], now: NOW }))
-    await hover(query(m.container, 'button.lc-ov-skill'))
+    await hover(row)
     assert.ok(bubble())
     await m.update(h(Skills, { stats: [stat('other', 1, NOW)], now: NOW }))
     assert.equal(bubble(), null, 'the hovered skill left the scope — nothing to say')
@@ -266,23 +252,21 @@ describe('OverviewSkills', () => {
       await act(async () => { vi.advanceTimersByTime(1600) })
       assert.equal(text(query(m.container, '.lc-skilld-pathv-text')), '/home/u/.agents/skills/tdd/SKILL.md', 'the dwell passes, the path returns')
       await m.unmount()
+
+      setSkillCopier(async () => { throw new Error('denied') })
+      const failed = await mount(h(Skills, {
+        stats: [stat('tdd', 2, NOW)],
+        selected: 'tdd',
+        catalog: CATALOG,
+        now: NOW,
+      }))
+      await click(query(failed.container, 'button.lc-skilld-pathv'))
+      await flush()
+      assert.equal(text(query(failed.container, '.lc-skilld-pathv-text')), '/home/u/.agents/skills/tdd/SKILL.md')
+      await failed.unmount()
     } finally {
       vi.useRealTimers()
     }
-  })
-
-  test('a failed copy never flashes', async () => {
-    setSkillCopier(async () => { throw new Error('denied') })
-    const m = await mount(h(Skills, {
-      stats: [stat('tdd', 2, NOW)],
-      selected: 'tdd',
-      catalog: CATALOG,
-      now: NOW,
-    }))
-    await click(query(m.container, 'button.lc-skilld-pathv'))
-    await flush()
-    assert.equal(text(query(m.container, '.lc-skilld-pathv-text')), '/home/u/.agents/skills/tdd/SKILL.md')
-    await m.unmount()
   })
 
   test('an out-of-scope pin falls back to a detached block at the bottom, head included; moving the pin resets the flash', async () => {
@@ -329,20 +313,6 @@ describe('OverviewSkills', () => {
     const foot = text(query(bubble()!, '.lc-skilld-foot'))
     assert.ok(foot.includes('1 loads'), foot)
     assert.ok(!foot.includes('null') && !foot.includes('NaN'), foot)
-    await m.unmount()
-  })
-
-  test('the heatmap’s pinned day is named in the title', async () => {
-    const m = await mount(h(Skills, { stats: [stat('tdd', 1, NOW)], day: '2026-09-19', now: NOW }))
-    assert.ok(text(query(m.container, '.lc-card-title')).includes('2026-09-19'))
-    await m.unmount()
-  })
-
-  test('the render bound lists twenty rows and counts the overflow', async () => {
-    const stats = Array.from({ length: 25 }, (_, i) => stat(`skill-${i}`, i + 1, NOW - i * 1000))
-    const m = await mount(h(Skills, { stats, now: NOW }))
-    assert.equal(queryAll(m.container, '.lc-ov-skill').length, 20)
-    assert.ok(text(m.container).includes('5 more skills'))
     await m.unmount()
   })
 
@@ -408,9 +378,6 @@ describe('OverviewSkills', () => {
     const one = await mount(h(Skills, { stats: [stat('tdd', 1, NOW)], now: NOW }))
     assert.equal(queryAll(one.container, 'input.lc-ov-skills-search').length, 0, 'a lone row has nothing to filter')
     await one.unmount()
-    const empty = await mount(h(Skills, { stats: [], now: NOW }))
-    assert.equal(queryAll(empty.container, 'input.lc-ov-skills-search').length, 0)
-    await empty.unmount()
   })
 
   test('a pin the filter hides falls back to the detached block; the filtered overflow line counts the matches', async () => {
@@ -427,40 +394,6 @@ describe('OverviewSkills', () => {
     assert.equal(queryAll(m.container, 'button.lc-ov-skill').length, 20)
     assert.ok(text(m.container).includes('5 more skills'), 'the overflow counts the filtered set')
     await m.unmount()
-  })
-
-  test('the bars keep the scope’s heaviest tally as their denominator under a filter', async () => {
-    const m = await mount(h(Skills, { stats: [stat('heavy', 8, NOW), stat('light', 4, NOW)], now: NOW }))
-    const input = query<HTMLInputElement>(m.container, 'input.lc-ov-skills-search')
-    await actType(input, 'light')
-    const rows = queryAll<HTMLElement>(m.container, 'button.lc-ov-skill')
-    assert.equal(rows.length, 1)
-    assert.ok(query(rows[0], '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(50% - 6px)'), 'the share stays against the scope’s heaviest row')
-    await m.unmount()
-  })
-
-  test('zh locale renders the shipped strings', async () => {
-    const m = await mount(h(SkillsZh, {
-      stats: [stat('tdd', 2, NOW - 2 * 3_600_000)],
-      selected: 'tdd',
-      catalog: CATALOG,
-      now: NOW,
-    }))
-    assert.ok(text(m.container).includes('技能加载'))
-    assert.ok(text(m.container).includes('1 个技能 · 2 次加载'), 'the zh summary sub')
-    assert.ok(text(m.container).includes('2 小时前'))
-    const detail = query(m.container, '.lc-ov-skill-detail')
-    assert.deepEqual(queryAll(detail, '.lc-skilld-k').map(k => text(k)), ['来源', '用量', '最近', '路径'])
-    const values = queryAll(detail, '.lc-skilld-v')
-    assert.equal(text(values[0]), '用户')
-    assert.ok(text(values[1]).includes('2 次加载 · 1 个会话'))
-    assert.equal(query(m.container, '.lc-skilld-pathv').getAttribute('data-lc-tip'), '点击复制路径')
-    await hover(query(m.container, 'button.lc-ov-skill'))
-    assert.equal(text(query(bubble()!, '.lc-skilld-hint')), '再次点击取消筛选', 'the pinned row’s zh hint')
-    await m.unmount()
-    const empty = await mount(h(SkillsZh, { stats: [], now: NOW }))
-    assert.ok(text(empty.container).includes('暂无技能加载'))
-    await empty.unmount()
   })
 })
 

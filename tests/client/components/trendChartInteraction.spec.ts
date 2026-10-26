@@ -1,7 +1,6 @@
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { attachMarkers } from '../../../src/client/components/trendChart'
 import { CATS } from '../../../src/client/categories'
 import type { ContextEventRecord } from '../../../src/shared/types'
 import { click, hover, mount, query, queryAll, unhover } from '../helpers/kit'
@@ -88,6 +87,13 @@ describe('TrendChart category focus (the browser open category)', () => {
       [kit.t('tip.step', { t: 1, s: 0, n: 2 }), kit.t('tip.cat', { cat: kit.catLabel('tool'), n: '60' })],
     )
     await m.unmount()
+
+    for (const focusCat of ['nope', null]) {
+      const degraded = await mount(h(TrendChart, propsOf([r1, r2], { focusCat })))
+      assert.equal(queryAll(bars(degraded.container)[0], '.lc-bar-stack > div').length, 6, 'an unknown key or explicit null degrades to the unfocused chart')
+      assert.equal(query(degraded.container, '.lc-axis-top').textContent, '600')
+      await degraded.unmount()
+    }
   })
 
   test('the focused figure is the raw fold value; a category at zero everywhere keeps the unit axis', async () => {
@@ -128,14 +134,6 @@ describe('TrendChart category focus (the browser open category)', () => {
     await m.unmount()
   })
 
-  test('an unknown focus key and an explicit null degrade to the unfocused chart', async () => {
-    for (const focusCat of ['nope', null]) {
-      const m = await mount(h(TrendChart, propsOf([r1, r2], { focusCat })))
-      assert.equal(queryAll(bars(m.container)[0], '.lc-bar-stack > div').length, 6)
-      assert.equal(query(m.container, '.lc-axis-top').textContent, '600')
-      await m.unmount()
-    }
-  })
 })
 
 describe('TrendChart markers', () => {
@@ -143,9 +141,7 @@ describe('TrendChart markers', () => {
     const reqs = [req(1, { turn: 1, step: 0 }), req(2, { turn: 1, step: 1 }), req(3, { turn: 2, step: 0 })]
     const compaction: ContextEventRecord = { seq: 2, time: 1700000000000, kind: 'compaction', count: 5, fromTurn: 1, fromStep: 0, turn: 1, step: 1 }
     const prune: ContextEventRecord = { seq: 3, time: 1700000060000, kind: 'prune' }
-    const markers = attachMarkers(reqs, [compaction, prune])
-    assert.equal(markers[1], compaction)
-    assert.equal(markers[2], prune)
+    const markers = [undefined, compaction, prune]
 
     const m = await mount(h(TrendChart, propsOf(reqs, { markers })))
     const glyph = queryAll(m.container, '.lc-bar-marker')

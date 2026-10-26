@@ -79,9 +79,7 @@ async function typeSearch(container: ParentNode, value: string): Promise<void> {
 
 describe('FileCard — empty state', () => {
   test('no file ops keeps the controls so the card measures the same as a populated one', async () => {
-    const m = await mount(h(FileCard, {
-      activity: richActivity({ entries: [] }),
-    }))
+    const m = await mount(h(FileCard, { activity: richActivity({ entries: [] }), }))
     assert.ok(text(m.container).includes('No file reads, writes, or searches'))
     // The empty state wears the SAME controls and the SAME reserved lane as a populated card: the card's
     // activity re-scopes on every step, and a controls-free empty state resized the page on the first read.
@@ -139,6 +137,27 @@ describe('FileCard — header, rows, and filters', () => {
     assert.ok(text(solo).includes('+5') && !text(solo).includes('−'))
     assert.ok(solo.querySelector('.lc-fa-time') === null)
     await m.unmount()
+
+    const langs = await mount(h(FileCard, {
+      activity: richActivity({
+        entries: [
+          entry('/src/main.ts', { reads: 1, ops: [fileOp(9, 'read', 'read')] }),
+          entry('/notes.md', { reads: 1, ops: [fileOp(8, 'read', 'read')] }),
+        ],
+        totals: { read: { files: 2, ops: 2 }, write: { files: 0, ops: 0 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
+      }),
+    }))
+    const tsRow = rowByTitle(langs.container, '/src/main.ts')
+    const badge = query(tsRow, '.lc-fa-lang')
+    assert.equal(badge.textContent, 'TS')
+    assert.equal(query(tsRow, '.lc-fa-form').getAttribute('title'), 'TypeScript')
+    const style = badge.getAttribute('style') ?? ''
+    assert.ok(style.includes('background: rgb(49, 120, 198)'), style)
+    const mdRow = rowByTitle(langs.container, '/notes.md')
+    assert.equal(queryAll(mdRow, '.lc-fa-lang').length, 0)
+    assert.ok(text(mdRow).includes('📝'), 'an emoji file keeps its glyph')
+    assert.equal(query(mdRow, '.lc-fa-form').getAttribute('title'), 'Markup document')
+    await langs.unmount()
   })
 
   test('purpose and form chips isolate rows; re-clicking restores all', async () => {
@@ -161,6 +180,13 @@ describe('FileCard — header, rows, and filters', () => {
     await click(chipByLabel(m.container, 'Read'))
     assert.deepEqual(paths(), ['/src/a.ts', '/shots/ui.png', '/var/many.log'])
     await click(chipByLabel(m.container, 'Read'))
+    assert.equal(paths().length, 5)
+    await typeSearch(m.container, 'A.TS')
+    assert.deepEqual(paths(), ['/src/a.ts'], 'the path search narrows the list, case-insensitively')
+    await typeSearch(m.container, 'zzz')
+    assert.equal(paths().length, 0)
+    assert.ok(text(m.container).includes('No files match the current filters'))
+    await typeSearch(m.container, '')
     assert.equal(paths().length, 5)
     await m.unmount()
   })
@@ -209,18 +235,6 @@ describe('FileCard — header, rows, and filters', () => {
     await m.unmount()
   })
 
-  test('path search narrows rows and reports no matches', async () => {
-    const m = await mount(h(FileCard, { activity: richActivity() }))
-    await typeSearch(m.container, 'A.TS')
-    assert.deepEqual(queryAll(m.container, '.lc-fa-row').map(r => r.title), ['/src/a.ts'])
-    await typeSearch(m.container, 'zzz')
-    assert.equal(queryAll(m.container, '.lc-fa-row').length, 0)
-    assert.ok(text(m.container).includes('No files match the current filters'))
-    await typeSearch(m.container, '')
-    assert.equal(queryAll(m.container, '.lc-fa-row').length, 5)
-    await m.unmount()
-  })
-
   test('the sort toggle defaults to line changes and switches to most-active, latest, path, and name', async () => {
     const m = await mount(h(FileCard, { activity: richActivity() }))
     const titles = () => queryAll(m.container, '.lc-fa-row').map(r => r.title)
@@ -244,66 +258,52 @@ describe('FileCard — header, rows, and filters', () => {
     assert.ok(sortBtns[1].className.includes('lc-gran-on'))
     assert.deepEqual(titles(), ['/src/a.ts', 'solo.md', '/shots/ui.png', '/src/', '/var/many.log'])
     await m.unmount()
-  })
 
-  test('the name sort leads with the last segment and breaks ties on the full path', async () => {
     const readOne = (seq: number, path: string): FileEntry => entry(path, { reads: 1, ops: [fileOp(seq, 'read', 'read')] })
-    const activity: FileActivity = {
-      entries: [
-        readOne(4, '/b/x.ts'),
-        readOne(3, '/d/x.ts'),
-        readOne(2, '/a/x.ts'),
-        readOne(1, '/a/z.ts'),
-        readOne(5, 'C:\\repo\\x.ts'),
-      ],
-      totals: { read: { files: 5, ops: 5 }, write: { files: 0, ops: 0 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
-    }
-    const m = await mount(h(FileCard, { activity }))
-    const sortBtns = queryAll(m.container, '.lc-fa-sort .lc-gran-btn')
-    await click(sortBtns[4])
-    assert.deepEqual(queryAll(m.container, '.lc-fa-row').map(r => r.title), ['/a/x.ts', '/b/x.ts', '/d/x.ts', 'C:\\repo\\x.ts', '/a/z.ts'])
-    await m.unmount()
-  })
+    const names = await mount(h(FileCard, {
+      activity: {
+        entries: [readOne(4, '/b/x.ts'), readOne(3, '/d/x.ts'), readOne(2, '/a/x.ts'), readOne(1, '/a/z.ts'), readOne(5, 'C:\\repo\\x.ts')],
+        totals: { read: { files: 5, ops: 5 }, write: { files: 0, ops: 0 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
+      },
+    }))
+    await click(queryAll(names.container, '.lc-fa-sort .lc-gran-btn')[4])
+    assert.deepEqual(queryAll(names.container, '.lc-fa-row').map(r => r.title),
+      ['/a/x.ts', '/b/x.ts', '/d/x.ts', 'C:\\repo\\x.ts', '/a/z.ts'], 'the last segment leads, ties break on the full path')
+    await names.unmount()
 
-  test('the line sort breaks equal churn on the full path, not the displayed path', async () => {
-    const activity: FileActivity = {
-      entries: [
-        entry('/x/z.ts', { writes: 1, added: 2, ops: [fileOp(2, 'write', 'edit')] }),
-        entry('/w/a.ts', { writes: 1, added: 2, ops: [fileOp(1, 'write', 'edit')] }),
-      ],
-      totals: { read: { files: 0, ops: 0 }, write: { files: 2, ops: 2 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 4, removed: 0 },
-    }
-    const m = await mount(h(FileCard, { activity, workspace: '/w' }))
+    const churn = await mount(h(FileCard, {
+      activity: {
+        entries: [
+          entry('/x/z.ts', { writes: 1, added: 2, ops: [fileOp(2, 'write', 'edit')] }),
+          entry('/w/a.ts', { writes: 1, added: 2, ops: [fileOp(1, 'write', 'edit')] }),
+        ],
+        totals: { read: { files: 0, ops: 0 }, write: { files: 2, ops: 2 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 4, removed: 0 },
+      },
+      workspace: '/w',
+    }))
     // The raw '/w/a.ts' sorts before '/x/z.ts', while the displayed 'a.ts' would sort after it.
-    assert.deepEqual(queryAll(m.container, '.lc-fa-row').map(r => r.title), ['/w/a.ts', '/x/z.ts'])
-    await m.unmount()
+    assert.deepEqual(queryAll(churn.container, '.lc-fa-row').map(r => r.title), ['/w/a.ts', '/x/z.ts'])
+    await churn.unmount()
   })
 
   test('the mount-time default sort comes from the plugin settings', async () => {
     const titles = (container: ParentNode) => queryAll(container, '.lc-fa-row').map(r => r.title)
     const sortBtns = (container: ParentNode) => queryAll(container, '.lc-fa-sort .lc-gran-btn')
-
-    settings.set('defaultFileSort', 'latest')
-    let m = await mount(h(FileCard, { activity: richActivity() }))
-    assert.ok(sortBtns(m.container)[2].className.includes('lc-gran-on'))
-    assert.deepEqual(titles(m.container), ['/var/many.log', '/shots/ui.png', 'solo.md', '/src/a.ts', '/src/'])
-    await m.unmount()
-
-    settings.set('defaultFileSort', 'path')
-    m = await mount(h(FileCard, { activity: richActivity() }))
-    assert.ok(sortBtns(m.container)[3].className.includes('lc-gran-on'))
-    assert.deepEqual(titles(m.container), ['/shots/ui.png', '/src/', '/src/a.ts', '/var/many.log', 'solo.md'])
-    await m.unmount()
-
-    settings.set('defaultFileSort', 'name')
-    m = await mount(h(FileCard, { activity: richActivity() }))
-    assert.ok(sortBtns(m.container)[4].className.includes('lc-gran-on'))
-    assert.deepEqual(titles(m.container), ['/src/a.ts', '/var/many.log', 'solo.md', '/src/', '/shots/ui.png'])
-    await m.unmount()
+    for (const [sort, active, order] of [
+      ['latest', 2, ['/var/many.log', '/shots/ui.png', 'solo.md', '/src/a.ts', '/src/']],
+      ['path', 3, ['/shots/ui.png', '/src/', '/src/a.ts', '/var/many.log', 'solo.md']],
+      ['name', 4, ['/src/a.ts', '/var/many.log', 'solo.md', '/src/', '/shots/ui.png']],
+    ] as const) {
+      settings.set('defaultFileSort', sort)
+      const m = await mount(h(FileCard, { activity: richActivity() }))
+      assert.ok(sortBtns(m.container)[active].className.includes('lc-gran-on'), `${sort} is the default sort`)
+      assert.deepEqual(titles(m.container), order)
+      await m.unmount()
+    }
 
     // The stored preference resets the default; in-card toggling never writes back.
     settings.set('defaultFileSort', 'count')
-    m = await mount(h(FileCard, { activity: richActivity() }))
+    const m = await mount(h(FileCard, { activity: richActivity() }))
     assert.ok(sortBtns(m.container)[0].className.includes('lc-gran-on'))
     assert.deepEqual(titles(m.container), ['/var/many.log', '/src/a.ts', '/shots/ui.png', 'solo.md', '/src/'])
     await click(sortBtns(m.container)[1])
@@ -313,12 +313,9 @@ describe('FileCard — header, rows, and filters', () => {
 })
 
 describe('FileCard — expansion and locate', () => {
-  test('a row click expands its op log; an op click locates it; re-click collapses', async () => {
+  test('a row click expands its op log; an op click locates it; re-click collapses; stamps ride the right edge', async () => {
     const located: number[] = []
-    const m = await mount(h(FileCard, {
-      activity: richActivity(),
-      onLocate: op => { located.push(op.seq) },
-    }))
+    const m = await mount(h(FileCard, { activity: richActivity(), onLocate: op => { located.push(op.seq) }, }))
     const row = rowByTitle(m.container, '/src/a.ts')
     await click(row)
     const ops = queryAll(m.container, '.lc-fa-op')
@@ -335,30 +332,20 @@ describe('FileCard — expansion and locate', () => {
     await click(rowByTitle(m.container, '/src/a.ts'))
     assert.equal(queryAll(m.container, '.lc-fa-ops').length, 0)
     await m.unmount()
-  })
 
-  test('expanded ops hold their values and step stamp on the right edge', async () => {
-    const m = await mount(h(FileCard, {
-      activity: richActivity(),
-      stampOf: seq => (seq === 7 ? { turn: 2, step: 1 } : seq === 3 ? { turn: 3, step: 4 } : null),
-    }))
-    await click(rowByTitle(m.container, '/src/a.ts'))
-    const ops = queryAll(m.container, '.lc-fa-op')
-    for (const op of ops) assert.equal(op.lastElementChild, query(op, '.lc-fa-op-meta'))
-    const stamped = ops[0] // the seq-7 read
-    assert.ok(text(stamped).includes('T2 S1'))
-    assert.ok(text(stamped).includes(':')) // the stamp prefixes, never replaces, the time
-    assert.equal(
-      query(stamped, '.lc-fa-op-time').getAttribute('title'),
-      'First carried by the Turn 2 · Step 1 request',
-    )
-    assert.ok(query(stamped, '.lc-fa-op-meta .lc-fa-op-time') !== null)
-    assert.equal(query(ops[3], '.lc-fa-op-time').textContent, 'T3 S4')
-    const unstamped = ops[1] // the seq-5 edit
+    const stamped = await mount(h(FileCard, { activity: richActivity(), stampOf: seq => (seq === 7 ? { turn: 2, step: 1 } : seq === 3 ? { turn: 3, step: 4 } : null), }))
+    await click(rowByTitle(stamped.container, '/src/a.ts'))
+    const stampedOps = queryAll(stamped.container, '.lc-fa-op')
+    for (const op of stampedOps) assert.equal(op.lastElementChild, query(op, '.lc-fa-op-meta'), 'values and stamp ride the right edge')
+    assert.ok(text(stampedOps[0]!).includes('T2 S1'))
+    assert.ok(text(stampedOps[0]!).includes(':'), 'the stamp prefixes, never replaces, the time')
+    assert.equal(query(stampedOps[0]!, '.lc-fa-op-time').getAttribute('title'), 'First carried by the Turn 2 · Step 1 request')
+    assert.equal(query(stampedOps[3]!, '.lc-fa-op-time').textContent, 'T3 S4')
+    const unstamped = stampedOps[1]!
     assert.ok(!text(unstamped).includes('T2 S1'))
     assert.equal(query(unstamped, '.lc-fa-op-time').getAttribute('title'), null)
     assert.ok(query(unstamped, '.lc-fa-op-meta .lc-fa-delta') !== null)
-    await m.unmount()
+    await stamped.unmount()
   })
 
   test('a search op shows its pattern detail; the expanded log lists every op', async () => {
@@ -371,10 +358,8 @@ describe('FileCard — expansion and locate', () => {
     const many = query(m.container, '.lc-fa-ops')
     assert.equal(queryAll(many, '.lc-fa-op').length, 9)
     await m.unmount()
-  })
 
-  test('a nested PTC op tells why (its program); a meta search op shows its hit count', async () => {
-    const m = await mount(h(FileCard, {
+    const detailed = await mount(h(FileCard, {
       activity: richActivity({
         entries: [
           entry('/src/a.ts', {
@@ -389,39 +374,14 @@ describe('FileCard — expansion and locate', () => {
         totals: { read: { files: 1, ops: 2 }, write: { files: 0, ops: 0 }, search: { files: 1, ops: 1 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
       }),
     }))
-    await click(rowByTitle(m.container, '/src/a.ts'))
-    assert.ok(text(query(m.container, '.lc-fa-ops')).includes('Read failing test and its fixture'))
-    await click(rowByTitle(m.container, '/src/a.ts')) // collapse
-    await click(rowByTitle(m.container, '/src/b.ts'))
-    const ops = text(query(m.container, '.lc-fa-ops'))
-    assert.ok(ops.includes('needle'))
-    assert.ok(ops.includes('3 hits'))
-    await m.unmount()
-  })
-
-  test('a code file renders its language badge; an emoji file keeps its glyph', async () => {
-    const m = await mount(h(FileCard, {
-      activity: richActivity({
-        entries: [
-          entry('/src/main.ts', { reads: 1, ops: [fileOp(9, 'read', 'read')] }),
-          entry('/notes.md', { reads: 1, ops: [fileOp(8, 'read', 'read')] }),
-        ],
-        totals: { read: { files: 2, ops: 2 }, write: { files: 0, ops: 0 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
-      }),
-    }))
-    const tsRow = rowByTitle(m.container, '/src/main.ts')
-    const badge = query(tsRow, '.lc-fa-lang')
-    assert.ok(badge !== undefined)
-    assert.equal(badge.textContent, 'TS')
-    assert.equal(query(tsRow, '.lc-fa-form').getAttribute('title'), 'TypeScript')
-    const style = badge.getAttribute('style') ?? ''
-    assert.ok(style.includes('background: rgb(49, 120, 198)'), style)
-    assert.ok(style.includes('color: rgb(255, 255, 255)'), style)
-    const mdRow = rowByTitle(m.container, '/notes.md')
-    assert.equal(queryAll(mdRow, '.lc-fa-lang').length, 0)
-    assert.ok(text(mdRow).includes('📝'))
-    assert.equal(query(mdRow, '.lc-fa-form').getAttribute('title'), 'Markup document')
-    await m.unmount()
+    await click(rowByTitle(detailed.container, '/src/a.ts'))
+    assert.ok(text(query(detailed.container, '.lc-fa-ops')).includes('Read failing test and its fixture'), 'a nested PTC op tells why (its program)')
+    await click(rowByTitle(detailed.container, '/src/a.ts'))
+    await click(rowByTitle(detailed.container, '/src/b.ts'))
+    const detail = text(query(detailed.container, '.lc-fa-ops'))
+    assert.ok(detail.includes('needle'))
+    assert.ok(detail.includes('3 hits'), 'a meta search op shows its hit count')
+    await detailed.unmount()
   })
 
   test('a read op shows its line footprint — exact window or estimate; the time rides the right edge', async () => {
@@ -459,16 +419,6 @@ describe('FileCard — expansion and locate', () => {
     await m.unmount()
   })
 
-  test('no line activity anywhere drops the aggregate delta pill', async () => {
-    const m = await mount(h(FileCard, {
-      activity: richActivity({
-        entries: [entry('/a.ts', { reads: 1, ops: [fileOp(1, 'read', 'read')] })],
-        totals: { read: { files: 1, ops: 1 }, write: { files: 0, ops: 0 }, search: { files: 0, ops: 0 }, image: { files: 0, ops: 0 }, added: 0, removed: 0 },
-      }),
-    }))
-    assert.equal(queryAll(m.container, '.lc-fa-meta-delta').length, 0)
-    await m.unmount()
-  })
 })
 
 describe('FileCard — workspace display and system open', () => {
@@ -501,8 +451,9 @@ describe('FileCard — workspace display and system open', () => {
 
   const baseOf = (row: HTMLElement): HTMLElement => query(row, '.lc-fa-path b')
 
-  test('workspace and relative paths display bare-relative; pattern rows and outside paths stay verbatim', async () => {
-    const m = await mount(h(FileCard, { activity: workspaceActivity(), workspace: '/repo' }))
+  test('workspace and relative paths display bare-relative and the file name opens on the system; pattern and unresolvable rows stay inert', async () => {
+    const opened: string[] = []
+    const m = await mount(h(FileCard, { activity: workspaceActivity(), workspace: '/repo', onOpen: p => { opened.push(p) } }))
     const a = rowOf(m.container, '/repo/src/a.ts')
     assert.ok(a.querySelector('.lc-fa-path em')?.textContent === 'src/')
     assert.ok(baseOf(a).textContent === 'a.ts')
@@ -515,28 +466,17 @@ describe('FileCard — workspace display and system open', () => {
     assert.ok(baseOf(pat).textContent === 'needle')
     const dot = rowOf(m.container, './dot/c.ts')
     assert.ok(dot.querySelector('.lc-fa-path em')?.textContent === 'dot/')
-    await m.unmount()
-  })
-
-  test('the file name opens on the system; pattern and unresolvable rows render inert', async () => {
-    const opened: string[] = []
-    const m = await mount(h(FileCard, {
-      activity: workspaceActivity(),
-      workspace: '/repo',
-      onOpen: p => { opened.push(p) },
-    }))
-    const a = baseOf(rowOf(m.container, '/repo/src/a.ts'))
-    assert.ok(a.className.includes('lc-fa-file'))
-    assert.equal(a.getAttribute('title'), 'Open on your system')
-    await click(a)
+    assert.equal(queryAll(m.container, '.lc-fa-meta-delta').length, 0, 'no line activity drops the aggregate delta pill')
+    const aName = baseOf(rowOf(m.container, '/repo/src/a.ts'))
+    assert.ok(aName.className.includes('lc-fa-file'))
+    assert.equal(aName.getAttribute('title'), 'Open on your system')
+    await click(aName)
     assert.deepEqual(opened, ['/repo/src/a.ts'])
     assert.equal(queryAll(m.container, '.lc-fa-ops').length, 0)
     await click(baseOf(rowOf(m.container, '/etc/hosts')))
     assert.deepEqual(opened, ['/repo/src/a.ts', '/etc/hosts'])
-    const pat = baseOf(rowOf(m.container, 'needle'))
-    assert.equal(pat.className.includes('lc-fa-file'), false)
-    const dot = baseOf(rowOf(m.container, './dot/c.ts'))
-    assert.equal(dot.className.includes('lc-fa-file'), false)
+    assert.equal(baseOf(rowOf(m.container, 'needle')).className.includes('lc-fa-file'), false)
+    assert.equal(baseOf(rowOf(m.container, './dot/c.ts')).className.includes('lc-fa-file'), false, 'an unresolvable row renders inert')
     await m.unmount()
   })
 
@@ -545,96 +485,59 @@ describe('FileCard — workspace display and system open', () => {
     assert.equal(queryAll(m1.container, '.lc-fa-file').length, 0)
     await m1.unmount()
     const opened: string[] = []
-    const m2 = await mount(h(FileCard, {
-      activity: workspaceActivity(),
-      onOpen: p => { opened.push(p) },
-    }))
+    const m2 = await mount(h(FileCard, { activity: workspaceActivity(), onOpen: p => { opened.push(p) }, }))
     assert.equal(queryAll(m2.container, '.lc-fa-file').length, 2)
     await click(baseOf(rowOf(m2.container, 'rel/b.md')))
     assert.deepEqual(opened, [])
     await m2.unmount()
+
+    const previewOnlyActivity = workspaceActivity()
+    previewOnlyActivity.entries.push(entry('/repo/src/', { form: 'dir', searches: 1, ops: [fileOp(0, 'search', 'grep')] }))
+    const previewOnly = await mount(h(FileCard, { activity: previewOnlyActivity, onPreview: () => false }))
+    const name = baseOf(rowOf(previewOnly.container, 'rel/b.md'))
+    assert.equal(name.getAttribute('title'), 'Preview in the sidebar')
+    await click(name)
+    assert.equal(baseOf(rowOf(previewOnly.container, '/repo/src/')).className.includes('lc-fa-file'), false, 'a directory never claims the preview')
+    await previewOnly.unmount()
   })
 
-  test('with the Sidebar preview available the name previews, and a refusal falls through to the system opener', async () => {
+  test('the Sidebar preview handles the name — never pattern or directory rows — and a refusal falls through to the system opener', async () => {
     const previewed: FileEntry[] = []
     const opened: string[] = []
-    const m = await mount(h(FileCard, {
-      activity: workspaceActivity(),
-      workspace: '/repo',
-      onPreview: e => { previewed.push(e); return true },
-      onOpen: p => { opened.push(p) },
-    }))
+    const dirActivity = workspaceActivity()
+    dirActivity.entries.push(entry('/repo/src/', { form: 'dir', searches: 1, ops: [fileOp(0, 'search', 'grep')] }))
+    const m = await mount(h(FileCard, { activity: dirActivity, workspace: '/repo', onPreview: e => { previewed.push(e); return true }, onOpen: p => { opened.push(p) }, }))
+    assert.equal(baseOf(rowOf(m.container, 'needle')).className.includes('lc-fa-file'), false)
     const a = baseOf(rowOf(m.container, '/repo/src/a.ts'))
     assert.equal(a.getAttribute('title'), 'Preview in the sidebar')
     await click(a)
     assert.deepEqual(previewed.map(e => e.path), ['/repo/src/a.ts'])
     assert.equal(opened.length, 0)
     await m.unmount()
-    const m2 = await mount(h(FileCard, {
-      activity: workspaceActivity(),
-      workspace: '/repo',
-      onPreview: () => false,
-      onOpen: p => { opened.push(p) },
-    }))
+    const m2 = await mount(h(FileCard, { activity: workspaceActivity(), workspace: '/repo', onPreview: () => false, onOpen: p => { opened.push(p) }, }))
     await click(baseOf(rowOf(m2.container, '/repo/src/a.ts')))
     assert.deepEqual(opened, ['/repo/src/a.ts'])
     await m2.unmount()
   })
 
-  test('the preview opener never claims pattern or directory rows', async () => {
-    const dirActivity = workspaceActivity()
-    dirActivity.entries.push(entry('/repo/src/', { form: 'dir', searches: 1, ops: [fileOp(0, 'search', 'grep')] }))
-    const previewed: FileEntry[] = []
-    const m = await mount(h(FileCard, {
-      activity: dirActivity,
-      workspace: '/repo',
-      onPreview: e => { previewed.push(e); return true },
-    }))
-    assert.equal(baseOf(rowOf(m.container, 'needle')).className.includes('lc-fa-file'), false)
-    assert.equal(baseOf(rowOf(m.container, '/repo/src/')).className.includes('lc-fa-file'), false)
-    await click(baseOf(rowOf(m.container, '/repo/src/a.ts')))
-    assert.deepEqual(previewed.map(e => e.path), ['/repo/src/a.ts'])
-    await m.unmount()
-  })
-
-  test('a refused preview with no resolvable absolute path is a silent no-op', async () => {
-    const m = await mount(h(FileCard, {
-      activity: workspaceActivity(),
-      onPreview: () => false,
-    }))
-    const name = baseOf(rowOf(m.container, 'rel/b.md'))
-    assert.equal(name.getAttribute('title'), 'Preview in the sidebar')
-    await click(name)
-    await m.unmount()
-  })
 })
 
 describe('FileCard — the split generation detail states', () => {
-  test('a pending detail read shows the loading note instead of the empty claim', async () => {
-    const m = await mount(h(FileCard, {
-      activity: richActivity({ entries: [] }),
-      state: 'loading',
-      onRetry: () => {},
-    }))
+  test('a pending detail read shows the loading note; a failed one arms its retry, or keeps the plain empty claim without one', async () => {
+    const m = await mount(h(FileCard, { activity: richActivity({ entries: [] }), state: 'loading', onRetry: () => {}, }))
     assert.ok(text(m.container).includes('Loading history'))
     assert.ok(!text(m.container).includes('No file reads'))
     await m.unmount()
-  })
 
-  test('a failed detail read arms the retry button; without one the empty claim stays', async () => {
     let retries = 0
-    const m = await mount(h(FileCard, {
-      activity: richActivity({ entries: [] }),
-      state: 'failed',
-      onRetry: () => { retries++ },
-    }))
-    await click(query(m.container, '.lc-br-retry'))
+    const failed = await mount(h(FileCard, { activity: richActivity({ entries: [] }), state: 'failed', onRetry: () => { retries++ }, }))
+    await click(query(failed.container, '.lc-br-retry'))
     assert.equal(retries, 1)
+    await failed.unmount()
 
     const inert = await mount(h(FileCard, { activity: richActivity({ entries: [] }), state: 'failed' }))
     assert.ok(text(inert.container).includes('No file reads'), 'no retry wired — the plain empty state')
     await inert.unmount()
-    await m.unmount()
   })
 })
 
@@ -670,17 +573,11 @@ describe('FileCard — the stats board\'s kind focus', () => {
     assert.equal(handled.length, 3)
     assert.ok(chipByLabel(m.container, 'Read').className.includes('lc-gran-on'))
     await m.unmount()
-  })
-
-  test('without a filter focus the chip band stays the card\'s own; a hand-back-free jump still lands', async () => {
-    const m = await mount(h(FileCard, { activity: richActivity() }))
-    assert.ok(chipByLabel(m.container, 'All').className.includes('lc-gran-on'))
-    await click(chipByLabel(m.container, 'Written'))
-    assert.ok(chipByLabel(m.container, 'Written').className.includes('lc-gran-on'))
-    await m.unmount()
 
     const solo = await mount(h(FileCard, { activity: richActivity(), filterFocus: 'search' }))
-    assert.ok(chipByLabel(solo.container, 'Searched').className.includes('lc-gran-on'))
+    assert.ok(chipByLabel(solo.container, 'Searched').className.includes('lc-gran-on'), 'a hand-back-free jump still lands')
+    await click(chipByLabel(solo.container, 'Written'))
+    assert.deepEqual(queryAll(solo.container, '.lc-fa-row').map(r => r.title), ['/src/a.ts', 'solo.md'], 'the count sort keys on the written tally')
     await solo.unmount()
   })
 })

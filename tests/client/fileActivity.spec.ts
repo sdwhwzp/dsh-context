@@ -45,20 +45,14 @@ describe('kindOfTool', () => {
 })
 
 describe('pathOfArgs', () => {
-  test('null or target-less args yield no path', () => {
+  test('null or target-less args yield no path; reads/writes take the first path-ish argument, searches prefer path then pattern', () => {
     assert.equal(pathOfArgs('read', null), null)
     assert.equal(pathOfArgs('read', {}), null)
     assert.equal(pathOfArgs('read', { file_path: '' }), null)
     assert.equal(pathOfArgs('read', { file_path: 42 }), null)
-  })
-
-  test('read/write tools take the first path-ish argument', () => {
     assert.equal(pathOfArgs('read', { file_path: '/a.ts' }), '/a.ts')
     assert.equal(pathOfArgs('edit', { filePath: '/b.ts' }), '/b.ts')
     assert.equal(pathOfArgs('write', { path: '/c.ts' }), '/c.ts')
-  })
-
-  test('searches prefer the narrowing path and fall back to the pattern', () => {
     assert.equal(pathOfArgs('grep', { pattern: 'foo', path: '/src' }), '/src')
     assert.equal(pathOfArgs('grep', { pattern: 'foo' }), 'foo')
     assert.equal(pathOfArgs('grep', { pattern: 'foo', path: '' }), 'foo')
@@ -95,7 +89,6 @@ describe('activityOf', () => {
       op(11, 'grep', { pattern: 'needle', path: '/src' }),
       op(13, 'glob', { pattern: '**/*.md' }),
     ])
-    assert.equal(a.entries.length, 4)
     assert.deepEqual(a.entries.map(e => e.path), ['**/*.md', '/src', '/src/b.ts', '/src/a.ts'])
 
     const file = a.entries[3]
@@ -140,7 +133,14 @@ describe('activityOf', () => {
     assert.deepEqual(a.totals.image, { files: 2, ops: 2 })
   })
 
-  test('stamps the error flag from the fold or the snapshot', () => {
+  test('the before bound excludes later ops; null serves everything', () => {
+    const ops = [op(3, 'read', { file_path: '/a.ts' }), op(9, 'read', { file_path: '/b.ts' })]
+    assert.equal(run(ops, 9).entries.length, 1)
+    assert.equal(run(ops, 9).entries[0].path, '/a.ts')
+    assert.equal(run(ops, null).entries.length, 2)
+  })
+
+  test('the error flags and the archive removal stamp ride the op', () => {
     const a = run([
       op(3, 'read', { file_path: '/a.ts' }, { err: true }),
       op(5, 'read', { file_path: '/a.ts' }, {}, { isError: true }),
@@ -148,18 +148,8 @@ describe('activityOf', () => {
     ])
     assert.deepEqual(a.entries[1].ops.map(o => o.err), [true, true])
     assert.equal(a.entries[0].ops[0].err, false)
-  })
-
-  test('carries the archive removal stamp onto the op for locate targeting', () => {
-    const a = run([op(3, 'read', { file_path: '/a.ts' }, { gone: 20 })])
-    assert.equal(a.entries[0].ops[0].gone, 20)
-  })
-
-  test('the before bound excludes later ops; null serves everything', () => {
-    const ops = [op(3, 'read', { file_path: '/a.ts' }), op(9, 'read', { file_path: '/b.ts' })]
-    assert.equal(run(ops, 9).entries.length, 1)
-    assert.equal(run(ops, 9).entries[0].path, '/a.ts')
-    assert.equal(run(ops, null).entries.length, 2)
+    const gone = run([op(3, 'read', { file_path: '/a.ts' }, { gone: 20 })])
+    assert.equal(gone.entries[0].ops[0].gone, 20)
   })
 
   test('non-file tools and non-tool nodes never enter the fold', () => {
@@ -192,9 +182,9 @@ describe('activityOf', () => {
     assert.equal(a.totals.read.files, 1)
   })
 
-  test('a file-kind node the join lost entirely skips without throwing', () => {
+  test('a lost or hostile join never takes the walk down', () => {
     // Regression: an aged window must make the fold skip the node, never dereference it and take the tab down.
-    const a = activityOf(
+    const lost = activityOf(
       [
         { seq: 3, cat: 'tool', tokens: 5, tool: 'read', time: T0 },
         { seq: 5, cat: 'tool', tokens: 5, tool: 'run_code', time: T0 },
@@ -202,24 +192,22 @@ describe('activityOf', () => {
       () => undefined,
       null,
     )
-    assert.deepEqual(a.entries, [])
-  })
+    assert.deepEqual(lost.entries, [])
 
-  test('one hostile join node cannot take the walk down', () => {
-    const hostile: ConversationNodeLike = { kind: 'tool', seq: 3 }
+    const hostile: ConversationNodeLike = { kind: 'tool', seq: 7 }
     Object.defineProperty(hostile, 'call', { get(): never { throw new Error('boom') } })
-    const healthy = op(5, 'read', { file_path: '/a.ts' })
-    const bySeq = new Map<number, ConversationNodeLike>([[3, hostile], [5, healthy.conv]])
-    const a = activityOf(
+    const healthy = op(9, 'read', { file_path: '/a.ts' })
+    const bySeq = new Map<number, ConversationNodeLike>([[7, hostile], [9, healthy.conv]])
+    const mixed = activityOf(
       [
-        { seq: 3, cat: 'tool', tokens: 5, tool: 'read', time: T0 },
+        { seq: 7, cat: 'tool', tokens: 5, tool: 'read', time: T0 },
         healthy.node,
       ],
       seq => bySeq.get(seq),
       null,
     )
-    assert.deepEqual(a.entries.map(e => e.path), ['/a.ts'])
-    assert.equal(a.totals.read.ops, 1)
+    assert.deepEqual(mixed.entries.map(e => e.path), ['/a.ts'])
+    assert.equal(mixed.totals.read.ops, 1)
   })
 
   test('an edit with missing strings contributes no line delta', () => {
@@ -255,40 +243,31 @@ describe('activityOf', () => {
     assert.deepEqual(nested.entries[0].ops[0].read, { count: 50, est: true })
   })
 
-  test('nodes without a timestamp carry ops without one', () => {
+  test('nodes without a timestamp carry ops without one; a search with a path but no pattern carries no detail', () => {
     const a = run([op(3, 'read', { file_path: '/a.ts' }, { time: undefined })])
     assert.equal(a.entries[0].ops[0].time, undefined)
-  })
-
-  test('a search with a path but no pattern carries no detail', () => {
-    const a = run([
+    const searches = run([
       op(3, 'grep', { path: '/src' }),
       op(5, 'grep', { pattern: 'y', path: '' }),
     ])
-    assert.equal(a.entries[1].path, '/src')
-    assert.equal(a.entries[1].ops[0].detail, undefined)
-    assert.equal(a.entries[0].path, 'y')
-    assert.equal(a.entries[0].ops[0].detail, undefined)
+    assert.equal(searches.entries[1].path, '/src')
+    assert.equal(searches.entries[1].ops[0].detail, undefined)
+    assert.equal(searches.entries[0].path, 'y')
+    assert.equal(searches.entries[0].ops[0].detail, undefined, 'the pattern IS the row path')
   })
 })
 
 describe('locateStepOf', () => {
   const requests = [{ seq: 10 }, { seq: 20 }, { seq: 30 }] as RequestRecord[]
 
-  test('the first request dispatched after the op — while alive — shows it', () => {
+  test('the first request dispatched after the op — while alive — shows it; an unconsumed live node reveals on the live surface', () => {
     assert.equal(locateStepOf(requests, 5, undefined), 10)
     assert.equal(locateStepOf(requests, 15, 25), 20)
     assert.equal(locateStepOf(requests, 5, 10), null)
     assert.equal(locateStepOf(requests, 5, 8), null)
-  })
-
-  test('a live node no request has consumed reveals on the live surface', () => {
+    assert.equal(locateStepOf([{ seq: 30 }, { seq: 10 }, { seq: 20 }] as RequestRecord[], 5, undefined), 10)
     assert.equal(locateStepOf(requests, 35, undefined), 'live')
     assert.equal(locateStepOf([], 1, undefined), 'live')
-  })
-
-  test('a re-ordered wire still resolves the first request logged after the node', () => {
-    assert.equal(locateStepOf([{ seq: 30 }, { seq: 10 }, { seq: 20 }] as RequestRecord[], 5, undefined), 10)
   })
 })
 
@@ -335,14 +314,12 @@ describe('activityOf — str_replace_editor', () => {
     assert.equal(a.entries[0].added, 2) // insert 'x\ny'
     assert.deepEqual(a.totals.read, { files: 1, ops: 1 })
     assert.deepEqual(a.totals.write, { files: 2, ops: 3 })
-  })
 
-  test('a stringless call rows as a failed-looking but zero-delta write', () => {
-    const a = run([
-      op(3, 'str_replace_editor', { command: 'str_replace', path: '/a.py' }),
-      op(5, 'str_replace_editor', { path: '/b.py' }),
+    const stringless = run([
+      op(13, 'str_replace_editor', { command: 'str_replace', path: '/a.py' }),
+      op(15, 'str_replace_editor', { path: '/b.py' }),
     ])
-    assert.ok(a.entries.every(e => e.writes === 1 && e.added === 0 && e.removed === 0))
+    assert.ok(stringless.entries.every(e => e.writes === 1 && e.added === 0 && e.removed === 0), 'a stringless call rows as a zero-delta write')
   })
 })
 
@@ -380,11 +357,18 @@ describe('activityOf — nested Code-Mode (PTC) calls', () => {
       added: 3,
       removed: 2,
     })
-  })
 
-  test('a program without a description rows its nested ops without one', () => {
-    const a = run([op(30, 'run_code', { code: 'x' }, {}, { subCalls: [sub(20, 'read', { file_path: '/a.ts' })] })])
-    assert.equal(a.entries[0].ops[0].program, undefined)
+    const b = run([op(30, 'run_code', null, {}, { subCalls: [
+      sub(20, 'grep', { pattern: 'needle', path: '/src' }),
+      sub(21, 'glob', { pattern: '**/*.md' }),
+      sub(22, 'read_image', { file_path: '/ui.png' }),
+    ] })])
+    assert.equal(b.entries[1].ops[0].detail, undefined) // the pattern IS the row path
+    assert.equal(b.entries[2].ops[0].detail, 'needle')
+    assert.equal(b.entries[0].form, 'image')
+    assert.deepEqual(b.totals.image, { files: 1, ops: 1 })
+    const bare = run([op(40, 'run_code', { code: 'x' }, {}, { subCalls: [sub(30, 'read', { file_path: '/a.ts' })] })])
+    assert.equal(bare.entries[0].ops[0].program, undefined)
   })
 
   test('the sub-call error flag and the parent removal stamp ride the op', () => {
@@ -408,21 +392,6 @@ describe('activityOf — nested Code-Mode (PTC) calls', () => {
     const runCode = op(30, 'run_code', { code: 'x' }, {}, { subCalls: [sub(20, 'read', { file_path: '/a.ts' })] })
     assert.equal(run([runCode], 30).entries.length, 0)
     assert.equal(run([runCode], 31).entries.length, 1)
-  })
-
-  test('nested searches keep the pattern detail only when the path narrows', () => {
-    const a = run([op(30, 'run_code', null, {}, { subCalls: [
-      sub(20, 'grep', { pattern: 'needle', path: '/src' }),
-      sub(21, 'glob', { pattern: '**/*.md' }),
-    ] })])
-    assert.equal(a.entries[0].ops[0].detail, undefined) // the pattern IS the row path
-    assert.equal(a.entries[1].ops[0].detail, 'needle')
-  })
-
-  test('a nested image read keeps the image form and totals', () => {
-    const a = run([op(30, 'run_code', null, {}, { subCalls: [sub(20, 'read_image', { file_path: '/ui.png' })] })])
-    assert.equal(a.entries[0].form, 'image')
-    assert.deepEqual(a.totals.image, { files: 1, ops: 1 })
   })
 
   test('running and malformed sub-call blocks drop out instead of throwing', () => {
@@ -525,25 +494,16 @@ describe('activityOf — search meta attribution', () => {
       { shape: 'matches', truncated: false, files: [null, 7, { path: '' }, { path: '/a.ts' }, { path: '/a.ts', matches: 'x' }] }, // all groups malformed
       { shape: 'paths', truncated: false }, // paths missing
       { shape: 'paths', truncated: false, paths: [] }, // nothing listed
+      { shape: 'paths', paths: ['/a.ts'] }, // truncated flag missing
     ]
     for (const [i, meta] of metas.entries()) {
       const a = run([op(10, 'grep', { pattern: 'needle', path: '/src' }, {}, { meta })])
       assert.deepEqual(a.entries.map(e => e.path), ['/src'], `meta case ${i} must fall back`)
     }
-  })
-
-  test('one valid path among malformed siblings still attributes', () => {
-    const a = run([op(10, 'grep', { pattern: 'needle', path: '/src' }, {}, {
+    const partial = run([op(10, 'grep', { pattern: 'needle', path: '/src' }, {}, {
       meta: { shape: 'paths', truncated: false, total: 2, paths: ['/a.ts', ''] },
     })])
-    assert.deepEqual(a.entries.map(e => e.path), ['/src', '/a.ts'])
-  })
-
-  test('a truncated flag is required — a missing one falls back', () => {
-    const a = run([op(10, 'grep', { pattern: 'n', path: '/src' }, {}, {
-      meta: { shape: 'paths', paths: ['/a.ts'] },
-    })])
-    assert.deepEqual(a.entries.map(e => e.path), ['/src'])
+    assert.deepEqual(partial.entries.map(e => e.path), ['/src', '/a.ts'], 'one valid path among malformed siblings still attributes')
   })
 
   test('meta attribution survives an aged-out call head — no args, no pattern detail', () => {
@@ -697,21 +657,18 @@ describe('displayPathOf', () => {
 
 describe('activityOf — pattern rows', () => {
   test('a pathless search marks its pattern-as-target entry; a narrowed one does not', () => {
-    const a = run([
+    const top = run([
       op(3, 'grep', { pattern: 'needle' }),
       op(5, 'grep', { pattern: 'needle', path: '/src' }),
     ])
-    assert.equal(a.entries[0].pattern, undefined)
-    assert.equal(a.entries[1].pattern, true)
-  })
-
-  test('a nested Code-Mode pathless search is a pattern row too; its narrowed sibling is not', () => {
-    const a = run([op(30, 'run_code', null, {}, { subCalls: [
+    assert.equal(top.entries[0].pattern, undefined)
+    assert.equal(top.entries[1].pattern, true)
+    const nested = run([op(30, 'run_code', null, {}, { subCalls: [
       sub(20, 'grep', { pattern: 'needle' }),
       sub(22, 'grep', { pattern: 'needle', path: '/src' }),
     ] })])
-    assert.equal(a.entries[0].pattern, undefined)
-    assert.equal(a.entries[1].pattern, true)
+    assert.equal(nested.entries[0].pattern, undefined)
+    assert.equal(nested.entries[1].pattern, true)
   })
 })
 

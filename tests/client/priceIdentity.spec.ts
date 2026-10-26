@@ -71,14 +71,11 @@ describe('suffix and form helpers', () => {
 })
 
 describe('isSubscriptionPlanProvider', () => {
-  test('recognizes coding and token plan branches', () => {
+  test('recognizes plan branches but not ordinary routes or subscription products', () => {
     assert.equal(isSubscriptionPlanProvider('kimi-code-plan-global'), true)
     assert.equal(isSubscriptionPlanProvider('zai-coding-plan'), true)
     assert.equal(isSubscriptionPlanProvider('alibaba-token-plan-cn'), true)
     assert.equal(isSubscriptionPlanProvider('xiaomi-token-plan-ams'), true)
-  })
-
-  test('does not treat ordinary routes or subscription products as plan branches', () => {
     assert.equal(isSubscriptionPlanProvider('kimi-coding'), false)
     assert.equal(isSubscriptionPlanProvider('opencode'), false)
     assert.equal(isSubscriptionPlanProvider('github-copilot'), false)
@@ -87,7 +84,7 @@ describe('isSubscriptionPlanProvider', () => {
 })
 
 describe('familyVendorOf', () => {
-  test('maps mainstream families to their maker', () => {
+  test('maps mainstream families to their maker; unknown families have no vendor hint', () => {
     assert.equal(familyVendorOf('anthropic/claude-sonnet-4.5'), 'anthropic')
     assert.equal(familyVendorOf('openai/gpt-5.6-sol'), 'openai')
     assert.equal(familyVendorOf('o1-preview'), 'openai')
@@ -106,9 +103,6 @@ describe('familyVendorOf', () => {
     assert.equal(familyVendorOf('pixtral-large'), 'mistral')
     assert.equal(familyVendorOf('command-a'), 'cohere')
     assert.equal(familyVendorOf('nemotron-4'), 'nvidia')
-  })
-
-  test('unknown families have no vendor hint', () => {
     assert.equal(familyVendorOf('k3'), undefined)
     assert.equal(familyVendorOf('mystery-model'), undefined)
   })

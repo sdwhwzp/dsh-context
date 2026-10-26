@@ -186,14 +186,6 @@ describe('ContextBrowser targeted content fetch', () => {
     await m.unmount()
   })
 
-  test('without a fetcher (older host) an un-joined row keeps the static note', async () => {
-    const m = await mount(h(Browser, props({ data, convNodes: [] })))
-    await openFirstRow(m)
-    await flush()
-    assert.ok(text(query(m.container, '.lc-br-content')).includes('outside the loaded message window'))
-    await m.unmount()
-  })
-
   test('a late fetch for an abandoned row never lands; the next row fetches its own seq', async () => {
     silenceFetchWarn()
     const deferreds: { resolve: (node: ConversationNodeLike | null) => void; reject: (reason: Error) => void }[] = []

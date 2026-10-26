@@ -40,22 +40,12 @@ describe('toCurrency', () => {
 })
 
 describe('priceOf', () => {
-  test('a mapped dsh provider id resolves to its models.dev branch', () => {
+  test('mapped and verbatim provider ids and short suffix model ids resolve to their branch rates', () => {
     assert.equal(priceOf(BOOK_B, 'deepseek-official', 'deepseek-v4-flash'), FLASH)
     assert.equal(priceOf(BOOK_B, 'kimi-coding', 'kimi-k2.7-code'), KIMI)
     assert.equal(priceOf(BOOK_B, 'deepseek-account', 'deepseek-v4-pro'), PRO, 'both native DeepSeek routes share the branch')
-  })
-
-  test('an unmapped dsh provider id passes through to the book verbatim', () => {
     assert.equal(priceOf(BOOK_B, 'opencode-go', 'deepseek-v4-flash'), FLASH)
     assert.equal(priceOf(bookOf({ anthropic: { claude: KIMI } }), 'anthropic', 'claude'), KIMI)
-  })
-
-  test('a known provider falls back to a case-insensitive model match', () => {
-    assert.equal(priceOf(bookOf({ minimax: { 'MiniMax-M2.5': KIMI } }), 'minimax-cn', 'minimax-m2.5'), KIMI)
-  })
-
-  test('a short dsh model id suffix-matches its namespaced registry id', () => {
     assert.equal(priceOf(BOOK_B, 'kimi-coding', 'k3'), K3)
     assert.equal(priceOf(BOOK_B, 'kimi-coding', 'K3'), K3, 'the suffix tier is case-insensitive too')
   })
@@ -63,17 +53,6 @@ describe('priceOf', () => {
   test('several suffix candidates in one branch are ambiguous', () => {
     const book = bookOf({ moonshotai: { 'kimi-k3': K3, 'other-k3': KIMI } })
     assert.equal(priceOf(book, 'kimi-coding', 'k3'), null)
-  })
-
-  test('a known provider with an unknown model prices null (no cross-provider guess)', () => {
-    assert.equal(priceOf(BOOK_B, 'deepseek', 'kimi-k2.7-code'), null)
-  })
-
-  test('a provider the book does not carry prices through the model-side index', () => {
-    assert.deepEqual(priceOf(BOOK_B, '', 'kimi-k2.7-code'), KIMI, 'exactly one branch carries it')
-    assert.deepEqual(priceOf(BOOK_B, 'future-provider', 'kimi-k2.7-code'), KIMI)
-    assert.deepEqual(priceOf(BOOK_B, 'any-gateway', 'deepseek-v4-flash'), FLASH, 'the id names its vendor: deepseek')
-    assert.equal(priceOf(BOOK_B, '', 'mystery'), null)
   })
 
   test('a null or missing book prices nothing', () => {
@@ -102,12 +81,9 @@ describe('priceIndexOf / the model-side resolution tiers', () => {
     assert.equal(exact.filter(c => c.pid === 'anthropic').length, 1)
   })
 
-  test('tier: the model-own vendor wins (issue #91: unknown routes price claude/gpt models)', () => {
+  test('tier: vendor, org, family, and carrier signals resolve; an unmatchable org and model price nothing', () => {
     assert.deepEqual(priceOf(VENDOR_B, 'claude', 'claude-sonnet-5'), ANTHROPIC_RATE)
     assert.deepEqual(priceOf(VENDOR_B, 'codex', 'claude-sonnet-5'), ANTHROPIC_RATE, 'the proxy route spells no vendor')
-  })
-
-  test('tier: the org segment of vendor/model dialects names the vendor', () => {
     const orgBook = bookOf({
       deepseek: { 'deepseek-v4-pro': PRO },
       gateway: { 'deepseek-v4-pro': KIMI },
@@ -116,10 +92,9 @@ describe('priceIndexOf / the model-side resolution tiers', () => {
     assert.deepEqual(priceOf(orgBook, 'together', 'deepseek-ai/DeepSeek-V4-Pro'), PRO, 'deepseek-ai resolves to the deepseek branch')
     assert.deepEqual(priceOf(orgBook, 'unknown', 'acme/model-1'), K3, 'an org naming its own provider resolves on the full id')
     assert.equal(priceOf(orgBook, 'together', 'zzz-org/Mystery'), null, 'an org and model nothing matches price nothing')
-  })
-
-  test('tier: a provider the model id itself names wins over mirrors', () => {
     assert.deepEqual(priceOf(BOOK_B, 'any-gateway', 'deepseek-v4-flash'), FLASH, 'deepseek-v4-flash names deepseek')
+    const lone = bookOf({ solo: { 'weird-model-9': K3 } })
+    assert.deepEqual(priceOf(lone, 'unknown', 'weird-model-9'), K3, 'a lone carrier prices without any vendor signal')
   })
 
   test('a deepseek- model id prices from the first-party branch first (issue #93)', () => {
@@ -137,12 +112,7 @@ describe('priceIndexOf / the model-side resolution tiers', () => {
     assert.deepEqual(priceOf(hostOnly, 'hx', 'deepseek-junk'), AZURE_FLAT, 'no first-party branch in the book leaves the tiers in charge')
   })
 
-  test('tier: a lone carrier prices without any vendor signal', () => {
-    const lone = bookOf({ solo: { 'weird-model-9': K3 } })
-    assert.deepEqual(priceOf(lone, 'unknown', 'weird-model-9'), K3)
-  })
-
-  test('unaccounted candidates never win by rate majority alone', () => {
+  test('unaccounted candidates never win by rate majority alone; float noise counts as agreement', () => {
     const disagree = bookOf({
       a: { 'x': { hit: 1, miss: 1, write: 1, out: 1 } },
       b: { 'x': { hit: 2, miss: 2, write: 2, out: 2 } },
@@ -155,9 +125,6 @@ describe('priceIndexOf / the model-side resolution tiers', () => {
       d: { 'x': { hit: 1, miss: 1, write: 1, out: 1 } },
     })
     assert.equal(priceOf(majority, '', 'x'), null, 'a plurality does not outrank an honest ambiguity')
-  })
-
-  test('float noise in registry sync counts as agreement', () => {
     const noisy = bookOf({
       a: { 'x': { hit: 0.125, miss: 1, write: 1, out: 2 } },
       b: { 'x': { hit: 0.12500000000000003, miss: 1, write: 1, out: 2 } },
@@ -165,35 +132,9 @@ describe('priceIndexOf / the model-side resolution tiers', () => {
     assert.equal(priceOf(noisy, '', 'x')?.hit, 0.125)
   })
 
-  test('registry ids are matched case-insensitively', () => {
-    assert.deepEqual(priceOf(VENDOR_B, 'claude', 'Claude-Sonnet-5'), ANTHROPIC_RATE)
-  })
-
-  test('an org-prefixed dialect falls back to its bare last segment', () => {
+  test('an org-prefixed dialect and an explicit org branch resolve; prefix-shaped suffixes still refuse', () => {
     assert.deepEqual(priceOf(VENDOR_B, 'together', 'openai/gpt-oss-120b'), KIMI, 'the bare id resolves once the unknown org is stripped')
     assert.deepEqual(priceOf(VENDOR_B, 'unknown', 'ZZZ/Gpt-Oss-120B'), KIMI, 'the segment lookup is case-insensitive too')
-  })
-
-  test('hostile branches and rate entries are skipped at index build', () => {
-    const hostile = bookOf({
-      junk: ['nope'],
-      broken: { 'x': 'nope' },
-      good: { 'x': KIMI },
-    } as unknown as ModelPrices)
-    assert.deepEqual(priceOf(hostile, '', 'x'), KIMI)
-    assert.equal(priceOf(hostile, '', 'y'), null)
-  })
-
-  test('a non-record branch is refused whole; identical re-pushes dedup', () => {
-    const R1 = { hit: 1, miss: 1, write: 1, out: 1 }
-    const index = priceIndexOf({ junk: 5, a: { 'x-y': R1, 'z-y': R1 }, b: { 'x': { hit: 1 } } } as unknown as ModelPrices, {})
-    assert.equal([...index.byModel.get('x-y') ?? []].length, 1)
-    assert.equal(index.byModel.get('y'), undefined, 'suffix tails are branch-local')
-    assert.equal(index.byModel.get('junk'), undefined)
-    assert.equal(index.byModel.get('x'), undefined, 'the partial rate entry dropped')
-  })
-
-  test('an explicit org branch outranks a same-key candidate', () => {
     const R1 = { hit: 1, miss: 1, write: 1, out: 1 }
     const R2 = { hit: 2, miss: 2, write: 2, out: 2 }
     const org = bookOf({
@@ -212,16 +153,29 @@ describe('priceIndexOf / the model-side resolution tiers', () => {
     })
     assert.deepEqual(priceOf(agree, '', 'x-y-z'), R1, 'a unanimous suffix tier carries the rate')
   })
+
+  test('hostile branches and partial rate entries are skipped at index build', () => {
+    const hostile = bookOf({
+      junk: ['nope'],
+      broken: { 'x': 'nope' },
+      good: { 'x': KIMI },
+    } as unknown as ModelPrices)
+    assert.deepEqual(priceOf(hostile, '', 'x'), KIMI)
+    assert.equal(priceOf(hostile, '', 'y'), null)
+    const R1 = { hit: 1, miss: 1, write: 1, out: 1 }
+    const index = priceIndexOf({ junk: 5, a: { 'x-y': R1, 'z-y': R1 }, b: { 'x': { hit: 1 } } } as unknown as ModelPrices, {})
+    assert.equal([...index.byModel.get('x-y') ?? []].length, 1)
+    assert.equal(index.byModel.get('y'), undefined, 'suffix tails are branch-local')
+    assert.equal(index.byModel.get('junk'), undefined)
+    assert.equal(index.byModel.get('x'), undefined, 'the partial rate entry dropped')
+  })
 })
 
 describe('billedTokensOf (the token face of the billed buckets)', () => {
-  test('null and empty usages total zero', () => {
+  test('any usage key mapping is summed across providers, models, and periods; null and empty total zero', () => {
     assert.equal(billedTokensOf(null), 0)
     assert.equal(billedTokensOf(undefined), 0)
     assert.equal(billedTokensOf({}), 0)
-  })
-
-  test('sums every bucket across providers, models, and periods', () => {
     const usage: SessionCostUsage = {
       p1: {
         m1: { peak: { uncached: 1, cacheRead: 2, cacheWrite: 3, output: 4 }, off: { uncached: 10, cacheRead: 20, cacheWrite: 30, output: 40 } },
@@ -241,13 +195,11 @@ describe('billedTokensOf (the token face of the billed buckets)', () => {
   })
 })
 
-describe('estimateSessionCost', () => {  test('null usage or null book prices to null', () => {
+describe('estimateSessionCost', () => {
+  test('null usage or book, and usage without any priced bucket, price to null', () => {
     assert.equal(estimateSessionCost(null, BOOK_B, 'usd'), null)
     assert.equal(estimateSessionCost(undefined, BOOK_B, 'cny'), null)
     assert.equal(estimateSessionCost({}, null, 'usd'), null)
-  })
-
-  test('usage without any priced bucket returns null', () => {
     assert.equal(estimateSessionCost({}, BOOK_B, 'usd'), null)
     assert.equal(estimateSessionCost({ 'deepseek-official': { unknown: { peak: bucket(0, M, 0, 0) } } }, BOOK_B, 'usd'), null)
   })
@@ -279,22 +231,14 @@ describe('estimateSessionCost', () => {  test('null usage or null book prices to
     close(estimateSessionCost({ 'deepseek-account': { 'deepseek-v4-flash': split } }, BOOK_B, 'usd'), 0.3 + 0.15)
   })
 
-  test('a missing model is skipped while priced ones still sum', () => {
-    const usage = { 'kimi-coding': { 'kimi-k2.7-code': { peak: bucket(0, M, 0, 0) } } }
-    close(estimateSessionCost(usage, BOOK_B, 'usd'), 0.95)
-  })
-
   test('the CNY currency converts the USD total at 1 CNY = 0.15 USD', () => {
     const usage = { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(0, M, 0, 0) } } }
     close(estimateSessionCost(usage, BOOK_B, 'cny'), 2)
   })
 
-  test('non-number bucket fields are coerced to zero by numOf', () => {
+  test('non-number bucket fields are coerced to zero while real fields still price', () => {
     const garbage = { cacheRead: NaN, uncached: 'x', cacheWrite: undefined, output: Infinity } as unknown as CostBucketTotals
     assert.equal(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4-flash': { peak: garbage } } }, BOOK_B, 'usd'), 0)
-  })
-
-  test('garbage fields degrade while real fields still price', () => {
     const mixed = { cacheRead: M, uncached: NaN, cacheWrite: M / 2, output: 'junk' } as unknown as CostBucketTotals
     close(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4-flash': { peak: mixed } } }, BOOK_B, 'usd'), 2 * (0.003 + 0.5 * 0.15))
   })
@@ -330,21 +274,11 @@ describe('mergeCostUsage', () => {
     })
   })
 
-  test('the merged estimate equals the sum of the sides priced apart', () => {
-    const a = { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(M, M, 0, 0) } } }
-    const b = { 'kimi-coding': { 'kimi-k2.7-code': { peak: bucket(0, 2 * M, 0, 0) } } }
-    const total = estimateSessionCost(mergeCostUsage(a, b), BOOK_B, 'usd')
-    close(total ?? 0, (estimateSessionCost(a, BOOK_B, 'usd') ?? 0) + (estimateSessionCost(b, BOOK_B, 'usd') ?? 0))
-  })
-
-  test('null and absent sides drop out; nothing usable merges to null', () => {
+  test('null and absent sides drop out; nothing usable merges to null; an all-zero bucket still counts', () => {
     const usage = { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(M, 0, 0, 0) } } }
     assert.deepEqual(mergeCostUsage(null, usage, undefined), usage)
     assert.equal(mergeCostUsage(null, undefined, null), null)
     assert.equal(mergeCostUsage(), null)
-  })
-
-  test('a bucket that merged with only zeros still counts (the estimator prices $0, not a dash)', () => {
     const zero = { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(0, 0, 0, 0) } } }
     assert.deepEqual(mergeCostUsage(zero), zero)
     assert.equal(estimateSessionCost(mergeCostUsage(zero), BOOK_B, 'usd'), 0)
@@ -439,52 +373,41 @@ describe('canonical authority and branch dialects', () => {
   }
   const CANON_BOOK = bookOf(PRICES, CANON)
 
-  test('the canonical lab selects the maker over a host with a different rate', () => {
-    const face = priceFaceOf(CANON_BOOK, 'proxy', 'gpt-5.6-sol')
-    assert.deepEqual(face, { pid: 'openai', mid: 'gpt-5.6-sol', rate: OPENAI_RATE, via: 'canonical-maker', confidence: 'high', canonical: 'openai/gpt-5.6-sol' })
+  test('authority tiers: canonical maker, direct branch, org branch, branch dialect, normalization, zen, and aliases', () => {
+    assert.deepEqual(priceFaceOf(CANON_BOOK, 'proxy', 'gpt-5.6-sol'), { pid: 'openai', mid: 'gpt-5.6-sol', rate: OPENAI_RATE, via: 'canonical-maker', confidence: 'high', canonical: 'openai/gpt-5.6-sol' })
     assert.equal(priceFaceOf(CANON_BOOK, 'CLIProxyAPI', 'claude-sonnet-5-5')?.pid, 'anthropic')
     assert.equal(priceFaceOf(CANON_BOOK, 'claude-vision', 'claude-sonnet-5-5')?.via, 'canonical-maker')
     assert.equal(priceFaceOf(CANON_BOOK, 'codex-vision', 'gpt-5.6-sol')?.via, 'canonical-maker')
-  })
-
-  test('an explicit org branch beats a full-id aggregator entry', () => {
-    const face = priceFaceOf(CANON_BOOK, 'magpie', 'google-vertex/gemini-4-argon')
-    assert.deepEqual(face, { pid: 'google-vertex', mid: 'gemini-4-argon', rate: VERTEX_RATE, via: 'org-branch', confidence: 'high', canonical: 'google/gemini-4-argon' })
-  })
-
-  test('a branch dialect resolves a bare id to its vendor-prefixed key', () => {
-    const face = priceFaceOf(CANON_BOOK, 'cloudflare-ai-gateway', 'claude-fable-5')
-    assert.deepEqual(face, { pid: 'cloudflare-ai-gateway', mid: 'anthropic/claude-fable-5', rate: CLOUDFLARE_RATE, via: 'branch-suffix', confidence: 'high', canonical: 'anthropic/claude-fable-5' })
-  })
-
-  test('index candidates agree on one canonical lab for full ids', () => {
+    assert.deepEqual(priceFaceOf(CANON_BOOK, 'magpie', 'google-vertex/gemini-4-argon'), { pid: 'google-vertex', mid: 'gemini-4-argon', rate: VERTEX_RATE, via: 'org-branch', confidence: 'high', canonical: 'google/gemini-4-argon' })
+    assert.deepEqual(priceFaceOf(CANON_BOOK, 'cloudflare-ai-gateway', 'claude-fable-5'), { pid: 'cloudflare-ai-gateway', mid: 'anthropic/claude-fable-5', rate: CLOUDFLARE_RATE, via: 'branch-suffix', confidence: 'high', canonical: 'anthropic/claude-fable-5' })
     assert.equal(priceFaceOf(CANON_BOOK, 'chanyan', 'kimi-k3')?.pid, 'moonshotai')
     assert.equal(priceFaceOf(CANON_BOOK, 'chanyan', 'glm-5.3')?.pid, 'zhipuai')
     assert.deepEqual(priceResolutionOf(CANON_BOOK, 'chanyan', 'k3'), { kind: 'unpriced', miss: { reason: 'no-entry' } })
-  })
-
-  test('a known direct branch keeps its own rate', () => {
     assert.equal(priceFaceOf(CANON_BOOK, 'azure', 'gpt-5.6-sol')?.pid, 'azure')
     assert.equal(priceFaceOf(CANON_BOOK, 'openai', 'gpt-5.6-sol')?.pid, 'openai')
     assert.equal(priceFaceOf(CANON_BOOK, 'anthropic', 'claude-sonnet-5-5')?.pid, 'anthropic')
+    assert.deepEqual(priceFaceOf(CANON_BOOK, 'anthropic', 'claude-sonnet-5.5'), { pid: 'anthropic', mid: 'claude-sonnet-5-5', rate: ANTHROPIC_RATE, via: 'branch-normalized', confidence: 'medium', canonical: 'anthropic/claude-sonnet-5-5' })
+    assert.deepEqual(priceFaceOf(CANON_BOOK, 'opencode', 'claude-sonnet-5'), {
+      pid: 'opencode', mid: 'claude-sonnet-5', rate: OPENCODE_RATE, via: 'direct', confidence: 'high', canonical: 'anthropic/claude-sonnet-5',
+    })
+    assert.equal(priceFaceOf(CANON_BOOK, 'opencode', 'kimi-k3')?.pid, 'opencode')
+    assert.deepEqual(priceFaceOf(CANON_BOOK, 'opencode-go', 'glm-5.3'), {
+      pid: 'opencode-go', mid: 'glm-5.3', rate: ZHIPU_RATE, via: 'direct', confidence: 'high', canonical: 'zhipuai/glm-5.3',
+    })
+    assert.equal(priceFaceOf(CANON_BOOK, 'fireworks', 'model-1')?.pid, 'fireworks-ai')
+    assert.equal(priceFaceOf(CANON_BOOK, 'together', 'model-1')?.pid, 'togetherai')
+    assert.equal(priceFaceOf(CANON_BOOK, 'vercel-ai-gateway', 'model-1')?.pid, 'vercel')
+    assert.equal(priceFaceOf(CANON_BOOK, 'zai-coding-cn', 'glm-5.3')?.pid, 'zhipuai')
   })
 
-  test('a normalized spelling resolves inside the maker branch', () => {
-    const face = priceFaceOf(CANON_BOOK, 'anthropic', 'claude-sonnet-5.5')
-    assert.deepEqual(face, { pid: 'anthropic', mid: 'claude-sonnet-5-5', rate: ANTHROPIC_RATE, via: 'branch-normalized', confidence: 'medium', canonical: 'anthropic/claude-sonnet-5-5' })
-  })
-
-  test('a single-vendor branch never falls back to another vendor', () => {
+  test('a single-vendor branch never falls back, while multiple labs need an org or family hint', () => {
     assert.deepEqual(priceResolutionOf(CANON_BOOK, 'anthropic', 'gpt-5.6-sol'), { kind: 'unpriced', miss: { reason: 'model-unknown' } })
-  })
-
-  test('multiple labs need an org or family hint', () => {
     assert.deepEqual(priceResolutionOf(CANON_BOOK, 'unknown', 'mystery'), { kind: 'unpriced', miss: { reason: 'ambiguous', candidates: 2 } })
     assert.equal(priceFaceOf(CANON_BOOK, 'unknown', 'claude-mystery')?.pid, 'anthropic')
     assert.equal(priceFaceOf(CANON_BOOK, 'unknown', 'claude-sonnet-5.5')?.pid, 'anthropic', 'normalized global ids resolve through the maker')
   })
 
-  test('authority misses fall through without inventing a rate', () => {
+  test('authority misses and ambiguous branch-local lookups fall through without inventing a rate', () => {
     const R1 = { hit: 1, miss: 1, write: 1, out: 1 }
     const R2 = { hit: 2, miss: 2, write: 2, out: 2 }
     const edge = bookOf({
@@ -518,11 +441,7 @@ describe('canonical authority and branch dialects', () => {
     assert.deepEqual(priceResolutionOf(edge, 'unknown', 'claude-zzz'), { kind: 'unpriced', miss: { reason: 'ambiguous', candidates: 2 } })
     assert.deepEqual(priceResolutionOf(CANON_BOOK, 'azure', 'private-model'), { kind: 'unpriced', miss: { reason: 'no-entry' } })
     assert.deepEqual(priceResolutionOf(CANON_BOOK, 'unknown', 'google-vertex/private'), { kind: 'unpriced', miss: { reason: 'no-entry' } })
-  })
-
-  test('ambiguous branch-local lookups stay unpriced', () => {
-    const R1 = { hit: 1, miss: 1, write: 1, out: 1 }
-    const R2 = { hit: 2, miss: 2, write: 2, out: 2 }
+    assert.deepEqual(priceResolutionOf(null, 'codex', 'gpt-5.6-sol'), { kind: 'unpriced', miss: { reason: 'book-unavailable' } })
     const book = bookOf({
       'reseller-a': { mystery: R1, 'claude-yyy': R1 },
       'reseller-b': { mystery: R2, 'claude-yyy': R2 },
@@ -539,28 +458,6 @@ describe('canonical authority and branch dialects', () => {
     assert.deepEqual(priceResolutionOf(book, 'unknown', 'mystery'), { kind: 'unpriced', miss: { reason: 'ambiguous', candidates: 2 } })
     assert.deepEqual(priceResolutionOf(book, 'unknown', 'claude-yyy'), { kind: 'unpriced', miss: { reason: 'ambiguous', candidates: 2 } })
     assert.deepEqual(priceResolutionOf(book, 'unknown', 'google-vertex/gemini-rrr'), { kind: 'unpriced', miss: { reason: 'ambiguous', candidates: 2 } })
-  })
-
-  test('opencode zen branches keep their own listed rates', () => {
-    assert.deepEqual(priceFaceOf(CANON_BOOK, 'opencode', 'claude-sonnet-5'), {
-      pid: 'opencode', mid: 'claude-sonnet-5', rate: OPENCODE_RATE, via: 'direct', confidence: 'high', canonical: 'anthropic/claude-sonnet-5',
-    })
-    assert.equal(priceFaceOf(CANON_BOOK, 'opencode', 'kimi-k3')?.pid, 'opencode')
-    assert.deepEqual(priceFaceOf(CANON_BOOK, 'opencode-go', 'glm-5.3'), {
-      pid: 'opencode-go', mid: 'glm-5.3', rate: ZHIPU_RATE, via: 'direct', confidence: 'high', canonical: 'zhipuai/glm-5.3',
-    })
-  })
-
-  test('structural provider aliases reach their registry branches', () => {
-    assert.equal(priceFaceOf(CANON_BOOK, 'fireworks', 'model-1')?.pid, 'fireworks-ai')
-    assert.equal(priceFaceOf(CANON_BOOK, 'together', 'model-1')?.pid, 'togetherai')
-    assert.equal(priceFaceOf(CANON_BOOK, 'vercel-ai-gateway', 'model-1')?.pid, 'vercel')
-    assert.equal(priceFaceOf(CANON_BOOK, 'zai-coding-cn', 'glm-5.3')?.pid, 'zhipuai')
-  })
-
-  test('a missing book and a missing entry report distinct reasons', () => {
-    assert.deepEqual(priceResolutionOf(null, 'codex', 'gpt-5.6-sol'), { kind: 'unpriced', miss: { reason: 'book-unavailable' } })
-    assert.deepEqual(priceResolutionOf(CANON_BOOK, 'unknown', 'private-model'), { kind: 'unpriced', miss: { reason: 'no-entry' } })
   })
 
   test('priceLookupsOf keeps priced and unpriced faces distinct', () => {
@@ -611,13 +508,10 @@ describe('subscription plan branches', () => {
   }
   const PLAN_BOOK = bookOf(PRICES, CANON)
 
-  test('plan branches never enter the per-token book', () => {
+  test('plan branches never enter the per-token book, and their routes fall back to the maker reference', () => {
     assert.equal(PLAN_BOOK.index.branches.has('kimi-code-plan-global'), false)
     assert.equal(PLAN_BOOK.index.branches.has('alibaba-token-plan'), false)
     assert.equal(PLAN_BOOK.index.branches.has('xiaomi-token-plan-cn'), false)
-  })
-
-  test('plan routes fall back to the maker reference instead of a zero rate', () => {
     assert.deepEqual(priceOf(PLAN_BOOK, 'kimi-code-plan-global', 'k3'), K3)
     assert.deepEqual(priceOf(PLAN_BOOK, 'qwen-token-plan', 'qwen3.8-max'), QWEN)
     assert.deepEqual(priceOf(PLAN_BOOK, 'qwen-token-plan', 'deepseek-v4-pro'), PRO)
@@ -630,17 +524,11 @@ describe('subscription plan branches', () => {
 })
 
 describe('formatCost', () => {
-  test('amounts of at least 1 use fixed two-decimal notation', () => {
+  test('amounts of at least 1 use fixed two-decimal notation; below 1, two significant digits; CNY uses ¥', () => {
     assert.equal(formatCost(3.456, 'usd'), '$3.46')
     assert.equal(formatCost(1, 'usd'), '$1.00')
-  })
-
-  test('amounts below 1 use two-significant-digit precision', () => {
     assert.equal(formatCost(0.014, 'usd'), '$0.014')
     assert.equal(formatCost(0.5, 'usd'), '$0.50')
-  })
-
-  test('the CNY currency uses the yen symbol', () => {
     assert.equal(formatCost(12.3, 'cny'), '¥12.30')
     assert.equal(formatCost(0.66, 'cny'), '¥0.66')
   })

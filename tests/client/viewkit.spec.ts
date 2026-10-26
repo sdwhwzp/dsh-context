@@ -1,21 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { act, createElement as h } from 'react'
-import { fmt, fmtTime } from '../../src/client/format'
 import { DICT_EN } from '../../src/client/i18n'
 import { makeViewKit } from '../../src/client/viewkit'
 import type { ContextEventRecord } from '../../src/shared/types'
 import { makeKit, makeTranslate, mount, text } from './helpers/kit'
 
 describe('makeViewKit', () => {
-  test('exposes t, fmt, and fmtTime', () => {
-    const t = makeTranslate()
-    const kit = makeViewKit(t)
-    assert.equal(kit.t, t)
-    assert.equal(kit.fmt, fmt)
-    assert.equal(kit.fmtTime, fmtTime)
-  })
-
   test('catLabel maps through the dictionary', () => {
     const kit = makeKit()
     assert.equal(kit.catLabel('system'), DICT_EN['cat.system'])

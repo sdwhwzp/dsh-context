@@ -57,6 +57,19 @@ function timeline(): ContextTimeline {
   }
 }
 
+/** Mount the Context tab against one baseline ctx (a served timeline, the generation's conversation seat). */
+function mountTab(ctx: TestClientCtx) {
+  const settings = createContextSettings()
+  const View = makeContextView(asClientCtx(ctx), kit, settings, makeAgentHeads())
+  const nodes = convNodes()
+  const props: SessionStandardProps = {
+    sessionId: 's-face',
+    useProjection: (key: string) => (key === 'contextTimeline' ? timeline() : undefined),
+    useChat: chatSeat(nodes),
+  }
+  return mount(h(View, props))
+}
+
 for (const baseline of BASELINES) {
   describe(`client faces — ${baseline.id}`, () => {
     test('the finalized-nodes seat serves the conversation window join', () => {
@@ -137,15 +150,7 @@ for (const baseline of BASELINES) {
 
     test('the Context tab renders through the seats of this generation without tripping the error boundary', async () => {
       const { ctx } = baselineCtx()
-      const settings = createContextSettings()
-      const View = makeContextView(asClientCtx(ctx), kit, settings, makeAgentHeads())
-      const nodes = convNodes()
-      const props: SessionStandardProps = {
-        sessionId: 's-face',
-        useProjection: (key: string) => (key === 'contextTimeline' ? timeline() : undefined),
-        useChat: chatSeat(nodes),
-      }
-      const m = await mount(h(View, props))
+      const m = await mountTab(ctx)
       const rendered = text(m.container)
       assert.ok(rendered.includes(DICT_EN['overview.title']), 'the tab rendered, not the error card')
       await click(queryAll(m.container, '.lc-br-cat-row')[2])
@@ -196,15 +201,7 @@ for (const baseline of BASELINES) {
       })
       watchHistoryFaces(asClientCtx(ctx))
       assert.equal(makeContentFetcher(plainOf('s-face')), undefined, 'the hostile face left the slot unset')
-      const settings = createContextSettings()
-      const View = makeContextView(asClientCtx(ctx), kit, settings, makeAgentHeads())
-      const nodes = convNodes()
-      const props: SessionStandardProps = {
-        sessionId: 's-face',
-        useProjection: (key: string) => (key === 'contextTimeline' ? timeline() : undefined),
-        useChat: chatSeat(nodes),
-      }
-      const m = await mount(h(View, props))
+      const m = await mountTab(ctx)
       assert.ok(text(m.container).includes(DICT_EN['overview.title']), 'the tab still rendered around a hostile face')
       await m.unmount()
       ctx.dispose()

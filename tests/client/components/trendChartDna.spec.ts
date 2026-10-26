@@ -67,22 +67,39 @@ describe('TrendChart DNA mode', () => {
     // Without an onPickBand handler a band click is a quiet no-op (the pick guard's undefined arm).
     await act(async () => { dnaDivs[0].dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     await m.unmount()
-  })
 
-  test('a bar far below the shared scale keeps its colour instead of an empty gradient', async () => {
-    const r1 = req(1, { turn: 1, step: 0, total: 1, system: 1 })
-    const r2 = req(2, { turn: 1, step: 1, total: 50000, system: 50000 })
-    const m = await mount(h(TrendChart, propsOf([r1, r2], {
+    const r1b = req(1, { turn: 1, step: 0, total: 1, system: 1 })
+    const r2b = req(2, { turn: 1, step: 1, total: 50000, system: 50000 })
+    const tiny = await mount(h(TrendChart, propsOf([r1b, r2b], {
       dna: [dnaBands([['sys', 'system', 1]]), dnaBands([['sys', 'system', 50000]])],
     })))
-    try {
-      const bars = queryAll<HTMLElement>(m.container, '.lc-bar-dna')
-      assert.ok(bars[0].style.background.length > 0)
-      assert.ok(!bars[0].style.background.includes('linear-gradient(to top, )'))
-      assert.ok(bars[0].style.background.includes('var(--color-indigo-500)'))
-    } finally {
-      await m.unmount()
-    }
+    const tinyBars = queryAll<HTMLElement>(tiny.container, '.lc-bar-dna')
+    assert.ok(tinyBars[0].style.background.length > 0)
+    assert.ok(!tinyBars[0].style.background.includes('linear-gradient(to top, )'))
+    assert.ok(tinyBars[0].style.background.includes('var(--color-indigo-500)'), 'a bar far below the shared scale keeps its colour')
+    await tiny.unmount()
+
+    const empty = await mount(h(TrendChart, propsOf([req(1, { turn: 1, step: 0, total: 0 }), req(2, { turn: 1, step: 1, total: 600 })], {
+      dna: [dnaBands([['n1', 'user', 0, { seq: 1, cat: 'user', tokens: 0 }]]), dnaBands([['n2', 'user', 600, { seq: 2, cat: 'user', tokens: 600 }]])],
+    })))
+    assert.equal(queryAll(empty.container, '.lc-bar-dna').length, 1, 'a bar whose bands carry no tokens paints no DNA strip')
+    await empty.unmount()
+
+    const focused = await mount(h(TrendChart, propsOf(
+      [req(1, { turn: 1, step: 0, total: 300 }), req(2, { turn: 1, step: 1, total: 600, user: 150 })],
+      {
+        dna: [
+          dnaBands([['sys', 'system', 100], ['n1', 'user', 200, { seq: 1, cat: 'user', tokens: 200 }]]),
+          dnaBands([['sys', 'system', 100], ['n2', 'user', 500, { seq: 2, cat: 'user', tokens: 500 }]]),
+        ],
+        focusCat: 'user',
+      },
+    )))
+    const focusedBars = queryAll(focused.container, '.lc-bar-dna')
+    assert.equal(focusedBars[0]!.style.height, `${Math.round(CHART_H * 300 / 600)}px`, 'full-context share, not the focused category share')
+    assert.equal(focusedBars[1]!.style.height, `${CHART_H}px`)
+    assert.ok(focusedBars[0]!.style.background.includes('var(--color-indigo-500)'), 'the system band is still painted')
+    await focused.unmount()
   })
 
   test('a band click reports the picked item with the bar seq, for the Context browser reveal', async () => {
@@ -227,26 +244,20 @@ describe('TrendChart DNA mode', () => {
     await unhover(dnaDivs[1])
     assert.equal(queryAll(m.container, '.lc-dna-slice').length, 0)
     await m.unmount()
-  })
 
-  test('a down-only DNA+delta bar resolves the zero-line edge into its first removed item', async () => {
-    const rs = [
-      req(1, { turn: 1, step: 0, total: 300 }),
-      req(2, { turn: 1, step: 1, total: 260 }),
-    ]
-    const ds = [
+    const downOnlyReqs = [req(1, { turn: 1, step: 0, total: 300 }), req(2, { turn: 1, step: 1, total: 260 })]
+    const downOnlyBands = [
       dnaBands([['sys', 'system', 100], ['n1', 'user', 200, { seq: 1, cat: 'user', tokens: 200 }]]),
       dnaBands([['sys', 'system', 100]]),
     ]
-    const m = await mount(h(TrendChart, propsOf(rs, { dna: ds, mode: 'delta', hoveredSeq: 2 })))
-    const dnaDiv = query(m.container, '.lc-bar-dna')
+    const downOnly = await mount(h(TrendChart, propsOf(downOnlyReqs, { dna: downOnlyBands, mode: 'delta', hoveredSeq: 2 })))
+    const dnaDiv = query(downOnly.container, '.lc-bar-dna')
     stubBarRect(dnaDiv)
     await act(async () => { dnaDiv.dispatchEvent(new MouseEvent('click', { bubbles: true, clientY: 0 })) })
     // The very top of a down-only bar IS the zero line: it resolves to the first removed item.
     await move(dnaDiv, 0)
-    const tipText = () => query(m.container, '.lc-chart-tip').textContent ?? ''
-    assert.ok(tipText().includes(kit.t('trend.dnaItem', { label: kit.catLabel('user'), n: '-200' })))
-    await m.unmount()
+    assert.ok((query(downOnly.container, '.lc-chart-tip').textContent ?? '').includes(kit.t('trend.dnaItem', { label: kit.catLabel('user'), n: '-200' })))
+    await downOnly.unmount()
   })
 
   test('combo hover off the arms keeps the delta row — the churn is never labeled a total (#96)', async () => {
@@ -267,29 +278,4 @@ describe('TrendChart DNA mode', () => {
     await m.unmount()
   })
 
-  test('the browser category focus is ignored — the bands already are the full composition', async () => {
-    // The axis is driven by the second bar's total, so the first bar's height discriminates: focused on
-    // 'user' the records shrink to their user figures (30/150 → 22px); ignored, they hold 300/600 → 56px.
-    const r1 = req(1, { turn: 1, step: 0, total: 300 })
-    const r2 = req(2, { turn: 1, step: 1, total: 600, user: 150 })
-    const d1 = dnaBands([['sys', 'system', 100], ['n1', 'user', 200, { seq: 1, cat: 'user', tokens: 200 }]])
-    const d2 = dnaBands([['sys', 'system', 100], ['n2', 'user', 500, { seq: 2, cat: 'user', tokens: 500 }]])
-    const m = await mount(h(TrendChart, propsOf([r1, r2], { dna: [d1, d2], focusCat: 'user' })))
-    const dnaDivs = queryAll(m.container, '.lc-bar-dna')
-    assert.equal(dnaDivs.length, 2)
-    assert.equal(dnaDivs[0].style.height, `${Math.round(CHART_H * 300 / 600)}px`, 'full-context share, not the focused category share')
-    assert.equal(dnaDivs[1].style.height, `${CHART_H}px`)
-    assert.ok(dnaDivs[0].style.background.includes('var(--color-indigo-500)'), 'the system band is still painted')
-    await m.unmount()
-  })
-
-  test('a bar whose bands carry no tokens paints no DNA strip', async () => {
-    const r1 = req(1, { turn: 1, step: 0, total: 0 })
-    const r2 = req(2, { turn: 1, step: 1, total: 600 })
-    const d1 = dnaBands([['n1', 'user', 0, { seq: 1, cat: 'user', tokens: 0 }]])
-    const d2 = dnaBands([['n2', 'user', 600, { seq: 2, cat: 'user', tokens: 600 }]])
-    const m = await mount(h(TrendChart, propsOf([r1, r2], { dna: [d1, d2] })))
-    assert.equal(queryAll(m.container, '.lc-bar-dna').length, 1)
-    await m.unmount()
-  })
 })

@@ -65,13 +65,20 @@ describe('the file-op log — call/result pairing', () => {
     assert.deepEqual(state.fileOps.map(o => [o.kind, o.path, o.tool]), [['read', 'a.ts', 'str_replace_editor']])
   })
 
-  test('a call without raw arguments pairs for the surface label but books no op', () => {
+  test('call-argument shapes degrade: no arguments books no op, an object form normalizes', () => {
     const { state } = driveTimeline([
       { type: 'tool/call', seq: 1, time: 1, data: { callId: 'c1', name: 'read' } } as unknown as TimelineEvent,
       toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'ok' }] }),
     ])
     assert.deepEqual(state.fileOps, [], 'no arguments — no target')
     assert.equal(state.callNames.c1, undefined, 'the pending entry consumed at the result')
+    // The durable vocabulary strings the arguments; an object form (foreign producer) is normalized through the
+    // same JSON.stringify guard.
+    const objectArgs = driveTimeline([
+      { type: 'tool/call', seq: 1, time: 1, data: { callId: 'c1', name: 'read', arguments: { file_path: 'a.ts' } } } as unknown as TimelineEvent,
+      toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'ok' }] }),
+    ])
+    assert.deepEqual(objectArgs.state.fileOps.map(o => [o.kind, o.path]), [['read', 'a.ts']])
   })
 
   test('the error flag reads the message isError mark', () => {
@@ -91,31 +98,33 @@ describe('the file-op log — call/result pairing', () => {
     ])
     assert.deepEqual(state.fileOps.map(o => o.err), [true, false])
   })
-
-  test('a call whose raw arguments are not a string still pairs by name (ops degrade to nothing)', () => {
-    const { state } = driveTimeline([
-      { type: 'tool/call', seq: 1, time: 1, data: { callId: 'c1', name: 'read', arguments: { file_path: 'a.ts' } } } as unknown as TimelineEvent,
-      toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'ok' }] }),
-    ])
-    // The durable vocabulary strings the arguments; an object form (foreign producer) is normalized through the
-    // same JSON.stringify guard.
-    assert.deepEqual(state.fileOps.map(o => [o.kind, o.path]), [['read', 'a.ts']])
-  })
 })
 
 describe('the file-op log — Code Mode (PTC) sub-dispatches', () => {
-  test('a dispatch buffers under its run_code root and flushes at its result with parent + program', () => {
-    const { state } = driveTimeline([
+  test('dispatches buffer under their run_code root and flush at its result with parent + program; an editor dispatch kinds by its command', () => {
+    const drive = driveTimeline([
       toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ description: 'batch the reads' }) }),
       codeDispatch(2, { rootCallId: 'rc1', name: 'read', arguments: { file_path: 'a.ts' } }),
       codeDispatch(3, { rootCallId: 'rc1', name: 'write', arguments: { file_path: 'b.ts', content: 'x\ny' } }),
-      toolResult(4, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
+      codeDispatch(4, { rootCallId: 'rc1', name: 'str_replace_editor', arguments: { command: 'view', path: 'c.ts' } }),
+      toolResult(5, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
     ])
-    assert.deepEqual(state.pendingCodeOps, undefined, 'the buffer flushed and emptied')
-    assert.deepEqual(state.fileOps.map(o => [o.kind, o.path, o.parent ?? 0, o.program ?? '', o.added]), [
-      ['read', 'a.ts', 4, 'batch the reads', 0],
-      ['write', 'b.ts', 4, 'batch the reads', 2],
+    assert.deepEqual(drive.state.pendingCodeOps, undefined, 'the buffer flushed and emptied')
+    assert.deepEqual(drive.state.fileOps.map(o => [o.kind, o.path, o.parent ?? 0, o.program ?? '', o.added]), [
+      ['read', 'a.ts', 5, 'batch the reads', 0],
+      ['write', 'b.ts', 5, 'batch the reads', 2],
+      ['read', 'c.ts', 5, 'batch the reads', 0],
     ])
+    assertStatesPlainJson(drive)
+    const interleaved = driveTimeline([
+      toolCall(1, { callId: 'rc1', name: 'run_code', arguments: '{}' }),
+      toolCall(2, { callId: 'rc2', name: 'run_code', arguments: '{}' }),
+      codeDispatch(3, { rootCallId: 'rc1', name: 'read', arguments: { file_path: 'a.ts' } }),
+      codeDispatch(4, { rootCallId: 'rc2', name: 'read', arguments: { file_path: 'b.ts' } }),
+      toolResult(5, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
+      toolResult(6, { callId: 'rc2', content: [{ type: 'text', text: 'ok' }] }),
+    ]).state
+    assert.deepEqual(interleaved.fileOps.map(o => [o.path, o.parent ?? 0]), [['a.ts', 5], ['b.ts', 6]])
   })
 
   test('a non-file dispatch books nothing; a junk dispatch envelope is dropped whole', () => {
@@ -150,27 +159,6 @@ describe('the file-op log — Code Mode (PTC) sub-dispatches', () => {
     const buffered = state.pendingCodeOps?.rc1 ?? []
     assert.equal(buffered.length, 200, 'the cap holds (the 201st+ batch drops wholesale)')
   })
-
-  test('two interleaved run_code roots flush independently', () => {
-    const { state } = driveTimeline([
-      toolCall(1, { callId: 'rc1', name: 'run_code', arguments: '{}' }),
-      toolCall(2, { callId: 'rc2', name: 'run_code', arguments: '{}' }),
-      codeDispatch(3, { rootCallId: 'rc1', name: 'read', arguments: { file_path: 'a.ts' } }),
-      codeDispatch(4, { rootCallId: 'rc2', name: 'read', arguments: { file_path: 'b.ts' } }),
-      toolResult(5, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
-      toolResult(6, { callId: 'rc2', content: [{ type: 'text', text: 'ok' }] }),
-    ])
-    assert.deepEqual(state.fileOps.map(o => [o.path, o.parent ?? 0]), [['a.ts', 5], ['b.ts', 6]])
-  })
-
-  test('a str_replace_editor dispatch keeps its arguments and kinds by command', () => {
-    const { state } = driveTimeline([
-      toolCall(1, { callId: 'rc1', name: 'run_code', arguments: '{}' }),
-      codeDispatch(2, { rootCallId: 'rc1', name: 'str_replace_editor', arguments: { command: 'view', path: 'a.ts', view_range: [1, 3] } }),
-      toolResult(3, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
-    ])
-    assert.deepEqual(state.fileOps.map(o => [o.kind, o.path, o.parent ?? 0]), [['read', 'a.ts', 3]])
-  })
 })
 
 describe('the file-op log — retention, schema, and the served payload', () => {
@@ -185,19 +173,7 @@ describe('the file-op log — retention, schema, and the served payload', () => 
     assert.equal(state.fileOpsFloor, 13, 'the newest dropped op was seq 13')
   })
 
-  test('every intermediate state is plain JSON with ops booked and buffered', () => {
-    const drive = driveTimeline([
-      toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ description: 'd' }) }),
-      codeDispatch(2, { rootCallId: 'rc1', name: 'read', arguments: { file_path: 'a.ts' } }),
-      toolCall(3, { callId: 'c1', name: 'edit', arguments: JSON.stringify({ file_path: 'a.ts', old_string: 'x', new_string: 'y' }) }),
-      toolResult(4, { callId: 'c1', content: [{ type: 'text', text: 'ok' }] }),
-      toolResult(5, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
-    ])
-    assertStatesPlainJson(drive)
-    assert.equal(drive.state.fileOps.length, 2)
-  })
-
-  test('the state schema accepts a state carrying ops; the detail builder serves detached copies', () => {
+  test('the schema accepts an op-bearing state; the detail serves detached copies and the slim head omits the log', () => {
     const { def, state } = driveTimeline([
       toolCall(1, { callId: 'c1', name: 'read', arguments: JSON.stringify({ file_path: 'a.ts' }) }),
       toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'ok' }], meta: readMeta('a.ts', 1, 2) }),
@@ -209,16 +185,8 @@ describe('the file-op log — retention, schema, and the served payload', () => 
     const read = detail.fileOps?.[0].read
     assert.ok(read !== undefined && 'start' in read)
     assert.equal(read.start, 1)
-  })
-
-  test('the slim head does NOT carry the op log; the inline value does', () => {
-    const events = [
-      toolCall(1, { callId: 'c1', name: 'read', arguments: JSON.stringify({ file_path: 'a.ts' }) }),
-      toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'ok' }] }),
-    ]
     const slim = timelineDef({}, true)
     const inline = timelineDef({}, false)
-    const { state } = driveTimeline(events)
     assert.equal('fileOps' in slim.wire.view(state), false)
     const full = inline.wire.view(state)
     assert.equal(full.fileOps?.length, 1)

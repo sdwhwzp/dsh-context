@@ -1,90 +1,66 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import type { TimelineEvent, TimelineState } from '../../src/host/fold'
+import type { TimelineEvent } from '../../src/host/fold'
 import { assistantMessage, at, compaction, toolCall, toolResult, userMessage } from './helpers/events'
 import { assertPlainJson, driveTimeline, timelineDef } from './helpers/projection'
 
 const text = (t: string) => [{ type: 'text', text: t }]
 
 describe('applySurface assistant branch', () => {
-  test('assistant text lands on the node preview', () => {
-    const { state } = driveTimeline([assistantMessage(1, { content: text('hello world') })])
-    assert.equal(state.surface.at(-1)?.text, 'hello world')
-    assert.equal(state.surface.at(-1)?.cat, 'assistant')
-  })
-
-  test('a text-less assistant message lists its tool-call names, capped at three', () => {
-    const { state } = driveTimeline([assistantMessage(1, {
+  test('assistant text lands on the node preview; a text-less message lists its tool-call names capped at three, or neither', () => {
+    const spoken = driveTimeline([assistantMessage(1, { content: text('hello world') })]).state.surface.at(-1)
+    assert.equal(spoken?.text, 'hello world')
+    assert.equal(spoken?.cat, 'assistant')
+    const named = driveTimeline([assistantMessage(1, {
       content: [
         { type: 'tool-call', name: 'bash', arguments: '{}' },
         { type: 'tool-call', name: 'read', arguments: '{}' },
         { type: 'tool-call', name: 'edit', arguments: '{}' },
         { type: 'tool-call', name: 'grep', arguments: '{}' },
       ],
-    })])
-    const node = state.surface.at(-1)
-    assert.equal(node?.text, undefined)
-    assert.deepEqual(node?.calls, ['bash', 'read', 'edit'])
-  })
-
-  test('a text-less assistant message without call names carries neither preview', () => {
-    const { state } = driveTimeline([assistantMessage(1, { content: [{ type: 'tool-call', arguments: '{}' }] })])
-    const node = state.surface.at(-1)
-    assert.equal(node?.text, undefined)
-    assert.equal(node?.calls, undefined)
+    })]).state.surface.at(-1)
+    assert.equal(named?.text, undefined)
+    assert.deepEqual(named?.calls, ['bash', 'read', 'edit'])
+    const unnamed = driveTimeline([assistantMessage(1, { content: [{ type: 'tool-call', arguments: '{}' }] })]).state.surface.at(-1)
+    assert.equal(unnamed?.text, undefined)
+    assert.equal(unnamed?.calls, undefined)
   })
 })
 
 describe('applySurface tool/result branch', () => {
-  test('a source callId armed by tool/call names the node and is consumed', () => {
-    const { state } = driveTimeline([
-      toolCall(1, { callId: 'c1', name: 'bash' }),
-      toolResult(2, { callId: 'c1', content: text('ok') }),
-    ])
-    const node = state.surface.at(-1)
-    assert.equal(node?.tool, 'bash')
-    assert.equal(node?.err, undefined, 'no error flag without the message mark')
-    assert.deepEqual(state.callNames, {}, 'the consumed entry leaves the persisted map')
-  })
-
-  test('an unknown source callId pairs nothing (a replay window where the tool/call event is gone)', () => {
-    const { state } = driveTimeline([toolResult(1, { callId: 'ghost', content: text('ok') })])
-    assert.equal(state.surface.at(-1)?.tool, undefined)
-    assert.deepEqual(state.callNames, {})
-  })
-
-  test('consume-once rebuild keeps the other pending calls', () => {
+  test('a source callId armed by tool/call names the node, is consumed, and leaves other pending calls armed', () => {
     const { state } = driveTimeline([
       toolCall(1, { callId: 'c1', name: 'bash' }),
       toolCall(2, { callId: 'c2', name: 'read' }),
       toolResult(3, { callId: 'c1', content: text('ok') }),
     ])
+    const node = state.surface.at(-1)
+    assert.equal(node?.tool, 'bash')
+    assert.equal(node?.err, undefined, 'no error flag without the message mark')
+    assert.deepEqual(Object.keys(state.callNames), ['c2'], 'the consumed entry leaves the persisted map')
     assert.equal(state.callNames.c2?.name, 'read', 'the unanswered call stays armed')
   })
 
-  test('a result without the source callId pairs nothing and leaves callNames untouched', () => {
-    // A hostile/foreign envelope: no source callId can only arrive hostile — it folds to an unnamed node.
+  test('an untraced result with an unknown or missing source callId pairs nothing and leaves callNames untouched', () => {
+    const unknown = driveTimeline([toolResult(1, { callId: 'ghost', content: text('ok') })]).state
+    assert.equal(unknown.surface.at(-1)?.tool, undefined)
+    assert.deepEqual(unknown.callNames, {})
     const ev: TimelineEvent = {
       type: 'tool/result', seq: 2, time: at(),
       data: { message: { role: 'tool', toolCallId: 'keep', content: text('ok') } },
       surfaceOp: 'append',
     }
-    const { state } = driveTimeline([toolCall(1, { callId: 'keep', name: 'read' }), ev])
-    assert.equal(state.surface.at(-1)?.tool, undefined)
-    assert.equal(state.callNames.keep?.name, 'read')
+    const sourceless = driveTimeline([toolCall(1, { callId: 'keep', name: 'read' }), ev]).state
+    assert.equal(sourceless.surface.at(-1)?.tool, undefined)
+    assert.equal(sourceless.callNames.keep?.name, 'read')
   })
 
-  test('the message isError flags the node', () => {
-    const { state } = driveTimeline([
+  test('the message isError flags the node; the retired envelope-only mark no longer does', () => {
+    const flagged = driveTimeline([
       toolCall(1, { callId: 'c1', name: 'bash' }),
       toolResult(2, { callId: 'c1', content: text('boom'), error: true }),
-    ])
-    const node = state.surface.at(-1)
-    assert.equal(node?.err, true)
-    assert.equal(node?.tool, 'bash', 'the source callId still pairs the node')
-  })
-
-  test('the retired envelope-only error mark no longer flags the node', () => {
+    ]).state.surface.at(-1)
+    assert.deepEqual([flagged?.err, flagged?.tool], [true, 'bash'], 'the message mark flags while the source callId still pairs')
     // The pre-V4 spelling (an event-level `data.error` with no message mark) is unreachable through the
     // supported harnesses' admission validation; a hostile replay carrying it degrades to an unflagged node.
     const ev: TimelineEvent = {
@@ -96,81 +72,59 @@ describe('applySurface tool/result branch', () => {
       surfaceOp: 'append',
     }
     const { state } = driveTimeline([toolCall(1, { callId: 'c1', name: 'bash' }), ev])
-    const node = state.surface.at(-1)
-    assert.equal(node?.err, undefined)
-    assert.equal(node?.tool, 'bash')
+    assert.deepEqual([state.surface.at(-1)?.err, state.surface.at(-1)?.tool], [undefined, 'bash'])
   })
 })
 
 describe('applySurface user-message previews', () => {
-  test('skill-invocation sources carry the skill name under the skill bucket', () => {
-    const { state } = driveTimeline([userMessage(1, text('run it'), { kind: 'skill-invocation', name: 'pdf' })])
-    assert.equal(state.surface.at(-1)?.skill, 'pdf')
-    assert.equal(state.surface.at(-1)?.cat, 'skill')
+  test('skill sources carry the skill name, or ? when nameless; the catalog joins the bucket unnamed', () => {
+    const named = driveTimeline([userMessage(1, text('run it'), { kind: 'skill-invocation', name: 'pdf' })]).state
+    assert.equal(named.surface.at(-1)?.skill, 'pdf')
+    assert.equal(named.surface.at(-1)?.cat, 'skill')
+    const nameless = driveTimeline([userMessage(1, text('run it'), { kind: 'skill-invocation' })]).state
+    assert.equal(nameless.surface.at(-1)?.skill, '?')
+    const catalog = driveTimeline([userMessage(1, text('<available_skills>'), { kind: 'skill-catalog', form: 'catalog' })]).state
+    assert.equal(catalog.surface.at(-1)?.cat, 'skill')
+    assert.equal(catalog.surface.at(-1)?.skill, undefined)
+    assert.equal(catalog.surface.at(-1)?.form, 'catalog')
   })
 
-  test('skill-catalog sources join the skill bucket', () => {
-    const { state } = driveTimeline([userMessage(1, text('<available_skills>'), { kind: 'skill-catalog', form: 'catalog' })])
-    const node = state.surface.at(-1)
-    assert.equal(node?.cat, 'skill')
-    assert.equal(node?.skill, undefined)
-    assert.equal(node?.form, 'catalog')
-  })
-
-  test('a nameless skill-invocation falls back to ?', () => {
-    const { state } = driveTimeline([userMessage(1, text('run it'), { kind: 'skill-invocation' })])
-    assert.equal(state.surface.at(-1)?.skill, '?')
-  })
-
-  test('plugin notice sources preview the summary', () => {
-    const { state } = driveTimeline([
+  test('plugin notice sources preview the summary; snapshots join section names, skipping nulls, truncated to 80', () => {
+    const notice = driveTimeline([
       userMessage(1, text('injected'), { kind: 'plugin', form: 'notice', plugin: 'dsh-x', summary: 'Skill injected (pdf)' }),
-    ])
-    const node = state.surface.at(-1)
-    assert.equal(node?.text, 'Skill injected (pdf)')
-    assert.equal(node?.form, 'notice')
-  })
-
-  test('plugin snapshot sources join section names, skipping nulls, truncated to 80', () => {
+    ]).state.surface.at(-1)
+    assert.equal(notice?.text, 'Skill injected (pdf)')
+    assert.equal(notice?.form, 'notice')
     const sections = [{ name: 'a'.repeat(50) }, null, { name: 'b'.repeat(50) }, {}]
-    const { state } = driveTimeline([
+    const snapshot = driveTimeline([
       userMessage(1, text('snapshot'), { kind: 'plugin', form: 'snapshot', sections }),
-    ])
+    ]).state.surface.at(-1)
     const expected = `${'a'.repeat(50)}, ${'b'.repeat(50)}`.slice(0, 80)
     assert.equal(expected.length, 80, 'fixture must actually exceed the truncation bound')
-    assert.equal(state.surface.at(-1)?.text, expected)
+    assert.equal(snapshot?.text, expected)
   })
 
-  test('plugin sources of other forms preview the first text', () => {
-    const { state } = driveTimeline([
+  test('other plugin forms preview the first text, or nothing without one', () => {
+    const withText = driveTimeline([
       userMessage(1, text('plain body'), { kind: 'plugin', form: 'instructions' }),
-    ])
-    assert.equal(state.surface.at(-1)?.text, 'plain body')
+    ]).state
+    assert.equal(withText.surface.at(-1)?.text, 'plain body')
+    const empty = driveTimeline([userMessage(1, [], { kind: 'plugin', form: 'instructions' })]).state
+    assert.equal(empty.surface.at(-1)?.text, undefined)
   })
 
-  test('plugin sources without text carry no preview', () => {
-    const { state } = driveTimeline([userMessage(1, [], { kind: 'plugin', form: 'instructions' })])
-    assert.equal(state.surface.at(-1)?.text, undefined)
-  })
-
-  test('a plain user message previews its text', () => {
-    const { state } = driveTimeline([userMessage(1, text('hi there'))])
-    const node = state.surface.at(-1)
+  test('a plain user message previews its text and image count, or nothing without text', () => {
+    const withText = driveTimeline([userMessage(1, text('hi there'))]).state
+    const node = withText.surface.at(-1)
     assert.equal(node?.text, 'hi there')
     assert.equal(node?.cat, 'user')
     assert.equal(node?.form, undefined, 'no source, no form stamp')
-  })
-
-  test('a plain user message without text carries no preview', () => {
-    const { state } = driveTimeline([userMessage(1, [])])
-    assert.equal(state.surface.at(-1)?.text, undefined)
-  })
-
-  test('image blocks ride the node as imgs', () => {
-    const { state } = driveTimeline([
+    const empty = driveTimeline([userMessage(1, [])]).state
+    assert.equal(empty.surface.at(-1)?.text, undefined)
+    const image = driveTimeline([
       userMessage(1, [{ type: 'image', attachment: { width: 800, height: 600 } }]),
-    ])
-    assert.equal(state.surface.at(-1)?.imgs, 1)
+    ]).state.surface.at(-1)
+    assert.equal(image?.imgs, 1)
   })
 })
 
@@ -189,25 +143,15 @@ describe('shadow-price claim lifecycle', () => {
 describe('surfaceOp variants', () => {
   const big = 'a'.repeat(16) // 12 tokens: ceil(16/4) + 4 block + 4 role
 
-  test('a null surfaceOp appends', () => {
-    const ev: TimelineEvent = { type: 'user/message', seq: 1, time: at(), data: { content: text('x') }, surfaceOp: null }
-    const { state } = driveTimeline([ev])
-    assert.equal(state.surface.length, 1)
+  test('a null, non-object, or non-replace surfaceOp appends', () => {
+    for (const surfaceOp of [null, 'append', undefined, { op: 'insert', startSeq: 0, endSeq: 0 }]) {
+      const ev: TimelineEvent = { type: 'user/message', seq: 1, time: at(), data: { content: text('x') }, surfaceOp }
+      const { state } = driveTimeline([ev])
+      assert.deepEqual(state.surface.map(n => n.seq), [1], JSON.stringify(surfaceOp))
+    }
   })
 
-  test('a non-object surfaceOp appends', () => {
-    const { state } = driveTimeline([userMessage(1, text('x'))]) // builder default: 'append'
-    assert.equal(state.surface.length, 1)
-  })
-
-  test('a non-replace op object appends', () => {
-    const { state } = driveTimeline([
-      userMessage(1, text('x'), undefined, { surfaceOp: { op: 'insert', startSeq: 0, endSeq: 0 } }),
-    ])
-    assert.equal(state.surface.length, 1)
-  })
-
-  test('a replace with an armed claim removes by seqs and rewrites the metering event net-freed', () => {
+  test('a replace with an armed claim removes by seqs and rewrites the metering event net-freed, clamped at zero', () => {
     const { state } = driveTimeline([
       userMessage(1, text(big)), // 12 tokens
       userMessage(2, text(big)), // 12 tokens
@@ -215,24 +159,22 @@ describe('surfaceOp variants', () => {
       compaction(4, 'summary', { shadowedTokenCount: 100, shadowedSeqs: [1, 2] }),
       userMessage(5, text('bbbbbbbb'), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 2 } }), // 10 tokens
     ])
-    assert.deepEqual(state.surface.map(n => n.seq), [3, 5])
-    assert.equal(state.sums.user, 22)
-    assert.deepEqual(state.archived.map(n => [n.seq, n.gone]), [[1, 5], [2, 5]], 'removed nodes archived as stamped copies')
-    assert.equal(state.events[0].tokens, 14)
+    assert.deepEqual(
+      [state.surface.map(n => n.seq), state.sums.user, state.archived.map(n => [n.seq, n.gone]), state.events[0].tokens],
+      [[3, 5], 22, [[1, 5], [2, 5]], 14],
+      'removed nodes archived as stamped copies, the metering row rewritten net-freed',
+    )
     assertPlainJson(state)
-  })
-
-  test('the net-freed rewrite clamps at zero when the replacement outweighs the shadow', () => {
-    const { state } = driveTimeline([
+    const clamped = driveTimeline([
       userMessage(1, text(big)), // 12 tokens
       compaction(2, 'prune', { shadowedTokenCount: 12, shadowedSeqs: [1] }),
       userMessage(3, text('x'.repeat(400)), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }), // 108 tokens
-    ])
-    assert.equal(state.events[0].tokens, 0)
-    assert.equal(state.sums.user, 108)
+    ]).state
+    assert.equal(clamped.events[0].tokens, 0)
+    assert.equal(clamped.sums.user, 108)
   })
 
-  test('an armed EMPTY claim falls through to the range path', () => {
+  test('the range path splices in place and never rewrites the metering event; missing endpoints append', () => {
     const { state } = driveTimeline([
       userMessage(1, text('aaaa')), // 9 tokens
       userMessage(2, text('bbbb')), // 9 tokens
@@ -244,55 +186,42 @@ describe('surfaceOp variants', () => {
     assert.deepEqual(state.archived.map(n => n.seq), [1, 2])
     assert.equal(state.events[0].tokens, 50, 'the range path never rewrites the metering event')
     assert.ok(!('pendingShadowedSeqs' in state))
-  })
-
-  test('a single-node range replace (start === end)', () => {
-    const { state } = driveTimeline([
+    const single = driveTimeline([
       userMessage(1, text('aaaa')),
       userMessage(2, text('bbbb')),
       userMessage(3, text('cccc')),
       userMessage(4, text('dddddddd'), undefined, { surfaceOp: { op: 'replace', startSeq: 2, endSeq: 2 } }),
-    ])
-    assert.deepEqual(state.surface.map(n => n.seq), [1, 4, 3])
-    assert.deepEqual(state.archived.map(n => [n.seq, n.gone]), [[2, 4]])
+    ]).state
+    assert.deepEqual(single.surface.map(n => n.seq), [1, 4, 3])
+    assert.deepEqual(single.archived.map(n => [n.seq, n.gone]), [[2, 4]])
+    for (const surfaceOp of [{ op: 'replace', startSeq: 99, endSeq: 100 }, { op: 'replace', startSeq: 1, endSeq: 99 }]) {
+      const missing = driveTimeline([
+        userMessage(1, text('aaaa')),
+        userMessage(2, text('bbbb'), undefined, { surfaceOp }),
+      ]).state
+      assert.deepEqual(missing.surface.map(n => n.seq), [1, 2], JSON.stringify(surfaceOp))
+    }
   })
 
-  test('a replace whose start seq is missing appends', () => {
-    const { state } = driveTimeline([
-      userMessage(1, text('aaaa')),
-      userMessage(2, text('bbbb'), undefined, { surfaceOp: { op: 'replace', startSeq: 99, endSeq: 100 } }),
-    ])
-    assert.deepEqual(state.surface.map(n => n.seq), [1, 2])
-  })
-
-  test('a replace whose end seq is missing appends', () => {
-    const { state } = driveTimeline([
-      userMessage(1, text('aaaa')),
-      userMessage(2, text('bbbb'), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 99 } }),
-    ])
-    assert.deepEqual(state.surface.map(n => n.seq), [1, 2])
-  })
-
-  test('restored state: claim without pendingShadowEventSeq skips the rewrite', () => {
+  test('restored state: a claim whose metering event cannot be rewritten skips the rewrite', () => {
     // A checkpoint restore may carry the claim fields partially — def.apply accepts any TimelineState.
     const def = timelineDef({})
     const base = driveTimeline([userMessage(1, text(big))]).state
-    const restored: TimelineState = { ...base, pendingShadowedSeqs: [1] }
-    const next = def.apply(restored, userMessage(2, text('bbbb'), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }))
-    assert.deepEqual(next.surface.map(n => n.seq), [2])
-    assert.equal(next.archived.length, 1)
-    assert.equal(next.events.length, 0, 'no event to rewrite, no crash')
-    assert.ok(!('pendingShadowedSeqs' in next))
-    assertPlainJson(next)
-  })
-
-  test('restored state: a claim whose event seq matches no event skips the rewrite', () => {
-    const def = timelineDef({})
-    const base = driveTimeline([userMessage(1, text(big))]).state
-    const restored: TimelineState = { ...base, pendingShadowedSeqs: [1], pendingShadowEventSeq: 999 }
-    const next = def.apply(restored, userMessage(2, text('bbbb'), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }))
-    assert.deepEqual(next.surface.map(n => n.seq), [2])
-    assert.equal(next.events.length, 0)
-    assert.ok(!('pendingShadowEventSeq' in next))
+    const withoutSeq = def.apply(
+      { ...base, pendingShadowedSeqs: [1] },
+      userMessage(2, text('bbbb'), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }),
+    )
+    assert.deepEqual(withoutSeq.surface.map(n => n.seq), [2])
+    assert.equal(withoutSeq.archived.length, 1)
+    assert.equal(withoutSeq.events.length, 0, 'no event to rewrite, no crash')
+    assert.ok(!('pendingShadowedSeqs' in withoutSeq))
+    assertPlainJson(withoutSeq)
+    const missingEvent = def.apply(
+      { ...base, pendingShadowedSeqs: [1], pendingShadowEventSeq: 999 },
+      userMessage(2, text('bbbb'), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }),
+    )
+    assert.deepEqual(missingEvent.surface.map(n => n.seq), [2])
+    assert.equal(missingEvent.events.length, 0)
+    assert.ok(!('pendingShadowEventSeq' in missingEvent))
   })
 })

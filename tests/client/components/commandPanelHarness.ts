@@ -2,7 +2,7 @@ import type { Command } from '../../../src/client/commands'
 import { makeCommandPanel } from '../../../src/client/components/commandPanel'
 import { makeKit, query, queryAll, text, typeText } from '../helpers/kit'
 
-export const kit = makeKit()
+const kit = makeKit()
 export const Panel = makeCommandPanel(kit)
 export const T0 = 1700000000000
 

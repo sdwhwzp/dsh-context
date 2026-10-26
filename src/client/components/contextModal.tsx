@@ -14,6 +14,7 @@ import { contextBreakdownOf, contextPressureOf, conversationNodesOf, headersOf, 
 import { makeContentFetcher, makeHeaderFetcher, useHistoryFace } from '../historyPage'
 import { useTimelineSource } from '../timelineSource'
 import type { ViewKit } from '../viewkit'
+import { useConversationSurface } from './useConversationSurface'
 import { makeContextBrowser } from './browser'
 import { makeCurrentComposition } from './currentComposition'
 import { makeDetailNote } from './detailNote'
@@ -46,24 +47,26 @@ export function makeContextModal(
     return typeof locale.getLocale === 'function' ? locale.getLocale().active : 'en'
   }
 
-  function ContextModalBody(props: ContextModalProps): ReactElement | null {
-    const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
+  /** Reads the open flag without mounting the reader: a closed modal must not subscribe to or fetch session data. */
+  function ContextModalGate(props: ContextModalProps): ReactElement | null {
     const open = typeof props.useContextModal === 'function' ? props.useContextModal(s => s) : false
+    return open ? h(ContextModalBody, props) : null
+  }
+
+  /** Mounted only while open. */
+  function ContextModalBody(props: ContextModalProps): ReactElement {
+    const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
     // Shares the tab's per-session detail store, so an open tab's detail serves the modal with no refetch.
     const source = useTimelineSource(props)
     const data = source.data
     const pressure = projectionOf(props, 'contextPressure', contextPressureOf)
     const breakdown = projectionOf(props, 'contextBreakdown', contextBreakdownOf)
     const headers = projectionOf(props, 'contextHeaders', headersOf)
-    // Read unconditionally, before the closed early return, so hook order stays stable across open/close.
     const convNodes = conversationNodesOf(props)
     const [hoverCat, setHoverCat] = useState<string | null>(null)
-    // Dock the mask beside the shell sidebar: 0 until the frame measure lands
-    // (the layout effect below resolves it before first paint).
-    const [dockInsets, setDockInsets] = useState({ left: 0, right: 0 })
+    const [dock, setDock] = useState({ left: 0, right: 0 })
     const anchorRef = useRef<HTMLSpanElement | null>(null)
-    // Session-authorized durable-image loader for the browser's attachment cards, resolved through the harness `uiConversation` service
-    // (`imageUrl`); absent service/session degrades the cards to metadata-only, never an error. Same parity as the Context tab.
+    useConversationSurface(anchorRef, 'modal')
     const loadImage = useMemo(
       () => imageLoaderOf(ctx, sessionId !== '' ? sessionId : undefined),
       [ctx, sessionId],
@@ -100,27 +103,20 @@ export function makeContextModal(
       if (scope !== undefined) scope.bail(scope, 'slash/input-consume-token', { guard })
     }, [ctx, sessionId])
 
-    useEscapeClose(open, close)
+    useEscapeClose(true, close)
 
-    // Keep the measurement anchor in the composer; the body portal escapes its skin filters and containing blocks.
-    // Dock the mask to the main column: measure both sidebar tracks once before
-    // first paint, then follow the frame's inline template while open (sidebar
-    // drags, collapse toggles and narrow-viewport re-solves all rewrite it).
-    // An unresolved frame keeps the full-viewport mask.
+    // The shell anchor preserves track measurement while the body portal escapes skin filters and containing blocks.
     useLayoutEffect(() => {
-      if (!open) return undefined
       const dock = measureDock(anchorRef.current)
-      setDockInsets({ left: dock.left, right: dock.right })
+      setDock({ left: dock.left, right: dock.right })
       if (dock.frame === null) return undefined
       const observer = new MutationObserver(() => {
         const next = measureDock(anchorRef.current)
-        setDockInsets({ left: next.left, right: next.right })
+        setDock({ left: next.left, right: next.right })
       })
       observer.observe(dock.frame, { attributes: true, attributeFilter: ['style'] })
       return () => { observer.disconnect() }
-    }, [open])
-
-    if (!open) return null
+    }, [])
 
     const head = data !== null ? headlineOf(data, pressure, breakdown) : null
     const subtitle = data !== null ? providerModelLabelOf(data.provider, data.model, data.reasoningEffort) : ''
@@ -129,7 +125,7 @@ export function makeContextModal(
       <>
         <span ref={anchorRef} hidden />
         {createPortal(
-          <div className="lc-modal-backdrop" style={dockInsets} onClick={close}>
+          <div className="lc-modal-backdrop" style={dock} onClick={close}>
             <div className="lc-modal-card lc-modal-fill" onClick={(ev) => { ev.stopPropagation() }}>
               <div className="lc-modal-head">
                 <span className="lc-modal-title">{t('tab.context')}</span>
@@ -175,6 +171,6 @@ export function makeContextModal(
   }
 
   return function ContextModal(props: ContextModalProps): ReactElement | null {
-    return h(ErrorBoundary, null, h(ContextModalBody, props))
+    return h(ErrorBoundary, null, h(ContextModalGate, props))
   }
 }

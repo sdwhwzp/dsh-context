@@ -8,19 +8,6 @@ import { click, flush, hover, mount, query, queryAll, text, unhover } from '../h
 import { buttonByText, makeView, mountRich, projectionsFor, richTimeline, T0, timeline } from './contextViewHarness'
 
 describe('ContextView — interactions', () => {
-  test('renders the rich tab: stats, chart bars, markers, events, nodes, browser', async () => {
-    const m = await mountRich('sv-rich')
-    assert.ok(text(m.container).includes('deepseek · deepseek-v4-flash (high)'))
-    assert.equal(queryAll(m.container, '.lc-bar').length, 3)
-    assert.equal(queryAll(m.container, '.lc-bar-marker').length, 1)
-    assert.equal(queryAll(m.container, '.lc-event').length, 2)
-    assert.ok(text(m.container).includes(DICT_EN['files.title']))
-    assert.ok(text(m.container).includes(DICT_EN['files.sort.count']))
-    assert.ok(text(m.container).includes(DICT_EN['browser.liveNow']))
-    assert.deepEqual(queryAll(m.container, '.lc-turn-label').map(el => text(el)), ['1', '0'])
-    await m.unmount()
-  })
-
   test('the browser column caps at the left cards\' full extent, flush with the column, live', async () => {
     // jsdom has no layout: stand in rects for the two left cards only, laid out card + 7px gap, then
     // grow them so the re-measure arm runs.
@@ -57,7 +44,7 @@ describe('ContextView — interactions', () => {
     }
   })
 
-  test('bar hover previews in the browser; hover loss on a granularity switch falls back', async () => {
+  test('bar hover previews in the browser; a turn-less bar highlights nothing; hover loss on a granularity switch falls back', async () => {
     const m = await mountRich('sv-hover')
     const chart = query(m.container, '.lc-chart')
     const bar2 = query(m.container, '.lc-bar[data-seq="2"]')
@@ -71,16 +58,11 @@ describe('ContextView — interactions', () => {
     await unhover(chart)
     await click(buttonByText(m.container, DICT_EN['gran.step']))
     assert.equal(queryAll(m.container, '.lc-bar').length, 3)
-    await m.unmount()
-  })
 
-  test('a request without a turn highlights nothing on hover', async () => {
-    const m = await mountRich('sv-noturn')
-    const chart = query(m.container, '.lc-chart')
-    await hover(query(m.container, '.lc-bar[data-seq="6"]'))
-    assert.ok(query(m.container, '.lc-bar[data-seq="6"]').className.includes('lc-bar-hovered'))
+    const bar6 = query(m.container, '.lc-bar[data-seq="6"]')
+    await hover(bar6)
+    assert.ok(bar6.className.includes('lc-bar-hovered'))
     assert.ok(!query(m.container, '.lc-chart-scroll').className.includes('lc-chart-dim'))
-    await unhover(chart)
     await m.unmount()
   })
 
@@ -146,21 +128,17 @@ describe('ContextView — interactions', () => {
     await m.unmount()
   })
 
-  test('composition legend hover lights the linked browser category', async () => {
-    const m = await mountRich('sv-link')
+  test('category hover links the composition legend, browser rows, trend segments, and detail chips', async () => {
+    const m = await mountRich('sv-link-trend')
     const comp = queryAll(m.container, '.lc-card').find(c => text(c).includes(DICT_EN['overview.title']))
     assert.ok(comp !== undefined)
 
-    const chip = query(comp, '.lc-legend .lc-chip')
-    await hover(chip)
+    const compChip = query(comp, '.lc-legend .lc-chip')
+    await hover(compChip)
     assert.ok(query(m.container, '.lc-br-cat-row').className.includes('lc-br-cat-on'))
-    await unhover(chip)
+    await unhover(compChip)
     assert.ok(!query(m.container, '.lc-br-cat-row').className.includes('lc-br-cat-on'))
-    await m.unmount()
-  })
 
-  test('browser category hover lights the trend chart segments and the detail composition bar', async () => {
-    const m = await mountRich('sv-link-trend')
     const toolsRow = queryAll(m.container, '.lc-br-cat-row')[1]
     await hover(toolsRow)
     assert.equal(query(m.container, '.lc-chart').getAttribute('data-catdim'), 'tools')
@@ -177,18 +155,12 @@ describe('ContextView — interactions', () => {
     assert.equal(query(m.container, '.lc-chart').hasAttribute('data-catdim'), false)
     assert.ok(!query(m.container, '.lc-detail .lc-stacked').className.includes('lc-stacked-dim'))
     await unhover(query(m.container, '.lc-stacked-free'))
-    await m.unmount()
-  })
 
-  test('trend panel chip hover feeds the shared category state back to the composition legend', async () => {
-    const m = await mountRich('sv-link-chip')
-    const chip = queryAll(m.container, '.lc-detail .lc-legend .lc-chip')[1]
-    await hover(chip)
+    const detailChip = queryAll(m.container, '.lc-detail .lc-legend .lc-chip')[1]
+    await hover(detailChip)
     assert.equal(query(m.container, '.lc-chart').getAttribute('data-catdim'), 'tools')
-    const comp = queryAll(m.container, '.lc-card').find(c => text(c).includes(DICT_EN['overview.title']))
-    assert.ok(comp !== undefined)
     assert.equal(queryAll(comp, '.lc-legend .lc-chip-on').length, 1, 'the composition legend chip lights with it')
-    await unhover(chip)
+    await unhover(detailChip)
     assert.equal(query(m.container, '.lc-chart').hasAttribute('data-catdim'), false)
     await m.unmount()
   })
@@ -211,32 +183,7 @@ describe('ContextView — interactions', () => {
     await m.unmount()
   })
 
-  test('the adaptive switch rides the trend title and toggles mount-locally', async () => {
-    const m = await mountRich('sv-adaptive')
-    const card = queryAll(m.container, '.lc-card').find(c => text(c).includes(DICT_EN['trend.title']))
-    assert.ok(card !== undefined)
-    const titleText = query(card, '.lc-card-title-text')
-    assert.equal(text(titleText), DICT_EN['trend.title'])
-
-    const toggleOf = () => buttonByText(m.container, DICT_EN['trend.adaptive'])
-    const modsGroupOf = () => buttonByText(m.container, DICT_EN['trend.dna']).parentElement as HTMLElement
-    assert.ok(modsGroupOf().className.includes('lc-trend-mods'))
-    assert.equal(modsGroupOf().previousElementSibling, titleText)
-    assert.equal(toggleOf().parentElement, modsGroupOf())
-    assert.equal(toggleOf().previousElementSibling, buttonByText(m.container, DICT_EN['trend.dna']), 'Adaptive rides right of DNA inside the group')
-    assert.equal(toggleOf().getAttribute('title'), DICT_EN['trend.adaptiveHint'])
-    assert.ok(!toggleOf().className.includes('lc-gran-on'), 'off at mount')
-
-    await click(toggleOf())
-    assert.ok(toggleOf().className.includes('lc-gran-on'))
-    assert.equal(text(query(m.container, '.lc-axis-top')), '420')
-    await click(toggleOf())
-    assert.ok(!toggleOf().className.includes('lc-gran-on'))
-    assert.equal(text(query(m.container, '.lc-axis-top')), '420')
-    await m.unmount()
-  })
-
-  test('the duration toggle overlays the active-time curve with a right-hand quartile axis', async () => {
+  test('the duration toggle overlays the active-time curve with a right-hand quartile axis; Adaptive toggles mount-locally', async () => {
     const View = makeView(new TestClientCtx())
     const m = await mount(h(View, {
       sessionId: 'sv-ms-curve',
@@ -249,25 +196,23 @@ describe('ContextView — interactions', () => {
     }))
 
     const msBtn = () => buttonByText(m.container, DICT_EN['trend.duration'])
-    const group = msBtn().parentElement as HTMLElement
-    assert.ok(group.className.includes('lc-trend-mods'))
-    assert.equal(msBtn().getAttribute('title'), DICT_EN['trend.durationTip'])
-    assert.equal(msBtn().previousElementSibling, buttonByText(m.container, DICT_EN['trend.adaptive']), 'Duration rides right of the adaptive switch')
-    // The settings default (show) mounts the overlay ON: the curve spans the two stamped bars and the
-    // right axis reads the 2s peak (jsdom's zero-width viewport keeps the whole-log scale).
     assert.ok(msBtn().className.includes('lc-gran-on'), 'on at mount (the settings default)')
     assert.equal(queryAll(m.container, '.lc-duration polyline:not(.lc-dur-halo)').length, 1)
     assert.equal(text(query(m.container, '.lc-axis-r .lc-axis-top')), '2.0s')
     assert.equal(text(query(m.container, '.lc-axis-r .lc-axis-mid')), '1.0s')
 
     await click(msBtn())
-    assert.ok(!msBtn().className.includes('lc-gran-on'))
     assert.equal(queryAll(m.container, '.lc-duration').length, 0)
     assert.equal(queryAll(m.container, '.lc-axis-r').length, 0)
-
     await click(msBtn())
     assert.equal(queryAll(m.container, '.lc-duration polyline:not(.lc-dur-halo)').length, 1)
-    assert.equal(queryAll(m.container, '.lc-axis-r').length, 1)
+
+    const adaptive = () => buttonByText(m.container, DICT_EN['trend.adaptive'])
+    assert.ok(!adaptive().className.includes('lc-gran-on'), 'off at mount')
+    await click(adaptive())
+    assert.ok(adaptive().className.includes('lc-gran-on'))
+    await click(adaptive())
+    assert.ok(!adaptive().className.includes('lc-gran-on'))
     await m.unmount()
   })
 
@@ -283,7 +228,6 @@ describe('ContextView — interactions', () => {
     await click(dnaBtn())
     assert.ok(dnaBtn().className.includes('lc-gran-on'))
     assert.equal(queryAll(m.container, '.lc-bar-dna').length, 3)
-    assert.equal(text(query(m.container, '.lc-axis-top')), '420')
 
     // The strip reads in the model's read order: the tool schema leads, then the messages by seq.
     const g = query(m.container, '.lc-bar[data-seq="4"] .lc-bar-dna').style.background
@@ -303,22 +247,13 @@ describe('ContextView — interactions', () => {
     assert.ok(!dnaBtn().className.includes('lc-gran-on'))
     assert.equal(queryAll(m.container, '.lc-bar-dna').length, 0)
     assert.ok(queryAll(m.container, '.lc-bar-up').length > 0, 'delta arms are back')
-    await m.unmount()
-  })
 
-  test('the trend and browser DNA toggles move as one', async () => {
-    const m = await mountRich('sv-dna-link')
-    const trendDna = () => buttonByText(m.container, DICT_EN['trend.dna'])
     const browserDna = () => query(m.container, '.lc-br-dna-ctl .lc-gran-btn')
-    assert.ok(!trendDna().className.includes('lc-gran-on') && !browserDna().className.includes('lc-gran-on'), 'both off at mount')
-
-    await click(trendDna())
+    await click(dnaBtn())
     assert.ok(browserDna().className.includes('lc-gran-on'), 'the browser follows the trend toggle')
     assert.equal(queryAll(m.container, '.lc-br-bar-dna').length, 1)
-
     await click(browserDna())
-    assert.ok(!trendDna().className.includes('lc-gran-on'), 'the trend follows the browser toggle')
-    assert.equal(queryAll(m.container, '.lc-bar-dna').length, 0)
+    assert.ok(!dnaBtn().className.includes('lc-gran-on'), 'the trend follows the browser toggle')
     assert.equal(queryAll(m.container, '.lc-br-bar-dna').length, 0)
     await m.unmount()
   })

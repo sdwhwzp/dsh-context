@@ -1,6 +1,9 @@
 // A driver over the session-projection registry's DOCUMENTED semantics, mirrored from dsh's
 // `packages/session/session-projection` at each supported tag; every supported line shares one contract.
 
+/** The plain-JSON persistence gate: the projection cache's own write precondition (mirrored in the fold helpers). */
+import { snapshotJson } from '../helpers/projection'
+
 interface ErasedDefinition {
   key: string
   stateSchema: { parse(value: unknown): unknown }
@@ -50,9 +53,6 @@ export type Checkpoint = Record<string, CheckpointRow>
 /** Register-time rule violations: non-negative safe-integer `stateVersion`, and a shared key must agree on it. */
 export class RegistryViolationError extends Error {}
 
-/** The plain-JSON persistence gate: the projection cache's own write precondition (mirrored in the fold helpers). */
-import { snapshotJson } from '../helpers/projection'
-
 export class RegistryDriver {
   private readonly registrations = new Map<string, { def: ErasedDefinition; cells: Map<SessionLike, UnitCell> }>()
   private readonly listeners = new Set<ChangeListener>()
@@ -78,10 +78,8 @@ export class RegistryDriver {
     const existing = this.registrations.get(def.key)
     if (existing === undefined) {
       this.registrations.set(def.key, { def, cells: new Map() })
-    } else {
-      if (existing.def.stateVersion !== def.stateVersion) {
-        throw new RegistryViolationError(`key ${JSON.stringify(def.key)} is already registered at stateVersion ${String(existing.def.stateVersion)}`)
-      }
+    } else if (existing.def.stateVersion !== def.stateVersion) {
+      throw new RegistryViolationError(`key ${JSON.stringify(def.key)} is already registered at stateVersion ${String(existing.def.stateVersion)}`)
     }
     return () => {
       this.registrations.delete(def.key)

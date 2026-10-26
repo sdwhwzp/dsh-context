@@ -28,30 +28,21 @@ function snapshotOf(entries: [string, Record<string, unknown>][], current?: stri
 }
 
 describe('sessionsSnapshotOf', () => {
-  test('a non-function seat reads null', () => {
+  test('a non-function or throwing seat reads null; the raw snapshot passes through', () => {
     assert.equal(sessionsSnapshotOf({}), null)
     assert.equal(sessionsSnapshotOf({ useSessions: 7 }), null)
-  })
-
-  test('a throwing seat reads null instead of taking the render down', () => {
     assert.equal(sessionsSnapshotOf({ useSessions: () => { throw new Error('boom') } }), null)
-  })
-
-  test('the raw snapshot passes through', () => {
     const snap = { ids: [] }
     assert.equal(sessionsSnapshotOf({ useSessions: (sel: (s: unknown) => unknown) => sel(snap) }), snap)
   })
 })
 
 describe('rowsOfSnapshot', () => {
-  test('unusable snapshots read null (the unavailable note, not an empty list)', () => {
+  test('unusable snapshots read null; an empty or id-less ready list reads as a real empty array', () => {
     assert.equal(rowsOfSnapshot(null), null)
     assert.equal(rowsOfSnapshot(7), null)
     assert.equal(rowsOfSnapshot({}), null, 'ids missing')
     assert.equal(rowsOfSnapshot({ ids: 'x' }), null, 'ids not an array')
-  })
-
-  test('an empty ready list reads as a real empty array', () => {
     assert.deepEqual(rowsOfSnapshot({ ids: [], byId: {} }), [])
     assert.deepEqual(rowsOfSnapshot({ ids: ['s1'] }), [], 'byId absent: the row is skipped')
     assert.deepEqual(rowsOfSnapshot({ ids: [7, 's1'], byId: {} }), [], 'non-string ids drop')
@@ -93,11 +84,10 @@ describe('rowsOfSnapshot', () => {
     assert.equal(rows[0].archived, false)
     assert.equal(rows[2].archived, false, 'non-string entries archive nothing')
     assert.equal(rowsOfSnapshot(snap)?.length, 3)
-    assert.equal(rowsOfSnapshot(snap, null)?.length, 3)
-    assert.equal(rowsOfSnapshot(snap, 7)?.length, 3)
-    assert.equal(rowsOfSnapshot(snap, {})?.length, 3)
-    assert.equal(rowsOfSnapshot(snap, { archivedSessionIds: 'x' })?.length, 3)
-    assert.equal(rowsOfSnapshot(snap, { get archivedSessionIds() { throw new Error('boom') } })?.length, 3)
+    const hostileWorkspaces = [null, 7, {}, { archivedSessionIds: 'x' }, { get archivedSessionIds() { throw new Error('boom') } }]
+    for (const [i, workspaces] of hostileWorkspaces.entries()) {
+      assert.equal(rowsOfSnapshot(snap, workspaces)?.length, 3, `hostile archive set ${i}`)
+    }
   })
 
   test('projection values are sanitized per row; hostile payloads degrade to nulls', () => {
@@ -154,14 +144,14 @@ describe('rowsOfSnapshot: the family fold', () => {
         displayTitle: 'root',
         projectionValues: {
           contextTimeline: billedHead(100, COST),
-          contextActivity: { days: { '2026-09-16': { tokens: 5, requests: 1, cost: COST, turns: 1, toolCalls: 1, toolsMs: 100, wallMs: 1_000 } } },
+          contextActivity: { days: { '2026-09-16': { tokens: 5, requests: 1, cost: COST, turns: 1, toolCalls: 1, toolsMs: 100, wallMs: 1_000 }, '2026-09-12': { tokens: 2, requests: 1 }, '2026-09-13': { tokens: 1, requests: 1 }, '2026-09-14': { tokens: 1, requests: 1, turns: 2 }, '2026-09-11': { tokens: 1, requests: 1 } } },
         },
       }],
       ['kid', {
         origin: 'subagent', parentId: 'root',
         projectionValues: {
           contextTimeline: billedHead(50, COST2),
-          contextActivity: { days: { '2026-09-16': { tokens: 7, requests: 2, cost: COST2, turns: 1, toolCalls: 2, toolsMs: 200, wallMs: 2_000 } } },
+          contextActivity: { days: { '2026-09-16': { tokens: 7, requests: 2, cost: COST2, turns: 1, toolCalls: 2, toolsMs: 200, wallMs: 2_000 }, '2026-09-13': { tokens: 1, requests: 1 }, '2026-09-14': { tokens: 1, requests: 1 }, '2026-09-11': { tokens: 1, requests: 1, turns: 3 } } },
         },
       }],
       ['grand', {
@@ -198,6 +188,11 @@ describe('rowsOfSnapshot: the family fold', () => {
     assert.equal(root.activity?.days['2026-09-15'].toolsMs, 400)
     assert.equal(root.activity?.days['2026-09-15'].wallMs, 4_000)
     assert.equal(root.activity?.days['2026-09-15'].cost, undefined)
+    assert.equal(root.activity?.days['2026-09-12'].turns, undefined, 'a day no member carried a tally for leaves it absent')
+    assert.equal(root.activity?.days['2026-09-12'].wallMs, undefined)
+    assert.equal(root.activity?.days['2026-09-13'].turns, undefined, 'a tally absent in every carrier stays absent')
+    assert.equal(root.activity?.days['2026-09-14'].turns, 2, 'a tally carried by one member survives the merge')
+    assert.equal(root.activity?.days['2026-09-11'].turns, 3, 'a tally arriving from a later member starts the sum')
     const parts = tokenPartsOf([root])
     assert.deepEqual(parts, {
       total: 500,
@@ -206,58 +201,6 @@ describe('rowsOfSnapshot: the family fold', () => {
         { key: 'output', color: 'var(--color-pink-500)', value: 40 },
       ],
     })
-  })
-
-  test('the daily tallies merge additively; a day none carried leaves them absent', () => {
-    const rows = rowsOfSnapshot(snapshotOf([
-      ['root', {
-        displayTitle: 'root',
-        projectionValues: {
-          contextTimeline: billedHead(1),
-          contextActivity: {
-            days: {
-              '2026-09-14': { tokens: 1, requests: 1 },
-              '2026-09-13': { tokens: 1, requests: 1 },
-            },
-          },
-        },
-      }],
-      ['kid', {
-        origin: 'subagent', parentId: 'root',
-        projectionValues: {
-          contextTimeline: billedHead(1),
-          contextActivity: {
-            days: {
-              '2026-09-14': { tokens: 1, requests: 1, turns: 1, toolCalls: 1, toolsMs: 1, wallMs: 1 },
-              '2026-09-13': { tokens: 1, requests: 1 },
-            },
-          },
-        },
-      }],
-      ['grand', {
-        origin: 'subagent', parentId: 'kid',
-        projectionValues: {
-          contextTimeline: billedHead(1),
-          contextActivity: {
-            days: {
-              '2026-09-14': { tokens: 1, requests: 1 },
-              '2026-09-13': { tokens: 1, requests: 1 },
-            },
-          },
-        },
-      }],
-    ]))
-    assert.ok(rows !== null)
-    const day = rows[0].activity?.days['2026-09-14']
-    assert.equal(day?.turns, 1)
-    assert.equal(day?.toolCalls, 1)
-    assert.equal(day?.toolsMs, 1)
-    assert.equal(day?.wallMs, 1)
-    const bare = rows[0].activity?.days['2026-09-13']
-    assert.equal(bare?.turns, undefined)
-    assert.equal(bare?.toolCalls, undefined)
-    assert.equal(bare?.toolsMs, undefined)
-    assert.equal(bare?.wallMs, undefined)
   })
 
   test('an unlisted subtree (a subagent whose root never lists) leaks nowhere', () => {
@@ -333,7 +276,7 @@ describe('rowsOfSnapshot: the family fold', () => {
     assert.equal(billedOf(rows[0]), 200)
   })
 
-  test('a childless family serves its own parts directly (no merge copy)', () => {
+  test('a childless family serves its own parts directly, aliasing a fully quantified fee and re-merging a sparse one', () => {
     const activity = { days: { '2026-09-16': { tokens: 15, requests: 1 } } }
     const timeline = timelineOf({ cost: { deepseek: { 'deepseek-v4': { peak: { uncached: 1, cacheRead: 2, cacheWrite: 3, output: 4 } } } } })
     const rows = rowsOfSnapshot(snapshotOf([
@@ -346,15 +289,12 @@ describe('rowsOfSnapshot: the family fold', () => {
     assert.ok(familyActivity.length === 1 && familyActivity[0] === row.activity)
     assert.ok(row.familyCost === row.timeline?.cost, 'a fully quantified fee aliases')
     assert.ok(row.activity === (activity as never), 'the sanitized ledger keeps its identity')
-  })
 
-  test('a childless family re-merges a sparse fee instead of aliasing it', () => {
-    const timeline = timelineOf({ cost: { deepseek: { 'deepseek-v4': { peak: { uncached: 5 } } } } })
-    const rows = rowsOfSnapshot(snapshotOf([
-      ['solo', { displayTitle: 'solo', projectionValues: { contextTimeline: timeline } }],
+    const sparse = rowsOfSnapshot(snapshotOf([
+      ['solo', { displayTitle: 'solo', projectionValues: { contextTimeline: timelineOf({ cost: { deepseek: { 'deepseek-v4': { peak: { uncached: 5 } } } } }) } }],
     ]))
-    assert.ok(rows !== null)
-    assert.deepEqual(rows[0].familyCost, {
+    assert.ok(sparse !== null)
+    assert.deepEqual(sparse[0].familyCost, {
       deepseek: { 'deepseek-v4': { peak: { uncached: 5, cacheRead: 0, cacheWrite: 0, output: 0 } } },
     })
   })

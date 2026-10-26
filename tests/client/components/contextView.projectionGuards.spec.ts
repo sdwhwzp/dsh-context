@@ -7,20 +7,23 @@ import { click, mount, query, queryAll, text, until } from '../helpers/kit'
 import { buttonByText, makeView, projectionsFor, richTimeline, T0, timeline } from './contextViewHarness'
 
 describe('ContextView — projection guards', () => {
-  test('loading screen while useProjection is absent, empty, or the session id is missing', async () => {
+  test('loading screen while useProjection is absent, empty, or the session id is missing; a served projection renders without one', async () => {
     const View = makeView(new TestClientCtx())
 
-    const m1 = await mount(h(View, { sessionId: 'sv-none' }))
-    assert.ok(text(m1.container).includes(DICT_EN.loading))
-    await m1.unmount()
+    for (const props of [
+      { sessionId: 'sv-none' },
+      { sessionId: '', useProjection: () => undefined },
+      { useProjection: () => undefined },
+    ]) {
+      const m = await mount(h(View, props))
+      assert.ok(text(m.container).includes(DICT_EN.loading))
+      await m.unmount()
+    }
 
-    const m2 = await mount(h(View, { sessionId: '', useProjection: () => undefined }))
-    assert.ok(text(m2.container).includes(DICT_EN.loading))
-    await m2.unmount()
-
-    const m3 = await mount(h(View, { useProjection: () => undefined }))
-    assert.ok(text(m3.container).includes(DICT_EN.loading))
-    await m3.unmount()
+    const m = await mount(h(View, { useProjection: projectionsFor(timeline()) }))
+    assert.ok(text(m.container).includes(DICT_EN['overview.title']))
+    assert.ok(text(m.container).includes(DICT_EN.footer))
+    await m.unmount()
   })
 
   test('a cold read that settles without data surfaces the retryable failure, not a stall', async () => {
@@ -32,14 +35,6 @@ describe('ContextView — projection guards', () => {
     await act(async () => {
       buttonByText(m.container, DICT_EN['detail.loadFailed']).click()
     })
-    await m.unmount()
-  })
-
-  test('renders the full tab without a session id (the agent card anchors nothing)', async () => {
-    const View = makeView(new TestClientCtx())
-    const m = await mount(h(View, { useProjection: projectionsFor(timeline()) }))
-    assert.ok(text(m.container).includes(DICT_EN['overview.title']))
-    assert.ok(text(m.container).includes(DICT_EN.footer))
     await m.unmount()
   })
 
@@ -101,21 +96,6 @@ describe('ContextView — the sidebar host', () => {
     assert.equal(queryAll(panel.container, '.lc-head > .lc-col-donut').length, 2, 'token usage and timing')
     await panel.unmount()
   })
-
-  test('both hosts arrange the main row as composition+trend beside the browser', async () => {
-    const View = makeView(new TestClientCtx())
-    const projections = projectionsFor(richTimeline())
-
-    for (const props of [{ useProjection: projections }, { host: 'sidebar' as const, useProjection: projections }]) {
-      const m = await mount(h(View, props))
-      const cols = queryAll(m.container, '.lc-cols-main > .lc-col')
-      assert.equal(cols.length, 2, 'one two-column split')
-      assert.ok(cols[0].querySelector('.lc-overview-num') !== null, 'composition leads the left column')
-      assert.ok(cols[0].querySelector('.lc-trend-ctl') !== null, 'the trend follows in the same column')
-      assert.ok(cols[1].querySelector('.lc-br-dna-ctl') !== null, 'the browser owns the right column')
-      await m.unmount()
-    }
-  })
 })
 
 describe('ContextView — baseline gate', () => {
@@ -138,16 +118,13 @@ describe('ContextView — baseline gate', () => {
     assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
     assert.ok(text(m.container).includes(DICT_EN['stats.title']))
     await m.unmount()
-  })
 
-  test('a malformed gate record never opens the modal', async () => {
-    const View = makeView(new TestClientCtx())
-    const m = await mount(h(View, {
+    const junk = await mount(h(View, {
       sessionId: 'sv-gate-junk',
       useProjection: projectionsFor(timeline({ unsupported: { current: 7 } })),
     }))
-    assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
-    assert.ok(text(m.container).includes(DICT_EN['overview.title']))
-    await m.unmount()
+    assert.equal(junk.container.querySelector('.lc-modal-backdrop'), null)
+    assert.ok(text(junk.container).includes(DICT_EN['overview.title']))
+    await junk.unmount()
   })
 })

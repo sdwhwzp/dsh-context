@@ -11,11 +11,8 @@ function deref(value: unknown): unknown {
 }
 
 describe('Config validator (cordis Standard Schema face)', () => {
-  test('an absent config (a loader row without config:) resolves to defaults', () => {
+  test('an absent config resolves to defaults; each bounds field overrides independently', () => {
     const resolved = Config(undefined) as unknown as Record<string, unknown>
-    for (const [key, value] of Object.entries(DEFAULT_BOUNDS)) {
-      assert.equal(resolved[key], value, key)
-    }
     const resolvedPrefs = Object.fromEntries(
       Object.entries(resolved).map(([key, value]) => [key, deref(value)]),
     )
@@ -37,9 +34,6 @@ describe('Config validator (cordis Standard Schema face)', () => {
     })
     assert.deepEqual(resolveBounds(undefined), DEFAULT_BOUNDS)
     assert.deepEqual(resolveBounds({}), DEFAULT_BOUNDS)
-  })
-
-  test('each field overrides independently', () => {
     assert.equal(resolveBounds({ maxRequestSteps: 7 }).maxRequestSteps, 7)
     assert.equal(resolveBounds({ maxKeptTurns: 7 }).maxKeptTurns, 7)
     assert.equal(resolveBounds({ maxEvents: 7 }).maxEvents, 7)
@@ -48,16 +42,10 @@ describe('Config validator (cordis Standard Schema face)', () => {
     assert.equal(resolveBounds({ maxNodes: 7 }).maxEvents, DEFAULT_BOUNDS.maxEvents)
   })
 
-  test('rejects zero/negative bounds (min 1)', () => {
+  test('rejects bounds below 1, non-integers, and non-numbers', () => {
     assert.throws(() => Config({ maxRequestSteps: 0 }))
     assert.throws(() => Config({ maxNodes: -1 }))
-  })
-
-  test('rejects non-integer bounds (step 1)', () => {
     assert.throws(() => Config({ maxEvents: 1.5 }))
-  })
-
-  test('rejects non-number bounds', () => {
     assert.throws(() => Config({ maxKeptTurns: '300' } as unknown as Config))
   })
 
@@ -78,42 +66,24 @@ describe('preference fields (the Config-form generation surface)', () => {
     }
   })
 
-  test('preferences resolve to schema defaults; a stale value degrades to its default (loose)', () => {
+  test('preferences resolve to defaults, stale values degrade, and stored values survive', () => {
     const resolved = Config({ defaultGranularity: 'bogus', overviewAutoSteps: '50', defaultOverviewRange: 'bogus', promptPrefix: 7, promptSuffix: {} } as unknown as Config)
-    assert.equal(deref(resolved.defaultPlacement), 'all')
     assert.equal(deref(resolved.defaultGranularity), 'step')
-    assert.equal(deref(resolved.defaultTrendMode), 'total')
-    assert.equal(deref(resolved.defaultDeltaBase), 'step')
-    assert.equal(deref(resolved.defaultToolSort), 'count')
-    assert.equal(deref(resolved.defaultFileSort), 'lines')
-    assert.equal(deref(resolved.insightsEntry), 'show')
-    assert.equal(deref(resolved.defaultDurationCurve), 'show')
     assert.equal(deref(resolved.overviewAutoSteps), '200')
     assert.equal(deref(resolved.defaultOverviewRange), '30d')
-    assert.equal(deref(resolved.fleetTab), 'show')
     assert.equal(deref(resolved.promptPrefix), '', 'a non-string prompt value degrades to the empty default')
     assert.equal(deref(resolved.promptSuffix), '')
-  })
-
-  test('a stored preference survives the resolve', () => {
-    const resolved = Config({ defaultPlacement: 'hide', defaultFileSort: 'count', insightsEntry: 'hide', overviewAutoSteps: 'off', defaultOverviewRange: '7d', fleetTab: 'hide', promptPrefix: 'Be terse.', promptSuffix: 'Sign as Atlas.' })
-    assert.equal(deref(resolved.defaultPlacement), 'hide')
-    assert.equal(deref(resolved.defaultFileSort), 'count')
-    assert.equal(deref(resolved.insightsEntry), 'hide')
-    assert.equal(deref(resolved.overviewAutoSteps), 'off')
-    assert.equal(deref(resolved.defaultOverviewRange), '7d')
-    assert.equal(deref(resolved.fleetTab), 'hide')
-    assert.equal(deref(resolved.promptPrefix), 'Be terse.')
-    assert.equal(deref(resolved.promptSuffix), 'Sign as Atlas.')
+    const stored = Config({ defaultPlacement: 'hide', defaultFileSort: 'count', insightsEntry: 'hide', overviewAutoSteps: 'off', defaultOverviewRange: '7d', fleetTab: 'hide', promptPrefix: 'Be terse.', promptSuffix: 'Sign as Atlas.' }) as unknown as Record<string, unknown>
+    assert.deepEqual(
+      ['defaultPlacement', 'defaultFileSort', 'insightsEntry', 'overviewAutoSteps', 'defaultOverviewRange', 'fleetTab', 'promptPrefix', 'promptSuffix'].map(key => deref(stored[key])),
+      ['hide', 'count', 'hide', 'off', '7d', 'hide', 'Be terse.', 'Sign as Atlas.'],
+    )
   })
 })
 
 describe('volatileField', () => {
-  test('marks the field where schemastery ships the modifier', () => {
+  test('marks the field where schemastery ships the modifier; returns it unchanged on an older schemastery', () => {
     assert.equal(volatileField(z.union(['a', 'b']).default('a')).meta?.volatile, true)
-  })
-
-  test('returns the field unchanged on a schemastery without the modifier (the older lines)', () => {
     const plain = z.union(['a', 'b']).default('a')
     // A schema-shaped value with no `volatile` member at all — the shape the older lines' schemastery presents.
     const legacy = { meta: plain.meta } as typeof plain

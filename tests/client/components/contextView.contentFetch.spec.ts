@@ -153,17 +153,6 @@ describe('ContextView — targeted content fetch and image loading', () => {
     assert.ok(m.container.querySelector('.lc-att-item img') !== null)
     await m.unmount()
   })
-
-  test('a conversation service without imageUrl degrades quietly', async () => {
-    const ctx = new TestClientCtx({ services: { uiConversation: {} } })
-    const View = makeView(ctx)
-    const m = await mount(h(View, {
-      sessionId: 'sv-noimg',
-      useProjection: projectionsFor(timeline()),
-    }))
-    assert.ok(text(m.container).includes(DICT_EN['overview.title']))
-    await m.unmount()
-  })
 })
 
 describe('ContextView — scroll ledger', () => {

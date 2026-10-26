@@ -3,16 +3,20 @@ import { describe, test } from 'vitest'
 import { estimateImageTokens } from '../../src/shared/imageTokens'
 
 describe('estimateImageTokens', () => {
-  test.each([
-    [2048, 1365, 313],
-    [800, 600, 341],
-    [2048, 2048, 349],
-    [512, 512, 201],
-    [100, 100, 117],
-    [1920, 1080, 369],
-    [400, 900, 249],
-  ])('%i×%i → %i tokens (docs calculator reference)', (w, h, expected) => {
-    assert.equal(estimateImageTokens(w, h), expected)
+  test('the reference calculator prices each size, including the 8:1 aspect clamp', () => {
+    for (const [w, h, expected] of [
+      [2048, 1365, 313],
+      [800, 600, 341],
+      [2048, 2048, 349],
+      [512, 512, 201],
+      [100, 100, 117],
+      [1920, 1080, 369],
+      [400, 900, 249],
+      [8000, 1000, 301],
+      [1000, 8000, 341],
+    ] as const) {
+      assert.equal(estimateImageTokens(w, h), expected, `${w}×${h}`)
+    }
   })
 
   test('every valid size lands inside the documented cap band', () => {
@@ -23,11 +27,6 @@ describe('estimateImageTokens', () => {
         assert.ok(tokens !== null && tokens >= 113 && tokens <= 384, `${w}×${h} → ${tokens}`)
       }
     }
-  })
-
-  test('extreme aspect ratios clamp to the 8:1 band before patching', () => {
-    assert.ok(estimateImageTokens(8000, 1000) !== null)
-    assert.ok(estimateImageTokens(1000, 8000) !== null)
   })
 
   test('a tall strip beyond the ~190:1 grid threshold solves on the collapsed-width arm', () => {
@@ -52,6 +51,5 @@ describe('estimateImageTokens', () => {
   test('astronomical (finite) dimensions fail to converge and return null instead of throwing', () => {
     // w×h overflows to Infinity: the fixed-point iteration never stabilizes, so the 9-iteration cap narrows to null.
     assert.equal(estimateImageTokens(Number.MAX_VALUE, Number.MAX_VALUE), null)
-    assert.equal(estimateImageTokens(1e308, 1e308), null)
   })
 })

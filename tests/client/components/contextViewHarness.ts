@@ -118,6 +118,16 @@ export function eventLink(container: ParentNode, label: string): HTMLElement {
   return query(row, '.lc-event-jump')
 }
 
+/** jsdom lays out nothing: fixed viewport tops for the reveal probes — the scrollport at 100, every other element
+ *  from `topOf` (default 0), shifted by the scroll the reveal itself applies so later probes see the moved page. */
+export function stubRevealRects(scroller: HTMLElement, topOf: (el: Element) => number = () => 0) {
+  return vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const inScroller = !this.hasAttribute('data-conversation-scroll')
+    const top = this.hasAttribute('data-conversation-scroll') ? 100 : topOf(this)
+    return { top: inScroller ? top - scroller.scrollTop : top } as DOMRect
+  })
+}
+
 /** Mount inside a `[data-conversation-scroll]` scroller so the view's shared-scrollport probes find it. */
 export async function mountInScroller(el: ReactElement, scroller: HTMLElement) {
   const inner = document.createElement('div')

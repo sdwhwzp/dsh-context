@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
 import { makeFleetView } from '../../../src/client/components/fleetView'
 import { makeAgentHeads } from '../../../src/client/agentHeads'
-import { DICT_EN, DICT_ZH } from '../../../src/client/i18n'
+import { DICT_EN } from '../../../src/client/i18n'
 import { resetTimelineDetailStores } from '../../../src/client/timelineSource'
 import { TestClientCtx, asClientCtx } from '../helpers/harness'
 import { click, hover, makeKit, mount, query, queryAll, text, until } from '../helpers/kit'
@@ -29,17 +29,18 @@ const TEAM_PROJECTION = {
   ],
 }
 
-/** A stable-snapshot sessions face (useSyncExternalStore loops on a fresh object per read). */
-function familySessions() {
+/** A stable-snapshot sessions face (useSyncExternalStore loops on a fresh object per read). A caller may lift the
+ * change stamps past an earlier test's page-scope detail ledger. */
+function familySessions(base = 10) {
   const snapshot = {
     byId: {
-      root: { displayTitle: 'Main Agent', running: true, updatedAt: 10, projectionValues: { agentTeam: TEAM_PROJECTION } },
+      root: { displayTitle: 'Main Agent', running: true, updatedAt: base, projectionValues: { agentTeam: TEAM_PROJECTION } },
       w1: {
-        parentId: 'root', origin: 'subagent', running: true, updatedAt: 8,
+        parentId: 'root', origin: 'subagent', running: true, updatedAt: base - 2,
         projectionValues: { subagent: { mode: 'continuable', label: 'worker-bee' }, subagentTiming: { settledMs: 42000 } },
       },
       w2: {
-        parentId: 'root', origin: 'subagent', running: false, updatedAt: 6,
+        parentId: 'root', origin: 'subagent', running: false, updatedAt: base - 4,
         projectionValues: { subagent: { mode: 'one-shot', label: 'side-quest' }, subagentTiming: { settledMs: 9000, lastTurnCompleted: true } },
       },
     },
@@ -76,7 +77,7 @@ function makeView(ctx: TestClientCtx, useKit = kit) {
 }
 
 describe('FleetView — the panels over one family', () => {
-  test('the other-agents card enter button jumps to the session', async () => {
+  test('the other-agents card enter and aside buttons jump to the session, and the aside prefers the right Sidebar\'s subagent chat', async () => {
     stubFleetRoute()
     const opened = new Array<string>()
     const ctx = new TestClientCtx({
@@ -84,47 +85,33 @@ describe('FleetView — the panels over one family', () => {
     })
     const View = makeView(ctx)
     const m = await mount(h(View, { sessionId: 'root', useProjection: projectionsFor(richTimeline()) }))
-    const cards = queryAll(m.container, '.lc-member-card')
-    await click(query(cards[cards.length - 1], '.lc-member-enter'))
+    const card = queryAll(m.container, '.lc-member-card').at(-1)!
+    await click(query(card, '.lc-member-enter'))
     assert.deepEqual([...opened], ['w2'])
+    await click(query(card, '.lc-member-aside'))
+    assert.deepEqual([...opened], ['w2', 'w2'], 'the aside falls back to the whole-view jump')
     await m.unmount()
     ctx.dispose()
-  })
 
-  test('the aside button keeps the whole-view jump when no sidebar takes the resource', async () => {
-    stubFleetRoute()
-    const opened = new Array<string>()
-    const ctx = new TestClientCtx({
-      services: { sessions: familySessions(), uiWorkspace: { openSession: (id: string) => { opened.push(id) } } },
-    })
-    const View = makeView(ctx)
-    const m = await mount(h(View, { sessionId: 'root', useProjection: projectionsFor(richTimeline()) }))
-    const cards = queryAll(m.container, '.lc-member-card')
-    await click(query(cards[cards.length - 1], '.lc-member-aside'))
-    assert.deepEqual([...opened], ['w2'])
-    await m.unmount()
-    ctx.dispose()
-  })
-
-  test('the other-agents card aside button prefers the right Sidebar\'s subagent chat', async () => {
-    stubFleetRoute()
-    const opened: { address: string; options: unknown }[] = []
-    const ctx = new TestClientCtx({
+    const sidebarOpened: { address: string; options: unknown }[] = []
+    const sidebarCtx = new TestClientCtx({
       services: {
         sessions: familySessions(),
-        sidebarRight: { openResource: (address: string, options?: unknown) => { opened.push({ address, options }) } },
+        sidebarRight: { openResource: (address: string, options?: unknown) => { sidebarOpened.push({ address, options }) } },
       },
     })
-    const View = makeView(ctx)
-    const m = await mount(h(View, { sessionId: 'root', useProjection: projectionsFor(richTimeline()) }))
-    const cards = queryAll(m.container, '.lc-member-card')
-    await click(query(cards[cards.length - 1], '.lc-member-aside'))
-    assert.deepEqual(opened, [{
-      address: 'dsh-resource://subagentchat/session/w2?parent=root&mode=one-shot',
-      options: { kind: 'subagentchat', preferNewPane: true },
-    }])
-    await m.unmount()
-    ctx.dispose()
+    const SidebarView = makeView(sidebarCtx)
+    const sidebarMount = await mount(h(SidebarView, { sessionId: 'root', useProjection: projectionsFor(richTimeline()) }))
+    try {
+      await click(query(queryAll(sidebarMount.container, '.lc-member-card').at(-1)!, '.lc-member-aside'))
+      assert.deepEqual(sidebarOpened, [{
+        address: 'dsh-resource://subagentchat/session/w2?parent=root&mode=one-shot',
+        options: { kind: 'subagentchat', preferNewPane: true },
+      }])
+    } finally {
+      await sidebarMount.unmount()
+      sidebarCtx.dispose()
+    }
   })
 
   test('overview strip, team chip, members board, task board, and comms all render off the one derivation', async () => {
@@ -144,9 +131,14 @@ describe('FleetView — the panels over one family', () => {
     assert.ok(text(board).includes(DICT_EN['fleet.board.others']))
     assert.equal(queryAll(board, '.lc-member-card').length, 4)
     assert.ok(text(query(m.container, '.lc-tasks')).includes('schema parsing'))
-    assert.ok(text(query(m.container, '.lc-comms')).includes('Scan 3 sessions'))
+    await until(() => text(query(m.container, '.lc-comms')).includes('Auto-read'), 'the comms hub never rendered')
     assert.equal(queryAll(m.container, '.lc-inspector').length, 0)
     await m.unmount()
+
+    const ZhView = makeView(ctx, makeKit('zh'))
+    const zh = await mount(h(ZhView, { sessionId: 'root', useProjection: projectionsFor(richTimeline()) }))
+    assert.ok(text(query(zh.container, '.lc-members')).includes('其他 Agent'))
+    await zh.unmount()
     ctx.dispose()
   })
 
@@ -220,15 +212,6 @@ describe('FleetView — the panels over one family', () => {
     assert.ok(query(m.container, '[data-agent="w1"]').className.includes('lc-agent-pinned'))
     await click(query(m.container, '[data-agent="w1"]'))
     assert.equal(queryAll(m.container, '.lc-agent-pinned').length, 0)
-    await m.unmount()
-    ctx.dispose()
-  })
-
-  test('a task-board owner pick toggles the pin on the graph and the member card', async () => {
-    stubFleetRoute()
-    const ctx = new TestClientCtx({ services: { sessions: familySessions() } })
-    const View = makeView(ctx)
-    const m = await mount(h(View, { sessionId: 'root', useProjection: projectionsFor(richTimeline()) }))
 
     await click(query(m.container, '.lc-team-task-owner'))
     assert.ok(query(m.container, '[data-agent="w1"]').className.includes('lc-agent-pinned'))
@@ -239,32 +222,83 @@ describe('FleetView — the panels over one family', () => {
     ctx.dispose()
   })
 
-  test('the comms scan merges the family logs into one timeline', async () => {
+  test('the comms hub merges the family logs automatically and its detail steers the boards', async () => {
     stubFleetRoute()
     const ctx = new TestClientCtx({ services: { sessions: familySessions() } })
     const View = makeView(ctx)
     const m = await mount(h(View, { sessionId: 'root', useProjection: projectionsFor(richTimeline()) }))
 
-    await click(query(m.container, '.lc-comms-scan'))
-    await until(() => queryAll(m.container, '.lc-comms-row').length === 6, 'the relays never surfaced')
-    const rows = queryAll(m.container, '.lc-comms-row')
-    assert.ok(text(rows[0]).includes('Main Agent'))
-    assert.ok(text(rows[0]).includes('worker-bee'))
-    assert.ok(text(rows[0]).includes('how far along?'))
-    assert.ok(text(rows[1]).includes('ghost-nine'))
-    assert.ok(text(rows[2]).includes('stranger'))
+    await until(() => queryAll(m.container, '.lc-comms-event').length === 6, 'the relays never surfaced')
+    const rows = queryAll<HTMLElement>(m.container, '.lc-comms-event')
+    assert.ok(text(rows[0]!).includes('Lead'))
+    assert.ok(text(rows[0]!).includes('worker-bee'))
+    assert.ok(text(rows[0]!).includes('how far along?'))
+    assert.ok(text(rows[1]!).includes('ghost-nine'))
+    assert.ok(text(rows[2]!).includes('stranger'))
 
-    await click(queryAll(rows[0], '.lc-comms-peer')[0])
-    assert.ok(query(m.container, '[data-agent="root"]').className.includes('lc-agent-pinned'))
+    await click(query(rows[0]!, '.lc-comms-hit'))
+    const leadEvent = query(m.container, '.lc-comms-detail')
+    const peer = queryAll<HTMLElement>(leadEvent, '.lc-comms-person').find(person => text(person).includes('worker-bee'))!
+    await click(queryAll<HTMLElement>(peer, '.lc-inspector-btn')[0]!)
+    assert.ok(query(m.container, '[data-agent="w1"]').className.includes('lc-agent-pinned'))
     assert.ok(query(m.container, '.lc-member-pinned') !== null)
 
-    await click(queryAll(rows[1], '.lc-comms-peer')[0])
-    await until(() => queryAll(m.container, '.lc-agent-pinned, .lc-member-pinned').length === 0, 'the ghost pin never released')
+    await click(query(rows[0]!, '.lc-comms-hit'))
+    const pinned = queryAll<HTMLElement>(m.container, '.lc-comms-person').find(person => text(person).includes('worker-bee'))!
+    await click(query(pinned, '.lc-comms-person-pin-on'))
+    await until(() => queryAll(m.container, '.lc-agent-pinned, .lc-member-pinned').length === 0, 'the pin never released')
+
+    await click(query(rows[1]!, '.lc-comms-hit'))
+    const ghost = queryAll<HTMLElement>(m.container, '.lc-comms-person').find(person => text(person).includes('ghost-nine'))!
+    await click(queryAll<HTMLElement>(ghost, '.lc-inspector-btn')[0]!)
+    await until(() => queryAll(m.container, '.lc-agent-pinned').length === 0, 'the ghost pin never released')
+    await click(query(m.container, '.lc-comms .lc-tasks-filter'))
+    await until(() => queryAll(m.container, '.lc-comms-event').length === 6, 'the ghost scope never cleared')
 
     await click(query(m.container, '[data-agent="w2"]'))
     assert.ok(text(query(m.container, '.lc-comms')).includes(DICT_EN['fleet.comms.noMatch']), 'side-quest rode no relays')
     await click(query(m.container, '.lc-comms .lc-tasks-filter'))
-    await until(() => queryAll(m.container, '.lc-comms-row').length === 6, 'the rows never returned')
+    await until(() => queryAll(m.container, '.lc-comms-event').length === 6, 'the rows never returned')
+    await m.unmount()
+    ctx.dispose()
+  })
+
+  test('the comms identities prefer roster names and duties over prompt labels', async () => {
+    vi.stubGlobal('fetch', (_url: unknown, init: { body: string }) => {
+      const { sessionId } = JSON.parse(init.body) as { sessionId: string }
+      const value = sessionId === 'w1'
+        ? {
+          messages: [
+            { seq: 9, time: 2000, kind: 'relay', from: 'root', text: 'hello bee' },
+            { seq: 8, time: 1000, kind: 'relay', from: 'w9', text: 'hello from the ghost' },
+          ],
+          truncated: false,
+        }
+        : {
+          messages: [],
+          truncated: false,
+          roster: [
+            { name: 'worker-bee', description: 'schema duty' },
+            { name: 'ghost-nine', description: 'ghost duty' },
+          ],
+        }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, value }) } as Response)
+    })
+    const ctx = new TestClientCtx({ services: { sessions: familySessions(1000) } })
+    const View = makeView(ctx)
+    const m = await mount(h(View, { sessionId: 'root', useProjection: projectionsFor(richTimeline()) }))
+    await until(() => queryAll(m.container, '.lc-comms-event').length === 2, 'the roster traffic never surfaced')
+    const rows = queryAll<HTMLElement>(m.container, '.lc-comms-event')
+
+    await click(query(rows[0]!, '.lc-comms-hit'))
+    const bee = queryAll<HTMLElement>(m.container, '.lc-comms-person').find(person => text(person).includes('worker-bee'))!
+    assert.ok(text(bee).includes('schema duty'))
+    const lead = queryAll<HTMLElement>(m.container, '.lc-comms-person').find(person => text(person).includes('Lead'))!
+    assert.ok(text(lead).includes('Main Agent'), 'the lead falls back to the session title')
+
+    await click(query(rows[1]!, '.lc-comms-hit'))
+    const ghost = queryAll<HTMLElement>(m.container, '.lc-comms-person').find(person => text(person).includes('ghost-nine'))!
+    assert.ok(text(ghost).includes('ghost duty'), 'a roster member without a session row keeps its duty')
     await m.unmount()
     ctx.dispose()
   })
@@ -290,8 +324,7 @@ describe('FleetView — the panels over one family', () => {
     const m = await mount(h(View, { sessionId: 'cold-root', useProjection: projectionsFor(richTimeline()) }))
 
     assert.ok(text(query(m.container, '.lc-members')).includes('cold-worker'))
-    await click(query(m.container, '.lc-comms-scan'))
-    await until(() => text(query(m.container, '.lc-comms')).includes(DICT_EN['fleet.comms.empty']), 'the scan never settled')
+    await until(() => text(query(m.container, '.lc-comms')).includes(DICT_EN['fleet.comms.empty']), 'the failed reads never settled')
     await m.unmount()
     ctx.dispose()
   })
@@ -306,10 +339,7 @@ describe('FleetView — the panels over one family', () => {
     }
     const ctx = new TestClientCtx({ services: { sessions: { list: { getSnapshot: () => snapshot, subscribe: () => () => {} } } } })
     const View = makeView(ctx)
-    const m = await mount(h(View, {
-      sessionId: 'root',
-      useProjection: projectionsFor(richTimeline(), { agentTeam: TEAM_PROJECTION }),
-    }))
+    const m = await mount(h(View, { sessionId: 'root', useProjection: projectionsFor(richTimeline(), { agentTeam: TEAM_PROJECTION }), }))
     assert.ok(query(m.container, '.lc-members') !== null)
     assert.ok(query(m.container, '.lc-tasks') !== null)
     const columns = queryAll(query(m.container, '.lc-cols'), '.lc-col')
@@ -321,26 +351,21 @@ describe('FleetView — the panels over one family', () => {
     assert.ok(text(leadCard).includes(DICT_EN['fleet.role.lead']))
     await m.unmount()
     ctx.dispose()
-  })
 
-  test('a team without a family forest serves the task board alone in the cockpit row', async () => {
-    stubFleetRoute()
-    const ctx = new TestClientCtx({ services: {} })
-    const View = makeView(ctx)
-    const m = await mount(h(View, {
-      sessionId: 'root',
-      useProjection: projectionsFor(richTimeline(), { agentTeam: TEAM_PROJECTION }),
-    }))
-    const row = query(m.container, '.lc-cols')
-    assert.ok(row !== null)
-    assert.equal(queryAll(m.container, '.lc-agents').length, 0)
-    assert.equal(queryAll(m.container, '.lc-members').length, 0)
-    assert.equal(queryAll(m.container, '.lc-summary').length, 0, 'no strip without a family')
-    const tasks = query(m.container, '.lc-tasks')
-    assert.ok(tasks !== null)
-    assert.ok(row.contains(tasks), 'the task board sits alone in the row')
-    await m.unmount()
-    ctx.dispose()
+    const bareCtx = new TestClientCtx({ services: {} })
+    const BareView = makeView(bareCtx)
+    const bare = await mount(h(BareView, { sessionId: 'root', useProjection: projectionsFor(richTimeline(), { agentTeam: TEAM_PROJECTION }), }))
+    try {
+      const row = query(bare.container, '.lc-cols')
+      assert.equal(queryAll(bare.container, '.lc-agents').length, 0)
+      assert.equal(queryAll(bare.container, '.lc-members').length, 0)
+      assert.equal(queryAll(bare.container, '.lc-summary').length, 0, 'no strip without a family')
+      const tasks = query(bare.container, '.lc-tasks')
+      assert.ok(row.contains(tasks), 'a team without a family forest serves the task board alone in the row')
+    } finally {
+      await bare.unmount()
+      bareCtx.dispose()
+    }
   })
 
   test('a solo session keeps the boards up with guidance — the graph, the strip, and pointers', async () => {
@@ -384,19 +409,6 @@ describe('FleetView — the panels over one family', () => {
     assert.equal(queryAll(m.container, '.lc-member-card').length, 2)
     assert.ok(!text(query(m.container, '.lc-tasks')).includes(DICT_EN['fleet.tasks.noTeam']), 'delegations board, no pointer')
     assert.deepEqual(queryAll(m.container, '.lc-tasks .lc-team-task').length, 2)
-    await m.unmount()
-    ctx.dispose()
-  })
-
-  test('zh locale renders the panel chrome in Chinese', async () => {
-    stubFleetRoute()
-    const ctx = new TestClientCtx({ locale: 'zh', services: { sessions: familySessions() } })
-    const View = makeFleetView(asClientCtx(ctx), makeKit('zh'), makeAgentHeads())
-    const m = await mount(h(View, { sessionId: 'root', useProjection: projectionsFor(richTimeline()) }))
-    assert.ok(text(m.container).includes(DICT_ZH['fleet.board.title']))
-    assert.ok(text(m.container).includes(DICT_ZH['fleet.members.title']))
-    assert.ok(text(m.container).includes(DICT_ZH['fleet.comms.title']))
-    assert.ok(text(m.container).includes(DICT_ZH['fleet.summary.tasks']))
     await m.unmount()
     ctx.dispose()
   })

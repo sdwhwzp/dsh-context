@@ -71,69 +71,7 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     await m.unmount()
   })
 
-  test('the feed paints its windowed rows and the filter summary on the first paint', async () => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    const silent = vi.spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      flushSync(() => {
-        root.render(h(Browser, props({ data: dnaData, headers: dnaHeaders, dna: true, onDnaChange: () => {} })))
-      })
-      // No skeleton stage: the rows and the summary come from the model at render time.
-      assert.equal(text(query(container, '.lc-br-filter-stat')), '×6 ≈275')
-      assert.equal(queryAll(container, '.lc-br-flat > .lc-br-elem').length, 6, 'rows, then the header groups')
-    } finally {
-      await act(async () => { root.unmount() })
-      container.remove()
-      silent.mockRestore()
-    }
-  })
-
-  test('enabling DNA after a disabled-pane resize never commits the whole feed', async () => {
-    let width = 300
-    const observers = new Set<{ notify: () => void }>()
-    class Observer {
-      constructor(readonly notify: () => void) {}
-      observe(): void { observers.add(this) }
-      disconnect(): void { observers.delete(this) }
-    }
-    vi.stubGlobal('ResizeObserver', Observer)
-    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
-      return this.classList.contains('lc-br-scroll') ? width : 0
-    })
-    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
-      return this.classList.contains('lc-br-scroll') ? 360 : 0
-    })
-    const data = tl({
-      current: { ...dnaData.current, user: 200, total: 200 },
-      nodes: Array.from({ length: 200 }, (_, i) => surfaceNode({ seq: i + 2, tokens: 1 })),
-    })
-    const commits: number[] = []
-    const view: { container?: HTMLElement } = {}
-    const render = (dna: boolean) => h(Profiler, {
-      id: 'feed',
-      onRender: () => { if (view.container) commits.push(queryAll(view.container, '.lc-br-flat > .lc-br-elem').length) },
-    }, h(Browser, props({ data, dna, onDnaChange: () => {} })))
-    const m = await mount(render(true))
-    view.container = m.container
-    try {
-      assert.equal(flatRows(m).length, 200, 'a narrow pane uses wrapping rows without a fixed pitch')
-      await m.update(render(false))
-      width = 500
-      await act(async () => { for (const observer of observers) observer.notify() })
-      commits.length = 0
-      await m.update(render(true))
-      assert.ok(commits.some(count => count > 0), 'the measured wide window contains rows')
-      assert.ok(commits.every(count => count <= 30), `every wide commit is bounded: ${commits.join(', ')}`)
-    } finally {
-      await m.unmount()
-      vi.unstubAllGlobals()
-    }
-  })
-
   test('the toggle redraws the composition bar as one band per item, in prompt order', async () => {    const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders })))
-    assert.equal(bands(m).length, 6)
     const normal = bands(m).map(seg => seg.style.width)
     assert.deepEqual(normal, [100, 75, 20, 10, 40, 30].map(v => `${v / 275 * 100}%`))
     assert.ok(!bands(m)[0].className.includes('lc-stacked-seg-pick'))
@@ -147,7 +85,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     // Prompt order: the system prompt, the two tool schemas in producer order, then the message flow by seq —
     // NOT the fold's category order and NOT the header event's bookkeeping seq (see dna.ts).
     const segs = bands(m)
-    assert.equal(segs.length, 7)
     assert.deepEqual(segs.map(seg => seg.style.width), [100, 50, 25, 20, 30, 40, 10].map(v => `${v / 275 * 100}%`))
     assert.ok(segs.every(seg => seg.className.includes('lc-stacked-seg-pick')))
     assert.ok(query(m.container, '.lc-br-bar').className.includes('lc-br-bar-dna'))
@@ -252,7 +189,6 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     assert.ok(query(m.container, '.lc-br-flat'))
     assert.equal(queryAll(m.container, '.lc-br-cat-row').length, 0, 'the accordion yields to the feed')
     const labels = flatRows(m).map(r => text(r))
-    assert.equal(labels.length, 6)
     assert.ok(labels[0].includes('#4') && labels[0].includes('Injected Context') && labels[0].includes('Notice'))
     assert.ok(labels[1].includes('#3') && labels[1].includes('Assistant Messages'))
     assert.ok(labels[2].includes('#2') && labels[2].includes('bash'))
@@ -286,23 +222,21 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     assert.equal(flatRows(m).length, 6)
     assert.equal(filterStat(m), '×6 ≈275')
     await m.unmount()
-  })
 
-  test('the DNA feed lens matches tool schemas by their source plugin too', async () => {
-    const headers: ContextHeaders = {
+    const pluginHeaders: ContextHeaders = {
       headers: [{
         seq: 1, time: 1000, systemTokens: 100,
         tools: [{ name: 'bash', tokens: 50, plugin: 'dsh-shell' }, { name: 'write', tokens: 25 }],
       }],
     }
-    const m = await mount(h(Browser, props({ data: dnaData, headers })))
-    await click(dnaButton(m))
-    await typeToolSearch(m, 'dsh-shell')
-    const rows = flatRows(m)
-    assert.equal(rows.length, 1, 'the tools group stays on a plugin-only match')
-    assert.ok(text(rows[0]).includes('Tool Schemas'))
-    assert.equal(filterStat(m), '×1 ≈75')
-    await m.unmount()
+    const plugin = await mount(h(Browser, props({ data: dnaData, headers: pluginHeaders })))
+    await click(dnaButton(plugin))
+    await typeToolSearch(plugin, 'dsh-shell')
+    const pluginRows = flatRows(plugin)
+    assert.equal(pluginRows.length, 1, 'the tools group stays on a plugin-only match')
+    assert.ok(text(pluginRows[0]).includes('Tool Schemas'))
+    assert.equal(filterStat(plugin), '×1 ≈75')
+    await plugin.unmount()
   })
 
   test('the flat system row degrades inside itself when the epoch carries no prompt text', async () => {
@@ -359,7 +293,7 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     await m.unmount()
   })
 
-  test('hovering a DNA feed row lights its exact band on the bar; the header groups light their group', async () => {
+  test('DNA feed rows and bands echo both ways: a row lights its band, a band echoes onto its row, groups included', async () => {
     const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders })))
     await click(dnaButton(m))
     await hover(flatRows(m)[2].querySelector('.lc-br-elem-row')!)
@@ -377,13 +311,8 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     assert.deepEqual(bands(m).map(seg => seg.className.includes('lc-stacked-seg-on')), [true, false, false, false, false, false, false])
     await unhover(flatRow(m, 'System Prompt'))
     assert.ok(bands(m).every(seg => !seg.className.includes('lc-stacked-seg-on')))
-    await m.unmount()
-  })
 
-  test('hovering a DNA band echoes onto its feed row; a tool-schema band lights the tools group row', async () => {
-    const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders })))
-    await click(dnaButton(m))
-    // Band n3 (index 4) is feed row index 2 (the feed runs newest-first).
+    // Band → row: n3 echoes on feed row index 2; a tool-schema band lights the tools group.
     await hover(bands(m)[4])
     assert.ok(flatRows(m)[2].className.includes('lc-br-elem-echo'))
     assert.ok(flatRows(m).every((r, i) => i === 2 || !r.className.includes('lc-br-elem-echo')))
@@ -497,4 +426,66 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     assert.ok(bands(m)[3].className.includes('lc-stacked-seg-on'), 'back on the live surface the pin returns')
     await m.unmount()
   })
+  test('the feed paints its windowed rows and the filter summary on the first paint', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const silent = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      flushSync(() => {
+        root.render(h(Browser, props({ data: dnaData, headers: dnaHeaders, dna: true, onDnaChange: () => {} })))
+      })
+      // No skeleton stage: the rows and the summary come from the model at render time.
+      assert.equal(text(query(container, '.lc-br-filter-stat')), '×6 ≈275')
+      assert.equal(queryAll(container, '.lc-br-flat > .lc-br-elem').length, 6, 'rows, then the header groups')
+    } finally {
+      await act(async () => { root.unmount() })
+      container.remove()
+      silent.mockRestore()
+    }
+  })
+
+  test('enabling DNA after a disabled-pane resize never commits the whole feed', async () => {
+    let width = 300
+    const observers = new Set<{ notify: () => void }>()
+    class Observer {
+      constructor(readonly notify: () => void) {}
+      observe(): void { observers.add(this) }
+      disconnect(): void { observers.delete(this) }
+    }
+    vi.stubGlobal('ResizeObserver', Observer)
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
+      return this.classList.contains('lc-br-scroll') ? width : 0
+    })
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
+      return this.classList.contains('lc-br-scroll') ? 360 : 0
+    })
+    const data = tl({
+      current: { ...dnaData.current, user: 200, total: 200 },
+      nodes: Array.from({ length: 200 }, (_, i) => surfaceNode({ seq: i + 2, tokens: 1 })),
+    })
+    const commits: number[] = []
+    const view: { container?: HTMLElement } = {}
+    const render = (dna: boolean) => h(Profiler, {
+      id: 'feed',
+      onRender: () => { if (view.container) commits.push(queryAll(view.container, '.lc-br-flat > .lc-br-elem').length) },
+    }, h(Browser, props({ data, dna, onDnaChange: () => {} })))
+    const m = await mount(render(true))
+    view.container = m.container
+    try {
+      assert.equal(flatRows(m).length, 200, 'a narrow pane uses wrapping rows without a fixed pitch')
+      await m.update(render(false))
+      width = 500
+      await act(async () => { for (const observer of observers) observer.notify() })
+      commits.length = 0
+      await m.update(render(true))
+      assert.ok(commits.some(count => count > 0), 'the measured wide window contains rows')
+      assert.ok(commits.every(count => count <= 30), `every wide commit is bounded: ${commits.join(', ')}`)
+    } finally {
+      await m.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
+
 })

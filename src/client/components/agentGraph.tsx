@@ -9,6 +9,7 @@ import { makeAgentHeads } from '../agentHeads'
 import { billedTokensOf, displayCurrencyOf, estimateSessionCost, formatCost, type CostCurrency, type ModelBook } from '../cost'
 import { useModelPrices } from '../modelPrices'
 import { containHorizontalOverscroll } from '../overscroll'
+import { scrollIntoViewIfPossible } from '../revealScroll'
 import { openSessionVia, type ClientCtx } from '../services'
 import type { ViewKit } from '../viewkit'
 import type { FleetDetail } from '../../shared/types'
@@ -85,11 +86,9 @@ export function makeAgentGraph(
     const heardFocus = props.focusId ?? null
     useEffect(() => {
       if (heardFocus === null) return
-      /* v8 ignore next 1 -- the stage renders whenever the card does; the ref is set before effects run. */
+      /* v8 ignore next 1 -- the stage seats before effects; a missing card is the no-layout path. */
       const card = stageRef.current?.querySelector<HTMLElement>(`[data-agent="${CSS.escape(heardFocus)}"]`) ?? null
-      /* v8 ignore next 1 -- jsdom ships no scrollIntoView; the live stage scrolls the card to its center. */
-      if (card === null || typeof card.scrollIntoView !== 'function') return
-      card.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      scrollIntoViewIfPossible(card, { block: 'center', behavior: 'smooth' })
     }, [heardFocus])
     const [stageWidth, setStageWidth] = useState(0)
     const [stageHeight, setStageHeight] = useState(0)

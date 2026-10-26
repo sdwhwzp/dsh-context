@@ -63,12 +63,9 @@ async function boot() {
 }
 
 describe('dsh-context host plugin', () => {
-  test('module shape: name and the sessionProjections inject gate', () => {
+  test('module shape is the sessionProjections inject gate, and all three units serve folded views over real appends', async () => {
     assert.equal(name, 'dsh-context')
     assert.deepEqual(inject, ['sessionProjections'])
-  })
-
-  test('registers all three units and serves the folded views over real appends', async () => {
     const { ctx } = await boot()
     const session = ctx.sessions.create()
     appendRealEnvelopes(session)
@@ -116,7 +113,7 @@ describe('dsh-context host plugin', () => {
     assert.ok(seen.some(e => e.key === 'contextHeaders'), 'contextHeaders changes notified')
   })
 
-  test('tool schema rows carry best-effort plugin attribution through real appends', async () => {
+  test('tool rows carry the static map and live register-hook attribution through real appends', async () => {
     const { ctx } = await boot()
     const session = ctx.sessions.create()
     session.append('request/header', {
@@ -136,21 +133,18 @@ describe('dsh-context host plugin', () => {
     assert.equal(tools.find(t => t.name === 'bash')?.plugin, '@deepseek-ai/dsh-tool-bash')
     assert.equal(tools.find(t => t.name === 'mcp__github__get_issue')?.plugin, 'mcp:github')
     assert.ok(!('plugin' in tools.find(t => t.name === 'agent_teams_add_member')!), 'unmapped third-party tools stay untagged')
-  })
 
-  test('register-hook attribution flows through to the rendered headers', async () => {
-    const { ctx } = await boot()
     // dsh-context booted before any tools service existed; a late-provided instance is wrapped on first read.
     ctx.provide('tools', { register() { return () => {} } })
     await ctx.plugin({
       name: 'my-agent-tools',
       apply(agentCtx) {
-        const tools = (agentCtx as any).tools
-        tools.register({ name: 'custom_dynamic_tool', description: 'd', parameters: { type: 'object' } })
+        const toolsFace = (agentCtx as any).tools
+        toolsFace.register({ name: 'custom_dynamic_tool', description: 'd', parameters: { type: 'object' } })
       },
     })
-    const session = ctx.sessions.create()
-    session.append('request/header', {
+    const live = ctx.sessions.create()
+    live.append('request/header', {
       header: {
         config: { model: 'deepseek-v4-flash', provider: 'deepseek' },
         tools: [
@@ -160,14 +154,14 @@ describe('dsh-context host plugin', () => {
       },
       reason: 'initial',
     } as never)
-    const headers = ctx.sessionProjections.snapshot(session).values.contextHeaders
-    assert.ok(headers !== undefined, 'contextHeaders served after real appends')
-    const tools = headers.headers[0].tools
-    assert.equal(tools.find(t => t.name === 'custom_dynamic_tool')?.plugin, 'my-agent-tools')
-    assert.equal(tools.find(t => t.name === 'bash')?.plugin, '@deepseek-ai/dsh-tool-bash', 'static backbone still applies')
+    const liveHeaders = ctx.sessionProjections.snapshot(live).values.contextHeaders
+    assert.ok(liveHeaders !== undefined, 'contextHeaders served after real appends')
+    const liveTools = liveHeaders.headers[0].tools
+    assert.equal(liveTools.find(t => t.name === 'custom_dynamic_tool')?.plugin, 'my-agent-tools')
+    assert.equal(liveTools.find(t => t.name === 'bash')?.plugin, '@deepseek-ai/dsh-tool-bash', 'static backbone still applies')
   })
 
-  test('disposing the plugin fiber removes both keys from later snapshots', async () => {
+  test('disposing the plugin fiber removes every projection key from later snapshots', async () => {
     const { ctx, fiber } = await boot()
     const session = ctx.sessions.create()
     appendRealEnvelopes(session)
@@ -177,6 +171,7 @@ describe('dsh-context host plugin', () => {
     const snapshot = ctx.sessionProjections.snapshot(session)
     assert.equal(snapshot.values.contextTimeline, undefined, 'an unloaded plugin reads as capability absence')
     assert.equal(snapshot.values.contextHeaders, undefined)
+    assert.equal(snapshot.values.contextActivity, undefined)
   })
 
   test('the split generation with the detail route live: slim wire head + the endpoint serves the collections', async () => {
@@ -276,8 +271,8 @@ describe('the baseline gate', () => {
     assert.deepEqual(headers.headers, [], 'the header epoch is not folded either')
   })
 
-  test('the baseline itself and newer compose the real units', async () => {
-    for (const home of ['baseline', 'future']) {
+  test('the baseline itself, newer releases, and an unparseable dev version compose the real units', async () => {
+    for (const home of ['baseline', 'future', 'dev']) {
       const { ctx } = await bootWithHome(home)
       const session = ctx.sessions.create()
       appendRealEnvelopes(session)
@@ -286,15 +281,5 @@ describe('the baseline gate', () => {
       assert.equal(timeline.unsupported, undefined, home)
       assert.ok(timeline.current.total > 0, `the real fold runs on ${home}`)
     }
-  })
-
-  test('an unparseable harness version fails open into the real units', async () => {
-    const { ctx } = await bootWithHome('dev')
-    const session = ctx.sessions.create()
-    appendRealEnvelopes(session)
-    const timeline = ctx.sessionProjections.snapshot(session).values.contextTimeline
-    assert.ok(timeline !== undefined)
-    assert.equal(timeline.unsupported, undefined)
-    assert.ok(timeline.current.total > 0, 'a dev-channel harness build is never gated')
   })
 })

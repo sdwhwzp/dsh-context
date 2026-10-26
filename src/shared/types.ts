@@ -107,10 +107,20 @@ export interface FleetMessage {
   kind: 'relay' | 'mailbox' | 'settled'
   /** Sender session id, when the source attests one. */
   from?: string
-  /** The historical mailbox's sender NAME (no id join needed). */
+  /** The sender NAME (historical mailbox attestation, or the Team relay's framing line). */
   fromName?: string
   /** Text excerpt, already capped by the route. */
   text: string
+  /** True when a cap cut this message: a `full: true` read lifts it. */
+  clipped?: boolean
+  /** `settled` only: the runtime's one-line settlement summary. */
+  summary?: string
+  /** `settled` only: the child's closing report, split out of the notice. */
+  report?: string
+  /** `settled` only: the structured result the notice printed, when it carried one. */
+  structured?: string
+  /** `settled` only: the provider diagnostic that followed the notice. */
+  diagnostic?: string
 }
 
 /** One roster fact lifted from a lead session's durable `team/member` records; the projection strips
@@ -133,6 +143,8 @@ export interface FleetDetail {
   roster?: FleetMemberInfo[]
   /** Newest-first inter-agent messages found in this session's log. */
   messages: FleetMessage[]
+  /** Every inter-agent message found before the excerpt cap; absent when nothing was hidden. */
+  messagesTotal?: number
   /** True when the route's caps cut the message list or a text. */
   truncated: boolean
 }

@@ -124,16 +124,16 @@ describe('ContextBrowser message categories', () => {
     content = query(m.container, '.lc-br-content')
     assert.ok(text(content).includes('outside the loaded message window'))
     assert.ok(!text(content).includes('Content'))
-    await m.unmount()
-  })
-
-  test('user node whose conversation entry carries no content array shows the note', async () => {
-    const m = await mountBrowser()
-    await click(catRow(m, 'user'))
     await click(elemRows(m).find(r => text(r).includes('no content array')) as HTMLElement)
-    const content = query(m.container, '.lc-br-content')
+    content = query(m.container, '.lc-br-content')
     assert.ok(text(content).includes('outside the loaded message window'))
     await m.unmount()
+
+    const noLoader = await mountBrowser({ loadImage: undefined })
+    await click(catRow(noLoader, 'user'))
+    await click(elemRows(noLoader).find(r => text(r).includes('one pic')) as HTMLElement)
+    assert.equal(queryAll(noLoader.container, '.lc-att-ph').length, 1, 'no loader → placeholder')
+    await noLoader.unmount()
   })
 
   test('a single-node category opens its node with the category', async () => {
@@ -177,6 +177,11 @@ describe('ContextBrowser message categories', () => {
     await typeToolSearch(m, 'bash')
     assert.deepEqual(previews(), ['full cascade', 'done all'])
     assert.equal(filterStat(m), '×2 ≈28')
+    await typeToolSearch(m, 'thinking hard')
+    assert.deepEqual(elemRows(m).map(r => text(query(r, '.lc-br-preview'))), ['full cascade'])
+    await typeToolSearch(m, '42')
+    assert.equal(elemRows(m).length, 0)
+    assert.ok(text(query(m.container, '.lc-br-body')).includes('No rows match the current filter'))
     await m.unmount()
   })
 
@@ -272,43 +277,6 @@ describe('ContextBrowser message categories', () => {
     await m.unmount()
   })
 
-  test('repeated call names fold into ×N capsules in first-appearance order', async () => {
-    const headers: ContextHeaders = { headers: [{ seq: 1, time: 1, systemTokens: 3, tools: [{ name: 'bash', tokens: 5 }, { name: 'write', tokens: 3 }] }] }
-    const data = tl({
-      current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 8, tool: 0, total: 8 },
-      nodes: [surfaceNode({ seq: 2, cat: 'assistant', tokens: 8, calls: ['bash', 'write', 'bash', 'bash'] })],
-    })
-    const m = await mount(h(Browser, props({ data, headers })))
-    await click(catRow(m, 'assistant'))
-    const row = elemRows(m)[0]
-    const caps = queryAll(row, '.lc-br-tag')
-    assert.deepEqual(caps.map(c => text(c)), ['bash ×3', 'write'])
-    await m.unmount()
-  })
-
-  test('the assistant text filter scans the join’s reasoning blocks', async () => {
-    const m = await mountBrowser()
-    await click(catRow(m, 'assistant'))
-    await typeToolSearch(m, 'thinking hard')
-    const rows = elemRows(m)
-    assert.equal(rows.length, 1)
-    assert.ok(text(rows[0]).includes('full cascade'))
-    await typeToolSearch(m, '42')
-    assert.equal(elemRows(m).length, 0)
-    assert.ok(text(query(m.container, '.lc-br-body')).includes('No rows match the current filter'))
-    await typeToolSearch(m, '')
-    assert.equal(elemRows(m).length, 8)
-    await m.unmount()
-  })
-
-  test('user images render a placeholder when no loader is wired', async () => {
-    const m = await mountBrowser({ loadImage: undefined })
-    await click(catRow(m, 'user'))
-    await click(elemRows(m).find(r => text(r).includes('one pic')) as HTMLElement)
-    assert.equal(queryAll(m.container, '.lc-att-ph').length, 1)
-    await m.unmount()
-  })
-
   test('assistant rows: preview cascade and the full block vocabulary', async () => {
     const m = await mountBrowser()
     await click(catRow(m, 'assistant'))
@@ -349,27 +317,23 @@ describe('ContextBrowser message categories', () => {
     await flush()
     assert.equal(queryAll(content, '.lc-att-err').length, 1)
     assert.equal(queryAll(content, '.lc-att-thumb img').length, 1)
-    await m.unmount()
-  })
 
-  test('assistant with a legacy content array renders the generic content section', async () => {
-    const m = await mountBrowser()
-    await click(catRow(m, 'assistant'))
     await click(elemRows(m).find(r => text(r).includes('legacy')) as HTMLElement)
-    const content = query(m.container, '.lc-br-content')
-    assert.ok(text(content).includes('Content'))
-    assert.ok(text(content).includes('legacy body'))
+    assert.ok(text(query(m.container, '.lc-br-content')).includes('legacy body'), 'a legacy content array renders the generic section')
+    await click(elemRows(m).find(r => text(r).includes('legacy')) as HTMLElement)
+    await click(elemRows(m).find(r => text(r).includes('(empty reply)') && !text(r).includes('read')) as HTMLElement)
+    assert.ok(text(query(m.container, '.lc-br-content')).includes('outside the loaded message window'), 'no join → only the window note')
     await m.unmount()
-  })
 
-  test('assistant without a join shows only the window note', async () => {
-    const m = await mountBrowser()
-    await click(catRow(m, 'assistant'))
-    const row = elemRows(m).find(r => text(r).includes('(empty reply)') && !text(r).includes('read')) as HTMLElement
-    await click(row)
-    const content = query(m.container, '.lc-br-content')
-    assert.ok(text(content).includes('outside the loaded message window'))
-    await m.unmount()
+    const headers: ContextHeaders = { headers: [{ seq: 1, time: 1, systemTokens: 3, tools: [{ name: 'bash', tokens: 5 }, { name: 'write', tokens: 3 }] }] }
+    const repeated = tl({
+      current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 8, tool: 0, total: 8 },
+      nodes: [surfaceNode({ seq: 2, cat: 'assistant', tokens: 8, calls: ['bash', 'write', 'bash', 'bash'] })],
+    })
+    const folded = await mount(h(Browser, props({ data: repeated, headers })))
+    await click(catRow(folded, 'assistant'))
+    assert.deepEqual(queryAll(elemRows(folded)[0], '.lc-br-tag').map(c => text(c)), ['bash ×3', 'write'])
+    await folded.unmount()
   })
 
   test('compaction nodes: summary text, null and empty summaries', async () => {

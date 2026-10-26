@@ -5,7 +5,7 @@ import { buildTimelineDetail } from '../../src/host/fold'
 import { resolveBounds } from '../../src/host/config'
 import type { CommandStateRecord } from '../../src/host/foldState'
 import { codeDispatch, codeDispatchStart, jobRegistered, jobSettled, toolCall, toolResult } from './helpers/events'
-import { assertStable, assertStatesPlainJson, driveTimeline, timelineDef } from './helpers/projection'
+import { assertStable, driveTimeline, timelineDef, assertStatesPlainJson } from './helpers/projection'
 
 function bashCall(seq: number, callId: string, args: Record<string, unknown>, time?: number): TimelineEvent {
   return toolCall(seq, { callId, name: 'bash', arguments: JSON.stringify(args), turn: 1, step: 1, time })
@@ -25,32 +25,28 @@ describe('the command log — call/result lifecycle', () => {
       bashCall(1, 'c1', { command: 'git status', description: 'check the tree', workdir: '/repo', timeoutMs: 5000 }),
       bashResult(2, 'c1', 'clean'),
     ])
-    const rec = cmdsOf(state)[0]
-    assert.equal(rec.cmd, 'git status')
-    assert.equal(rec.description, 'check the tree')
-    assert.equal(rec.cwd, '/repo')
-    assert.equal(rec.timeoutMs, 5000)
-    assert.equal(rec.status, 'completed')
-    assert.equal(rec.exit, 0)
-    assert.equal(rec.exitInferred, true, 'a clean exit logs no marker — the 0 is inferred')
-    assert.equal(rec.derived, true)
-    assert.equal(rec.resultSeq, 2)
-    assert.equal(rec.err, false)
-    assert.equal(rec.outChars, 5)
-    assert.equal(rec.end !== undefined && rec.end >= rec.start, true)
+    const { time, start, end, ...rec } = cmdsOf(state)[0]
+    assert.deepEqual(rec, {
+      seq: 1, tool: 'bash', cmd: 'git status', description: 'check the tree', cwd: '/repo',
+      timeoutMs: 5000, status: 'completed', exit: 0, exitInferred: true, derived: true,
+      resultSeq: 2, err: false, outChars: 5, call: 'c1', turn: 1, step: 1,
+    })
+    assert.ok(typeof time === 'number' && end !== undefined && end >= start, 'a numeric time and a non-inverted end')
   })
 
-  test('the exit marker fails the run; stderr/truncation/meta.cwd land on the record', () => {
+  test('the exit marker fails the run; stderr, truncation, stop, sandbox, and meta.cwd land on the record', () => {
     const { state } = driveTimeline([
       bashCall(1, 'c1', { command: 'vitest run', description: 'tests' }),
       bashResult(2, 'c1', '1 failed\n[stderr]\nerror here\n[exit code: 1]', { meta: { cwd: '/repo/sub' } }),
+      bashCall(3, 'c2', { command: 'long', description: 'd', sandbox_permissions: 'danger-full-access' }),
+      bashResult(4, 'c2', 'partial\n[output truncated; full output: /tmp/x]'),
+      bashCall(5, 'c3', { command: 'halt' }),
+      bashResult(6, 'c3', 'x\n[stopped: user request]'),
     ])
-    const rec = cmdsOf(state)[0]
-    assert.equal(rec.status, 'failed')
-    assert.equal(rec.exit, 1)
-    assert.equal(rec.exitInferred, undefined)
-    assert.equal(rec.stderr, true)
-    assert.equal(rec.cwd, '/repo/sub', 'the result meta cwd wins over the argument')
+    const [failed, truncated, stopped] = cmdsOf(state)
+    assert.deepEqual([failed.status, failed.exit, failed.exitInferred, failed.stderr, failed.cwd], ['failed', 1, undefined, true, '/repo/sub'])
+    assert.deepEqual([truncated.outTruncated, truncated.sandbox, truncated.turn], [true, 'danger-full-access', 1])
+    assert.deepEqual([stopped.status, stopped.stopped], ['killed', true])
   })
 
   test('a kill, a timeout, and a denial each carry their own flag', () => {
@@ -60,16 +56,13 @@ describe('the command log — call/result lifecycle', () => {
       bashCall(3, 'c2', { command: 'b' }),
       bashResult(4, 'c2', 'x\n[timed out after 5000ms]\n[exit code: 28]'),
       bashCall(5, 'c3', { command: 'c' }),
-      bashResult(6, 'c3', '[sandbox: file access denied under strict mode]'),
+      bashResult(6, 'c3', '[sandbox: file access denied under read-only mode]'),
     ])
-    const [killed, timedOut, denied] = cmdsOf(state)
-    assert.equal(killed.status, 'killed')
-    assert.equal(killed.signal, 'SIGKILL')
-    assert.equal(timedOut.status, 'failed')
-    assert.equal(timedOut.timedOut, true)
-    assert.equal(timedOut.exit, 28)
-    assert.equal(denied.status, 'failed')
-    assert.equal(denied.denied, true)
+    assert.deepEqual(cmdsOf(state).map(r => [r.status, r.signal, r.timedOut, r.exit, r.denied]), [
+      ['killed', 'SIGKILL', undefined, undefined, undefined],
+      ['failed', undefined, true, 28, undefined],
+      ['failed', undefined, undefined, undefined, true],
+    ])
   })
 
   test('an infrastructure error (isError) fails the run without inventing an exit code', () => {
@@ -119,25 +112,6 @@ describe('the command log — call/result lifecycle', () => {
     assert.equal(bare.outChars, undefined)
   })
 
-  test('truncation and stop markers land on the record; a call can carry every argument', () => {
-    const { state } = driveTimeline([
-      bashCall(1, 'c1', {
-        command: 'long',
-        description: 'd',
-        sandbox_permissions: 'full',
-      }),
-      bashResult(2, 'c1', 'partial\n[output truncated; full output: /tmp/x]'),
-      bashCall(3, 'c2', { command: 'halt' }),
-      bashResult(4, 'c2', 'x\n[stopped: user request]'),
-    ])
-    const [truncated, stopped] = cmdsOf(state)
-    assert.equal(truncated.outTruncated, true)
-    assert.equal(truncated.sandbox, 'full')
-    assert.equal(truncated.turn, 1)
-    assert.equal(stopped.status, 'killed')
-    assert.equal(stopped.stopped, true)
-  })
-
   test('the command text caps at maxCommandChars with the truncation flag', () => {
     const { state } = driveTimeline([
       // No turn/step on this envelope: those optional fields stay absent.
@@ -150,7 +124,7 @@ describe('the command log — call/result lifecycle', () => {
     assert.equal('step' in rec, false)
   })
 
-  test('a run_code call books the program source as the command', () => {
+  test('a run_code call books the program source as the command, with no shell exit code', () => {
     const { state } = driveTimeline([
       toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'await x()', description: 'batch it' }) }),
       toolResult(2, { callId: 'rc1', content: [{ type: 'text', text: 'done' }] }),
@@ -160,16 +134,8 @@ describe('the command log — call/result lifecycle', () => {
     assert.equal(rec.cmd, 'await x()')
     assert.equal(rec.description, 'batch it')
     assert.equal(rec.status, 'completed')
-  })
-
-  test('every intermediate state is plain JSON', () => {
-    const drive = driveTimeline([
-      bashCall(1, 'c1', { command: 'ls', description: 'list' }),
-      jobRegistered(2, { callId: 'c1', startedAt: 500 }),
-      bashResult(3, 'c1', 'ok'),
-      jobSettled(4, { callId: 'c1', finishedAt: 900, status: 'completed', detail: 'exit code: 0' }),
-    ])
-    assertStatesPlainJson(drive)
+    assert.equal('exit' in rec, false, 'a code program carries no exit code')
+    assert.equal('exitInferred' in rec, false)
   })
 })
 
@@ -226,22 +192,37 @@ describe('the command log — job events', () => {
 })
 
 describe('the command log — background runs', () => {
-  test('a background dispatch stays running past its ack and settles at the job record', () => {
-    const { state } = driveTimeline([
+  test('a background run stays past its ack and tallies exactly once — at its terminal job record', () => {
+    const launched = driveTimeline([
       bashCall(1, 'c1', { command: 'pnpm dev', description: 'serve', run_in_background: true }, 1000),
       bashResult(2, 'c1', 'started background job j1', { time: 1200 }),
       jobSettled(3, { callId: 'c1', finishedAt: 999000, status: 'completed', detail: 'exit code: 0' }),
-    ])
-    const rec = cmdsOf(state)[0]
+    ]).state
+    const rec = cmdsOf(launched)[0]
     assert.equal(rec.background, true)
     assert.equal(rec.status, 'completed')
     assert.equal(rec.exit, 0)
     assert.equal(rec.end, 999000)
-    assert.equal(state.commandStats?.bg, 1)
-    assert.equal(state.commandStats?.runs, 1, 'the tally fired once, at the terminal transition')
+    assert.equal(launched.commandStats?.bg, 1)
+    assert.equal(launched.commandStats?.runs, 1, 'the tally fired once, at the terminal transition')
+    // A foreground call promoted at its wait timeout: the ack marks it background, the job record ends it.
+    const promoted = driveTimeline([
+      bashCall(1, 'c1', { command: 'slow', description: 's' }, 1000),
+      jobRegistered(2, { callId: 'c1', startedAt: 1100 }),
+      bashResult(3, 'c1', '[still running after 10000ms; moved to background job j9]\n'
+        + 'The command keeps running in the background. You will be notified when it finishes; '
+        + 'read newer output with job_output, stop it with job_kill.', { time: 11000 }),
+      jobSettled(4, { callId: 'c1', finishedAt: 999000, status: 'killed', detail: 'signal: SIGTERM' }),
+    ]).state
+    const killed = cmdsOf(promoted)[0]
+    assert.equal(killed.status, 'killed', 'promoted: the job outcome wins')
+    assert.equal(killed.signal, 'SIGTERM', 'promoted: the termination signal survives')
+    assert.equal(killed.background, true, 'promoted: the ack marked it background')
+    assert.equal(killed.exitInferred, undefined, 'no phantom inferred exit survives the job outcome')
+    assert.deepEqual(promoted.commandStats, { runs: 1, failed: 1, ms: 997900, bg: 1 }, 'promoted: one run tallied at its terminal job record')
   })
 
-  test('a promoted foreground call (wait timeout) marks the run background at its ack', () => {
+  test('a promoted foreground call (wait timeout) marks the run background at its ack, still running', () => {
     const { state } = driveTimeline([
       bashCall(1, 'c1', { command: 'slow', description: 's' }),
       // The real renderPromoted text: the marker followed by the fixed hand-off guidance.
@@ -256,34 +237,15 @@ describe('the command log — background runs', () => {
     assert.deepEqual(state.commandStats, { runs: 0, failed: 0, ms: 0, bg: 1 }, 'the dispatch tallies at the ack; nothing terminal yet')
   })
 
-  test('a promoted run tallies exactly once — at its terminal job record, not at the ack', () => {
-    const { state } = driveTimeline([
-      bashCall(1, 'c1', { command: 'slow', description: 's' }, 1000),
-      jobRegistered(2, { callId: 'c1', startedAt: 1100 }),
-      bashResult(3, 'c1', '[still running after 10000ms; moved to background job j9]\n'
-        + 'The command keeps running in the background. You will be notified when it finishes; '
-        + 'read newer output with job_output, stop it with job_kill.', { time: 11000 }),
-      jobSettled(4, { callId: 'c1', finishedAt: 999000, status: 'killed', detail: 'signal: SIGTERM' }),
-    ])
-    const rec = cmdsOf(state)[0]
-    assert.equal(rec.status, 'killed')
-    assert.equal(rec.signal, 'SIGTERM')
-    assert.equal(rec.background, true)
-    assert.equal(rec.exitInferred, undefined, 'no phantom inferred exit survives the job outcome')
-    assert.equal(state.commandStats?.runs, 1)
-    assert.equal(state.commandStats?.failed, 1)
-    assert.equal(state.commandStats?.bg, 1)
-    assert.equal(state.commandStats?.ms, 997900)
-  })
-
   test('the persistent-shell failure family fails the run honestly', () => {
+    const reset = 'The persistent bash shell was reset; the next bash call starts from the workspace with a fresh current directory and environment.'
     const { state } = driveTimeline([
       bashCall(1, 'c1', { command: 'sleep 999' }),
-      bashResult(2, 'c1', 'out\n[Command timed out or OOM]\n[shell reset for the next call]'),
+      bashResult(2, 'c1', `out\n[Command timed out or OOM]\n${reset}`),
       bashCall(3, 'c2', { command: 'exit' }),
-      bashResult(4, 'c2', 'bye\n[shell exited: code 3]\n[shell reset for the next call]'),
+      bashResult(4, 'c2', `bye\n[shell exited: code 3]\n${reset}`),
       bashCall(5, 'c3', { command: 'kill -9 $$' }),
-      bashResult(6, 'c3', 'x\n[shell killed by signal: SIGKILL]\n[shell reset for the next call]'),
+      bashResult(6, 'c3', `x\n[shell killed by signal: SIGKILL]\n${reset}`),
     ])
     const [timedOut, exited, killed] = cmdsOf(state)
     assert.equal(timedOut.status, 'failed')
@@ -293,17 +255,6 @@ describe('the command log — background runs', () => {
     assert.equal(exited.exit, 3)
     assert.equal(killed.status, 'killed')
     assert.equal(killed.signal, 'SIGKILL')
-  })
-
-  test('a run_code program settles without a shell exit code', () => {
-    const { state } = driveTimeline([
-      toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'await x()', description: 'batch' }) }),
-      toolResult(2, { callId: 'rc1', content: [{ type: 'text', text: 'done' }] }),
-    ])
-    const rec = cmdsOf(state)[0]
-    assert.equal(rec.status, 'completed')
-    assert.equal('exit' in rec, false, 'a code program carries no exit code')
-    assert.equal('exitInferred' in rec, false)
   })
 
   test('on a job-less log a background run stays dispatched, never tallied as failed', () => {
@@ -317,53 +268,55 @@ describe('the command log — background runs', () => {
 })
 
 describe('the command log — Code Mode (PTC) sub-dispatches', () => {
-  test('a precise nested job outcome survives a later contradictory dispatch result', () => {
-    const { state } = driveTimeline([
-      toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }),
-      codeDispatchStart(2, { rootCallId: 'rc1', subCallId: 'nested', name: 'bash', arguments: { command: 'build' } }),
-      jobRegistered(3, { callId: 'nested', startedAt: 20 }),
-      jobSettled(4, { callId: 'nested', finishedAt: 40, status: 'completed', detail: 'exit code: 2' }),
-      codeDispatch(5, { rootCallId: 'rc1', subCallId: 'nested', name: 'bash', content: [{ type: 'text', text: 'late\n[exit code: 0]' }] }),
-      toolResult(6, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
-    ])
-    const nested = cmdsOf(state).find(r => r.codeMode === true)
-    assert.ok(nested !== undefined)
-    assert.equal(nested.status, 'failed')
-    assert.equal(nested.exit, 2)
-    assert.equal(nested.start, 20)
-    assert.equal(nested.end, 40)
-    assert.equal(nested.derived, undefined)
-    assert.equal(nested.exitInferred, undefined)
-    assert.equal(nested.outChars, 19)
-    assert.equal(state.commandStats?.failed, 1)
-    assert.equal(state.commandStats?.runs, 2)
-  })
-
-  test('a nested dispatch buffers at start, settles at its dispatch event, and flushes on the root result', () => {
-    const { state } = driveTimeline([
+  test('a nested dispatch buffers at start, caps its command, settles at its dispatch event, and flushes on the root result', () => {
+    const drive = driveTimeline([
       toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'program', description: 'batch' }) }),
-      codeDispatchStart(2, { rootCallId: 'rc1', subCallId: 'rc1:ptc:0', name: 'bash', arguments: { command: 'git status', description: 'check' } }),
+      codeDispatchStart(2, { rootCallId: 'rc1', subCallId: 'rc1:ptc:0', name: 'bash', arguments: { command: 'git status --porcelain', description: 'check' } }),
       codeDispatch(3, {
         rootCallId: 'rc1',
         subCallId: 'rc1:ptc:0',
         name: 'bash',
-        arguments: { command: 'git status' },
+        arguments: { command: 'git status --porcelain' },
         isError: false,
         content: [{ type: 'text', text: 'clean\n[exit code: 0]' }],
       }),
       toolResult(4, { callId: 'rc1', content: [{ type: 'text', text: 'program done' }] }),
-    ])
-    assert.equal(state.pendingCodeCmds, undefined, 'the buffer flushed and emptied')
+    ], { maxCommandChars: 16 })
+    assertStatesPlainJson(drive)
+    assert.equal(drive.state.pendingCodeCmds, undefined, 'the buffer flushed and emptied')
     // The root books at its own call; the nested record flushes BEHIND it at the root's result.
-    const [root, nested] = cmdsOf(state)
-    assert.equal(nested.cmd, 'git status')
-    assert.equal(nested.codeMode, true)
-    assert.equal(nested.parent, 4, 'the locate target is the root result row')
-    assert.equal(nested.status, 'completed')
-    assert.equal(nested.exit, 0)
-    assert.equal(root.tool, 'run_code')
-    assert.equal(root.status, 'completed')
-    assert.equal(state.commandStats?.runs, 2, 'both the root and the nested run tallied')
+    const [root, nested] = cmdsOf(drive.state)
+    assert.deepEqual(
+      [nested.cmd, nested.cmdTruncated, nested.codeMode, nested.parent, nested.status, nested.exit],
+      ['git status --por', true, true, 4, 'completed', 0],
+      'the locate target is the root result row',
+    )
+    assert.deepEqual([root.tool, root.status, drive.state.commandStats?.runs], ['run_code', 'completed', 2], 'both the root and the nested run tallied')
+    // The nested record carries its full argument set; an isError settle fails it without an exit marker.
+    const armed = driveTimeline([
+      toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }),
+      codeDispatchStart(2, {
+        rootCallId: 'rc1',
+        subCallId: 'rc1:ptc:0',
+        name: 'bash',
+        arguments: {
+          command: 'deploy',
+          description: 'ship it',
+          workdir: '/srv',
+          timeoutMs: 3000,
+          run_in_background: true,
+          sandbox_permissions: 'danger-full-access',
+        },
+      }),
+      codeDispatch(3, { rootCallId: 'rc1', subCallId: 'rc1:ptc:0', name: 'bash', arguments: { command: 'deploy' }, isError: true }),
+      toolResult(4, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
+    ]).state
+    const errored = cmdsOf(armed).find(r => r.codeMode === true)
+    assert.ok(errored !== undefined)
+    assert.deepEqual(
+      [errored.cwd, errored.timeoutMs, errored.sandbox, errored.background, errored.status, errored.exit, errored.exitInferred],
+      ['/srv', 3000, 'danger-full-access', true, 'failed', undefined, undefined],
+    )
   })
 
   test('a non-command dispatch buffers nothing; the buffer stays bounded when the root never settles', () => {
@@ -389,46 +342,6 @@ describe('the command log — Code Mode (PTC) sub-dispatches', () => {
     assert.equal(cmdsOf(state).length, 1, 'only the run_code root')
   })
 
-  test('a nested command text caps at maxCommandChars with the truncation flag', () => {
-    const { state } = driveTimeline([
-      toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }),
-      codeDispatchStart(2, { rootCallId: 'rc1', subCallId: 'rc1:ptc:0', name: 'bash', arguments: { command: 'y'.repeat(40) } }),
-    ], { maxCommandChars: 16 })
-    const rec = state.pendingCodeCmds?.rc1[0]
-    assert.equal(rec?.cmd, 'y'.repeat(16))
-    assert.equal(rec?.cmdTruncated, true)
-  })
-
-  test('a nested dispatch carries its full argument set, and an error settle marks it without an exit code', () => {
-    const { state } = driveTimeline([
-      toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }),
-      codeDispatchStart(2, {
-        rootCallId: 'rc1',
-        subCallId: 'rc1:ptc:0',
-        name: 'bash',
-        arguments: {
-          command: 'deploy',
-          description: 'ship it',
-          workdir: '/srv',
-          timeoutMs: 3000,
-          run_in_background: true,
-          sandbox_permissions: 'full',
-        },
-      }),
-      codeDispatch(3, { rootCallId: 'rc1', subCallId: 'rc1:ptc:0', name: 'bash', arguments: { command: 'deploy' }, isError: true }),
-      toolResult(4, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
-    ])
-    const nested = cmdsOf(state).find(r => r.codeMode === true)
-    assert.ok(nested !== undefined)
-    assert.equal(nested.cwd, '/srv')
-    assert.equal(nested.timeoutMs, 3000)
-    assert.equal(nested.sandbox, 'full')
-    assert.equal(nested.background, true)
-    assert.equal(nested.status, 'failed', 'an isError settle fails without an exit marker')
-    assert.equal(nested.exit, undefined)
-    assert.equal(nested.exitInferred, undefined)
-  })
-
   test('a nested background run takes its job events while still buffered behind the root', () => {
     const { state } = driveTimeline([
       toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }),
@@ -447,38 +360,22 @@ describe('the command log — Code Mode (PTC) sub-dispatches', () => {
     ])
     const nested = cmdsOf(state).find(r => r.codeMode === true)
     assert.ok(nested !== undefined)
-    assert.equal(nested.status, 'completed', 'the buffered record took its job settlement')
-    assert.equal(nested.start, 2000, 'the registered spawn instant reached the buffer')
-    assert.equal(nested.end, 62000)
-    assert.equal(nested.derived, undefined)
-    assert.equal(state.commandStats?.runs, 2, 'root + nested each tallied once')
-    assert.equal(state.commandStats?.bg, 1)
+    assert.deepEqual(
+      [nested.status, nested.start, nested.end, nested.derived],
+      ['completed', 2000, 62000, undefined],
+      'the buffered record took its job settlement and the registered spawn instant',
+    )
+    assert.deepEqual([state.commandStats?.runs, state.commandStats?.bg], [2, 1], 'root + nested each tallied once')
   })
 
-  test('a nested job event for an unknown sub-call returns the state unchanged', () => {
+  test('job events skip buffers that do not hold the call (no buffer, a stale buffer, a multi-root scan)', () => {
     const def = timelineDef()
-    let state = def.init()
-    state = def.apply(state, toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }))
-    const before = state
-    state = def.apply(state, jobSettled(2, { callId: 'rc1:ptc:9', finishedAt: 5, status: 'completed', detail: 'exit code: 0' }))
-    assert.equal(state, before, 'no such buffered record — no change')
-    state = def.apply(state, jobRegistered(3, { callId: 'rc1:ptc:9', startedAt: 5 }))
-    assert.equal(state, before)
-  })
-
-  test('a job event naming no buffered sub-call of an EXISTING buffer still returns the state unchanged', () => {
-    const def = timelineDef()
-    let state = def.init()
-    state = def.apply(state, toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }))
-    state = def.apply(state, codeDispatchStart(2, { rootCallId: 'rc1', subCallId: 'rc1:ptc:0', name: 'bash', arguments: { command: 'one' } }))
-    const before = state
-    state = def.apply(state, jobRegistered(3, { callId: 'rc1:ptc:ghost', startedAt: 5 }))
-    assert.equal(state, before)
-    state = def.apply(state, jobSettled(4, { callId: 'rc1:ptc:ghost', finishedAt: 9, status: 'completed' }))
-    assert.equal(state, before)
-  })
-
-  test('a job event skips buffers that do not hold the call (multi-root scan)', () => {
+    const noBuffer = def.apply(def.init(), toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }))
+    assert.equal(def.apply(noBuffer, jobSettled(2, { callId: 'rc1:ptc:9', finishedAt: 5, status: 'completed', detail: 'exit code: 0' })), noBuffer, 'no buffer at all')
+    assert.equal(def.apply(noBuffer, jobRegistered(3, { callId: 'rc1:ptc:9', startedAt: 5 })), noBuffer)
+    const buffered = def.apply(noBuffer, codeDispatchStart(4, { rootCallId: 'rc1', subCallId: 'rc1:ptc:0', name: 'bash', arguments: { command: 'one' } }))
+    assert.equal(def.apply(buffered, jobRegistered(5, { callId: 'rc1:ptc:ghost', startedAt: 5 })), buffered)
+    assert.equal(def.apply(buffered, jobSettled(6, { callId: 'rc1:ptc:ghost', finishedAt: 9, status: 'completed' })), buffered)
     const { state } = driveTimeline([
       toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'a' }) }),
       toolCall(2, { callId: 'rc2', name: 'run_code', arguments: JSON.stringify({ code: 'b' }) }),
@@ -525,7 +422,7 @@ describe('the command log — Code Mode (PTC) sub-dispatches', () => {
 })
 
 describe('the command log — retention, stats, and the served payload', () => {
-  test('the log drops the oldest SETTLED records first and stamps the coverage floor; running records stay', () => {
+  test('the log drops the oldest SETTLED records first, stamps the coverage floor, and still bounds never-settling calls', () => {
     const events: TimelineEvent[] = []
     for (let i = 0; i < 5; i++) {
       events.push(bashCall(10 + i * 2, `c${i}`, { command: `cmd${i}` }))
@@ -534,17 +431,13 @@ describe('the command log — retention, stats, and the served payload', () => {
     // One still-running record sits between the settled ones.
     events.push(bashCall(20, 'keep', { command: 'running' }))
     const { state } = driveTimeline(events, { maxCommands: 3 })
-    const kept = cmdsOf(state).map(r => r.cmd)
-    assert.deepEqual(kept, ['cmd3', 'cmd4', 'running'])
+    assert.deepEqual(cmdsOf(state).map(r => r.cmd), ['cmd3', 'cmd4', 'running'])
     assert.equal(state.commandsFloor, 14, 'the newest dropped record was the cmd2 call (a record’s seq is its call’s)')
-  })
-
-  test('a log of never-settling calls is still bounded', () => {
-    const events: TimelineEvent[] = []
-    for (let i = 0; i < 10; i++) events.push(bashCall(10 + i, `c${i}`, { command: `cmd${i}` }))
-    const { state } = driveTimeline(events, { maxCommands: 4 })
-    assert.equal(cmdsOf(state).length, 4)
-    assert.equal(state.commandsFloor, 15)
+    const neverSettling: TimelineEvent[] = []
+    for (let i = 0; i < 10; i++) neverSettling.push(bashCall(10 + i, `c${i}`, { command: `cmd${i}` }))
+    const bounded = driveTimeline(neverSettling, { maxCommands: 4 })
+    assert.equal(cmdsOf(bounded.state).length, 4)
+    assert.equal(bounded.state.commandsFloor, 15)
   })
 
   test('the whole-log stats survive list trimming', () => {
@@ -559,30 +452,46 @@ describe('the command log — retention, stats, and the served payload', () => {
     assert.equal(state.commandStats?.failed, 3)
   })
 
-  test('the state schema accepts a state carrying commands; the detail serves detached, key-stripped copies', () => {
-    const { def, state } = driveTimeline([
+  test('the schema accepts a command-bearing state; the detail serves detached records and the slim head omits the log', () => {
+    const events = [
       bashCall(1, 'c1', { command: 'ls', description: 'list' }),
       bashResult(2, 'c1', 'ok'),
-    ])
+    ]
+    const { def, state } = driveTimeline(events)
     def.stateSchema.parse(structuredClone(state))
     const detail = buildTimelineDetail(state, resolveBounds({}))
     assert.equal(detail.commands?.length, 1)
     assert.notEqual(detail.commands?.[0], state.commands[0], 'the served record never aliases the state')
     assert.equal('call' in (detail.commands?.[0] ?? {}), false, 'the fold pairing key stays off the wire')
     assert.equal(detail.commandStats?.runs, 1)
-  })
-
-  test('the slim head does NOT carry the command log; the inline value does and validates', () => {
-    const events = [
-      bashCall(1, 'c1', { command: 'ls', description: 'list' }),
-      bashResult(2, 'c1', 'ok'),
-    ]
     const slim = timelineDef({}, true)
     const inline = timelineDef({}, false)
-    const { state } = driveTimeline(events)
     assert.equal('commands' in slim.wire.view(state), false)
     const full = inline.wire.view(state)
     assert.equal(full.commands?.length, 1)
     assert.equal(inline.wire.viewSchema.safeParse(full).success, true)
   })
+  test('a precise nested job outcome survives a later contradictory dispatch result', () => {
+    const { state } = driveTimeline([
+      toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }),
+      codeDispatchStart(2, { rootCallId: 'rc1', subCallId: 'nested', name: 'bash', arguments: { command: 'build' } }),
+      jobRegistered(3, { callId: 'nested', startedAt: 20 }),
+      jobSettled(4, { callId: 'nested', finishedAt: 40, status: 'completed', detail: 'exit code: 2' }),
+      codeDispatch(5, { rootCallId: 'rc1', subCallId: 'nested', name: 'bash', content: [{ type: 'text', text: 'late\n[exit code: 0]' }] }),
+      toolResult(6, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
+    ])
+    const nested = cmdsOf(state).find(r => r.codeMode === true)
+    assert.ok(nested !== undefined)
+    assert.equal(nested.status, 'failed')
+    assert.equal(nested.exit, 2)
+    assert.equal(nested.start, 20)
+    assert.equal(nested.end, 40)
+    assert.equal(nested.derived, undefined)
+    assert.equal(nested.exitInferred, undefined)
+    assert.equal(nested.outChars, 19)
+    assert.equal(state.commandStats?.failed, 1)
+    assert.equal(state.commandStats?.runs, 2)
+  })
+
+
 })

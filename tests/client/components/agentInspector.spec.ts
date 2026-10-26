@@ -128,7 +128,7 @@ describe('AgentInspector — team membership', () => {
     const el = query(m.container, '.lc-inspector')
     assert.ok(text(el).includes(DICT_EN['fleet.membership']))
     assert.ok(text(el).includes('worker-bee'))
-    assert.ok(text(el).includes('teammate'))
+    assert.ok(text(el).includes(DICT_EN['fleet.role.teammate']))
     assert.ok(text(el).includes('维度2：代码质量'))
     const tasks = queryAll(el, '.lc-inspector-task')
     assert.equal(tasks.length, 4)
@@ -158,7 +158,7 @@ describe('AgentInspector — the fleet-detail sections', () => {
     truncated: false,
   }
 
-  test('descriptor and prompt render off the landed detail; the node model joins the config', async () => {
+  test('descriptor and prompt render off the landed detail; the config line dedupes the model; the reply carries its clock', async () => {
     const m = await mount(h(AgentInspector, propsOf({
       node: nodeOf('w1', { model: 'deepseek-flash', reasoningEffort: 'max' }),
       detail: { detail: DETAIL },
@@ -170,28 +170,23 @@ describe('AgentInspector — the fleet-detail sections', () => {
     // jsdom reports no clamping: the expand toggle stays hidden.
     assert.equal(queryAll(el, '.lc-inspector-btn').length, 1, 'only the open button')
     await m.unmount()
-  })
 
-  test('the config line dedupes the descriptor model against the node model and skips absent fields', async () => {
-    const m = await mount(h(AgentInspector, propsOf({
+    const deduped = await mount(h(AgentInspector, propsOf({
       node: nodeOf('w1', { model: 'deepseek-v4' }),
       detail: { detail: { descriptor: { mode: 'continuable', label: 'w', agentModel: 'deepseek-v4' }, messages: [], truncated: false } },
     })))
-    const el = query(m.container, '.lc-inspector')
-    assert.ok(text(el).includes(DICT_EN['fleet.config']))
-    // One model mention only — the descriptor's identical model dedupes, no provider listed.
-    assert.equal(text(el).match(/deepseek-v4/g)?.length, 1)
-    await m.unmount()
-  })
+    const dedupedEl = query(deduped.container, '.lc-inspector')
+    assert.ok(text(dedupedEl).includes(DICT_EN['fleet.config']))
+    assert.equal(text(dedupedEl).match(/deepseek-v4/g)?.length, 1)
+    await deduped.unmount()
 
-  test('the latest reply renders with its clock', async () => {
-    const m = await mount(h(AgentInspector, propsOf({
+    const reply = await mount(h(AgentInspector, propsOf({
       detail: { detail: { lastReply: { time: 1_700_000_000_000, text: '报告完毕' }, messages: [], truncated: false } },
     })))
-    const el = query(m.container, '.lc-inspector')
-    assert.ok(text(el).includes(DICT_EN['fleet.members.reply']))
-    assert.ok(text(el).includes('报告完毕'))
-    await m.unmount()
+    const replyEl = query(reply.container, '.lc-inspector')
+    assert.ok(text(replyEl).includes(DICT_EN['fleet.members.reply']))
+    assert.ok(text(replyEl).includes('报告完毕'))
+    await reply.unmount()
   })
 
   test('a clamped prompt expands and collapses', async () => {
@@ -229,11 +224,11 @@ describe('AgentInspector — the fleet-detail sections', () => {
 
 describe('AgentInspector — comms', () => {
   const COMMS: CommsRow[] = [
-    { key: 'w1:9', to: 'w1', time: 100, kind: 'relay', from: 'root', text: 'how far along?' },
-    { key: 'root:4', to: 'root', time: 90, kind: 'settled', from: 'w1', text: 'w1 finished' },
-    { key: 'w1:3', to: 'w1', time: 80, kind: 'mailbox', fromName: 'lead', text: 'old school' },
+    { key: 'w1:9', to: 'w1', seq: 9, time: 100, kind: 'relay', from: 'root', text: 'how far along?' },
+    { key: 'root:4', to: 'root', seq: 4, time: 90, kind: 'settled', from: 'w1', text: 'w1 finished' },
+    { key: 'w1:3', to: 'w1', seq: 3, time: 80, kind: 'mailbox', fromName: 'lead', text: 'old school' },
     // Neither an id nor a name: the arrow alone introduces the recipient.
-    { key: 'w1:2', to: 'w1', time: 70, kind: 'relay', text: 'anonymous relay' },
+    { key: 'w1:2', to: 'w1', seq: 2, time: 70, kind: 'relay', text: 'anonymous relay' },
   ]
 
   test('rows render with peer links; clicking a peer pins it', async () => {
@@ -261,7 +256,7 @@ describe('AgentInspector — comms', () => {
 
   test('settled notices render the localized variant with the raw text on the tooltip', async () => {
     const settled: CommsRow[] = [
-      { key: 'root:4', to: 'root', time: 90, kind: 'settled', from: 'w1', text: 'Background subagent w1 finished and will do no further work unless you send it more.' },
+      { key: 'root:4', to: 'root', seq: 4, time: 90, kind: 'settled', from: 'w1', text: 'Background subagent w1 finished and will do no further work unless you send it more.' },
     ]
     const m = await mount(h(AgentInspector, propsOf({ comms: settled, labelOf: id => ({ root: 'Main Agent', w1: 'worker-bee' })[id] ?? id })))
     const el = query(m.container, '.lc-inspector')
@@ -274,7 +269,7 @@ describe('AgentInspector — comms', () => {
 
   test('more than six rows clamp to six', async () => {
     const many: CommsRow[] = Array.from({ length: 8 }, (_, i) => ({
-      key: `w1:${i}`, to: 'w1', time: i, kind: 'relay' as const, from: 'root', text: `m${i}`,
+      key: `w1:${i}`, to: 'w1', seq: i, time: i, kind: 'relay' as const, from: 'root', text: `m${i}`,
     }))
     const m = await mount(h(AgentInspector, propsOf({ comms: many })))
     assert.equal(queryAll(m.container, '.lc-inspector-comm').length, 6)

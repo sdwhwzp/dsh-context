@@ -1,6 +1,6 @@
 import { act, createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
-import { describe, test, vi, afterEach } from 'vitest'
+import { describe, test, vi, afterEach, beforeEach } from 'vitest'
 import {
   DetailStore,
   detailOf,
@@ -52,16 +52,13 @@ function stubDetailFetch(behavior: () => { status?: number; body?: unknown }): v
 }
 
 describe('detailOf', () => {
-  test('rejects non-records and revision-less/negative/NaN payloads', () => {
+  test('rejects non-records and revision-less/negative/NaN payloads; a served payload narrows per item', () => {
     assert.equal(detailOf(null), null)
     assert.equal(detailOf(42), null)
     assert.equal(detailOf({}), null)
     assert.equal(detailOf({ rev: '1' }), null)
     assert.equal(detailOf({ rev: -1 }), null)
     assert.equal(detailOf({ rev: NaN }), null)
-  })
-
-  test('narrows a served payload: collections re-proved per item, floors conditional', () => {
     const d = detail(3, {
       requests: [{ seq: 3 }, null, 'junk'],
       nodes: [null, { seq: 2 }],
@@ -167,7 +164,7 @@ describe('DetailStore', () => {
   }
 
   test('request schedules the trailing-edge read; the snapshot transitions pending → landed', async () => {
-    const { fetcher, calls } = scriptedFetcher([detail(1)])
+    const { fetcher, calls } = scriptedFetcher([detail(1), detail(2)])
     const store = new DetailStore(fetcher, 0)
     const seen: string[] = []
     store.subscribe(() => seen.push('change'))
@@ -183,33 +180,30 @@ describe('DetailStore', () => {
     store.request(1)
     await settle()
     assert.equal(calls.length, 1, 'a covered revision does not refetch')
-  })
-
-  test('unsubscribe stops the notifications', async () => {
-    const { fetcher } = scriptedFetcher([detail(1)])
-    const store = new DetailStore(fetcher, 0)
-    const seen: string[] = []
-    const off = store.subscribe(() => seen.push('change'))
+    const off = store.subscribe(() => seen.push('late'))
     off()
-    store.request(1)
+    store.request(2)
     await settle()
-    assert.equal(seen.length, 0)
+    assert.equal(seen.includes('late'), false, 'an unsubscribed listener hears nothing')
   })
 
-  test('a parked store arms no read (the last unsubscribe drops the pending window)', async () => {
+  test('a parked store arms no read; it parks only when its last subscriber leaves', async () => {
     vi.useFakeTimers()
     const { fetcher, calls } = scriptedFetcher([detail(1)])
     const store = new DetailStore(fetcher, 10)
-    const off = store.subscribe(() => {})
+    const offTab = store.subscribe(() => {})
+    const offModal = store.subscribe(() => {})
     store.request(1)
     assert.equal(store.getSnapshot().pending, true, 'the debounce window is armed')
-    off()
+    offTab()
+    await vi.advanceTimersByTimeAsync(10)
+    assert.equal(calls.length, 1, 'the remaining subscriber still gets its read')
+    offModal()
     assert.equal(store.getSnapshot().pending, false, 'parking drops the pending window')
     await vi.advanceTimersByTimeAsync(100)
-    assert.equal(calls.length, 0, 'a parked store never reaches the fetcher')
     store.request(2)
     await vi.advanceTimersByTimeAsync(100)
-    assert.equal(calls.length, 0)
+    assert.equal(calls.length, 1, 'a parked store never reaches the fetcher')
     vi.useRealTimers()
   })
 
@@ -233,7 +227,7 @@ describe('DetailStore', () => {
     vi.useRealTimers()
   })
 
-  test('a store parked without a payload re-reads on the next subscribe', async () => {
+  test('a parked store resumes without a cached payload by reading again, and with one by serving the cache', async () => {
     vi.useFakeTimers()
     const { fetcher, calls } = scriptedFetcher([new Error('offline'), detail(1)])
     const store = new DetailStore(fetcher, 10)
@@ -251,36 +245,17 @@ describe('DetailStore', () => {
     await vi.advanceTimersByTimeAsync(10)
     assert.equal(calls.length, 2, 'the resumed store reads instead of sticking on the note')
     vi.useRealTimers()
-  })
 
-  test('a parked store with a cached payload resumes without a read', async () => {
-    const { fetcher, calls } = scriptedFetcher([detail(1)])
-    const store = new DetailStore(fetcher, 0)
-    const off = store.subscribe(() => {})
-    store.request(1)
-    await until(() => store.getSnapshot().detail?.rev === 1, 'the first read never landed')
-    off()
-    store.subscribe(() => {})
-    store.request(1)
+    const cached = scriptedFetcher([detail(1)])
+    const cachedStore = new DetailStore(cached.fetcher, 0)
+    const offCached = cachedStore.subscribe(() => {})
+    cachedStore.request(1)
+    await until(() => cachedStore.getSnapshot().detail?.rev === 1, 'the first read never landed')
+    offCached()
+    cachedStore.subscribe(() => {})
+    cachedStore.request(1)
     await settle()
-    assert.equal(calls.length, 1, 'the cached payload still covers the rev')
-  })
-
-  test('a shared store parks only when its last subscriber leaves', async () => {
-    vi.useFakeTimers()
-    const { fetcher, calls } = scriptedFetcher([detail(1)])
-    const store = new DetailStore(fetcher, 10)
-    const offTab = store.subscribe(() => {})
-    const offModal = store.subscribe(() => {})
-    store.request(1)
-    offTab()
-    await vi.advanceTimersByTimeAsync(10)
-    assert.equal(calls.length, 1, 'the remaining subscriber still gets its read')
-    offModal()
-    store.request(2)
-    await vi.advanceTimersByTimeAsync(100)
-    assert.equal(calls.length, 1, 'the parked store arms nothing')
-    vi.useRealTimers()
+    assert.equal(cached.calls.length, 1, 'the cached payload still covers the rev')
   })
 
   test('release drops the cached payload and any armed window', async () => {
@@ -301,7 +276,7 @@ describe('DetailStore', () => {
     vi.useRealTimers()
   })
 
-  test('a rev bump during the in-flight read re-reads after settle (trailing edge)', async () => {
+  test('a rev bump during an in-flight read stacks nothing, then trails after settle', async () => {
     let gate!: () => void
     const first = new Promise<ContextTimelineDetail | null>(resolve => { gate = () => resolve(detail(1)) })
     let call = 0
@@ -312,6 +287,8 @@ describe('DetailStore', () => {
     store.request(1)
     await vi.waitFor(() => { assert.equal(call, 1) })
     store.request(2)
+    await settle()
+    assert.equal(call, 1, 'no stacked read while the first is in flight')
     gate()
     await until(() => store.getSnapshot().detail?.rev === 2, 'the trailing read never landed')
     assert.equal(call, 2)
@@ -338,10 +315,11 @@ describe('DetailStore', () => {
     await until(() => store.getSnapshot().detail?.rev === 2, 'the refold reset never refetched')
   })
 
-  for (const outcome of ['detail', 'absent', 'failure'] as const) {
-    for (const timerFired of [false, true]) {
-      test(`a refold ignores an old ${outcome} before a new read (timer fired: ${String(timerFired)})`, async () => {
-        vi.useFakeTimers()
+  test('a refold ignores an old detail, absence, or failure before a new read, whether or not its timer fired', async () => {
+    vi.useFakeTimers()
+    for (const outcome of ['detail', 'absent', 'failure'] as const) {
+      for (const timerFired of [false, true]) {
+        const label = `old ${outcome} (timer fired: ${String(timerFired)})`
         let resolve!: (value: ContextTimelineDetail | null) => void
         let reject!: (reason: Error) => void
         let calls = 0
@@ -357,44 +335,41 @@ describe('DetailStore', () => {
         await vi.advanceTimersByTimeAsync(10)
         store.request(2)
         if (timerFired) await vi.advanceTimersByTimeAsync(10)
-        assert.equal(calls, 1, 'the reset never stacks a concurrent read')
+        assert.equal(calls, 1, `${label}: the reset never stacks a concurrent read`)
 
         if (outcome === 'failure') reject(new Error('offline'))
         else resolve(outcome === 'detail' ? detail(5) : null)
         await vi.advanceTimersByTimeAsync(0)
-        assert.equal(store.getSnapshot().detail, null, 'old collections must not land under the new head')
-        assert.equal(store.getSnapshot().failed, false, 'old absence or failure must not fail the new generation')
-        assert.equal(store.getSnapshot().pending, true, 'the new generation still needs its read')
+        assert.equal(store.getSnapshot().detail, null, `${label}: old collections must not land under the new head`)
+        assert.equal(store.getSnapshot().failed, false, `${label}: old absence or failure must not fail the new generation`)
+        assert.equal(store.getSnapshot().pending, true, `${label}: the new generation still needs its read`)
 
         await vi.advanceTimersByTimeAsync(10)
-        assert.equal(calls, 2)
-        assert.equal(store.getSnapshot().detail?.rev, 2)
-        assert.equal(store.getSnapshot().failed, false)
-        assert.equal(store.getSnapshot().pending, false)
-      })
+        assert.equal(calls, 2, label)
+        assert.equal(store.getSnapshot().detail?.rev, 2, label)
+        assert.equal(store.getSnapshot().failed, false, label)
+        assert.equal(store.getSnapshot().pending, false, label)
+      }
     }
-  }
-
-  test('several refolds during one read converge to the latest generation', async () => {
-    vi.useFakeTimers()
-    let resolve!: (value: ContextTimelineDetail | null) => void
-    let calls = 0
-    const first = new Promise<ContextTimelineDetail | null>(res => { resolve = res })
-    const store = new DetailStore(() => {
-      calls++
-      return calls === 1 ? first : Promise.resolve(detail(1))
+    let resolveMany!: (value: ContextTimelineDetail | null) => void
+    let callsMany = 0
+    const firstMany = new Promise<ContextTimelineDetail | null>(res => { resolveMany = res })
+    const many = new DetailStore(() => {
+      callsMany++
+      return callsMany === 1 ? firstMany : Promise.resolve(detail(1))
     }, 10)
-    store.request(5)
+    many.request(5)
     await vi.advanceTimersByTimeAsync(10)
-    store.request(3)
-    store.request(1)
+    many.request(3)
+    many.request(1)
     await vi.advanceTimersByTimeAsync(10)
-    resolve(detail(5))
+    resolveMany(detail(5))
     await vi.advanceTimersByTimeAsync(0)
-    assert.equal(store.getSnapshot().detail, null)
+    assert.equal(many.getSnapshot().detail, null)
     await vi.advanceTimersByTimeAsync(10)
-    assert.equal(calls, 2)
-    assert.equal(store.getSnapshot().detail?.rev, 1)
+    assert.equal(callsMany, 2)
+    assert.equal(many.getSnapshot().detail?.rev, 1, 'several refolds during one read converge to the latest generation')
+    vi.useRealTimers()
   })
 
   test('a transport failure with no detail arms the failed state; the backoff trailing recovers on its own', async () => {
@@ -477,18 +452,22 @@ describe('DetailStore', () => {
     assert.equal(store.getSnapshot().detail, null)
   })
 
-  test('retry re-arms immediately and resets the backoff', async () => {
+  test('retry refires at once and a landed detail absorbs later retries', async () => {
+    vi.useFakeTimers()
     const { fetcher, calls } = scriptedFetcher([new Error('offline'), detail(1)])
     const store = new DetailStore(fetcher, 1000)
     store.request(1)
-    await vi.waitFor(() => { assert.equal(calls.length, 1) }, { timeout: 3000 })
-    await until(() => store.getSnapshot().failed === true, 'the failure never settled')
+    await vi.advanceTimersByTimeAsync(1000)
+    assert.equal(calls.length, 1)
+    assert.equal(store.getSnapshot().failed, true, 'the failure settled')
     store.retry()
-    await until(() => store.getSnapshot().detail?.rev === 1, 'the retry never refetched')
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(store.getSnapshot().detail?.rev, 1, 'the retry refetched at once')
     assert.equal(calls.length, 2)
     store.retry()
-    await settle()
+    await vi.advanceTimersByTimeAsync(0)
     assert.equal(calls.length, 2)
+    vi.useRealTimers()
   })
 
   test('consecutive failures back the debounce off exponentially', async () => {
@@ -509,27 +488,12 @@ describe('DetailStore', () => {
     assert.equal(calls.length, 3, 'the recovered read lands')
   })
 
-  test('a rev bump arriving while a read is in flight waits out the flight, then trails', async () => {
-    let release!: (d: ContextTimelineDetail | null) => void
-    let call = 0
-    const store = new DetailStore(() => {
-      call++
-      if (call === 1) return new Promise<ContextTimelineDetail | null>(resolve => { release = resolve })
-      return Promise.resolve(detail(2))
-    }, 0)
-    store.request(1)
-    await vi.waitFor(() => { assert.equal(call, 1) })
-    store.request(2)
-    await settle()
-    assert.equal(call, 1, 'no stacked read while the first is in flight')
-    release(detail(1))
-    await until(() => store.getSnapshot().detail?.rev === 2, 'the trailing read never landed')
-    assert.equal(call, 2)
-  })
 })
 
 describe('detailStoreOf', () => {
-  test('the store map stays bounded while an ACTIVE store is never dropped', { timeout: 30_000 }, async () => {
+  beforeEach(() => { vi.useFakeTimers() })
+
+  test('the store map stays bounded while an ACTIVE store is never dropped', async () => {
     stubDetailFetch(() => ({ body: { ok: true, value: detail(1) } }))
     const held = detailStoreOf('held')
     const off = held.subscribe(() => {})
@@ -574,7 +538,8 @@ describe('detailStoreOf', () => {
     const store = detailStoreOf(id)
     const off = store.subscribe(() => {})
     store.request(1)
-    await until(() => store.hasPayload, `store ${id} never landed its read`)
+    await vi.advanceTimersByTimeAsync(1000)
+    assert.equal(store.hasPayload, true, `store ${id} never landed its read`)
     off()
     return store
   }
@@ -597,7 +562,8 @@ describe('detailStoreOf', () => {
     const held = detailStoreOf(ids[0])
     const off = held.subscribe(() => {})
     held.request(1)
-    await until(() => held.hasPayload, 'the mounted store never landed')
+    await vi.advanceTimersByTimeAsync(1000)
+    assert.equal(held.hasPayload, true, 'the mounted store never landed')
     for (const id of ids.slice(1)) await visitStore(id)
     assert.equal(held.active, true)
     assert.equal(held.hasPayload, true, 'a mounted store keeps its payload')
@@ -614,8 +580,9 @@ describe('detailStoreOf', () => {
       store.request(1)
       return store
     })
+    await vi.advanceTimersByTimeAsync(1000)
     for (const [i, store] of created.entries()) {
-      await until(() => store.hasPayload, 'burst store ' + String(i) + ' never landed')
+      assert.equal(store.hasPayload, true, 'burst store ' + String(i) + ' never landed')
     }
     for (const off of offs) off()
     await visitStore('burst-extra')
@@ -711,18 +678,13 @@ describe('useTimelineSource', () => {
   })
 
   test('the cold start: no pushed value opens the channel itself and renders from the read', async () => {
-    let calls = 0
-    stubDetailFetch(() => {
-      calls++
-      return { body: { ok: true, value: detail(2, { head: slimHead(2) }) } }
-    })
+    stubDetailFetch(() => ({ body: { ok: true, value: detail(2, { head: slimHead(2) }) } }))
     const m = await mount(h(SourceProbe, { sessionId: 's1', value: undefined }))
     assert.equal(probeRead(m.container, 'state'), 'loading')
     await until(() => probeRead(m.container, 'state') === 'ready', 'the cold read never landed')
     assert.equal(probeRead(m.container, 'model'), 'm', 'the read head renders')
     assert.equal(probeRead(m.container, 'rev'), '2')
     assert.equal(probeRead(m.container, 'steps'), '1', 'the read collections merge')
-    assert.ok(calls >= 1)
     await m.unmount()
   })
 
@@ -765,21 +727,16 @@ describe('useTimelineSource', () => {
     await m.unmount()
   })
 
-  test('a cold payload without its head types the failure (nothing renderable, no stall)', async () => {
-    stubDetailFetch(() => ({ body: { ok: true, value: detail(1) } }))
-    const m = await mount(h(SourceProbe, { sessionId: 's1', value: undefined }))
-    await until(() => probeRead(m.container, 'state') === 'failed', 'the headless payload never surfaced')
-    await m.unmount()
-  })
-
-  test('an absent cold answer (the session left the live set) surfaces the failed note', async () => {
-    stubDetailFetch(() => ({ body: { ok: true, value: null } }))
-    const m = await mount(h(SourceProbe, { sessionId: 's1', value: undefined }))
-    await until(() => probeRead(m.container, 'state') === 'failed', 'absence never surfaced')
-    await m.unmount()
-  })
-
-  test('no session id to read for: the cold start types the failure, not an eternal spinner', async () => {
+  test('an unrenderable cold start — headless payload, absent answer, or no session id — types the failure', async () => {
+    for (const [label, body] of [
+      ['headless', { ok: true, value: detail(1) }],
+      ['absent', { ok: true, value: null }],
+    ] as const) {
+      stubDetailFetch(() => ({ body }))
+      const m = await mount(h(SourceProbe, { sessionId: 's1', value: undefined }))
+      await until(() => probeRead(m.container, 'state') === 'failed', `the ${label} cold start never surfaced its failure`)
+      await m.unmount()
+    }
     stubDetailFetch(() => ({ body: { ok: true, value: detail(1, { head: slimHead(1) }) } }))
     const m = await mount(h(SourceProbe, { sessionId: '', value: undefined }))
     await until(() => probeRead(m.container, 'state') === 'failed', 'the empty-id cold start never surfaced')
@@ -787,22 +744,18 @@ describe('useTimelineSource', () => {
   })
 
   test('the split generation: counters render off the head immediately, the detail lands through the channel', async () => {
-    let calls = 0
-    stubDetailFetch(() => {
-      calls++
-      return {
-        body: {
-          ok: true,
-          value: detail(3, {
-            surfaceFloor: 2,
-            archiveFloor: 5,
-            fileOps: [{ seq: 2, path: 'a.ts', kind: 'read', tool: 'read', err: false, added: 0, removed: 0 }],
-            fileOpsFloor: 4,
-            spans: [{ kind: 'ttft', start: 0, end: 100 }, { kind: 'other', start: 100, end: 1_400 }],
-          }),
-        },
-      }
-    })
+    stubDetailFetch(() => ({
+      body: {
+        ok: true,
+        value: detail(3, {
+          surfaceFloor: 2,
+          archiveFloor: 5,
+          fileOps: [{ seq: 2, path: 'a.ts', kind: 'read', tool: 'read', err: false, added: 0, removed: 0 }],
+          fileOpsFloor: 4,
+          spans: [{ kind: 'ttft', start: 0, end: 100 }, { kind: 'other', start: 100, end: 1_400 }],
+        }),
+      },
+    }))
     const m = await mount(h(SourceProbe, { sessionId: 's1', value: slimHead(3) }))
     assert.equal(probeRead(m.container, 'state'), 'loading')
     assert.equal(probeRead(m.container, 'turns'), '1', 'the head counters render before the detail lands')
@@ -814,7 +767,6 @@ describe('useTimelineSource', () => {
     assert.equal(probeRead(m.container, 'floors'), '2/5', 'the detail floors merge')
     assert.equal(probeRead(m.container, 'ops'), '1', 'the op log merges')
     assert.equal(probeRead(m.container, 'spans'), '2', 'the strip spans merge')
-    assert.ok(calls >= 1)
     await m.unmount()
   })
 

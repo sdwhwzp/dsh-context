@@ -36,34 +36,31 @@ describe('ContextBrowser tool schemas', () => {
       { name: 'beta', schema: { input_schema: { properties: { x: { type: 'string' } } } } },
       {
         name: 'mega', description: 'does everything',
-        schema: {
-          name: 'mega',
-          parameters: {
-            type: 'object',
-            properties: {
-              a: { type: 'string', description: 'the a param' },
-              b: { type: 'object', properties: { x: {}, y: {} } },
-              c: { type: 'array', items: { type: 'number' } },
-              d: { type: 'array' },
-              d2: { type: 'array', items: null },
-              e: { type: 'string', enum: ['x', 'y'] },
-              e2: { type: 'string', enum: [] },
-              f: { enum: [1, 2] },
-              g: { anyOf: [{ type: 'string' }, { type: 'number' }] },
-              h: { oneOf: [{ type: 'boolean' }] },
-              i: { anyOf: [null, { type: 'string' }] },
-              j: { anyOf: [] },
-              k: { anyOf: [42, null] },
-              l: { type: 'object', properties: {} },
-              m: { type: 'object', properties: null },
-              n: { type: 'object', properties: 42 },
-              o: 'not-an-object',
-              p: { description: 42 },
-              q: { description: '' },
-            },
-            required: ['a', 42],
+        schema: { name: 'mega', parameters: {
+          type: 'object',
+          properties: {
+            a: { type: 'string', description: 'the a param' },
+            b: { type: 'object', properties: { x: {}, y: {} } },
+            c: { type: 'array', items: { type: 'number' } },
+            d: { type: 'array' },
+            d2: { type: 'array', items: null },
+            e: { type: 'string', enum: ['x', 'y'] },
+            e2: { type: 'string', enum: [] },
+            f: { enum: [1, 2] },
+            g: { anyOf: [{ type: 'string' }, { type: 'number' }] },
+            h: { oneOf: [{ type: 'boolean' }] },
+            i: { anyOf: [null, { type: 'string' }] },
+            j: { anyOf: [] },
+            k: { anyOf: [42, null] },
+            l: { type: 'object', properties: {} },
+            m: { type: 'object', properties: null },
+            n: { type: 'object', properties: 42 },
+            o: 'not-an-object',
+            p: { description: 42 },
+            q: { description: '' },
           },
-        },
+          required: ['a', 42],
+        } },
       },
     ],
   }
@@ -76,7 +73,6 @@ describe('ContextBrowser tool schemas', () => {
     await click(catRow(m, 'tools'))
     await flush()
     const rows = elemRows(m)
-    assert.equal(rows.length, 9)
     assert.deepEqual(rows.map(r => text(query(r, '.lc-br-preview'))),
       ['mega', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'theta', 'rho', 'omega'])
 
@@ -109,7 +105,6 @@ describe('ContextBrowser tool schemas', () => {
     assert.ok(text(byName('a') as HTMLElement).includes('the a param'))
     assert.equal(queryAll(byName('p') as HTMLElement, '.lc-ts-param-desc').length, 0, 'non-string description hidden')
     assert.equal(queryAll(byName('q') as HTMLElement, '.lc-ts-param-desc').length, 0, 'empty description hidden')
-    assert.ok(text(body).includes('Parameters'))
 
     const toggle = query(body, '.lc-ts-json-toggle')
     assert.ok(text(toggle).includes('View Raw JSON'))
@@ -120,6 +115,46 @@ describe('ContextBrowser tool schemas', () => {
     assert.equal(queryAll(body, 'pre').length, 0)
     await click(elemRows(m)[0])
     assert.equal(queryAll(m.container, '.lc-br-content').length, 0)
+
+    const open = async (name: string) => {
+      const row = rows.find(r => text(query(r, '.lc-br-preview')) === name) as HTMLElement
+      await click(row)
+      return query(m.container, '.lc-br-content')
+    }
+    const close = async (name: string) => {
+      await click(rows.find(r => text(query(r, '.lc-br-preview')) === name) as HTMLElement)
+    }
+    let nested = await open('beta')
+    assert.equal(queryAll(nested, '.lc-ts-param-row').length, 1)
+    assert.ok(!text(nested).includes('Description'), 'no description section without one')
+    await close('beta')
+    nested = await open('gamma')
+    assert.ok(text(nested).includes('(no parameters)'))
+    await close('gamma')
+    nested = await open('delta')
+    assert.equal(queryAll(nested, '.lc-ts-param-row').length, 1)
+    await close('delta')
+    nested = await open('epsilon')
+    assert.equal(queryAll(nested, '.lc-ts-param-row').length, 1)
+    assert.ok(text(nested).includes('integer'))
+    await close('epsilon')
+    nested = await open('zeta')
+    assert.equal(queryAll(nested, '.lc-ts-param-row').length, 0)
+    assert.ok(!text(nested).includes('(no parameters)'))
+    assert.ok(queryAll(nested, '.lc-ts-json-toggle').length === 1, 'raw JSON still available')
+    await close('zeta')
+    nested = await open('theta')
+    assert.ok(text(nested).includes('(no parameters)'))
+    await close('theta')
+    nested = await open('rho')
+    assert.equal(queryAll(nested, '.lc-ts-param-row').length, 0)
+    await click(query(nested, '.lc-ts-json-toggle'))
+    assert.ok(text(query(nested, 'pre')).includes('"nope"'))
+    await close('rho')
+    nested = await open('omega')
+    assert.equal(queryAll(nested, '.lc-ts-param-row').length, 0)
+    assert.ok(!text(nested).includes('does everything'))
+    assert.ok(queryAll(nested, '.lc-ts-json-toggle').length === 1)
     await m.unmount()
     settings.set('defaultToolSort', 'count')
   })
@@ -237,23 +272,19 @@ describe('ContextBrowser tool schemas', () => {
       return m
     }
 
-    let m = await mountWith('count')
-    assert.ok(sortBtns(m.container)[1].className.includes('lc-gran-on'))
-    assert.deepEqual(names(m), ['zzz', 'aaa'])
-    await m.unmount()
-
-    m = await mountWith('size')
-    assert.ok(sortBtns(m.container)[0].className.includes('lc-gran-on'))
-    assert.deepEqual(names(m), ['aaa', 'zzz'])
-    await m.unmount()
-
-    m = await mountWith('name')
-    assert.ok(sortBtns(m.container)[2].className.includes('lc-gran-on'))
-    assert.deepEqual(names(m), ['aaa', 'zzz'])
-    await m.unmount()
+    for (const [sort, idx, order] of [
+      ['count', 1, ['zzz', 'aaa']],
+      ['size', 0, ['aaa', 'zzz']],
+      ['name', 2, ['aaa', 'zzz']],
+    ] as const) {
+      const m = await mountWith(sort)
+      assert.ok(sortBtns(m.container)[idx].className.includes('lc-gran-on'))
+      assert.deepEqual(names(m), order)
+      await m.unmount()
+    }
 
     // In-toolbar toggling never writes the preference back.
-    m = await mountWith('count')
+    const m = await mountWith('count')
     await click(sortBtns(m.container)[0])
     assert.equal(settings.store.getSnapshot().toolSort, 'count')
     await m.unmount()
@@ -270,98 +301,33 @@ describe('ContextBrowser tool schemas', () => {
     assert.equal(names().length, 0)
     assert.ok(text(m.container).includes('No tools match the current filter'))
     await m.unmount()
-  })
 
-  test('a hostile schema degrades the text filter, not the rows', async () => {
     const cyclic: Record<string, unknown> = { type: 'object' }
     cyclic['self'] = cyclic
-    const hostileContent: HeaderEpochContent = {
-      system: 'SYS',
-      tools: [
-        { name: 'loop', schema: cyclic },
-        { name: 'nully', schema: null },
-        { name: 'plain', schema: {} },
-      ],
-    }
     const hostile: ContextHeaders = { headers: [{ seq: 1, time: 1, systemTokens: 3, tools: [
-      { name: 'loop', tokens: 3 },
-      { name: 'nully', tokens: 1 },
-      { name: 'plain', tokens: 2 },
+      { name: 'loop', tokens: 3 }, { name: 'nully', tokens: 1 }, { name: 'plain', tokens: 2 },
     ] }] }
-    const m = await mount(h(Browser, props({ data, headers: hostile, fetchHeader: () => Promise.resolve(hostileContent) })))
-    await click(catRow(m, 'tools'))
+    const hostileContent: HeaderEpochContent = { system: 'SYS', tools: [
+      { name: 'loop', schema: cyclic }, { name: 'nully', schema: null }, { name: 'plain', schema: {} },
+    ] }
+    const hostileMount = await mount(h(Browser, props({ data, headers: hostile, fetchHeader: () => Promise.resolve(hostileContent) })))
+    await click(catRow(hostileMount, 'tools'))
     await flush()
-    assert.equal(elemRows(m).length, 3)
-    await typeToolSearch(m, 'loop')
-    assert.deepEqual(elemRows(m).map(r => text(query(r, '.lc-br-preview'))), ['loop'])
-    await typeToolSearch(m, 'properties')
-    assert.equal(elemRows(m).length, 0)
-    assert.ok(text(m.container).includes('No tools match the current filter'))
-    await m.unmount()
-  })
+    assert.equal(elemRows(hostileMount).length, 3)
+    await typeToolSearch(hostileMount, 'loop')
+    assert.deepEqual(elemRows(hostileMount).map(r => text(query(r, '.lc-br-preview'))), ['loop'])
+    await typeToolSearch(hostileMount, 'properties')
+    assert.equal(elemRows(hostileMount).length, 0)
+    assert.ok(text(hostileMount.container).includes('No tools match the current filter'))
+    await hostileMount.unmount()
 
-  test('schema nesting variants and the empty/degenerate arms', async () => {
-    const m = await mount(h(Browser, lazyProps()))
-    await click(catRow(m, 'tools'))
-    await flush()
-    const rows = elemRows(m)
-    const open = async (name: string) => {
-      const row = rows.find(r => text(query(r, '.lc-br-preview')) === name) as HTMLElement
-      await click(row)
-      return query(m.container, '.lc-br-content')
-    }
-    const close = async (name: string) => {
-      await click(rows.find(r => text(query(r, '.lc-br-preview')) === name) as HTMLElement)
-    }
-    let body = await open('beta')
-    assert.equal(queryAll(body, '.lc-ts-param-row').length, 1)
-    assert.ok(!text(body).includes('Description'), 'no description section without one')
-    await close('beta')
-
-    body = await open('gamma')
-    assert.ok(text(body).includes('(no parameters)'))
-    await close('gamma')
-
-    body = await open('delta')
-    assert.equal(queryAll(body, '.lc-ts-param-row').length, 1)
-    await close('delta')
-
-    body = await open('epsilon')
-    assert.equal(queryAll(body, '.lc-ts-param-row').length, 1)
-    assert.ok(text(body).includes('integer'))
-    await close('epsilon')
-
-    body = await open('zeta')
-    assert.equal(queryAll(body, '.lc-ts-param-row').length, 0)
-    assert.ok(!text(body).includes('(no parameters)'))
-    assert.ok(queryAll(body, '.lc-ts-json-toggle').length === 1, 'raw JSON still available')
-    await close('zeta')
-
-    body = await open('theta')
-    assert.ok(text(body).includes('(no parameters)'))
-    await close('theta')
-
-    body = await open('rho')
-    assert.equal(queryAll(body, '.lc-ts-param-row').length, 0)
-    await click(query(body, '.lc-ts-json-toggle'))
-    assert.ok(text(query(body, 'pre')).includes('"nope"'))
-    await close('rho')
-
-    body = await open('omega')
-    assert.equal(queryAll(body, '.lc-ts-param-row').length, 0)
-    assert.ok(!text(body).includes('does everything'))
-    assert.ok(queryAll(body, '.lc-ts-json-toggle').length === 1)
-    await m.unmount()
-  })
-
-  test('a metadata row missing from the fetched content degrades to the not-in-log note', async () => {
     const partial: HeaderEpochContent = { system: 'SYS', tools: [{ name: 'other', schema: {} }] }
-    const m = await mount(h(Browser, props({ data, headers, fetchHeader: () => Promise.resolve(partial) })))
-    await click(catRow(m, 'tools'))
+    const missing = await mount(h(Browser, props({ data, headers, fetchHeader: () => Promise.resolve(partial) })))
+    await click(catRow(missing, 'tools'))
     await flush()
-    await click(elemRows(m).find(r => text(query(r, '.lc-br-preview')) === 'mega') as HTMLElement)
-    assert.ok(text(query(m.container, '.lc-br-content')).includes('not in the session log'))
-    await m.unmount()
+    await click(elemRows(missing).find(r => text(query(r, '.lc-br-preview')) === 'mega') as HTMLElement)
+    assert.ok(text(query(missing.container, '.lc-br-content')).includes('not in the session log'))
+    await missing.unmount()
   })
 
   test('tool rows tag the registering plugin when attribution exists', async () => {

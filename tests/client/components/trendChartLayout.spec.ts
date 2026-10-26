@@ -32,20 +32,24 @@ describe('TrendChart adaptive scale (the title-adjacent toggle)', () => {
     await scrollTo(scroll, 64)
     assert.equal(query(m.container, '.lc-axis-top').textContent, '100')
 
-    await m.update(h(TrendChart, propsOf(reqs, { adaptive: false })))
-    assert.equal(query(m.container, '.lc-axis-top').textContent, '900')
-    await m.unmount()
-  })
-
-  test('a column wholly in the 2px gap outside the viewport does not join the window', async () => {
-    const m = await mount(h(TrendChart, propsOf(spikedSteps(), { adaptive: true })))
-    await flush()
-    const scroll = query<LayoutEl>(m.container, '.lc-chart-scroll')
     await scrollTo(scroll, 15)
     assert.equal(query(m.container, '.lc-axis-top').textContent, '100')
     await scrollTo(scroll, 13)
     assert.equal(query(m.container, '.lc-axis-top').textContent, '900')
+
+    await m.update(h(TrendChart, propsOf(reqs, { adaptive: false })))
+    assert.equal(query(m.container, '.lc-axis-top').textContent, '900')
     await m.unmount()
+
+    const durations: RequestRecord[] = []
+    for (let i = 0; i < 30; i++) durations.push(req(i + 1, { turn: 1, step: i, activeMs: i === 0 ? 9000 : 1000 }))
+    const curve = await mount(h(TrendChart, propsOf(durations, { adaptive: true, durationCurve: true })))
+    await flush()
+    const curveScroll = query<LayoutEl>(curve.container, '.lc-chart-scroll')
+    assert.equal(query(curve.container, '.lc-axis-r .lc-axis-top').textContent, '1.0s')
+    await scrollTo(curveScroll, 0)
+    assert.equal(query(curve.container, '.lc-axis-r .lc-axis-top').textContent, '9.0s', 'the curve rescales with the visible window like the bars')
+    await curve.unmount()
   })
 
   test('an empty history or a zero-width viewport keeps the previous scale', async () => {
@@ -142,10 +146,17 @@ describe('TrendChart adaptive scale (the title-adjacent toggle)', () => {
 describe('TrendChart duration overlay (durationCurve)', () => {
   const activeMsY = (activeMs: number, maxActiveMs: number): number => Math.round((CHART_H - activeMs * (CHART_H / Math.max(1, maxActiveMs))) * 100) / 100
 
-  test('off by default: no curve, no right-hand axis', async () => {
-    const m = await mount(h(TrendChart, propsOf([req(1, { activeMs: 1000 }), req(2, { activeMs: 2000 })])))
+  test('off by default there is no curve or right-hand axis; with no stamped durations the enabled axis dashes', async () => {
+    const off = await mount(h(TrendChart, propsOf([req(1, { activeMs: 1000 }), req(2, { activeMs: 2000 })])))
+    assert.equal(queryAll(off.container, '.lc-duration').length, 0)
+    assert.equal(queryAll(off.container, '.lc-axis-r').length, 0)
+    await off.unmount()
+
+    const m = await mount(h(TrendChart, propsOf([req(1), req(2)], { durationCurve: true })))
     assert.equal(queryAll(m.container, '.lc-duration').length, 0)
-    assert.equal(queryAll(m.container, '.lc-axis-r').length, 0)
+    const axis = query(m.container, '.lc-axis-r')
+    assert.equal(query(axis, '.lc-axis-top').textContent, '—')
+    assert.equal(query(axis, '.lc-axis-bot').textContent, '0')
     await m.unmount()
   })
 
@@ -172,6 +183,17 @@ describe('TrendChart duration overlay (durationCurve)', () => {
     assert.equal(query(axis, '.lc-axis-q1').textContent, '1.0s')
     assert.equal(query(axis, '.lc-axis-bot').textContent, '0')
     await m.unmount()
+
+    const agg = aggregateByTurn([
+      req(1, { turn: 1, step: 0, activeMs: 1000 }),
+      req(2, { turn: 1, step: 1, activeMs: 500 }),
+      req(3, { turn: 2, step: 0, activeMs: 2000 }),
+    ])
+    const turns = await mount(h(TrendChart, propsOf(agg, { granularity: 'turn', durationCurve: true })))
+    const turnLines = queryAll(query(turns.container, '.lc-duration'), 'polyline:not(.lc-dur-halo)')
+    assert.equal(turnLines[0].getAttribute('points'), `7,${activeMsY(1500, 2000)} 23,${activeMsY(2000, 2000)}`, 'each turn plots its summed active time')
+    assert.equal(query(turns.container, '.lc-axis-r .lc-axis-top').textContent, '2.0s')
+    await turns.unmount()
   })
 
   test('a bar without ms breaks the line; an isolated single point draws a dot', async () => {
@@ -188,19 +210,6 @@ describe('TrendChart duration overlay (durationCurve)', () => {
     await m.unmount()
   })
 
-  test('turn granularity plots each turn\'s summed active time', async () => {
-    const agg = aggregateByTurn([
-      req(1, { turn: 1, step: 0, activeMs: 1000 }),
-      req(2, { turn: 1, step: 1, activeMs: 500 }),
-      req(3, { turn: 2, step: 0, activeMs: 2000 }),
-    ])
-    const m = await mount(h(TrendChart, propsOf(agg, { granularity: 'turn', durationCurve: true })))
-    const lines = queryAll(query(m.container, '.lc-duration'), 'polyline:not(.lc-dur-halo)')
-    assert.equal(lines[0].getAttribute('points'), `7,${activeMsY(1500, 2000)} 23,${activeMsY(2000, 2000)}`)
-    assert.equal(query(m.container, '.lc-axis-r .lc-axis-top').textContent, '2.0s')
-    await m.unmount()
-  })
-
   test('delta mode keeps the floor-anchored duration axis; the hover tip appends the duration row', async () => {
     const reqs = [req(1, { activeMs: 1000 }), req(2, { activeMs: 2000 })]
     const m = await mount(h(TrendChart, propsOf(reqs, { mode: 'delta', durationCurve: true, hoveredSeq: 1 })))
@@ -214,26 +223,6 @@ describe('TrendChart duration overlay (durationCurve)', () => {
     await m.unmount()
   })
 
-  test('adaptive scale rescales the curve to the visible window like the bars', async () => {
-    const reqs: RequestRecord[] = []
-    for (let i = 0; i < 30; i++) reqs.push(req(i + 1, { turn: 1, step: i, activeMs: i === 0 ? 9000 : 1000 }))
-    const m = await mount(h(TrendChart, propsOf(reqs, { adaptive: true, durationCurve: true })))
-    await flush()
-    const scroll = query<LayoutEl>(m.container, '.lc-chart-scroll')
-    assert.equal(query(m.container, '.lc-axis-r .lc-axis-top').textContent, '1.0s')
-    await scrollTo(scroll, 0)
-    assert.equal(query(m.container, '.lc-axis-r .lc-axis-top').textContent, '9.0s')
-    await m.unmount()
-  })
-
-  test('no stamped durations at all: the axis shows the scale floor, the curve draws nothing', async () => {
-    const m = await mount(h(TrendChart, propsOf([req(1), req(2)], { durationCurve: true })))
-    assert.equal(queryAll(m.container, '.lc-duration').length, 0)
-    const axis = query(m.container, '.lc-axis-r')
-    assert.equal(query(axis, '.lc-axis-top').textContent, '—')
-    assert.equal(query(axis, '.lc-axis-bot').textContent, '0')
-    await m.unmount()
-  })
 })
 
 describe('TrendChart scroll anchoring', () => {
@@ -255,7 +244,7 @@ describe('TrendChart scroll anchoring', () => {
     }
   }
 
-  test('the end-anchor sticks only near the end', async () => {
+  test('the end-anchor sticks only near the end, and a data push follows the newest bar only there', async () => {
     const reqs = manySteps()
     const { handlers } = makeSpies()
     const m = await mount(h(TrendChart, propsOf(reqs, handlers)))
@@ -283,27 +272,23 @@ describe('TrendChart scroll anchoring', () => {
     await scrollTo(scroll, 0)
     assert.equal(labels[1].style.transform, '', 'back at the left edge every block centers natively')
     await m.unmount()
-  })
 
-  test('a data push follows the newest bar only when the reader was near the right edge', async () => {
-    const reqs = manySteps()
-    const { handlers } = makeSpies()
-    const m = await mount(h(TrendChart, propsOf(reqs, handlers)))
+    const pushedReqs = manySteps()
+    const pushedSpies = makeSpies()
+    const pushed = await mount(h(TrendChart, propsOf(pushedReqs, pushedSpies.handlers)))
     await flush()
-    const scroll = query<LayoutEl>(m.container, '.lc-chart-scroll')
-    assert.equal(scroll.scrollLeft, 240)
-
-    const grown = [...reqs, req(reqs.length + 1, { turn: 1 + Math.floor(reqs.length / 10), step: reqs.length % 10 })]
-    await m.update(h(TrendChart, propsOf(grown, handlers)))
+    const pushedScroll = query<LayoutEl>(pushed.container, '.lc-chart-scroll')
+    assert.equal(pushedScroll.scrollLeft, 240)
+    const grown = [...pushedReqs, req(pushedReqs.length + 1, { turn: 1 + Math.floor(pushedReqs.length / 10), step: pushedReqs.length % 10 })]
+    await pushed.update(h(TrendChart, propsOf(grown, pushedSpies.handlers)))
     await flush()
-    assert.equal(scroll.scrollLeft, 256, 'near-edge reader follows the appended bar')
-
-    await scrollTo(scroll, 100)
+    assert.equal(pushedScroll.scrollLeft, 256, 'near-edge reader follows the appended bar')
+    await scrollTo(pushedScroll, 100)
     const grown2 = [...grown, req(grown.length + 1, { turn: 1 + Math.floor(grown.length / 10), step: grown.length % 10 })]
-    await m.update(h(TrendChart, propsOf(grown2, handlers)))
+    await pushed.update(h(TrendChart, propsOf(grown2, pushedSpies.handlers)))
     await flush()
-    assert.equal(scroll.scrollLeft, 100, 'mid-scroll reader is not yanked back to the newest')
-    await m.unmount()
+    assert.equal(pushedScroll.scrollLeft, 100, 'mid-scroll reader is not yanked back to the newest')
+    await pushed.unmount()
   })
 
   test('a granularity switch re-anchors and flips overflow for real (React #185 regression)', async () => {
@@ -324,7 +309,7 @@ describe('TrendChart scroll anchoring', () => {
     await m.unmount()
   })
 
-  test('focusTurn scroll-centers the target turn bar once; unknown turns still consume the focus', async () => {
+  test('focusTurn and focusSeq scroll-center their bar once; an absent target still consumes the focus', async () => {
     await narrowViewport(async () => {
       const agg = aggregateByTurn([...manySteps(), ...manySteps().map(r => ({ ...r, seq: r.seq + 40, turn: (r.turn ?? 0) + 4 }))])
       assert.equal(agg.length, 8)
@@ -341,25 +326,21 @@ describe('TrendChart scroll anchoring', () => {
       assert.ok(spies.focusHandled > before, 'the focus is consumed even when the turn is absent')
       assert.equal(scroll.scrollLeft, 8, 'no focus target and not near the end → the scroll position holds')
       await m.unmount()
-    })
-  })
 
-  test('focusSeq scroll-centers its exact step bar once; an absent step still consumes the focus', async () => {
-    await narrowViewport(async () => {
       const reqs = manySteps()
-      const { spies, handlers } = makeSpies()
-      const m = await mount(h(TrendChart, propsOf(reqs, { ...handlers, focusSeq: 21 })))
+      const stepSpies = makeSpies()
+      const step = await mount(h(TrendChart, propsOf(reqs, { ...stepSpies.handlers, focusSeq: 21 })))
       await flush()
-      const scroll = query<LayoutEl>(m.container, '.lc-chart-scroll')
-      assert.ok(spies.seqFocusHandled >= 1)
-      assert.equal(scroll.scrollLeft, 20 * 16 + 7 - 15) // bar 21 is index 20
+      const stepScroll = query<LayoutEl>(step.container, '.lc-chart-scroll')
+      assert.ok(stepSpies.spies.seqFocusHandled >= 1)
+      assert.equal(stepScroll.scrollLeft, 20 * 16 + 7 - 15) // bar 21 is index 20
 
-      const before = spies.seqFocusHandled
-      await m.update(h(TrendChart, propsOf(reqs, { ...handlers, focusSeq: 999 })))
+      const stepBefore = stepSpies.spies.seqFocusHandled
+      await step.update(h(TrendChart, propsOf(reqs, { ...stepSpies.handlers, focusSeq: 999 })))
       await flush()
-      assert.ok(spies.seqFocusHandled > before, 'the focus is consumed even when the step is absent')
-      assert.equal(scroll.scrollLeft, 20 * 16 + 7 - 15, 'no focus target and not near the end → the scroll position holds')
-      await m.unmount()
+      assert.ok(stepSpies.spies.seqFocusHandled > stepBefore, 'the focus is consumed even when the step is absent')
+      assert.equal(stepScroll.scrollLeft, 20 * 16 + 7 - 15, 'no focus target and not near the end → the scroll position holds')
+      await step.unmount()
     })
   })
 
@@ -455,7 +436,7 @@ describe('TrendChart hover tip overlay', () => {
 
 /** The tip lives beside the scroller: an absolutely positioned child of a scroller contributes to its
  *  scrollable overflow, so hovering inflated scrollWidth and flapped the horizontal scrollbar. */
-  test('renders outside the scroller, glues to the visible slice while scrolling, and clamps at both edges', async () => {
+  test('renders outside the scroller, glues to the visible slice while scrolling, and clamps real widths at both edges', async () => {
     const reqs = manySteps()
     const { handlers } = makeSpies()
     const m = await mount(h(TrendChart, propsOf(reqs, { ...handlers, hoveredSeq: 40 })))
@@ -484,31 +465,27 @@ describe('TrendChart hover tip overlay', () => {
     // the browser-level scrollbar parity here — verified against real Chromium separately).
     assert.equal(scroll.scrollWidth, 640)
     await m.unmount()
-  })
 
-  test('real tip widths clamp into the viewport on both sides and center when wider than the viewport', async () => {
-    const reqs = manySteps()
-    const { handlers } = makeSpies()
-    const m = await mount(h(TrendChart, propsOf(reqs, { ...handlers, hoveredSeq: 30 })))
+    const wideSpies = makeSpies()
+    const wide = await mount(h(TrendChart, propsOf(manySteps(), { ...wideSpies.handlers, hoveredSeq: 30 })))
     await flush()
-    const scroll = query<LayoutEl>(m.container, '.lc-chart-scroll')
-    const tip = query<LayoutEl & { offsetWidth: number }>(m.container, '.lc-chart-tip')
-    scroll.__clientW = 160
-    Object.defineProperty(tip, 'offsetWidth', { configurable: true, get: () => 120 })
+    const wideScroll = query<LayoutEl>(wide.container, '.lc-chart-scroll')
+    const wideTip = query<LayoutEl & { offsetWidth: number }>(wide.container, '.lc-chart-tip')
+    wideScroll.__clientW = 160
+    Object.defineProperty(wideTip, 'offsetWidth', { configurable: true, get: () => 120 })
     try {
-      await scrollTo(scroll, 0)
-      assert.equal(tip.style.transform, 'translate(40px, 0)')
-      await scrollTo(scroll, 380)
-      assert.equal(tip.style.transform, 'translate(31px, 0)')
-      await scrollTo(scroll, 480)
-      assert.equal(tip.style.transform, 'translate(0px, 0)')
-
-      Object.defineProperty(tip, 'offsetWidth', { configurable: true, get: () => 500 })
-      await scrollTo(scroll, 0)
-      assert.equal(tip.style.transform, 'translate(-170px, 0)')
+      await scrollTo(wideScroll, 0)
+      assert.equal(wideTip.style.transform, 'translate(40px, 0)')
+      await scrollTo(wideScroll, 380)
+      assert.equal(wideTip.style.transform, 'translate(31px, 0)')
+      await scrollTo(wideScroll, 480)
+      assert.equal(wideTip.style.transform, 'translate(0px, 0)')
+      Object.defineProperty(wideTip, 'offsetWidth', { configurable: true, get: () => 500 })
+      await scrollTo(wideScroll, 0)
+      assert.equal(wideTip.style.transform, 'translate(-170px, 0)')
     } finally {
-      delete scroll.__clientW
+      delete wideScroll.__clientW
+      await wide.unmount()
     }
-    await m.unmount()
   })
 })

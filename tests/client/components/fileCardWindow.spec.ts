@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, test, vi } from 'vitest'
 import { makeFileCard } from '../../../src/client/components/fileCard'
 import type { FileActivity, FileEntry, FileOp } from '../../../src/client/fileActivity'
 import { createContextSettings } from '../../../src/client/settings'
-import { makeKit, mount, query, queryAll, until } from '../helpers/kit'
+import { click, fireScroll, makeKit, mount, query, queryAll, settle, until } from '../helpers/kit'
 
 const kit = makeKit()
 const FileCard = makeFileCard(kit, createContextSettings())
@@ -93,28 +93,25 @@ const props = { activity: activityOf(60), state: 'ready' as const, onRetry: unde
 describe('FileCard row windowing', () => {
   test('renders a measured window with full-height pads and follows the scroll', async () => {
     const m = await mount(h(FileCard, props))
-    try {
-      const list = query<HTMLElement>(m.container, '.lc-fa-list')
-      await until(() => queryAll(m.container, '.lc-fa-item').length < 60, 'the list windows after measuring')
-      const rendered = queryAll(m.container, '.lc-fa-item').length
-      assert.ok(rendered < 60 && rendered > 8)
-      const pads = queryAll<HTMLElement>(m.container, '.lc-row-pad')
-      assert.equal(pads.length, 1)
-      assert.ok(Number.parseFloat(pads[0].style.height) > 0)
-      assert.equal(list.clientHeight, 320) // the list keeps its box; the full height lives in the pads
-      list.scrollTop = 900
-      await new Promise(resolve => setTimeout(resolve, 40))
-      list.dispatchEvent(new Event('scroll'))
-      await until(() => queryAll<HTMLElement>(m.container, '.lc-row-pad').length === 2, 'a top pad appears after scrolling')
-      const afterScroll = queryAll(m.container, '.lc-fa-item').length
-      assert.ok(afterScroll < 60 && afterScroll >= 8)
-      // Pads carry the skipped rows' pitch minus the flex gap between pad and row.
-      const [topPad, bottomPad] = queryAll<HTMLElement>(m.container, '.lc-row-pad')
-      assert.equal(topPad.style.height, `${13 * PITCH - GAP}px`)
-      assert.equal(bottomPad.style.height, `${21 * PITCH - GAP}px`)
-    } finally {
-      await m.unmount()
-    }
+    const list = query<HTMLElement>(m.container, '.lc-fa-list')
+    await until(() => queryAll(m.container, '.lc-fa-item').length < 60, 'the list windows after measuring')
+    const rendered = queryAll(m.container, '.lc-fa-item').length
+    assert.ok(rendered < 60 && rendered > 8)
+    const pads = queryAll<HTMLElement>(m.container, '.lc-row-pad')
+    assert.equal(pads.length, 1)
+    assert.ok(Number.parseFloat(pads[0].style.height) > 0)
+    assert.equal(list.clientHeight, 320) // the list keeps its box; the full height lives in the pads
+    list.scrollTop = 900
+    await settle(40)
+    await fireScroll(list)
+    await until(() => queryAll<HTMLElement>(m.container, '.lc-row-pad').length === 2, 'a top pad appears after scrolling')
+    const afterScroll = queryAll(m.container, '.lc-fa-item').length
+    assert.ok(afterScroll < 60 && afterScroll >= 8)
+    // Pads carry the skipped rows' pitch minus the flex gap between pad and row.
+    const [topPad, bottomPad] = queryAll<HTMLElement>(m.container, '.lc-row-pad')
+    assert.equal(topPad.style.height, `${13 * PITCH - GAP}px`)
+    assert.equal(bottomPad.style.height, `${21 * PITCH - GAP}px`)
+    await m.unmount()
   })
 
   test('mixed wrapped row heights keep the full list so the scroll geometry stays truthful', async () => {
@@ -131,15 +128,12 @@ describe('FileCard row windowing', () => {
 
   test('an expanded row falls back to the full list, then windows again when closed', async () => {
     const m = await mount(h(FileCard, props))
-    try {
-      await until(() => queryAll(m.container, '.lc-fa-item').length < 60, 'windowed')
-      const first = query<HTMLElement>(m.container, '.lc-fa-row')
-      first.click()
-      await until(() => queryAll(m.container, '.lc-fa-item').length === 60, 'expanded row shows the full list')
-      first.click()
-      await until(() => queryAll(m.container, '.lc-fa-item').length < 60, 'closing the row re-windows')
-    } finally {
-      await m.unmount()
-    }
+    await until(() => queryAll(m.container, '.lc-fa-item').length < 60, 'windowed')
+    const first = query<HTMLElement>(m.container, '.lc-fa-row')
+    await click(first)
+    await until(() => queryAll(m.container, '.lc-fa-item').length === 60, 'expanded row shows the full list')
+    await click(first)
+    await until(() => queryAll(m.container, '.lc-fa-item').length < 60, 'closing the row re-windows')
+    await m.unmount()
   })
 })

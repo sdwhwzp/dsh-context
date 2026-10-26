@@ -58,7 +58,7 @@ describe('registerContextCommand', () => {
 describe('candidates', () => {
   test('a non-leading position yields no candidates', async () => {
     const { source } = setup()
-    assert.deepEqual(await source.candidates({ sessionId: 'cmd-pos' }, { query: '', position: 'trailing', signal: SIGNAL }), [])
+    assert.deepEqual(await source.candidates({ sessionId: 'cmd-pos' }, { query: '', position: 'inline', signal: SIGNAL }), [])
   })
 
   test('an empty query yields the context candidate', async () => {
@@ -73,19 +73,14 @@ describe('candidates', () => {
     }])
   })
 
-  test('a matching prefix yields the candidate; a mismatch yields none', async () => {
+  test('a matching prefix yields the candidate; a mismatch or case/whitespace-normalized mismatch yields none', async () => {
     const { source } = setup()
     const session = { sessionId: 'cmd-prefix' }
     const hit = await source.candidates(session, { query: 'con', position: 'leading', signal: SIGNAL })
     assert.equal(hit.length, 1)
     assert.equal(hit[0].name, 'context')
     assert.deepEqual(await source.candidates(session, { query: 'xyz', position: 'leading', signal: SIGNAL }), [])
-  })
-
-  test('the query match is case- and whitespace-insensitive', async () => {
-    const { source } = setup()
-    const candidates = await source.candidates({ sessionId: 'cmd-case' }, { query: ' CONTEXT ', position: 'leading', signal: SIGNAL })
-    assert.equal(candidates.length, 1)
+    assert.equal((await source.candidates(session, { query: ' CONTEXT ', position: 'leading', signal: SIGNAL })).length, 1)
   })
 })
 
@@ -116,16 +111,11 @@ describe('matchEnter', () => {
     assert.deepEqual(takePendingConsume('cmd-enter'), { kind: 'bare-token', token: '/context' })
   })
 
-  test('a /context line with trailing text is not matched', async () => {
+  test('a line other than the bare /context is not matched', async () => {
     const { source } = setup()
     assert.ok(source.matchEnter)
     assert.equal(await source.matchEnter({ sessionId: 'cmd-extra' }, '/context extra', SIGNAL), undefined)
-    assert.equal(takePendingConsume('cmd-extra'), undefined)
-  })
-
-  test('any other line is not matched', async () => {
-    const { source } = setup()
-    assert.ok(source.matchEnter)
     assert.equal(await source.matchEnter({ sessionId: 'cmd-other' }, 'hello', SIGNAL), undefined)
+    assert.equal(takePendingConsume('cmd-extra'), undefined)
   })
 })

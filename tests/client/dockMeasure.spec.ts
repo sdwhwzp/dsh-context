@@ -16,11 +16,8 @@ function frameEl(template: string): HTMLDivElement {
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('measureDock', () => {
-  test('resolves to the full mask without a start element', () => {
+  test('resolves to the full mask without a start element or without an ancestor carrying an inline template', () => {
     assert.deepEqual(measureDock(null), { left: 0, right: 0, frame: null })
-  })
-
-  test('resolves to the full mask when no ancestor carries an inline template', () => {
     const start = chainOf(document.createElement('div'), document.createElement('div'))
     assert.deepEqual(measureDock(start), { left: 0, right: 0, frame: null })
   })

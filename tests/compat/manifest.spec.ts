@@ -22,7 +22,6 @@ const floorsOf = (range: string): string[] => range.split('||').map(term => term
 
 describe('supported-set lockstep', () => {
   test('dshReleases, baselines and the CI tag fetches name the same releases', () => {
-    assert.deepEqual(Object.keys(manifest.dsh.compatibility.dshReleases).sort(), [...versions].sort())
     assert.deepEqual(manifest.dsh.compatibility.dshReleases, Object.fromEntries(versions.map(version => [version, 'compatible'])))
     for (const artifact of ['.github/workflows/pr-checks.yml', '.github/workflows/release.yml']) {
       const tags = [...read(artifact).matchAll(/refs\/tags\/(dsh-v[0-9a-z.-]+)/gi)].map(match => match[1])

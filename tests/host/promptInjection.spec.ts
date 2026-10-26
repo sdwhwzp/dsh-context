@@ -56,7 +56,7 @@ describe('watchPromptInjection', () => {
     assert.ok(face.registered.every(section => section.interpolate === false), 'the text is literal, never variable-interpolated')
   })
 
-  test('a volatile config reference is read at each assembly; a live edit applies', () => {
+  test('a volatile reference is read at each assembly; a plain string stays static; non-strings and blanks read empty', () => {
     const face = fakeSystemPrompt()
     const box = { value: 'before' as unknown }
     watchPromptInjection(ctxWith(face), { promptPrefix: ref(box), promptSuffix: '' } as never)
@@ -64,25 +64,21 @@ describe('watchPromptInjection', () => {
     assert.equal(textOf(prefix), 'before')
     box.value = 'after'
     assert.equal(textOf(prefix), 'after', 'the loader rewrites the reference in place; the next assembly reads it')
-  })
 
-  test('a plain string config stays static; non-string values read as empty', () => {
-    const face = fakeSystemPrompt()
-    watchPromptInjection(ctxWith(face), { promptPrefix: 'static', promptSuffix: 42 } as never)
-    const [prefix, suffix] = face.registered
-    assert.equal(textOf(prefix), 'static')
-    assert.equal(textOf(suffix), '')
+    const staticFace = fakeSystemPrompt()
+    watchPromptInjection(ctxWith(staticFace), { promptPrefix: 'static', promptSuffix: 42 } as never)
+    const [staticPrefix, staticSuffix] = staticFace.registered
+    assert.equal(textOf(staticPrefix), 'static')
+    assert.equal(textOf(staticSuffix), '')
     const refFace = fakeSystemPrompt()
-    const box = { value: 7 }
-    watchPromptInjection(ctxWith(refFace), { promptPrefix: ref(box), promptSuffix: ref(box) } as never)
+    const nonString = { value: 7 }
+    watchPromptInjection(ctxWith(refFace), { promptPrefix: ref(nonString), promptSuffix: ref(nonString) } as never)
     assert.equal(textOf(refFace.registered[0]), '', 'a reference carrying a non-string reads as empty')
-  })
 
-  test('whitespace-only text collapses to empty; other text stays byte-exact', () => {
-    const face = fakeSystemPrompt()
-    watchPromptInjection(ctxWith(face), { promptPrefix: '  \n\t ', promptSuffix: '\nline one\n\nline two\n' } as never)
-    const [prefix, suffix] = face.registered
-    assert.equal(textOf(prefix), '', 'a blank prompt contributes nothing')
+    const blankFace = fakeSystemPrompt()
+    watchPromptInjection(ctxWith(blankFace), { promptPrefix: '  \n\t ', promptSuffix: '\nline one\n\nline two\n' } as never)
+    const [blank, suffix] = blankFace.registered
+    assert.equal(textOf(blank), '', 'a blank prompt contributes nothing')
     assert.equal(textOf(suffix), '\nline one\n\nline two\n', 'the configured bytes are preserved')
   })
 

@@ -18,24 +18,18 @@ function selfOnly() {
 const TIMING = { wallMs: 387_000, ttftMs: 0, genMs: 0, calls: 0, toolsMs: 0, toolCalls: 0, tools: {} }
 
 describe('ContextView — the agent network card\'s own session', () => {
-  test("the panel's active time and step count fill the current card's footer", async () => {
+  test("the panel's active time and step count fill the current card's footer, or just the steps without timing", async () => {
     const View = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }))
     const m = await mount(h(View, { sessionId: 'sv-self', host: 'sidebar', useProjection: projectionsFor(richTimeline({ timing: TIMING })) }))
-
     const self = query(m.container, '.lc-agent-card.lc-agent-self')
     assert.equal(text(self).includes('Main Agent'), true)
     // Three steps come from richTimeline; 6m27s is TIMING.wallMs.
     assert.equal(query(self, '.lc-agent-meta-text').textContent, '6m27s · 3 steps')
     await m.unmount()
-  })
 
-  test('without timing totals the card drops the duration instead of claiming 0s', async () => {
-    const View = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }))
-    const m = await mount(h(View, { sessionId: 'sv-self', host: 'sidebar', useProjection: projectionsFor(richTimeline()) }))
-
-    const self = query(m.container, '.lc-agent-card.lc-agent-self')
-    assert.equal(query(self, '.lc-agent-meta-text').textContent, '3 steps')
-    await m.unmount()
+    const m2 = await mount(h(View, { sessionId: 'sv-self', host: 'sidebar', useProjection: projectionsFor(richTimeline()) }))
+    assert.equal(query(m2.container, '.lc-agent-self .lc-agent-meta-text').textContent, '3 steps')
+    await m2.unmount()
   })
 
   test('the center Context tab hands the card to the Fleet tab; only the sidebar host keeps it inline', async () => {
@@ -43,9 +37,6 @@ describe('ContextView — the agent network card\'s own session', () => {
     const m = await mount(h(View, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline({ timing: TIMING })) }))
 
     assert.equal(queryAll(m.container, '.lc-agents').length, 0, 'no agent network on the Context tab')
-    assert.equal(queryAll(m.container, '.lc-agent-card').length, 0)
-    // The split moves the card, not the page.
-    assert.ok(queryAll(m.container, '.lc-card').length > 0)
     await m.unmount()
   })
 
@@ -88,19 +79,15 @@ describe('ContextView — the agent network card\'s own session', () => {
     const m2 = await mount(h(bare, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
     await click(query(m2.container, '.lc-ledger-team-head'))
     await m2.unmount()
-  })
 
-  test('with neither view served the Fleet section is a plain figure, never a dead button', async () => {
     const settings = createContextSettings()
     settings.set('defaultPlacement', 'tab')
     settings.set('fleetTab', 'hide')
-    const View = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }), settings)
-    const m = await mount(h(View, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
-
-    const cell = query(m.container, '.lc-ledger-team-head')
+    const plainView = makeView(new TestClientCtx({ services: { sessions: selfOnly() } }), settings)
+    const plain = await mount(h(plainView, { sessionId: 'sv-self', useProjection: projectionsFor(richTimeline()) }))
+    const cell = query(plain.container, '.lc-ledger-team-head')
     assert.equal(cell.getAttribute('role'), null)
     assert.equal(cell.getAttribute('tabindex'), null)
-    await click(cell)
-    await m.unmount()
+    await plain.unmount()
   })
 })

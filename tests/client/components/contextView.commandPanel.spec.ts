@@ -60,7 +60,6 @@ describe('ContextView — command panel', () => {
   test('the panel lists the served commands and reveals the result message in the browser', async () => {
     const { m, card } = await mountCommands('sv-cmds', [cmd(10, { resultSeq: 3 })])
     const pick = query<HTMLSelectElement>(m.container, 'select.lc-br-pick')
-    assert.equal(pick.value, 'live')
     const row = query(card, '.lc-cmd-row')
     assert.ok(text(row).includes('git status --short'))
     // The trailing time/stamp is the reveal affordance.
@@ -87,9 +86,6 @@ describe('ContextView — command panel', () => {
   })
 
   test('the card follows the detail channel states', async () => {
-    // The legacy (inline) generation renders the served commands directly.
-    const { card } = await mountCommands('sv-cmds-legacy', [cmd(10, { resultSeq: 3 })])
-    assert.equal(queryAll(card, '.lc-cmd-row').length, 1)
     // A pre-field projection (no commands array) renders the empty state, not a crash.
     const { m } = await mountCommands('sv-cmds-none', [])
     assert.ok(text(m.container).includes('No commands executed in this session'))

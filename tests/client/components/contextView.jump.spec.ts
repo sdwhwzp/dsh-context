@@ -5,7 +5,7 @@ import { requestContextFocus, takeContextFocus } from '../../../src/client/viewF
 import { DICT_EN } from '../../../src/client/i18n'
 import { TestClientCtx } from '../helpers/harness'
 import { click, flush, mount, query, queryAll, text } from '../helpers/kit'
-import { buttonByText, eventLink, makeView, mountInScroller, mountRich, overflowingScroller, projectionsFor, richTimeline, settingsWith, T0, timeline } from './contextViewHarness'
+import { buttonByText, eventLink, makeView, mountInScroller, mountRich, overflowingScroller, projectionsFor, richTimeline, settingsWith, stubRevealRects, T0, timeline } from './contextViewHarness'
 
 describe('ContextView — chat→Context jump', () => {
   test('the relay flips the chart to turn bars, pins the reply\'s turn, and consumes itself', async () => {
@@ -115,13 +115,8 @@ describe('ContextView — the stats board\'s pill jumps', () => {
     Object.defineProperty(scroller, 'clientHeight', { value: 300 })
     // jsdom lays out nothing: fixed viewport tops make each reveal's rect delta deterministic (450 − 100),
     // shifted by the scroll the reveal itself applies (then 700 − 100).
-    const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const inScroller = !this.hasAttribute('data-conversation-scroll')
-      const top = this.hasAttribute('data-conversation-scroll') ? 100
-        : this.classList.contains('lc-col-browser') ? 450
-          : this.classList.contains('lc-fa-card') ? 700 : 0
-      return { top: inScroller ? top - scroller.scrollTop : top } as DOMRect
-    })
+    const gBCR = stubRevealRects(scroller, el => (el.classList.contains('lc-col-browser') ? 450
+      : el.classList.contains('lc-fa-card') ? 700 : 0))
     try {
       const View = makeView(new TestClientCtx())
       const m = await mountInScroller(h(View, { sessionId: 'sv-pilljump', useProjection: projectionsFor(jumpTimeline()) }), scroller)
@@ -178,12 +173,7 @@ describe('ContextView — the stats board\'s lower-lane jumps', () => {
 
   test('a command chip mounts the lazy card, seeds its lens, and scrolls it in', async () => {
     const scroller = overflowingScroller(1200)
-    const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const inScroller = !this.hasAttribute('data-conversation-scroll')
-      const top = this.hasAttribute('data-conversation-scroll') ? 100
-        : this.classList.contains('lc-cmd-card') ? 700 : 0
-      return { top: inScroller ? top - scroller.scrollTop : top } as DOMRect
-    })
+    const gBCR = stubRevealRects(scroller, el => (el.classList.contains('lc-cmd-card') ? 700 : 0))
     try {
       const View = makeView(new TestClientCtx())
       const m = await mountInScroller(h(View, { sessionId: 'sv-cmdjump', useProjection: projectionsFor(commandTimeline()) }), scroller)
@@ -204,12 +194,7 @@ describe('ContextView — the stats board\'s lower-lane jumps', () => {
 
   test('a tool chip opens the tool-results category with the tool lens seeded', async () => {
     const scroller = overflowingScroller(1200)
-    const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const inScroller = !this.hasAttribute('data-conversation-scroll')
-      const top = this.hasAttribute('data-conversation-scroll') ? 100
-        : this.classList.contains('lc-col-browser') ? 450 : 0
-      return { top: inScroller ? top - scroller.scrollTop : top } as DOMRect
-    })
+    const gBCR = stubRevealRects(scroller, el => (el.classList.contains('lc-col-browser') ? 450 : 0))
     try {
       const View = makeView(new TestClientCtx())
       const m = await mountInScroller(h(View, { sessionId: 'sv-tooljump', useProjection: projectionsFor(richTimeline()) }), scroller)
@@ -232,12 +217,7 @@ describe('ContextView — the stats board\'s lower-lane jumps', () => {
 
   test('an event kind filters the card to that kind and scrolls it in', async () => {
     const scroller = overflowingScroller(1200)
-    const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const inScroller = !this.hasAttribute('data-conversation-scroll')
-      const top = this.hasAttribute('data-conversation-scroll') ? 100
-        : this.classList.contains('lc-events-card') ? 700 : 0
-      return { top: inScroller ? top - scroller.scrollTop : top } as DOMRect
-    })
+    const gBCR = stubRevealRects(scroller, el => (el.classList.contains('lc-events-card') ? 700 : 0))
     try {
       const data = richTimeline({
         events: [
@@ -274,11 +254,7 @@ describe('ContextView — the events card\'s boundary rows', () => {
 
   test('a click pins the step the compaction landed on, aligns the browser, and reveals the trend card', async () => {
     const scroller = overflowingScroller(1200)
-    const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const top = this.hasAttribute('data-conversation-scroll') ? 100
-        : this.hasAttribute('data-lc-trend') ? 450 : 0
-      return { top } as DOMRect
-    })
+    const gBCR = stubRevealRects(scroller, el => (el.hasAttribute('data-lc-trend') ? 450 : 0))
     try {
       const View = makeView(new TestClientCtx())
       const m = await mountInScroller(h(View, {
@@ -298,6 +274,16 @@ describe('ContextView — the events card\'s boundary rows', () => {
     } finally {
       gBCR.mockRestore()
     }
+
+    const pruneData = richTimeline({
+      events: [{ seq: 3, time: T0 + 2000, kind: 'prune', tokens: 500, turn: 1, step: 2, fromTurn: 1, fromStep: 1 }],
+    })
+    const pruneView = makeView(new TestClientCtx())
+    const prune = await mount(h(pruneView, { sessionId: 'sv-prunejump', useProjection: projectionsFor(pruneData) }))
+    await click(eventLink(prune.container, DICT_EN['ev.prune']))
+    assert.ok(query(prune.container, '.lc-bar[data-seq="4"]').className.includes('lc-bar-selected'), 'the pruned step is pinned')
+    assert.equal(query<HTMLSelectElement>(prune.container, 'select.lc-br-pick').value, '4')
+    await prune.unmount()
   })
 
   test('a click leaves the overview face and flips turn granularity to the exact step', async () => {
@@ -312,18 +298,6 @@ describe('ContextView — the events card\'s boundary rows', () => {
     assert.ok(buttonByText(m.container, DICT_EN['gran.step']).className.includes('lc-gran-on'), 'step granularity is on')
     assert.equal(queryAll(m.container, '.lc-bar').length, 3)
     assert.ok(query(m.container, '.lc-bar[data-seq="4"]').className.includes('lc-bar-selected'))
-    await m.unmount()
-  })
-
-  test('a prune row jumps the same way — it shares the compaction anchor', async () => {
-    const data = richTimeline({
-      events: [{ seq: 3, time: T0 + 2000, kind: 'prune', tokens: 500, turn: 1, step: 2, fromTurn: 1, fromStep: 1 }],
-    })
-    const View = makeView(new TestClientCtx())
-    const m = await mount(h(View, { sessionId: 'sv-prunejump', useProjection: projectionsFor(data) }))
-    await click(eventLink(m.container, DICT_EN['ev.prune']))
-    assert.ok(query(m.container, '.lc-bar[data-seq="4"]').className.includes('lc-bar-selected'), 'the pruned step is pinned')
-    assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, '4')
     await m.unmount()
   })
 

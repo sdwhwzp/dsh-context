@@ -84,7 +84,7 @@ describe('the attachment block', () => {
     await bare.unmount()
   })
 
-  test('an unnamed file names its kind on the badge, and shows no size or token row', async () => {
+  test('an unnamed file names its kind on the badge with no size or token row; an image without sent bytes still shows dimensions', async () => {
     const m = await mountSection({ attachments: [{ kind: 'file', attachmentId: 'sha256:u' }] })
     const card = query(m.container, '.lc-att-item')
     assert.ok(text(query(card, '.lc-att-name')).includes('File'))
@@ -93,12 +93,10 @@ describe('the attachment block', () => {
     // The handle names the file and its size, so an unproven reference prices nothing.
     assert.ok(!text(card).includes('Token'))
     await m.unmount()
-  })
 
-  test('an image without sent bytes still shows its dimensions', async () => {
-    const m = await mountSection({ attachments: [{ kind: 'image', attachmentId: 'sha256:i2', name: 'x.png', width: 10, height: 20 }] })
-    assert.ok(text(query(m.container, '.lc-att-item')).includes('10×20'))
-    await m.unmount()
+    const image = await mountSection({ attachments: [{ kind: 'image', attachmentId: 'sha256:i2', name: 'x.png', width: 10, height: 20 }] })
+    assert.ok(text(query(image.container, '.lc-att-item')).includes('10×20'))
+    await image.unmount()
   })
 
   test('a row re-render never re-reads the bytes (the reference is re-proven each render)', async () => {

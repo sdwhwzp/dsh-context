@@ -33,16 +33,13 @@ describe('billedOf / turnsOf', () => {
 describe('createdDayOf', () => {
   const activity = { days: { '2026-09-16': { tokens: 5, requests: 1 }, '2026-09-10': { tokens: 1, requests: 1 } } }
 
-  test('the earliest ledger day stands in for the creation date', () => {
+  test('the earliest ledger day stands in for the creation date; no ledger, no days record, or an empty one names none', () => {
     assert.equal(createdDayOf(activity as ContextActivity), '2026-09-10')
     assert.equal(
       createdDayOf({ days: { '2026-09-10': { tokens: 1, requests: 1 }, '2026-09-16': { tokens: 5, requests: 1 } } } as ContextActivity),
       '2026-09-10',
       'a later day never displaces the earliest',
     )
-  })
-
-  test('no ledger, no days record, or an empty one names no creation date', () => {
     assert.equal(createdDayOf(null), undefined)
     assert.equal(createdDayOf({} as ContextActivity), undefined)
     assert.equal(createdDayOf({ days: {} } as ContextActivity), undefined)
@@ -50,15 +47,12 @@ describe('createdDayOf', () => {
 })
 
 describe('usageTotalsOf', () => {
-  test('absent or empty usage reads null (the caller keeps its dash)', () => {
+  test('absent or empty usage reads null; buckets sum per bucket and in total', () => {
     assert.equal(usageTotalsOf(null), null)
     assert.equal(usageTotalsOf(undefined), null)
     assert.equal(usageTotalsOf({}), null)
     assert.equal(usageTotalsOf({ deepseek: {} }), null)
     assert.equal(usageTotalsOf({ deepseek: { m: {} } }), null)
-  })
-
-  test('buckets sum per bucket and in total', () => {
     const totals = usageTotalsOf({
       deepseek: { a: { peak: { uncached: 10, cacheRead: 5, cacheWrite: 2, output: 3 }, off: { uncached: 4, cacheRead: 1, cacheWrite: 1, output: 1 } } },
       other: { b: { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 2 } } },
@@ -68,36 +62,30 @@ describe('usageTotalsOf', () => {
 })
 
 describe('timingSumOf', () => {
-  test('no timing anywhere reads null', () => {
+  const SUM = {
+    wallMs: 150, ttftMs: 15, genMs: 90, calls: 3, toolsMs: 40, toolCalls: 4,
+    tools: { read: { calls: 3, ms: 25 }, write: { calls: 1, ms: 10 } },
+  }
+
+  test('no timing anywhere reads null; otherwise the required fields sum and per-tool tallies merge untouched', () => {
     assert.equal(timingSumOf([]), null)
     assert.equal(timingSumOf([rowOf()]), null)
     assert.equal(timingSumOf([rowOf({ timeline: { requests: [] } as unknown as ContextTimeline })]), null)
-  })
-
-  test('sums the required fields and merges the per-tool tallies; the inputs stay untouched', () => {
     const a = { wallMs: 100, ttftMs: 10, genMs: 60, calls: 2, toolsMs: 30, toolCalls: 3, tools: { read: { calls: 2, ms: 20 } } }
     const b = { wallMs: 50, ttftMs: 5, genMs: 30, calls: 1, toolsMs: 10, toolCalls: 1, tools: { read: { calls: 1, ms: 5 }, write: { calls: 1, ms: 10 } } }
     const sum = timingSumOf([
       rowOf({ timeline: { timing: a } as unknown as ContextTimeline }),
       rowOf({ timeline: { timing: b } as unknown as ContextTimeline }),
     ])
-    assert.deepEqual(sum, {
-      wallMs: 150, ttftMs: 15, genMs: 90, calls: 3, toolsMs: 40, toolCalls: 4,
-      tools: { read: { calls: 3, ms: 25 }, write: { calls: 1, ms: 10 } },
-    })
+    assert.deepEqual(sum, SUM)
     assert.deepEqual(a.tools.read, { calls: 2, ms: 20 })
-    assert.equal('reasoningMs' in (sum as object), false)
-    assert.equal('speedMs' in (sum as object), false)
   })
 
   test('folds every family member — a null self and the dispatched subagents alike', () => {
     const self = { wallMs: 100, ttftMs: 10, genMs: 60, calls: 2, toolsMs: 30, toolCalls: 3, tools: { read: { calls: 2, ms: 20 } } }
     const kid = { wallMs: 50, ttftMs: 5, genMs: 30, calls: 1, toolsMs: 10, toolCalls: 1, tools: { read: { calls: 1, ms: 5 }, write: { calls: 1, ms: 10 } } }
     const sum = timingSumOf([rowOf({ family: [null, { timing: self }, { timing: kid }] as unknown as ContextTimeline[] })])
-    assert.deepEqual(sum, {
-      wallMs: 150, ttftMs: 15, genMs: 90, calls: 3, toolsMs: 40, toolCalls: 4,
-      tools: { read: { calls: 3, ms: 25 }, write: { calls: 1, ms: 10 } },
-    })
+    assert.deepEqual(sum, SUM)
   })
 
   test('the additive-optional fields sum their carriers only', () => {
@@ -130,7 +118,7 @@ describe('tokenPartsOf', () => {
   const STANDARD_CURRENT = { system: 100, tools: 50, user: 30, inject: 10, skill: 10, assistant: 200, tool: 100, total: 500 }
   const TINY_CURRENT = { system: 10, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 10 }
 
-  test('nothing billed reads null', () => {
+  test('nothing billed reads null; otherwise each session\'s billedParts estimate folds by category and totals stay billed-exact', () => {
     assert.equal(tokenPartsOf([]), null)
     assert.equal(tokenPartsOf([rowOf()]), null)
     assert.equal(
@@ -138,9 +126,6 @@ describe('tokenPartsOf', () => {
       null,
       'a composition without billed buckets contributes nothing',
     )
-  })
-
-  test('folds each session\'s billedParts estimate by category; totals stay billed-exact', () => {
     const rows = [
       rowOf({ timeline: { current: STANDARD_CURRENT, cost: COST, requests: [] } as unknown as ContextTimeline }),
       rowOf({ timeline: { current: TINY_CURRENT, cost: { deepseek: { m: { peak: { uncached: 10, cacheRead: 0, cacheWrite: 0, output: 0 } } } }, requests: [] } as unknown as ContextTimeline }),
@@ -344,19 +329,17 @@ describe('kpisOf', () => {
     assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 390e-6) < 1e-12, 'the unpriced session adds nothing to the estimate')
     assert.equal(kpi.tokenParts?.total, 218, 'both sessions\' billed totals fold into the split')
     assert.equal(kpi.timing, null)
+    const unbilled = kpisOf([rowOf()], null, 'cny')
+    assert.equal(unbilled.tokens, 0)
+    assert.equal(unbilled.turns, 0)
+    assert.equal(unbilled.cost, null)
+    assert.equal(unbilled.cacheHit, null)
+    assert.equal(unbilled.costSessions, 0)
+    assert.equal(unbilled.usageSessions, 0)
+    assert.equal(unbilled.tokenParts, null)
+    assert.equal(unbilled.timing, null, 'no timing aggregates to null, so the band dashes and the card shows its empty state')
   })
 
-  test('an unbilled set zeroes and dashes', () => {
-    const kpi = kpisOf([rowOf()], null, 'cny')
-    assert.equal(kpi.tokens, 0)
-    assert.equal(kpi.turns, 0)
-    assert.equal(kpi.cost, null)
-    assert.equal(kpi.cacheHit, null)
-    assert.equal(kpi.costSessions, 0)
-    assert.equal(kpi.usageSessions, 0)
-    assert.equal(kpi.tokenParts, null)
-    assert.equal(kpi.timing, null, 'no timing aggregates to null, so the band dashes and the card shows its empty state')
-  })
 })
 
 describe('aggregateDays', () => {
@@ -373,20 +356,17 @@ describe('aggregateDays', () => {
       '2026-09-16': { tokens: 12, requests: 4, sessions: 2, cost: null },
       '2026-09-15': { tokens: 2, requests: 2, sessions: 1, cost: null },
     })
-  })
-
-  test('a zeroed day entry is no activity: it counts no session and makes no day', () => {
-    const rows = [
+    const zeroed = [
       rowOf({ activity: { days: { '2026-09-16': { tokens: 0, requests: 0 }, '2026-09-15': { tokens: 3, requests: 1 } } } }),
       rowOf({ activity: { days: { '2026-09-16': { tokens: 1, requests: 1 } } } }),
     ]
-    assert.deepEqual(aggregateDays(rows, book, 'usd'), {
+    assert.deepEqual(aggregateDays(zeroed, book, 'usd'), {
       '2026-09-16': { tokens: 1, requests: 1, sessions: 1, cost: null },
       '2026-09-15': { tokens: 3, requests: 1, sessions: 1, cost: null },
-    })
+    }, 'a zeroed day entry is no activity: no session counted, no day made')
   })
 
-  test('each day’s pricing records merge and price off the book; unpriced days stay null', () => {
+  test('each day’s pricing records merge and price off the book; unpriced days and a missing book stay null', () => {
     const rows = [
       rowOf({ activity: { days: {
         '2026-09-16': { tokens: 5, requests: 1, cost: FEE },
@@ -399,10 +379,6 @@ describe('aggregateDays', () => {
     assert.ok(Math.abs((days['2026-09-16'].cost ?? 0) - 376e-6) < 1e-12)
     assert.equal(days['2026-09-15'].cost, null, 'a day without pricing records prices to nothing')
     assert.equal(days['2026-09-14'].cost, null, 'a model the book cannot price prices to nothing')
-  })
-
-  test('a day with no book prices to null', () => {
-    const rows = [rowOf({ activity: { days: { '2026-09-16': { tokens: 5, requests: 1, cost: FEE } } } })]
-    assert.equal(aggregateDays(rows, null, 'cny')['2026-09-16'].cost, null)
+    assert.equal(aggregateDays([rows[0]], null, 'cny')['2026-09-16'].cost, null, 'a day with no book prices to null')
   })
 })

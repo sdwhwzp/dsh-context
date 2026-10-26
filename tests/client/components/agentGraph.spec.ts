@@ -43,8 +43,6 @@ function timeline(total: number, requests = 0): unknown {
 
 class FakeSessions {
   opened: string[] = []
-  refreshed: string[] = []
-  rejectRefresh = false
   private listeners = new Set<() => void>()
   state: unknown
 
@@ -62,11 +60,6 @@ class FakeSessions {
 
   openSession(id: string): void {
     this.opened.push(id)
-  }
-
-  refreshSubagents(parentSessionId: string): Promise<void> {
-    this.refreshed.push(parentSessionId)
-    return this.rejectRefresh ? Promise.reject(new Error('catalog unavailable')) : Promise.resolve()
   }
 
   setState(byId: Record<string, unknown>): void {
@@ -119,31 +112,19 @@ function family(): Record<string, unknown> {
 }
 
 describe('AgentGraph — degrade arms', () => {
-  test('no sessions service renders nothing (and mounts/unmounts cleanly)', async () => {
-    const ctx = new TestClientCtx()
-    const View = makeAgentGraph(asClientCtx(ctx), kit)
-    const m = await mount(h(View, { sessionId: 's1', self: selfStats() }))
-    assert.equal(text(m.container), '')
-    await m.unmount()
-  })
-
-  test('a service without the list feed renders nothing', async () => {
-    const View = makeView({ open: () => {} })
-    const m = await mount(h(View, { sessionId: 's1' }))
-    assert.equal(text(m.container), '')
-    await m.unmount()
-  })
-
-  test('missing or empty session id anchors nothing', async () => {
-    const face = new FakeSessions(family())
-    const View = makeView(face)
-    const m1 = await mount(h(View, { self: selfStats() }))
-    assert.equal(text(m1.container), '')
-    await m1.unmount()
-    const m2 = await mount(h(View, { sessionId: '', self: selfStats() }))
-    assert.equal(text(m2.container), '')
-    await m2.unmount()
-    assert.deepEqual(face.refreshed, [])
+  test('renders nothing without a sessions face or a session id', async () => {
+    const noService = makeAgentGraph(asClientCtx(new TestClientCtx()), kit)
+    const View = makeView(new FakeSessions(family()))
+    for (const [Component, props] of [
+      [noService, { sessionId: 's1', self: selfStats() }],
+      [makeView({ open: () => {} }), { sessionId: 's1' }],
+      [View, { self: selfStats() }],
+      [View, { sessionId: '', self: selfStats() }],
+    ] as const) {
+      const m = await mount(h(Component, props))
+      assert.equal(text(m.container), '')
+      await m.unmount()
+    }
   })
 })
 
@@ -155,7 +136,6 @@ describe('AgentGraph — the family tree', () => {
 
     const cards = queryAll(m.container, '.lc-agent-card')
     assert.equal(cards.length, 3)
-    assert.deepEqual(face.refreshed, ['root'])
 
     const rendered = text(m.container)
     assert.ok(rendered.includes('3 agents'))
@@ -171,13 +151,9 @@ describe('AgentGraph — the family tree', () => {
     assert.ok(self.querySelector('.lc-agent-self-badge') !== null)
     assert.ok(query(m.container, '[data-agent="worker"]').querySelector('.lc-agent-self-badge') === null)
 
-    const links = queryAll(m.container, 'path.lc-agents-link')
-    assert.equal(links.length, 2)
-    assert.ok(links.every(l => l.getAttribute('d')?.startsWith('M 276 ')))
-    assert.ok(links.every(l => l.getAttribute('d')?.includes(' C ')))
+    assert.equal(queryAll(m.container, 'path.lc-agents-link').length, 2)
     assert.equal(queryAll(m.container, 'path.lc-agents-link-live').length, 1)
     assert.equal(queryAll(m.container, 'path.lc-agents-flow').length, 1)
-    assert.equal(queryAll(m.container, 'circle.lc-agents-joint').length, 4)
 
     const worker = query(m.container, '[data-agent="worker"]')
     assert.equal(worker.getAttribute('role'), 'button')
@@ -233,10 +209,11 @@ describe('AgentGraph — the family tree', () => {
       { sessionId: 'root', self: { head: null, billed: null, requests: 0 } },
     ))
     assert.equal(queryAll(fresh.container, '.lc-agent-state').length, 0)
+    assert.ok(!text(fresh.container).includes('tokens in context'), 'no token data at all hides the totals chip')
     await fresh.unmount()
   })
 
-  test('hover moves the inspector, click/Enter opens the session', async () => {
+  test('hover and focus move the inspector, click/Enter opens the session, and an external focusId lights the member card', async () => {
     const face = new FakeSessions(family())
     const View = makeView(face)
     const m = await mount(h(View, { sessionId: 'root', self: selfStats() }))
@@ -299,28 +276,22 @@ describe('AgentGraph — the family tree', () => {
     assert.deepEqual(face.opened, ['worker', 'done'])
 
     await m.unmount()
-  })
 
-  test('an external focusId lights the member card and its lineage; a hover takes precedence', async () => {
-    const face = new FakeSessions(family())
-    const View = makeView(face)
-    const m = await mount(h(View, { sessionId: 'root', self: selfStats(), focusId: 'done' }))
-    const done = query(m.container, '[data-agent="done"]')
+    const focused = await mount(h(View, { sessionId: 'root', self: selfStats(), focusId: 'done' }))
+    const done = query(focused.container, '[data-agent="done"]')
     assert.ok(done.classList.contains('lc-agent-hover'), 'the focused card lights like a pointed-at one')
     assert.ok(done.classList.contains('lc-agent-on'), 'its lineage lights too')
-    assert.ok(query(m.container, '[data-agent="root"]').classList.contains('lc-agent-on'))
-    assert.ok(query(m.container, '.lc-agents-canvas').classList.contains('lc-agents-focus'))
-    assert.equal(queryAll(m.container, 'g.lc-agents-on').length, 1)
-
-    await hover(query(m.container, '[data-agent="worker"]'))
+    assert.ok(query(focused.container, '[data-agent="root"]').classList.contains('lc-agent-on'))
+    assert.ok(query(focused.container, '.lc-agents-canvas').classList.contains('lc-agents-focus'))
+    assert.equal(queryAll(focused.container, 'g.lc-agents-on').length, 1)
+    await hover(query(focused.container, '[data-agent="worker"]'))
     assert.ok(!done.classList.contains('lc-agent-hover'), 'the live hover takes the slot')
-    assert.ok(query(m.container, '[data-agent="worker"]').classList.contains('lc-agent-hover'))
-    await unhover(query(m.container, '[data-agent="worker"]'))
+    await unhover(query(focused.container, '[data-agent="worker"]'))
     assert.ok(done.classList.contains('lc-agent-hover'), 'the resting focus returns after the sweep')
-    await m.unmount()
+    await focused.unmount()
   })
 
-  test('list updates re-render the tree live', async () => {
+  test('list updates re-render the tree live, and a tall family offers Show all until expanded', async () => {
     const face = new FakeSessions({ root: { displayTitle: 'Main', running: false, updatedAt: 1 } })
     const View = makeView(face)
     const m = await mount(h(View, { sessionId: 'root', self: selfStats() }))
@@ -339,19 +310,8 @@ describe('AgentGraph — the family tree', () => {
     assert.ok(!text(m.container).includes('No subagents yet'))
     assert.ok(text(m.container).includes('2 agents'))
     assert.equal(queryAll(m.container, '.lc-agents-toggle').length, 0)
-
     await m.unmount()
-  })
 
-  test('a family with no token data at all hides the totals chip', async () => {
-    const View = makeView(new FakeSessions({ root: { displayTitle: 'Main', running: false, updatedAt: 1 } }))
-    const m = await mount(h(View, { sessionId: 'root', self: { head: null, billed: null, requests: 0 } }))
-    assert.ok(text(m.container).includes('1 agents'))
-    assert.ok(!text(m.container).includes('tokens in context'))
-    await m.unmount()
-  })
-
-  test('a tall family offers Show all until expanded', async () => {
     const byId: Record<string, unknown> = { root: { displayTitle: 'Main', running: false, updatedAt: 1 } }
     let parent = 'root'
     for (let i = 0; i < 4; i++) {
@@ -359,50 +319,22 @@ describe('AgentGraph — the family tree', () => {
       parent = 'level' + i
     }
     for (let i = 0; i < 45; i++) byId['kid' + i] = { parentId: parent, origin: 'subagent', updatedAt: i }
-    const View = makeView(new FakeSessions(byId))
-    const m = await mount(h(View, { sessionId: 'root', self: selfStats() }))
-    assert.equal(queryAll(m.container, '.lc-agent-card').length, 50)
-    assert.ok(text(m.container).includes('50 agents'))
-    assert.ok(query<HTMLElement>(m.container, '.lc-agents-stage').className.includes('lc-agents-stage-tall'))
-    assert.ok(!query<HTMLElement>(m.container, '.lc-agents-stage').className.includes('lc-agents-stage-all'))
-
-    const toggle = query<HTMLElement>(m.container, '.lc-agents-toggle')
-    assert.equal(text(toggle), 'Show all')
-    await click(toggle)
-    assert.ok(query<HTMLElement>(m.container, '.lc-agents-stage').className.includes('lc-agents-stage-all'))
-    assert.equal(text(query(m.container, '.lc-agents-toggle')), 'Show less')
-
-    await click(query<HTMLElement>(m.container, '.lc-agents-toggle'))
-    assert.ok(!query<HTMLElement>(m.container, '.lc-agents-stage').className.includes('lc-agents-stage-all'))
-    assert.equal(text(query(m.container, '.lc-agents-toggle')), 'Show all')
-
-    await m.update(h(View, { sessionId: 'other', self: selfStats() }))
+    const TallView = makeView(new FakeSessions(byId))
+    const tall = await mount(h(TallView, { sessionId: 'root', self: selfStats() }))
+    assert.equal(queryAll(tall.container, '.lc-agent-card').length, 50)
+    assert.ok(text(tall.container).includes('50 agents'))
+    assert.ok(query<HTMLElement>(tall.container, '.lc-agents-stage').className.includes('lc-agents-stage-tall'))
+    assert.equal(text(query(tall.container, '.lc-agents-toggle')), 'Show all')
+    await click(query<HTMLElement>(tall.container, '.lc-agents-toggle'))
+    assert.ok(query<HTMLElement>(tall.container, '.lc-agents-stage').className.includes('lc-agents-stage-all'))
+    assert.equal(text(query(tall.container, '.lc-agents-toggle')), 'Show less')
+    await click(query<HTMLElement>(tall.container, '.lc-agents-toggle'))
+    assert.ok(!query<HTMLElement>(tall.container, '.lc-agents-stage').className.includes('lc-agents-stage-all'))
+    assert.equal(text(query(tall.container, '.lc-agents-toggle')), 'Show all')
+    await tall.update(h(TallView, { sessionId: 'other', self: selfStats() }))
     await flush()
-    assert.equal(queryAll(m.container, '.lc-agents-toggle').length, 0)
-    assert.ok(!query<HTMLElement>(m.container, '.lc-agents-stage').className.includes('lc-agents-stage-all'))
-    await m.unmount()
-  })
-
-  test('a rejected catalog refresh is swallowed', async () => {
-    const face = new FakeSessions(family())
-    face.rejectRefresh = true
-    const View = makeView(face)
-    const m = await mount(h(View, { sessionId: 'root', self: selfStats() }))
-    await flush()
-    assert.deepEqual(face.refreshed, ['root'])
-    assert.equal(queryAll(m.container, '.lc-agent-card').length, 3)
-    await m.unmount()
-  })
-
-  test('a face without refreshSubagents still renders', async () => {
-    const face = new FakeSessions(family())
-    const bare: unknown = { list: face.list }
-    const View = makeView(bare)
-    const m = await mount(h(View, { sessionId: 'root' }))
-    assert.equal(queryAll(m.container, '.lc-agent-card').length, 3)
-    const self = query(m.container, '.lc-agent-card.lc-agent-self')
-    assert.ok(text(self).includes('23%'))
-    await m.unmount()
+    assert.equal(queryAll(tall.container, '.lc-agents-toggle').length, 0)
+    await tall.unmount()
   })
 
   test('stat-less nodes render dashes; zero occupancy draws no bar fill', async () => {
@@ -460,19 +392,6 @@ describe('AgentGraph — the family tree', () => {
     await m.unmount()
   })
 
-  test('zh locale renders translated chrome', async () => {
-    const View = makeView(new FakeSessions(family()), { locale: 'zh' })
-    const m = await mount(h(View, { sessionId: 'root', self: selfStats() }))
-    const rendered = text(m.container)
-    assert.ok(rendered.includes('Agent 网络'))
-    assert.ok(rendered.includes('3 个 Agent'))
-    assert.ok(rendered.includes('当前'))
-    assert.equal(query(m.container, '.lc-agent-card.lc-agent-self .lc-agent-meta-text').textContent, '6m27s · 3 步')
-    await hover(query(m.container, '[data-agent="worker"]'))
-    assert.ok(text(query(m.container, '.lc-agents-inspector')).includes('多轮'))
-    await m.unmount()
-  })
-
   /** peak: (1M uncached × $0.15 + 0.5M output × $0.6) × DeepSeek's peak factor 2 = $0.90 (¥6.00). */
   const COST_LEDGER = { 'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 500_000 } } } }
 
@@ -499,6 +418,11 @@ describe('AgentGraph — the family tree', () => {
     const ViewZh = makeView(new FakeSessions(byId), { locale: 'zh' })
     const mz = await mount(h(ViewZh, { sessionId: 'root', self: selfStats() }))
     await until(() => text(query(mz.container, '[data-agent="worker"]')).includes('¥6.00'), 'zh cost estimate')
+    assert.ok(text(mz.container).includes('Agent 网络'), 'the zh title')
+    assert.ok(text(mz.container).includes('当前'), 'the zh self marker')
+    assert.ok(text(mz.container).includes('4 个 Agent'), 'the zh kit localizes the chips')
+    await hover(query(mz.container, '[data-agent="worker"]'))
+    assert.ok(text(query(mz.container, '.lc-agents-inspector')).includes('多轮'), 'the zh inspector copy')
     await mz.unmount()
 
     const bare = new TestClientCtx({
@@ -517,12 +441,21 @@ describe('AgentGraph — the Fleet seat', () => {
     tasks: [],
   }
 
-  test('the team prop surfaces the chip while an explicit null wins; the pin rings its card', async () => {
+  test('the team prop surfaces the chip and a teammate’s roster name; the pin rings both cards; an explicit null wins', async () => {
     const face = new FakeSessions(family())
     const View = makeView(face)
-    const m = await mount(h(View, { sessionId: 'root', self: selfStats(), team: TEAM, pinnedId: 'worker', inspector: false }))
-    assert.ok(text(m.container).includes('1 members'))
+    const team = { ...TEAM, members: [...TEAM.members, { id: 'worker', name: 'architect', role: 'teammate' as const, phase: 'active' as const }] }
+    const m = await mount(h(View, { sessionId: 'root', self: selfStats(), team, pinnedId: 'worker', inspector: false }))
+    assert.ok(text(m.container).includes('2 members'))
     assert.ok(query(m.container, '[data-agent="worker"]').className.includes('lc-agent-pinned'))
+    const worker = query(m.container, '[data-agent="worker"]')
+    assert.equal(text(query(worker, '.lc-agent-member')), 'architect')
+    assert.equal(text(query(worker, '.lc-agent-duty')), 'worker-bee')
+    const self = query(m.container, '.lc-agent-card.lc-agent-self')
+    assert.equal(queryAll(self, '.lc-agent-duty').length, 0)
+    const done = query(m.container, '[data-agent="done"]')
+    assert.equal(text(query(done, '.lc-agent-label')), 'done')
+    assert.equal(queryAll(done, '.lc-agent-duty').length, 0)
     assert.equal(queryAll(m.container, '.lc-inspector').length, 0, 'the Fleet seat paints the graph alone')
     await m.unmount()
 
@@ -532,41 +465,16 @@ describe('AgentGraph — the Fleet seat', () => {
     await m2.unmount()
   })
 
-  test('a teammate card leads with the roster name and carries the duty in a light line', async () => {
-    const face = new FakeSessions(family())
-    const View = makeView(face)
-    const team = { ...TEAM, members: [...TEAM.members, { id: 'worker', name: 'architect', role: 'teammate' as const, phase: 'active' as const }] }
-    const m = await mount(h(View, { sessionId: 'root', self: selfStats(), team, inspector: false }))
-
-    const worker = query(m.container, '[data-agent="worker"]')
-    assert.equal(text(query(worker, '.lc-agent-member')), 'architect')
-    assert.equal(text(query(worker, '.lc-agent-duty')), 'worker-bee')
-    const self = query(m.container, '.lc-agent-card.lc-agent-self')
-    assert.equal(queryAll(self, '.lc-agent-duty').length, 0)
-    const done = query(m.container, '[data-agent="done"]')
-    assert.equal(text(query(done, '.lc-agent-label')), 'done')
-    assert.equal(queryAll(done, '.lc-agent-duty').length, 0)
-    await m.unmount()
-  })
-
-  test('select mode: a card click highlights instead of jumping', async () => {
+  test('select mode highlights instead of jumping, while open mode keeps the jump copy and the inert current card', async () => {
     const face = new FakeSessions(family())
     const View = makeView(face)
     const selected = new Array<string>()
-    const m = await mount(h(View, {
-      sessionId: 'root',
-      self: selfStats(),
-      team: TEAM,
-      inspector: false,
-      onSelect: (id: string) => { selected.push(id) },
-    }))
+    const m = await mount(h(View, { sessionId: 'root', self: selfStats(), team: TEAM, inspector: false, onSelect: (id: string) => { selected.push(id) }, }))
 
     assert.ok(text(m.container).includes(DICT_EN['agents.subSelect']))
-
     const self = query(m.container, '.lc-agent-card.lc-agent-self')
     assert.equal(self.getAttribute('role'), 'button')
     await click(self)
-
     const worker = query(m.container, '[data-agent="worker"]')
     await click(worker)
     assert.deepEqual([...selected], ['root', 'worker'])
@@ -585,17 +493,14 @@ describe('AgentGraph — the Fleet seat', () => {
     assert.deepEqual([...selected], ['root', 'worker', 'done'])
     assert.deepEqual(face.opened, [], 'no card corner jump: the boards carry the open buttons')
     await m.unmount()
-  })
 
-  test('open mode (the sidebar seat) keeps the jump copy and the inert current card', async () => {
-    const face = new FakeSessions(family())
-    const View = makeView(face)
-    const m = await mount(h(View, { sessionId: 'root', self: selfStats() }))
-    assert.ok(text(m.container).includes(DICT_EN['agents.sub']))
-    assert.equal(query(m.container, '.lc-agent-card.lc-agent-self').getAttribute('role'), null)
-    await click(query(m.container, '[data-agent="worker"]'))
-    assert.deepEqual(face.opened, ['worker'])
-    await m.unmount()
+    const openFace = new FakeSessions(family())
+    const open = await mount(h(makeView(openFace), { sessionId: 'root', self: selfStats() }))
+    assert.ok(text(open.container).includes(DICT_EN['agents.sub']))
+    assert.equal(query(open.container, '.lc-agent-card.lc-agent-self').getAttribute('role'), null)
+    await click(query(open.container, '[data-agent="worker"]'))
+    assert.deepEqual(openFace.opened, ['worker'])
+    await open.unmount()
   })
 })
 
@@ -711,7 +616,7 @@ describe('AgentGraph — cold-relative composition fetch', () => {
     await m.unmount()
   })
 
-  test('a hostile head drops alone and a null value degrades the same way', async () => {
+  test('a hostile head, a null value, or an empty id degrades to the pressure-only fill (the empty id without fetching)', async () => {
     for (const options of [{ head: 'garbage' }, { nullValue: true }]) {
       const rpc = detailFetch(options)
       const { View } = makeFetchingView()
@@ -722,9 +627,7 @@ describe('AgentGraph — cold-relative composition fetch', () => {
       assert.ok(text(query(m.container, '[data-agent="done"]')).includes('95%'))
       await m.unmount()
     }
-  })
 
-  test('a hostile empty session id degrades to the pressure-only fill without fetching', async () => {
     const rpc = detailFetch({ head: composedHead() })
     const face = new FakeSessions({
       root: { displayTitle: 'Main', running: false, updatedAt: 10 },

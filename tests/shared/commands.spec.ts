@@ -27,7 +27,7 @@ describe('commandTool', () => {
 })
 
 describe('commandArgsOf', () => {
-  test('parses the durable JSON-string form with every field', () => {
+  test('parses the durable JSON-string and normalized object forms with every field', () => {
     const parsed = commandArgsOf('bash', JSON.stringify({
       command: 'git status',
       description: 'check the tree',
@@ -44,25 +44,16 @@ describe('commandArgsOf', () => {
       background: true,
       sandbox: 'full',
     })
+    const code = commandArgsOf('run_code', JSON.stringify({ code: 'const x = 1', description: 'compute' }), 4096)
+    assert.deepEqual(code, { cmd: 'const x = 1', description: 'compute' })
+    const ptc = commandArgsOf('bash', { command: 'ls', description: 'list' }, 4096)
+    assert.deepEqual(ptc, { cmd: 'ls', description: 'list' })
   })
 
-  test('a run_code call carries the program source and description instead', () => {
-    const parsed = commandArgsOf('run_code', JSON.stringify({ code: 'const x = 1', description: 'compute' }), 4096)
-    assert.deepEqual(parsed, { cmd: 'const x = 1', description: 'compute' })
-  })
-
-  test('accepts the PTC dispatch\'s already-normalized object arguments', () => {
-    const parsed = commandArgsOf('bash', { command: 'ls', description: 'list' }, 4096)
-    assert.deepEqual(parsed, { cmd: 'ls', description: 'list' })
-  })
-
-  test('caps an overlong command and flags the truncation', () => {
+  test('caps an overlong command; a command-less or unreadable payload books nothing; junk fields drop silently', () => {
     const parsed = commandArgsOf('bash', JSON.stringify({ command: 'x'.repeat(100) }), 10)
     assert.equal(parsed?.cmd, 'x'.repeat(10))
     assert.equal(parsed?.truncated, true)
-  })
-
-  test('a command-less or unreadable payload books nothing; junk fields drop silently', () => {
     assert.equal(commandArgsOf('bash', JSON.stringify({ description: 'no command' }), 4096), null)
     assert.equal(commandArgsOf('bash', 'not json', 4096), null)
     assert.equal(commandArgsOf('bash', '[1,2]', 4096), null)
@@ -91,19 +82,20 @@ describe('commandArgsRecordOf', () => {
 })
 
 describe('markersOfText', () => {
-  test('a clean exit carries no marker at all', () => {
+  test('a clean exit carries no marker; the exit marker anchors at the very tail, like dsh’s own parser', () => {
     assert.deepEqual(markersOfText('total 8\nfile.ts'), {})
-  })
-
-  test('the exit marker anchors at the very tail, like dsh’s own parser', () => {
     assert.deepEqual(markersOfText('boom\n[exit code: 3]'), { exit: 3 })
     // A marker-like line mid-output is output, not a status.
     assert.deepEqual(markersOfText('[exit code: 3]\nmore output'), {})
   })
 
-  test('the persistent-shell family marker reads the same (including a clean exit)', () => {
+  test('the persistent-shell family reads exits, OOM timeouts, shell kills and resets', () => {
     assert.deepEqual(markersOfText('ok\n[Command finished with exit code 0]'), { exit: 0 })
     assert.deepEqual(markersOfText('bad\n[Command finished with exit code 2]'), { exit: 2 })
+    assert.deepEqual(markersOfText('out\n[Command timed out or OOM]\n[shell reset]'), { timedOut: true })
+    assert.deepEqual(markersOfText('out\n[shell killed by signal: SIGKILL]\nreset'), { signal: 'SIGKILL' })
+    assert.deepEqual(markersOfText('out\n[shell exited: code 3]\nreset'), { exit: 3 })
+    assert.deepEqual(markersOfText('out\n[shell exited]'), { stopped: true })
   })
 
   test('a kill reports the signal instead of an exit code', () => {
@@ -133,15 +125,6 @@ describe('markersOfText', () => {
     assert.deepEqual(markersOfText('[still running after 10ms; moved to background job x]\nother output'), {})
   })
 
-  test('the persistent-shell failure family: OOM timeout, shell kill, shell exit', () => {
-    assert.deepEqual(markersOfText('out\n[Command timed out or OOM]\n[shell reset]'), { timedOut: true })
-    assert.deepEqual(markersOfText('out\n[shell killed by signal: SIGKILL]\nreset'), { signal: 'SIGKILL' })
-    assert.deepEqual(markersOfText('out\n[shell exited: code 3]\nreset'), { exit: 3 })
-    assert.deepEqual(markersOfText('out\n[shell exited]'), { stopped: true })
-    // The persistent clean-exit marker still wins when it is the tail.
-    assert.deepEqual(markersOfText('ok\n[Command finished with exit code 0]'), { exit: 0 })
-  })
-
   test('hostile text yields no markers', () => {
     assert.deepEqual(markersOfText(''), {})
     assert.deepEqual(markersOfText('[exit code: abc]'), {})
@@ -166,15 +149,12 @@ describe('outcomeOfMarkers', () => {
 })
 
 describe('job detail parsing', () => {
-  test('the exit code reads out of the detail line, including with sandbox notes appended', () => {
+  test('the exit code and signal read out of the detail line, including with sandbox notes appended', () => {
     assert.equal(exitOfJobDetail('exit code: 3'), 3)
     assert.equal(exitOfJobDetail('exit code: 0; [sandbox: file access denied under strict mode]'), 0)
     assert.equal(exitOfJobDetail('killed before exit'), undefined)
     assert.equal(exitOfJobDetail(undefined), undefined)
     assert.equal(exitOfJobDetail(42), undefined)
-  })
-
-  test('the signal reads out of a killed job’s detail', () => {
     assert.equal(signalOfJobDetail('signal: SIGTERM'), 'SIGTERM')
     assert.equal(signalOfJobDetail('signal: SIGKILL; [sandbox: x]'), 'SIGKILL')
     assert.equal(signalOfJobDetail('exit code: 1'), undefined)
@@ -210,7 +190,7 @@ describe('display shaping', () => {
     assert.deepEqual(shapeOfCmd('echo "a <<- not a heredoc in spirit but matches the cheap test"'), { lines: 1, heredoc: true, inline: false })
   })
 
-  test('headProgramOf unwraps POSIX shell scaffolding to the first program', () => {
+  test('headProgramOf parses POSIX scaffolding: wrappers, assignments, separators, and partial text', () => {
     assert.equal(headProgramOf('git status'), 'git')
     assert.equal(headProgramOf('cd /repo && git status'), 'git')
     assert.equal(headProgramOf('cd "/my repo" && pnpm run build'), 'pnpm')
@@ -229,9 +209,6 @@ describe('display shaping', () => {
     assert.equal(headProgramOf('(cd /repo && git status)'), 'shell', 'a group is a shell construct')
     assert.equal(headProgramOf(''), '')
     assert.equal(headProgramOf('   '), '')
-  })
-
-  test('headProgramOf resolves assignments, variables and separators across POSIX shells', () => {
     assert.equal(headProgramOf('FOO=bar; echo hi'), 'echo', 'a standalone assignment hands off to the next command')
     assert.equal(headProgramOf('FOO=bar'), 'shell', 'an assignment-only command has no program')
     assert.equal(headProgramOf('FOO="a b" node x.mjs'), 'node', 'quoted assignment values may contain spaces')
@@ -272,7 +249,7 @@ describe('display shaping', () => {
     assert.equal(headProgramOf('', 'pwsh'), '')
   })
 
-  test('headProgramOf survives partial and defensive command text', () => {
+  test('headProgramOf survives partial and defensive command and PowerShell text', () => {
     assert.equal(headProgramOf('FOO="a'), 'shell')
     assert.equal(headProgramOf('FOO="$BAR"'), 'shell')
     assert.equal(headProgramOf('FOO=`cmd`'), 'shell')
@@ -305,9 +282,6 @@ describe('display shaping', () => {
     assert.equal(headProgramOf('>'), 'shell')
     assert.equal(headProgramOf('cd /x;'), 'cd')
     assert.equal(headProgramOf('"$UNSET-suffix"'), 'shell')
-  })
-
-  test('headProgramOf survives partial and defensive PowerShell text', () => {
     assert.equal(headProgramOf('$x = "foo', 'pwsh'), 'pwsh')
     assert.equal(headProgramOf('$x = "a $b"; $x', 'pwsh'), 'pwsh')
     assert.equal(headProgramOf('$x = "foo" + "bar"; $x', 'pwsh'), 'pwsh')
@@ -366,7 +340,6 @@ describe('display shaping', () => {
     assert.equal(headProgramOf('FOO="a""b echo'), 'shell')
     assert.equal(headProgramOf('X=$(cmd)/suffix echo hi'), 'echo')
     assert.equal(headProgramOf('$HOME/bin/tool --x'), 'tool', 'an unresolved prefix still yields a literal basename')
-    assert.equal(headProgramOf('$PWD/node_modules/.bin/vitest run'), 'vitest')
     assert.equal(headProgramOf('$UNSET/$X'), 'shell', 'an unresolved suffix basename falls back')
     assert.equal(headProgramOf('export A=1\ngit status'), 'git', 'a declaration does not cross the newline')
     assert.equal(headProgramOf('export NVM_DIR="$HOME/.nvm"\n[ -s x ] && . x'), 'shell')

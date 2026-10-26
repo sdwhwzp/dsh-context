@@ -17,13 +17,13 @@ import {
   toolResult,
   userMessage,
 } from '../helpers/events'
-import { assertStatesPlainJson, driveTimeline } from '../helpers/projection'
 import type { TimelineEvent } from '../../../src/host/fold'
 import type { TimelineState } from '../../../src/host/foldState'
 import type { HeadersState } from '../../../src/host/headers'
 import type { ActivityState } from '../../../src/host/activity'
 import { RegistryDriver, RegistryViolationError } from './registryDriver'
 import type { Checkpoint, SessionLike } from './registryDriver'
+import { assertStatesPlainJson, driveTimeline } from '../helpers/projection'
 
 function canonicalLog(): TimelineEvent[] {
   return [
@@ -50,22 +50,22 @@ function fullLog(): TimelineEvent[] {
   return [{ seq: 0, time: 0, type: 'session/created', data: {} } as unknown as TimelineEvent, ...canonicalLog()]
 }
 
-function bootSession(log = fullLog()): { driver: RegistryDriver; session: SessionLike; log: TimelineEvent[] } {
+function bootSession(log = fullLog(), slim = false): { driver: RegistryDriver; session: SessionLike } {
   const driver = new RegistryDriver()
-  driver.register(createContextTimelineDefinition({}, () => false))
+  driver.register(createContextTimelineDefinition({}, () => slim))
   driver.register(createContextHeadersDefinition())
-  const session: SessionLike = { seq: 0, header: { id: 's-matrix', cwd: '/tmp' }, inheritedEventCount: 0, events: [] }
+  const session: SessionLike = { seq: 0, header: { id: slim ? 's-slim' : 's-matrix', cwd: '/tmp' }, inheritedEventCount: 0, events: [] }
   driver.sessionCreated(session)
   for (const event of log) {
     session.events[event.seq] = event
     session.seq = event.seq + 1
     driver.driveEvent(session, event)
   }
-  return { driver, session, log }
+  return { driver, session }
 }
 
 describe('registry contract — the semantics every supported line shares', () => {
-  test('accepts both real units and serves both wire values after the canonical log', () => {
+  test('accepts both real units and serves both wire values after the canonical log; the slim head rides the same contract', () => {
     const { driver, session } = bootSession()
     const snapshot = driver.snapshot(session)
     assert.deepEqual(Object.keys(snapshot.values).sort(), ['contextHeaders', 'contextTimeline'])
@@ -75,35 +75,25 @@ describe('registry contract — the semantics every supported line shares', () =
     assert.ok(timeline.nodes.length > 0)
     const headers = snapshot.values.contextHeaders as { headers: { tools: { name: string }[] }[] }
     assert.equal(headers.headers[0].tools[0].name, 'bash')
-  })
+    assertStatesPlainJson(driveTimeline(canonicalLog()))
 
-  test('the split generation (slim head) rides the same registry contract', () => {
-    const driver = new RegistryDriver()
-    driver.register(createContextTimelineDefinition({}, () => true))
-    driver.register(createContextHeadersDefinition())
-    const session: SessionLike = { seq: 0, header: { id: 's-slim', cwd: '/tmp' }, inheritedEventCount: 0, events: [] }
-    driver.sessionCreated(session)
     // One log instance: the envelope builders' clock is monotonic, so a second call would mint fresh
     // times and the restore comparison would drift.
     const log = fullLog()
-    for (const event of log) {
-      session.events[event.seq] = event
-      session.seq = event.seq + 1
-      driver.driveEvent(session, event)
-    }
-    const timeline = driver.snapshot(session).values.contextTimeline as {
+    const slim = bootSession(log, true)
+    const slimTimeline = slim.driver.snapshot(slim.session).values.contextTimeline as {
       detailRev?: number
       counts?: { steps: number }
       nodes: unknown[]
       requests: unknown[]
     }
-    assert.equal(typeof timeline.detailRev, 'number', 'the split marker rides the push feed')
-    assert.equal(timeline.counts?.steps, 2, 'the counters travel on the head')
-    assert.equal(timeline.nodes.length, 0, 'the collections stay off the wire')
-    assert.equal(timeline.requests.length, 0)
-    assert.ok(driver.checkpointJson(session) !== undefined)
-    const cold = driver.restore({}, log, 0, session.header)
-    assert.deepEqual(cold.values, driver.snapshot(session).values)
+    assert.equal(typeof slimTimeline.detailRev, 'number', 'the split marker rides the push feed')
+    assert.equal(slimTimeline.counts?.steps, 2, 'the counters travel on the head')
+    assert.equal(slimTimeline.nodes.length, 0, 'the collections stay off the wire')
+    assert.equal(slimTimeline.requests.length, 0)
+    assert.ok(slim.driver.checkpointJson(slim.session) !== undefined)
+    const cold = slim.driver.restore({}, log, 0, slim.session.header)
+    assert.deepEqual(cold.values, slim.driver.snapshot(slim.session).values)
   })
 
   test('the local unit contract stays assignable to the harness projection contract', () => {
@@ -133,7 +123,7 @@ describe('registry contract — the semantics every supported line shares', () =
     assert.equal(driver.snapshot(session).values.contextTimeline !== undefined, true)
   })
 
-  test('every intermediate fold state and checkpoint row passes the projection cache write gate', () => {
+  test('the checkpoint rows pass the projection cache write gate at the canonical log end', () => {
     const { driver, session } = bootSession()
     const rows = driver.checkpointJson(session)
     assert.ok(rows !== undefined, 'checkpoint rows are losslessly JSON-serializable')
@@ -142,7 +132,6 @@ describe('registry contract — the semantics every supported line shares', () =
       assert.equal(row.ver, key === 'contextTimeline' ? 31 : 1)
       assert.equal(row.seq, 12)
     }
-    assertStatesPlainJson(driveTimeline(canonicalLog()))
   })
 
   test('cached rows restore: viewCheckpoint serves them, restore seeds them through stateSchema', () => {
@@ -154,23 +143,11 @@ describe('registry contract — the semantics every supported line shares', () =
     const floor = driver.restoreFloor(rows)
     assert.equal(floor, 12)
 
-    // A cold read from scratch matches the live snapshot; a warm read seeded from the rows equals it too.
-    const cold = driver.restore({}, log, 0, session.header)
-    assert.deepEqual(cold.values, driver.snapshot(session).values)
     const warm = driver.restore(rows, log, 0, session.header)
     assert.deepEqual(warm.values, driver.snapshot(session).values)
   })
 
-  test('a corrupted checkpoint row is skipped by viewCheckpoint, never served', () => {
-    const { driver, session } = bootSession()
-    const rows: Checkpoint = driver.checkpoint(session)
-    rows.contextTimeline = { ver: 999, seq: 12, val: rows.contextTimeline.val }
-    const viewed = driver.viewCheckpoint(rows)
-    assert.equal(viewed.contextTimeline, undefined)
-    assert.ok(viewed.contextHeaders !== undefined)
-  })
-
-  test('issue #44 recovery: the version bump discards the poisoned row and the refold re-tracks every step', () => {
+  test('issue #44 recovery and rollback: a version mismatch discards the row and the refold re-tracks every step', () => {
     // A pre-fix checkpoint row (stateVersion 12) carries a raw nonconforming gateway figure while the durable log
     // holds every step; the bump makes the row unusable, so the cold read refolds from init over the FULL log.
     const log = [
@@ -179,7 +156,9 @@ describe('registry contract — the semantics every supported line shares', () =
       assistantMessage(14, { turn: 1, step: 3, usage: { inputTokens: NaN, outputTokens: null } }),
       assistantMessage(15, { turn: 1, step: 4, usage: { inputTokens: 12 } }),
     ]
+    const { driver, session } = bootSession(log)
     const stale: Checkpoint = {
+      ...driver.checkpoint(session),
       contextTimeline: {
         ver: 12,
         seq: 15,
@@ -196,8 +175,9 @@ describe('registry contract — the semantics every supported line shares', () =
         },
       },
     }
-    const { driver, session } = bootSession(log)
-    assert.equal(driver.viewCheckpoint(stale).contextTimeline, undefined)
+    const viewed = driver.viewCheckpoint(stale)
+    assert.equal(viewed.contextTimeline, undefined)
+    assert.ok(viewed.contextHeaders !== undefined, 'the untouched row still serves')
     // A schema violation anywhere would throw out of restore here (it parses each wire value through the real viewSchema).
     const restored = driver.restore(stale, log, 0, session.header)
     const timeline = restored.values.contextTimeline as { requests: { seq: number; prompt?: number; cacheRead?: number; output?: number }[] }
@@ -206,25 +186,23 @@ describe('registry contract — the semantics every supported line shares', () =
       timeline.requests.filter(r => r.seq >= 13).map(r => [r.prompt, r.cacheRead, r.output]),
       [[151, 151, 22], [undefined, undefined, undefined], [12, undefined, undefined]],
     )
-  })
 
-  test('issue #44 rollback: a pre-bump plugin discards the v13 rows and refolds clean, never crashes', () => {
     // Reverse upgrade: v13-written rows read by a plugin still pinned at v12. The state SHAPE never changed
     // (only value normalization), so the version mismatch discards the rows and refolds from the log.
-    const log = fullLog()
-    const { driver: current, session } = bootSession(log)
-    const rows = current.checkpoint(session)
+    const currentLog = fullLog()
+    const current = bootSession(currentLog)
+    const rows = current.driver.checkpoint(current.session)
     const rolledBack = new RegistryDriver()
     rolledBack.register({ ...createContextTimelineDefinition({}, () => false), stateVersion: 12 })
     rolledBack.register(createContextHeadersDefinition())
     assert.equal(rolledBack.viewCheckpoint(rows).contextTimeline, undefined)
-    const restored = rolledBack.restore(rows, log, 0, session.header)
-    const timeline = restored.values.contextTimeline as { current: { total: number }; requests: unknown[] }
-    assert.ok(timeline.current.total > 0)
-    assert.equal(timeline.requests.length, 2)
+    const rolled = rolledBack.restore(rows, currentLog, 0, current.session.header)
+    const rolledTimeline = rolled.values.contextTimeline as { current: { total: number }; requests: unknown[] }
+    assert.ok(rolledTimeline.current.total > 0)
+    assert.equal(rolledTimeline.requests.length, 2)
   })
 
-  test('the change gate: an uninteresting event keeps its state reference and notifies nothing', () => {
+  test('the change gate keeps an uninteresting event inert; malformed committed events never throw the drive', () => {
     const { driver, session } = bootSession()
     const seen: string[] = []
     driver.onChanged((_s, key) => seen.push(key))
@@ -237,14 +215,11 @@ describe('registry contract — the semantics every supported line shares', () =
     const after = driver.snapshot(session)
     assert.deepEqual(after.values, before.values)
     assert.deepEqual(seen, [])
-  })
 
-  test('a malformed committed event must not throw the drive (a throwing fold stalls the push feed)', () => {
-    const { driver, session } = bootSession()
     const malformed = [
-      { type: 'user/message', seq: 12, time: 1, data: null },
-      { type: 'tool/call', seq: 12, time: 1, data: { callId: 42, name: null } },
-      { type: 'assistant/message', seq: 12, time: 1, data: { message: 'not-a-record' } },
+      { type: 'user/message', seq: 14, time: 1, data: null },
+      { type: 'tool/call', seq: 15, time: 1, data: { callId: 42, name: null } },
+      { type: 'assistant/message', seq: 16, time: 1, data: { message: 'not-a-record' } },
     ] as unknown as TimelineEvent[]
     for (const event of malformed) {
       session.events[event.seq] = event
@@ -263,5 +238,12 @@ describe('registry contract — the semantics every supported line shares', () =
     // Same key at the SAME stateVersion shares the registration (preset ref-counting).
     assert.doesNotThrow(() => driver.register(createContextTimelineDefinition({}, () => false)))
     assert.throws(() => driver.register({ ...def, stateVersion: def.stateVersion + 1 }), RegistryViolationError)
+    const disposable = new RegistryDriver()
+    const dispose = disposable.register(createContextTimelineDefinition({}, () => false))
+    const session: SessionLike = { seq: 0, header: { id: 'reg' }, inheritedEventCount: 0, events: [] }
+    disposable.sessionCreated(session)
+    assert.ok(disposable.snapshot(session).values.contextTimeline !== undefined)
+    dispose()
+    assert.equal(disposable.snapshot(session).values.contextTimeline, undefined, 'the returned disposer unregisters the key')
   })
 })

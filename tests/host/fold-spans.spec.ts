@@ -79,9 +79,11 @@ describe('spans — the step flush', () => {
       toolResult(4, { callId: 'c1', content: text('ok'), time: 1_095 }),
       stepEnd(5, { time: 1_095 }),
     ])
-    assert.equal(state.timing?.ttftMs, 364, 'the wait ends at the first marker, not the first token')
-    assert.equal(state.timing?.genMs, 699, 'the generation window opens at the same marker')
-    assert.equal(state.timing?.reasoningMs, 588, 'the tally tiles the marker window regardless')
+    assert.deepEqual(
+      [state.timing?.ttftMs, state.timing?.genMs, state.timing?.reasoningMs],
+      [364, 699, 588],
+      'the wait and generation open at the first marker; the tally tiles that window regardless',
+    )
     assert.equal(
       (state.timing?.reasoningMs ?? 0) + (state.timing?.textMs ?? 0) + (state.timing?.toolArgMs ?? 0),
       state.timing?.genMs,
@@ -116,28 +118,25 @@ describe('spans — the step flush', () => {
     ])
   })
 
-  test('a marker-less stream leaves the generation window to the residue fill', () => {
-    const { state } = driveTimeline([
+  test('without model slices the generation window falls to the residue fill', () => {
+    const marked = driveTimeline([
       stepStart(1, { time: 0 }),
       assistantMessage(2, {
         time: 1_000,
         stream: [chunkRec(100, { type: 'text-delta', text: 'x' })],
       }),
       stepEnd(3, { time: 1_400 }),
-    ])
-    assert.deepEqual(state.spans, [
+    ]).state
+    assert.deepEqual(marked.spans, [
       { kind: 'ttft', start: 0, end: 100 },
       { kind: 'other', start: 100, end: 1_400 },
     ])
-  })
-
-  test('an unstamped call paints no model slices — the whole step is residue', () => {
-    const { state } = driveTimeline([
+    const unstamped = driveTimeline([
       stepStart(1, { time: 0 }),
       assistantMessage(2, { time: 1_000 }),
       stepEnd(3, { time: 1_400 }),
-    ])
-    assert.deepEqual(state.spans, [{ kind: 'other', start: 0, end: 1_400 }])
+    ]).state
+    assert.deepEqual(unstamped.spans, [{ kind: 'other', start: 0, end: 1_400 }])
   })
 
   test('idle time BETWEEN steps carries no span', () => {
@@ -199,14 +198,13 @@ describe('spans — the step flush', () => {
     assert.deepEqual(before.state.spans, [{ kind: 'other', start: 3_000, end: 4_000 }])
   })
 
-  test('a zero-width step flushes nothing; an unpaired step/end stays uninteresting', () => {
+  test('a zero-width step flushes nothing but bumps the detail revision', () => {
     const { state } = driveTimeline([
       stepStart(1, { time: 5_000 }),
       stepEnd(2, { time: 5_000 }),
     ])
     assert.deepEqual(state.spans, [])
-    const bare = driveTimeline([stepEnd(1, { time: 5_000 })])
-    assert.deepEqual(bare.state.spans, [])
+    assert.equal(state.detailRev, 1, 'open tabs refetch the strip')
   })
 
   test('a tool result folded without an open step prices the totals but paints no span', () => {
@@ -231,14 +229,6 @@ describe('spans — the step flush', () => {
       { kind: 'ttft', start: 10_000, end: 10_100 },
       { kind: 'other', start: 10_100, end: 11_400 },
     ])
-  })
-
-  test('the flush marks the detail revision (open tabs refetch the strip)', () => {
-    const { state } = driveTimeline([
-      stepStart(1, { time: 0 }),
-      stepEnd(2, { time: 1_000 }),
-    ])
-    assert.equal(state.detailRev, 1)
   })
 })
 
@@ -283,20 +273,7 @@ describe('spans — retention, wire, and schema faces', () => {
     assert.equal(Object.hasOwn(slimDef.wire.view(slimState), 'spans'), false)
   })
 
-  test('every intermediate state validates against the state schema; a spans-less state fails it (the v23 gate)', () => {
-    const drive = driveTimeline([
-      stepStart(1, { time: 0 }),
-      assistantMessage(2, { time: 1_000, stream: [chunkRec(100, { type: 'text-delta', text: 'x' })] }),
-      stepEnd(3, { time: 1_400 }),
-    ])
-    for (const state of drive.states) drive.def.stateSchema.parse(structuredClone(state))
-    // A row folded before the collection existed has no `spans` key: the required-key schema rejects it (the stateVersion 22 → 23 bump).
-    const stale = structuredClone(drive.state) as unknown as Record<string, unknown>
-    delete stale.spans
-    assert.throws(() => drive.def.stateSchema.parse(stale))
-  })
-
-  test('span-bearing states stay plain JSON', () => {
+  test('every intermediate state stays plain JSON and validates against the state schema; a spans-less state fails it (the v23 gate)', () => {
     const drive = driveTimeline([
       stepStart(1, { time: 0 }),
       assistantMessage(2, { time: 1_000, stream: [chunkRec(100, { type: 'text-delta', text: 'x' })] }),
@@ -307,6 +284,13 @@ describe('spans — retention, wire, and schema faces', () => {
       stepStart(6, { time: 2_000 }),
       assistantMessage(7, { time: 3_000, stream: [chunkRec(2_100, { type: 'text-delta', text: 'y' })] }),
     ])
-    for (const state of drive.states) assertPlainJson(state)
+    for (const state of drive.states) {
+      assertPlainJson(state)
+      drive.def.stateSchema.parse(structuredClone(state))
+    }
+    // A row folded before the collection existed has no `spans` key: the required-key schema rejects it (the stateVersion 22 → 23 bump).
+    const stale = structuredClone(drive.state) as unknown as Record<string, unknown>
+    delete stale.spans
+    assert.throws(() => drive.def.stateSchema.parse(stale))
   })
 })

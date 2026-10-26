@@ -4,13 +4,10 @@ import { activateViewTab, openContextSidebar, requestContextFocus, subscribeCont
 import { asClientCtx, TestClientCtx } from './helpers/harness'
 
 describe('context focus relay', () => {
-  test('one request survives until taken, then the map entry is consumed', () => {
+  test('one request survives until taken; a fresh request replaces it and sessions are isolated', () => {
     requestContextFocus('sv-relay', 42)
     assert.equal(takeContextFocus('sv-relay'), 42)
     assert.equal(takeContextFocus('sv-relay'), null, 'one-shot: a second take finds nothing')
-  })
-
-  test('a fresh request replaces an unconsumed one; sessions are isolated', () => {
     requestContextFocus('sv-race', 7)
     requestContextFocus('sv-race', 9)
     assert.equal(takeContextFocus('sv-race'), 9, 'the latest click wins')
@@ -51,14 +48,12 @@ describe('context focus subscription', () => {
 })
 
 describe('openContextSidebar', () => {
-  test('opens the registered kind through the sidebarRight face', () => {
+  test('opens the registered kind through the sidebarRight face; absent or verb-less faces report false', () => {
     const opened: string[] = []
     const ctx = new TestClientCtx({ services: { sidebarRight: { openTab: (kind: string) => { opened.push(kind) } } } })
     assert.equal(openContextSidebar(asClientCtx(ctx)), true)
     assert.deepEqual(opened, ['dsh-context'])
-  })
 
-  test('no service, or a face without the verb, reports false', () => {
     assert.equal(openContextSidebar(asClientCtx(new TestClientCtx())), false)
     assert.equal(openContextSidebar(asClientCtx(new TestClientCtx({ services: { sidebarRight: {} } }))), false)
     assert.equal(openContextSidebar(asClientCtx(new TestClientCtx({ services: { sidebarRight: null } }))), false)

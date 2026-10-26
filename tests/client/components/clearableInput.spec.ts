@@ -37,6 +37,28 @@ describe('ClearableInput', () => {
     assert.equal(box.className, 'lc-searchbox lc-searchbox-on')
     assert.equal(query<HTMLButtonElement>(m.container, '.lc-searchbox-x').getAttribute('aria-label'), 'Clear input')
     await m.unmount()
+
+    const seen: string[] = []
+    const ref = { current: null as HTMLInputElement | null }
+    function Bound(): ReactElement {
+      return h(ClearableInput, {
+        value: 'x',
+        onChange: () => {},
+        className: 'lc-ov-search',
+        placeholder: 'Search',
+        clearLabel: 'Clear input',
+        type: 'search',
+        inputRef: ref,
+        onKeyDown: (ev: ReactKeyboardEvent<HTMLInputElement>) => { seen.push(ev.key) },
+      })
+    }
+    const bound = await mount(h(Bound, {}))
+    const boundInput = query<HTMLInputElement>(bound.container, 'input')
+    assert.equal(boundInput.type, 'search')
+    assert.equal(ref.current, boundInput)
+    await keydown('Enter', boundInput)
+    assert.deepEqual(seen, ['Enter'])
+    await bound.unmount()
   })
 
   test('the clear control empties the field and keeps focus in the input', async () => {
@@ -65,7 +87,7 @@ describe('ClearableInput', () => {
     await m.unmount()
   })
 
-  test('Escape leaves an empty or composing field to the host', async () => {
+  test('Escape leaves an empty, composing, or modifier-held field to the host', async () => {
     const empty = await mount(h(Field, {}))
     const emptyInput = query<HTMLInputElement>(empty.container, 'input')
     const emptyEsc = await press(emptyInput, { key: 'Escape' })
@@ -79,12 +101,6 @@ describe('ClearableInput', () => {
     assert.equal(input.value, 'x', 'Escape during IME composition stays with the IME')
     assert.equal(composing.ev.defaultPrevented, false)
     assert.equal(composing.reachedDocument, true)
-    await filled.unmount()
-  })
-
-  test('a modified Escape passes through untouched', async () => {
-    const m = await mount(h(Field, { initial: 'x' }))
-    const input = query<HTMLInputElement>(m.container, 'input')
     const modifiers: KeyboardEventInit[] = [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]
     for (const init of modifiers) {
       const { ev, reachedDocument } = await press(input, { key: 'Escape', ...init })
@@ -92,7 +108,7 @@ describe('ClearableInput', () => {
       assert.equal(ev.defaultPrevented, false)
       assert.equal(reachedDocument, true)
     }
-    await m.unmount()
+    await filled.unmount()
   })
 
   test("a caller's preventDefault wins over Escape clearing", async () => {
@@ -105,30 +121,6 @@ describe('ClearableInput', () => {
     assert.equal(input.value, 'x')
     assert.equal(ev.defaultPrevented, true)
     assert.equal(reachedDocument, true, 'the caller only prevented the default action')
-    await m.unmount()
-  })
-
-  test('the search type, caller ref and key handler pass through', async () => {
-    const seen: string[] = []
-    const ref = { current: null as HTMLInputElement | null }
-    function Bound(): ReactElement {
-      return h(ClearableInput, {
-        value: 'x',
-        onChange: () => {},
-        className: 'lc-ov-search',
-        placeholder: 'Search',
-        clearLabel: 'Clear input',
-        type: 'search',
-        inputRef: ref,
-        onKeyDown: (ev: ReactKeyboardEvent<HTMLInputElement>) => { seen.push(ev.key) },
-      })
-    }
-    const m = await mount(h(Bound, {}))
-    const input = query<HTMLInputElement>(m.container, 'input')
-    assert.equal(input.type, 'search')
-    assert.equal(ref.current, input)
-    await keydown('Enter', input)
-    assert.deepEqual(seen, ['Enter'])
     await m.unmount()
   })
 })

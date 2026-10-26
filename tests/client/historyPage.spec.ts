@@ -37,13 +37,16 @@ describe('pageNodesOf — the durable-page mapper', () => {
     })
   })
 
-  test('call heads degrade missing names and raw arguments safely', () => {
+  test('call heads degrade missing names and raw arguments, and read the message toolCallId when the source omits it', () => {
     const page = [
       row('tool/call', 10, { callId: 'c1' }),
       row('tool/result', 11, { message: { source: { callId: 'c1' }, content: [] } }),
+      row('tool/call', 20, { callId: 'cb', name: 'read', arguments: '{"path":"a.ts"}' }),
+      row('tool/result', 21, { message: { role: 'tool', toolCallId: 'cb', content: [] } }),
     ]
     const nodes = pageNodesOf(page)
     assert.deepEqual(nodes.get(11)?.call, { name: '?', argsRaw: '' })
+    assert.deepEqual(nodes.get(21)?.call, { name: 'read', argsRaw: '{"path":"a.ts"}' })
   })
 
   test('bare event envelopes without the {event} wrapper map identically', () => {
@@ -54,17 +57,28 @@ describe('pageNodesOf — the durable-page mapper', () => {
     assert.equal(pageNodesOf([{ event: 42 }, { event: 'x' }]).size, 0, 'non-envelope event fields drop')
   })
 
-  test('a tool result without any message shape still joins empty', () => {
-    const nodes = pageNodesOf([row('tool/result', 12, {})])
-    assert.deepEqual(nodes.get(12), { kind: 'tool-result', seq: 12, call: null, content: [], isError: false })
-  })
-
-  test('the call head reads the message toolCallId when the source omits it', () => {
+  test('tool results pair with their in-page call head; isError rides the message mark', () => {
     const page = [
-      row('tool/call', 20, { callId: 'cb', name: 'read', arguments: '{"path":"a.ts"}' }),
-      row('tool/result', 21, { message: { role: 'tool', toolCallId: 'cb', content: [] } }),
+      row('tool/call', 30, { callId: 'c9', name: 'bash', arguments: '{"command":"pwd"}' }),
+      row('tool/result', 31, {
+        message: { role: 'tool', toolCallId: 'c9', isError: true, source: { kind: 'tool', callId: 'c9' }, content: [{ type: 'text', text: 'out' }] },
+      }),
+      row('tool/result', 32, {
+        message: { role: 'tool', toolCallId: 'missing', isError: true, source: { kind: 'tool', callId: 'missing' }, content: [] },
+      }),
+      row('tool/result', 33, { message: {} }),
+      row('tool/result', 34, {}),
     ]
-    assert.deepEqual(pageNodesOf(page).get(21)?.call, { name: 'read', argsRaw: '{"path":"a.ts"}' })
+    const nodes = pageNodesOf(page)
+    const paired = nodes.get(31)
+    assert.deepEqual(paired?.call, { name: 'bash', argsRaw: '{"command":"pwd"}' })
+    assert.deepEqual(paired?.content, [{ type: 'text', text: 'out' }], 'the direct content blocks')
+    assert.equal(paired?.isError, true, 'the message error mark')
+    assert.equal(nodes.get(32)?.isError, true, 'the mark without a pairable call')
+    assert.equal(nodes.get(32)?.call, null)
+    assert.deepEqual(nodes.get(33)?.content, [])
+    assert.equal(nodes.get(33)?.isError, false)
+    assert.deepEqual(nodes.get(34), { kind: 'tool-result', seq: 34, call: null, content: [], isError: false })
   })
 
   test('user messages map with their durable content blocks', () => {
@@ -105,32 +119,7 @@ describe('pageNodesOf — the durable-page mapper', () => {
       { kind: 'image' },
       { kind: 'tool-call', name: '?', argsRaw: '{}' },
     ])
-  })
-
-  test('an assistant event without a message still joins (empty blocks)', () => {
     assert.deepEqual(pageNodesOf([row('assistant/message', 21, {})]).get(21), { kind: 'assistant', seq: 21, blocks: [] })
-  })
-
-  test('tool results pair with their in-page call head; isError rides the message mark', () => {
-    const page = [
-      row('tool/call', 30, { callId: 'c9', name: 'bash', arguments: '{"command":"pwd"}' }),
-      row('tool/result', 31, {
-        message: { role: 'tool', toolCallId: 'c9', isError: true, source: { kind: 'tool', callId: 'c9' }, content: [{ type: 'text', text: 'out' }] },
-      }),
-      row('tool/result', 32, {
-        message: { role: 'tool', toolCallId: 'missing', isError: true, source: { kind: 'tool', callId: 'missing' }, content: [] },
-      }),
-      row('tool/result', 33, { message: {} }),
-    ]
-    const nodes = pageNodesOf(page)
-    const paired = nodes.get(31)
-    assert.deepEqual(paired?.call, { name: 'bash', argsRaw: '{"command":"pwd"}' })
-    assert.deepEqual(paired?.content, [{ type: 'text', text: 'out' }], 'the direct content blocks')
-    assert.equal(paired?.isError, true, 'the message error mark')
-    assert.equal(nodes.get(32)?.isError, true, 'the mark without a pairable call')
-    assert.equal(nodes.get(32)?.call, null)
-    assert.deepEqual(nodes.get(33)?.content, [])
-    assert.equal(nodes.get(33)?.isError, false)
   })
 
   test('a compaction checkpoint renders as a compaction marker with its summary text', () => {
@@ -179,6 +168,7 @@ const pageFace = (events: unknown[], calls: unknown[] = [], envelope: (records: 
 describe('makeContentFetcher — the per-session targeted read', () => {
   test('undefined while the declared slot holds no face', () => {
     assert.equal(makeContentFetcher(plainOf('s')), undefined)
+    assert.equal(makeHeaderFetcher(plainOf('s')), undefined)
   })
 
   test('fetches the page anchored past the seq, maps it, and caches the hit', async () => {
@@ -249,21 +239,19 @@ describe('makeContentFetcher — the per-session targeted read', () => {
     }
   })
 
-  test('the declared inject never fires without both remote services', () => {
-    const ctx = new TestClientCtx()
-    ctx.setService('remote', { session: {} })
-    watchHistoryFaces(asClientCtx(ctx))
+  test('the declared inject never fires without both remote services, and tolerates shapeless ones', () => {
+    const withoutSession = new TestClientCtx()
+    withoutSession.setService('remote', { session: {} })
+    watchHistoryFaces(asClientCtx(withoutSession))
     assert.equal(makeContentFetcher(plainOf('s')), undefined)
-    ctx.dispose()
-  })
+    withoutSession.dispose()
 
-  test('the declared inject tolerates a shapeless remote service', () => {
-    const ctx = new TestClientCtx()
-    ctx.setService('remote', {})
-    ctx.setService('remote.session', {})
-    watchHistoryFaces(asClientCtx(ctx))
+    const shapeless = new TestClientCtx()
+    shapeless.setService('remote', {})
+    shapeless.setService('remote.session', {})
+    watchHistoryFaces(asClientCtx(shapeless))
     assert.equal(makeContentFetcher(plainOf('s')), undefined)
-    ctx.dispose()
+    shapeless.dispose()
   })
 
   test('the page face maps its records', async () => {
@@ -286,62 +274,45 @@ describe('makeContentFetcher — the per-session targeted read', () => {
     bare.dispose()
   })
 
-  test('page-face failures reject so the caller can offer a retry', async () => {
-    const badTop = armHistoryFaces({ session: { page: async () => ({ ok: false, error: { message: 'gone' } }) } })
-    await assert.rejects(makeContentFetcher(plainOf('s'))!(1))
-    badTop.dispose()
-    const garbage = armHistoryFaces({ session: { page: async () => ({ records: 'nope' }) } })
-    await assert.rejects(makeContentFetcher(plainOf('s'))!(1))
-    garbage.dispose()
-    const broken = armHistoryFaces({ session: { page: async () => { throw new Error('transport down') } } })
-    await assert.rejects(makeContentFetcher(plainOf('s'))!(1), /transport down/)
-    broken.dispose()
-  })
-
-  test('a system/message event maps its prompt text', async () => {
+  test('a system/message event maps its prompt text; whitespace-only renders and no text block maps to null', async () => {
     const ctx = armHistoryFaces({ session: pageFace([
       ev('system/message', 7, { message: { content: [{ type: 'text', text: 'the prompt' }, { type: 'text', text: ' line two' }] } }),
-    ]) })
-    const content = await makeHeaderFetcher(plainOf('s'))!(7)
-    assert.deepEqual(content, { system: 'the prompt line two', tools: [] })
-    ctx.dispose()
-  })
-
-  test('a whitespace-only system prompt renders (never reads as absent), and no text block maps to null', async () => {
-    const ctx = armHistoryFaces({ session: pageFace([
-      ev('system/message', 7, { message: { content: [{ type: 'text', text: '   ' }] } }),
-      ev('system/message', 8, { message: { content: [{ type: 'image', attachment: {} }] } }),
-      ev('system/message', 9, { message: {} }),
-      ev('system/message', 10, {}),
-      ev('system/message', 11, { message: { content: [7, null] } }),
+      ev('system/message', 8, { message: { content: [{ type: 'text', text: '   ' }] } }),
+      ev('system/message', 9, { message: { content: [{ type: 'image', attachment: {} }] } }),
+      ev('system/message', 10, { message: {} }),
+      ev('system/message', 11, {}),
+      ev('system/message', 12, { message: { content: [7, null] } }),
     ]) })
     const fetch = makeHeaderFetcher(plainOf('s'))!
-    assert.deepEqual(await fetch(7), { system: '   ', tools: [] })
-    assert.equal(await fetch(8), null, 'no text block: nothing to render')
-    assert.equal(await fetch(9), null)
+    assert.deepEqual(await fetch(7), { system: 'the prompt line two', tools: [] })
+    assert.deepEqual(await fetch(8), { system: '   ', tools: [] })
+    assert.equal(await fetch(9), null, 'no text block: nothing to render')
     assert.equal(await fetch(10), null)
-    assert.equal(await fetch(11), null, 'primitive elements carry no text')
+    assert.equal(await fetch(11), null)
+    assert.equal(await fetch(12), null, 'primitive elements carry no text')
     ctx.dispose()
   })
 
   test('malformed rpc envelopes reject so the caller can offer a retry', async () => {
-    const nullResponse = armHistoryFaces({ session: { page: async () => null } })
-    await assert.rejects(makeContentFetcher(plainOf('s'))!(1))
-    nullResponse.dispose()
-    const noResult = armHistoryFaces({ session: { page: async () => ({}) } })
-    await assert.rejects(makeContentFetcher(plainOf('s'))!(1))
-    noResult.dispose()
-    const scalarValue = armHistoryFaces({ session: { page: async () => ({ ok: true, value: 'nope' }) } })
-    await assert.rejects(makeContentFetcher(plainOf('s'))!(1))
-    scalarValue.dispose()
+    for (const page of [
+      async () => null,
+      async () => ({}),
+      async () => ({ ok: true, value: 'nope' }),
+      async () => ({ ok: false, value: undefined }),
+      async () => ({ ok: true, value: { records: 'nope' } }),
+      async () => { throw new Error('transport down') },
+    ]) {
+      const ctx = armHistoryFaces({ session: { page } })
+      await assert.rejects(makeContentFetcher(plainOf('s'))!(1))
+      ctx.dispose()
+    }
+    const broken = armHistoryFaces({ session: { page: async () => { throw new Error('transport down') } } })
+    await assert.rejects(makeHeaderFetcher(plainOf('s'))!(1), /transport down/)
+    broken.dispose()
   })
 })
 
 describe('makeHeaderFetcher — the lazy epoch content read', () => {
-  test('undefined while the declared slot holds no face', () => {
-    assert.equal(makeHeaderFetcher(plainOf('s')), undefined)
-  })
-
   test('fetches the epoch page, maps the raw header, and caches per seq', async () => {
     const calls: unknown[] = []
     const headerEvent = {
@@ -373,14 +344,11 @@ describe('makeHeaderFetcher — the lazy epoch content read', () => {
     assert.equal(await fetch(5), content)
     assert.equal(calls.length, 1)
     ctx.dispose()
-  })
-
-  test('an epoch with no system text and an absent tools list maps to empty tools', async () => {
-    const ctx = armHistoryFaces({ session: pageFace([ev('request/header', 2, { header: {} })]) })
-    const content = await makeHeaderFetcher(plainOf('s'))!(2)
-    assert.deepEqual(content, { tools: [] })
-    assert.equal('system' in (content ?? {}), false)
-    ctx.dispose()
+    const bare = armHistoryFaces({ session: pageFace([ev('request/header', 2, { header: {} })]) })
+    const empty = await makeHeaderFetcher(plainOf('s'))!(2)
+    assert.deepEqual(empty, { tools: [] }, 'an absent tools list maps to empty tools')
+    assert.equal('system' in (empty ?? {}), false)
+    bare.dispose()
   })
 
   test('a page holding OLDER epochs caches them for free alongside the picked one', async () => {
@@ -407,18 +375,6 @@ describe('makeHeaderFetcher — the lazy epoch content read', () => {
     assert.equal(await fetch(500), null, 'the seq is not on the page')
     assert.equal(await fetch(3), null, 'a header envelope without a header object maps to nothing')
     ctx.dispose()
-  })
-
-  test('malformed rpc envelopes reject so the caller can offer a retry', async () => {
-    const rejector = armHistoryFaces({ session: { page: async () => ({ ok: false, value: undefined }) } })
-    await assert.rejects(makeHeaderFetcher(plainOf('s'))!(1))
-    rejector.dispose()
-    const rowsGarbage = armHistoryFaces({ session: { page: async () => ({ ok: true, value: { records: 'nope' } }) } })
-    await assert.rejects(makeHeaderFetcher(plainOf('s'))!(1))
-    rowsGarbage.dispose()
-    const broken = armHistoryFaces({ session: { page: async () => { throw new Error('transport down') } } })
-    await assert.rejects(makeHeaderFetcher(plainOf('s'))!(1), /transport down/)
-    broken.dispose()
   })
 })
 

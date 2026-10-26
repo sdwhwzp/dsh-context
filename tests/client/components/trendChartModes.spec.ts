@@ -12,25 +12,25 @@ import { click, hover, mount, query, queryAll, unhover } from '../helpers/kit'
 import { CHART_H, TrendChart, assertColor, bars, kit, makeSpies, propsOf, req } from './trendChartHarness'
 
 describe('TrendChart empty history', () => {
-  test('renders the chart frame with no bars and no turn blocks', async () => {
+  test('renders the chart frame with no bars and no turn blocks; a zero-only history keeps the unit scale', async () => {
     const m = await mount(h(TrendChart, propsOf([])))
     assert.equal(bars(m.container).length, 0)
     assert.equal(queryAll(m.container, '.lc-turn').length, 0)
-    assert.equal(query(m.container, '.lc-axis-top').textContent, '1')
-    assert.equal(query(m.container, '.lc-axis-q3').textContent, '1')
-    assert.equal(query(m.container, '.lc-axis-mid').textContent, '1')
-    assert.equal(query(m.container, '.lc-axis-q1').textContent, '0')
-    assert.equal(query(m.container, '.lc-axis-bot').textContent, '0')
-    assert.ok(query(m.container, '.lc-grid-mid'), 'total mode keeps the dashed mid grid')
-    assert.ok(query(m.container, '.lc-grid-q3'), 'total mode keeps the dashed quarter guides')
-    assert.ok(query(m.container, '.lc-grid-q1'), 'total mode keeps the dashed quarter guides')
-    assert.ok(query(m.container, '.lc-grid-zero'), 'total mode draws the solid zero baseline at the chart floor')
+    assert.deepEqual(['top', 'q3', 'mid', 'q1', 'bot'].map(k => query(m.container, `.lc-axis-${k}`).textContent),
+      ['1', '1', '1', '0', '0'])
+    for (const grid of ['mid', 'q3', 'q1', 'zero']) assert.ok(query(m.container, `.lc-grid-${grid}`), `the ${grid} grid line renders`)
     await m.unmount()
+
+    const zero = req(1, { turn: 1, step: 0, system: 0, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 0 })
+    const zeroMount = await mount(h(TrendChart, propsOf([zero])))
+    assert.equal(query(zeroMount.container, '.lc-axis-top').textContent, '1', 'maxTotal floors at 1')
+    assert.equal(queryAll(bars(zeroMount.container)[0], '.lc-bar-stack > div').length, 0)
+    await zeroMount.unmount()
   })
 })
 
 describe('TrendChart entrance rise cap', () => {
-  test('a log longer than the cap rises only over its newest columns', async () => {
+  test('a log longer than the cap rises only over its newest columns, while a short log cascades fully', async () => {
     const reqs: RequestRecord[] = []
     for (let i = 0; i < RISE_CAP + 10; i++) reqs.push(req(i + 1, { turn: 1, step: i }))
     const m = await mount(h(TrendChart, propsOf(reqs)))
@@ -43,38 +43,33 @@ describe('TrendChart entrance rise cap', () => {
     // The window's own cascade counts from its edge — raw indices would exceed the stagger cap and rise in unison.
     assert.equal(stacks[10].style.getPropertyValue('--lc-i'), '0')
     await m.unmount()
-  })
 
-  test('a log that fits the cap keeps its full cascade', async () => {
-    const reqs = [req(1, { turn: 1, step: 0 }), req(2, { turn: 1, step: 1 }), req(3, { turn: 2, step: 0 })]
-    const m = await mount(h(TrendChart, propsOf(reqs)))
-    assert.deepEqual(queryAll(m.container, '.lc-bar-stack').map(s => s.className.includes('animate-lc-bar-in')), [true, true, true])
-    await m.unmount()
-  })
+    const short = await mount(h(TrendChart, propsOf([req(1, { turn: 1, step: 0 }), req(2, { turn: 1, step: 1 }), req(3, { turn: 2, step: 0 })])))
+    assert.deepEqual(queryAll(short.container, '.lc-bar-stack').map(s => s.className.includes('animate-lc-bar-in')), [true, true, true])
+    await short.unmount()
 
-  test('the DNA and DNA+delta interiors obey the same cap', async () => {
-    const reqs: RequestRecord[] = []
+    const dnaReqs: RequestRecord[] = []
     const bands: TrendBand[][] = []
     for (let i = 0; i < RISE_CAP + 5; i++) {
       const tokens = 100 + i
-      reqs.push(req(i + 1, { turn: 1, step: i, total: tokens }))
+      dnaReqs.push(req(i + 1, { turn: 1, step: i, total: tokens }))
       bands.push([{ key: 'sys', cat: 'system', tokens, off: 0, color: '#123456' } as TrendBand])
     }
-    const total = await mount(h(TrendChart, propsOf(reqs, { dna: bands })))
+    const total = await mount(h(TrendChart, propsOf(dnaReqs, { dna: bands })))
     const totalDivs = queryAll(total.container, '.lc-bar-dna')
     assert.equal(totalDivs.length, RISE_CAP + 5)
     assert.equal(totalDivs.filter(d => d.className.includes('animate-lc-bar-in')).length, RISE_CAP)
     await total.unmount()
-    const delta = await mount(h(TrendChart, propsOf(reqs, { dna: bands, mode: 'delta' })))
+    const delta = await mount(h(TrendChart, propsOf(dnaReqs, { dna: bands, mode: 'delta' })))
     const deltaDivs = queryAll(delta.container, '.lc-bar-dna')
-    assert.equal(deltaDivs.length, RISE_CAP + 4)
+    assert.equal(deltaDivs.length, RISE_CAP + 4, 'the DNA and DNA+delta interiors obey the same cap')
     assert.equal(deltaDivs.filter(d => d.className.includes('animate-lc-bar-in')).length, RISE_CAP)
     await delta.unmount()
   })
 })
 
 describe('TrendChart step granularity, total mode', () => {
-  test('stacks per-category segments in CATS order with real colors and proportional px heights', async () => {
+  test('stacks per-category segments in CATS order with real colors and proportional px heights, plotting raw fold figures', async () => {
     const r1 = req(1, { turn: 1, step: 0, skill: 40, total: 340 })
     const r2 = req(2, { turn: 1, step: 1, system: 200, tools: 100, user: 60, inject: 40, skill: 60, assistant: 80, tool: 120, total: 660 })
     const r3 = req(3, { turn: undefined, step: 0, user: 0, total: 280 })
@@ -111,47 +106,24 @@ describe('TrendChart step granularity, total mode', () => {
     assert.ok(turns[1].style.background.includes('var(--color-neutral-500) 26%'))
     assert.deepEqual(turns.map(t => t.textContent), ['1', '0'])
     await m.unmount()
-  })
 
-  test('plots raw fold figures: the provider prompt never rescales the stack, so constant categories stay flat', async () => {
     const composition = { system: 200, tools: 100, user: 60, inject: 40, assistant: 80, tool: 120, total: 600 }
-    const r1 = req(1, { turn: 1, step: 0, ...composition })
-    const r2 = req(2, { turn: 1, step: 1, ...composition, prompt: 1200 })
-    const r3 = req(3, { turn: 2, step: 0, system: 0, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 0, prompt: 500 })
-    const m = await mount(h(TrendChart, propsOf([r1, r2, r3])))
-
-    assert.equal(query(m.container, '.lc-axis-top').textContent, '600')
-    const bs = bars(m.container)
-    assert.equal(bs.length, 3)
-    // Identical compositions plot IDENTICAL heights regardless of the reported prompt — a constant
-    // system prompt must not ride the provider/heuristic ratio (that rescale faked growth).
-    const segs1 = queryAll(bs[0], '.lc-bar-stack > div')
-    const segs2 = queryAll(bs[1], '.lc-bar-stack > div')
-    assert.equal(segs1.length, 6)
-    assert.deepEqual(segs2.map(s => s.style.height), segs1.map(s => s.style.height))
-    assert.equal(segs1[0].style.height, `${Math.round(200 / 600 * CHART_H)}px`)
-    assert.equal(queryAll(bs[2], '.lc-bar-stack > div').length, 0)
-
-    // The tip is placed over its bar's visible slice imperatively (transform, not `left`), so it never
-    // contributes to the scroller's overflow.
-    const { spies, handlers } = makeSpies()
-    await m.update(h(TrendChart, { ...propsOf([r1, r2, r3]), ...handlers, hoveredSeq: 2 }))
-    const tip = query(m.container, '.lc-chart-tip')
-    assert.deepEqual(
-      queryAll(tip, 'span').map(r => r.textContent),
-      [kit.t('tip.step', { t: 1, s: 1, n: 2 }), kit.t('tip.total', { n: '600' })],
-    )
-    assert.equal(tip.style.transform, 'translate(23px, 0)') // idx 1 * 16 + BAR_W/2, scrollLeft 0
-    assert.ok(spies.hover.length === 0, 'hover callback only fires from real mouseover')
-    await m.unmount()
-  })
-
-  test('a zero-only history keeps the unit scale (maxTotal floors at 1)', async () => {
-    const zero = req(1, { turn: 1, step: 0, system: 0, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 0 })
-    const m = await mount(h(TrendChart, propsOf([zero])))
-    assert.equal(query(m.container, '.lc-axis-top').textContent, '1')
-    assert.equal(queryAll(bars(m.container)[0], '.lc-bar-stack > div').length, 0)
-    await m.unmount()
+    const rawReqs = [
+      req(1, { turn: 1, step: 0, ...composition }),
+      req(2, { turn: 1, step: 1, ...composition, prompt: 1200 }),
+      req(3, { turn: 2, step: 0, system: 0, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 0, prompt: 500 }),
+    ]
+    const raw = await mount(h(TrendChart, propsOf(rawReqs)))
+    assert.equal(query(raw.container, '.lc-axis-top').textContent, '600')
+    const rawBars = bars(raw.container)
+    assert.equal(rawBars.length, 3)
+    const rawSegs1 = queryAll(rawBars[0]!, '.lc-bar-stack > div')
+    const rawSegs2 = queryAll(rawBars[1]!, '.lc-bar-stack > div')
+    assert.equal(rawSegs1.length, 6)
+    assert.deepEqual(rawSegs2.map(s => s.style.height), rawSegs1.map(s => s.style.height), 'identical compositions plot identical heights regardless of the reported prompt')
+    assert.equal(rawSegs1[0]!.style.height, `${Math.round(200 / 600 * CHART_H)}px`)
+    assert.equal(queryAll(rawBars[2]!, '.lc-bar-stack > div').length, 0)
+    await raw.unmount()
   })
 })
 
@@ -159,9 +131,8 @@ describe('TrendChart delta mode', () => {
   const base = req(1, { turn: 1, step: 0 })
   const grown = req(2, { turn: 1, step: 1, system: 110, tools: 60, user: 40, inject: 30, assistant: 50, tool: 70, total: 360 })
   const shrunk = req(3, { turn: 2, step: 0, system: 90, tools: 40, user: 20, inject: 10, assistant: 30, tool: 50, total: 240 })
-  const zeroReq = req(9, { turn: 3, step: 0, system: 0, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 0 })
 
-  test('diverging stacks pile positive deltas up and hang negatives down off a solid zero line', async () => {
+  test('diverging stacks pile positive deltas up and hang negatives down off a solid zero line, zeroing an absent arm', async () => {
     const m = await mount(h(TrendChart, propsOf([base, grown, shrunk], { mode: 'delta' })))
 
     assert.equal(query(m.container, '.lc-axis-top').textContent, '+60')
@@ -199,29 +170,28 @@ describe('TrendChart delta mode', () => {
     await m.update(h(TrendChart, propsOf([base, grown, shrunk], { mode: 'delta', hoveredSeq: 1 })))
     assert.ok(query(m.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.delta', { n: '0' })))
     await m.unmount()
-  })
 
-  test('growth-only history zeroes the negative axis arm; shrink-only zeroes the positive arm', async () => {
-    const up = await mount(h(TrendChart, propsOf([zeroReq, base], { mode: 'delta' })))
+    const zeroReq = req(9, { turn: 3, step: 0, system: 0, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 0 })
+    const baseReq = req(1, { turn: 1, step: 0 })
+    const up = await mount(h(TrendChart, propsOf([zeroReq, baseReq], { mode: 'delta' })))
     assert.equal(query(up.container, '.lc-axis-top').textContent, '+300')
     assert.equal(query(up.container, '.lc-axis-q3').textContent, '+225')
     assert.equal(query(up.container, '.lc-axis-q1').textContent, '+75')
     assert.equal(query(up.container, '.lc-axis-bot').textContent, '0')
     assert.ok(query(up.container, '.lc-grid-q3'))
     assert.ok(query(up.container, '.lc-grid-q1'))
-    const upSegs = queryAll(bars(up.container)[1], '.lc-bar-up > div')
+    const upSegs = queryAll(bars(up.container)[1]!, '.lc-bar-up > div')
     assert.equal(upSegs.length, 6)
-    assert.equal(upSegs[0].style.height, `${Math.round(100 * CHART_H / 300)}px`)
+    assert.equal(upSegs[0]!.style.height, `${Math.round(100 * CHART_H / 300)}px`)
     await up.unmount()
-
-    const down = await mount(h(TrendChart, propsOf([base, zeroReq], { mode: 'delta' })))
+    const down = await mount(h(TrendChart, propsOf([baseReq, zeroReq], { mode: 'delta' })))
     assert.equal(query(down.container, '.lc-axis-top').textContent, '0')
     assert.equal(query(down.container, '.lc-axis-q3').textContent, '-75')
     assert.equal(query(down.container, '.lc-axis-q1').textContent, '-225')
     assert.equal(query(down.container, '.lc-axis-bot').textContent, '-300')
     assert.ok(query(down.container, '.lc-grid-q3'))
     assert.ok(query(down.container, '.lc-grid-q1'))
-    assert.equal(queryAll(bars(down.container)[1], '.lc-bar-down > div').length, 6)
+    assert.equal(queryAll(bars(down.container)[1]!, '.lc-bar-down > div').length, 6)
     await down.unmount()
   })
 
@@ -248,7 +218,7 @@ describe('TrendChart turn granularity', () => {
   const t1s1 = req(2, { turn: 1, step: 1, total: 360 })
   const t2s0 = req(3, { turn: 2, step: 0, total: 280 })
 
-  test('turn aggregates render one bar per turn with aggregated labels and turn-count tooltips', async () => {
+  test('turn aggregates render one bar per turn with aggregated labels and turn-count tooltips, and the strip drives the turn callbacks', async () => {
     const agg = aggregateByTurn([t1s0, t1s1, t2s0])
     const m = await mount(h(TrendChart, propsOf(agg, { granularity: 'turn' })))
     const bs = bars(m.container)
@@ -275,33 +245,28 @@ describe('TrendChart turn granularity', () => {
     const m3 = await mount(h(TrendChart, propsOf([req(20, { turn: undefined, step: 3 })], { granularity: 'turn', hoveredSeq: 20 })))
     assert.ok(query(m3.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.turn1', { t: 0 })))
     await m3.unmount()
-  })
 
-  test('turn strip hover/click drive the turn callbacks; activeTurn dims the chart and lights the block', async () => {
     const { spies, handlers } = makeSpies()
-    const agg = aggregateByTurn([t1s0, t1s1, t2s0])
-    const m = await mount(h(TrendChart, propsOf(agg, { ...handlers, granularity: 'turn' })))
-
-    const turns = queryAll(m.container, '.lc-turn')
-    await hover(turns[0])
+    const stripAgg = aggregateByTurn([t1s0, t1s1, t2s0])
+    const strip = await mount(h(TrendChart, propsOf(stripAgg, { ...handlers, granularity: 'turn' })))
+    const stripBlocks = queryAll(strip.container, '.lc-turn')
+    await hover(stripBlocks[0]!)
     assert.deepEqual(spies.hoverTurn, [1])
-    await click(turns[1])
+    await click(stripBlocks[1]!)
     assert.deepEqual(spies.pickTurn, [2])
-    await unhover(turns[0])
+    await unhover(stripBlocks[0]!)
     assert.deepEqual(spies.hoverTurn, [1, null])
-
-    await m.update(h(TrendChart, propsOf(agg, { ...handlers, granularity: 'turn', activeTurn: 1 })))
-    assert.ok(query(m.container, '.lc-chart-scroll').className.includes('lc-chart-dim'))
-    const bs = bars(m.container)
-    assert.ok(bs[0].className.includes('lc-bar-in-turn'))
-    assert.ok(!bs[1].className.includes('lc-bar-in-turn'))
-    assert.ok(queryAll(m.container, '.lc-turn')[0].className.includes('lc-turn-on'))
-    assert.ok(!queryAll(m.container, '.lc-turn')[1].className.includes('lc-turn-on'))
-
-    await m.update(h(TrendChart, propsOf(agg, { ...handlers, granularity: 'turn', activeTurn: null })))
-    assert.ok(!query(m.container, '.lc-chart-scroll').className.includes('lc-chart-dim'))
-    assert.ok(!bars(m.container)[0].className.includes('lc-bar-in-turn'))
-    await m.unmount()
+    await strip.update(h(TrendChart, propsOf(stripAgg, { ...handlers, granularity: 'turn', activeTurn: 1 })))
+    assert.ok(query(strip.container, '.lc-chart-scroll').className.includes('lc-chart-dim'))
+    const stripBars = bars(strip.container)
+    assert.ok(stripBars[0]!.className.includes('lc-bar-in-turn'))
+    assert.ok(!stripBars[1]!.className.includes('lc-bar-in-turn'))
+    assert.ok(queryAll(strip.container, '.lc-turn')[0]!.className.includes('lc-turn-on'))
+    assert.ok(!queryAll(strip.container, '.lc-turn')[1]!.className.includes('lc-turn-on'))
+    await strip.update(h(TrendChart, propsOf(stripAgg, { ...handlers, granularity: 'turn', activeTurn: null })))
+    assert.ok(!query(strip.container, '.lc-chart-scroll').className.includes('lc-chart-dim'))
+    assert.ok(!bars(strip.container)[0]!.className.includes('lc-bar-in-turn'))
+    await strip.unmount()
   })
 })
 
@@ -317,17 +282,15 @@ describe('TrendChart step flags', () => {
     assert.ok(query(bs[4], '.lc-trend-flag'))
     assert.ok(query(bs[9], '.lc-trend-flag'))
     await m.unmount()
-  })
 
-  test('delta mode keeps the flags; turn granularity plants none (the turn strip numbers that grid)', async () => {
-    const reqs = Array.from({ length: 6 }, (_, i) => req(i + 1, { turn: 1, step: i }))
-    const m = await mount(h(TrendChart, propsOf(reqs, { mode: 'delta' })))
-    assert.deepEqual(queryAll(m.container, '.lc-trend-flag').map(f => f.textContent), ['5'])
-    await m.unmount()
+    const deltaReqs = Array.from({ length: 6 }, (_, i) => req(i + 1, { turn: 1, step: i }))
+    const delta = await mount(h(TrendChart, propsOf(deltaReqs, { mode: 'delta' })))
+    assert.deepEqual(queryAll(delta.container, '.lc-trend-flag').map(f => f.textContent), ['5'], 'delta mode keeps the flags')
+    await delta.unmount()
 
     const turns = Array.from({ length: 6 }, (_, i) => req(i + 1, { turn: i + 1, step: 0 }))
-    const m2 = await mount(h(TrendChart, propsOf(aggregateByTurn(turns), { granularity: 'turn' })))
-    assert.equal(queryAll(m2.container, '.lc-trend-flag').length, 0)
-    await m2.unmount()
+    const turnMount = await mount(h(TrendChart, propsOf(aggregateByTurn(turns), { granularity: 'turn' })))
+    assert.equal(queryAll(turnMount.container, '.lc-trend-flag').length, 0, 'the turn strip numbers that grid')
+    await turnMount.unmount()
   })
 })

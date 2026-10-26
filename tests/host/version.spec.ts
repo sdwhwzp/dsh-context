@@ -136,41 +136,26 @@ afterAll(() => {
 })
 
 describe('detectHarnessVersion — running anchor', () => {
-  test('outranks a stale home mirror (issue #59: a healthy Desktop harness)', () => {
+  test('outranks a stale home mirror, even when the running tree is below the baseline', () => {
     assert.equal(detectHarnessVersion(ctxWithHome(homeResolver('old')), runningResolver('running-supported', scratch), ELSEWHERE), '0.2.0-rc.2')
-  })
-
-  test('a below-baseline running tree still trips the gate over a newer mirror', () => {
     assert.equal(detectHarnessVersion(ctxWithHome(homeResolver('future')), runningResolver('running-old', scratch), ELSEWHERE), '0.1.7-rc.2')
   })
 
-  test('discards a witness inside this package own closure for the home anchor', () => {
+  test('discards a witness inside this package own closure and never probes the CLI package for the home anchor', () => {
     // A `link:`-installed dev checkout resolves its own pinned devDependencies: that closure is not the harness, so
     // the home mirror answers instead (the default package root performs the discard).
     const ctx = ctxWithHome(homeResolver('old'))
     assert.equal(detectHarnessVersion(ctx, runningResolver('module-skips-cli')), '0.1.7-rc.2')
-  })
-
-  test('never probes the CLI package from the running anchor', () => {
     // The fixture pins the CLI at 0.0.1 but the libraries at the baseline: only a library answer may come back.
-    const ctx = ctxWithHome(scratchResolver('empty'))
-    assert.equal(detectHarnessVersion(ctx, runningResolver('module-skips-cli'), ELSEWHERE), '0.2.0-rc.2')
+    const empty = ctxWithHome(scratchResolver('empty'))
+    assert.equal(detectHarnessVersion(empty, runningResolver('module-skips-cli'), ELSEWHERE), '0.2.0-rc.2')
   })
 
-  test('a resolving witness with no readable version falls through to home', () => {
-    // The library resolves, so the witness is trusted, but its manifest name never matches: home answers.
+  test('an unusable running witness falls through to the home anchor', () => {
     const ctx = ctxWithHome(homeResolver('future'))
     assert.equal(detectHarnessVersion(ctx, runningResolver('running-decoy', scratch), ELSEWHERE), '0.3.0-rc.1')
-  })
-
-  test('a non-file running URL is no answer', () => {
-    const ctx = ctxWithHome(homeResolver('future'))
     assert.equal(detectHarnessVersion(ctx, fixedUrl('data:text/javascript,'), ELSEWHERE), '0.3.0-rc.1')
-  })
-
-  test('classifies the plugin root and its parent correctly', () => {
     // A witness equal to the plugin root is inside it (`relative` is empty); a witness one level above is reached through `..`.
-    const ctx = ctxWithHome(homeResolver('future'))
     assert.equal(detectHarnessVersion(ctx, fixedUrl(pathToFileURL(ELSEWHERE).href), ELSEWHERE), '0.3.0-rc.1')
     assert.equal(detectHarnessVersion(ctx, fixedUrl(pathToFileURL(ELSEWHERE).href), join(ELSEWHERE, 'inner')), '0.3.0-rc.1')
   })
@@ -190,43 +175,28 @@ describe('detectHarnessVersion — home anchor', () => {
     assert.equal(detectHarnessVersion(ctxWithHome(scratchResolver('library-only')), NO_RUNNING), '0.1.1-rc.2')
   })
 
-  test('ascends from the entry point when the manifest subpath is not exported', () => {
-    const ctx = ctxWithHome(scratchResolver('entry-only'))
-    assert.equal(detectHarnessVersion(ctx, NO_RUNNING), '0.1.1-rc.1')
-  })
-
-  test('skips mismatched manifests while ascending to the owning package', () => {
-    const ctx = ctxWithHome(scratchResolver('entry-nested'))
-    assert.equal(detectHarnessVersion(ctx, NO_RUNNING), '0.1.1-rc.4')
-  })
-
-  test('skips invalid, null, and primitive manifests met while ascending', () => {
-    assert.equal(detectHarnessVersion(ctxWithHome(scratchResolver('entry-badjson')), NO_RUNNING), '0.1.1-rc.5')
-    assert.equal(detectHarnessVersion(ctxWithHome(scratchResolver('entry-null')), NO_RUNNING), '0.1.1-rc.6')
-    assert.equal(detectHarnessVersion(ctxWithHome(scratchResolver('entry-primitive')), NO_RUNNING), '0.1.1-rc.7')
-  })
-
-  test('an entry the exports map names but the package does not ship → undefined', () => {
-    // The entry resolve fails AT the fixture level (the promised file is absent): no ascend, no NODE_PATH fall-through.
-    assert.equal(detectHarnessVersion(ctxWithHome(scratchResolver('entry-gone')), NO_RUNNING), undefined)
+  test('ascends from the entry point, skipping mismatched, invalid, null, and primitive manifests', () => {
+    const cases: [string, string | undefined][] = [
+      ['entry-only', '0.1.1-rc.1'], // the manifest subpath is not exported
+      ['entry-nested', '0.1.1-rc.4'], // a decoy manifest beside the exports entry is skipped
+      ['entry-badjson', '0.1.1-rc.5'],
+      ['entry-null', '0.1.1-rc.6'],
+      ['entry-primitive', '0.1.1-rc.7'],
+      // The entry resolve fails AT the fixture level (the promised file is absent): no ascend, no NODE_PATH fall-through.
+      ['entry-gone', undefined],
+    ]
+    for (const [home, expected] of cases) {
+      assert.equal(detectHarnessVersion(ctxWithHome(scratchResolver(home)), NO_RUNNING), expected, home)
+    }
   })
 })
 
 describe('detectHarnessVersion — degradation arms (fail open)', () => {
-  test('no running tree and no home service → undefined', () => {
+  test('an absent, non-function, or hostile home probe yields undefined', () => {
     assert.equal(detectHarnessVersion(new Context(), NO_RUNNING), undefined)
-  })
-
-  test('a non-function dshHomePath is ignored', () => {
     assert.equal(detectHarnessVersion(ctxWithHome(42), NO_RUNNING), undefined)
-  })
-
-  test('a home resolver that throws yields undefined', () => {
-    const ctx = ctxWithHome(() => { throw new Error('hostile home') })
-    assert.equal(detectHarnessVersion(ctx, NO_RUNNING), undefined)
-  })
-
-  test('a hostile ctx.get yields undefined', () => {
+    const throwing = ctxWithHome(() => { throw new Error('hostile home') })
+    assert.equal(detectHarnessVersion(throwing, NO_RUNNING), undefined)
     const hostile = { get() { throw new Error('hostile ctx') } } as unknown as Context
     assert.equal(detectHarnessVersion(hostile, NO_RUNNING), undefined)
   })

@@ -36,6 +36,15 @@ describe('watchFleetTab — the Fleet tab\'s own gate', () => {
     dispose()
     assert.deepEqual(ctx.slots.of('conversation.view'), [], 'the watcher dispose unwinds the tab')
     ctx.dispose()
+
+    const bare = new TestClientCtx()
+    ;(bare.slots as unknown as { register: () => unknown }).register = () => undefined
+    const guarded = wire(bare)
+    guarded.settings.set('fleetTab', 'hide')
+    guarded.settings.set('fleetTab', 'show')
+    guarded.dispose()
+    assert.deepEqual(bare.slots.of('conversation.view'), [], 'a no-disposer registry never throws')
+    bare.dispose()
   })
 
   test('hide unwinds it live and show brings it back, with no churn in between', () => {
@@ -77,16 +86,6 @@ describe('watchFleetTab — the Fleet tab\'s own gate', () => {
     assert.equal(ctx.slots.of('conversation.view').length, 1, 'no placement churn')
     settings.set('defaultPlacement', 'hide')
     assert.equal(ctx.slots.of('conversation.view').length, 1, 'a hidden panel entry leaves the tab served')
-    dispose()
-    assert.deepEqual(ctx.slots.of('conversation.view'), [])
-    ctx.dispose()
-  })
-
-  test('a registry that hands back no disposer never throws on show, hide or disposal', () => {
-    const ctx = new TestClientCtx()
-    ;(ctx.slots as unknown as { register: () => unknown }).register = () => undefined
-    const { dispose, settings } = wire(ctx)
-    settings.set('fleetTab', 'hide')
     dispose()
     assert.deepEqual(ctx.slots.of('conversation.view'), [])
     ctx.dispose()

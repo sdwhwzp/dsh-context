@@ -1,4 +1,4 @@
-import { createElement as h } from 'react'
+import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
 import { makeFleetView } from '../../../src/client/components/fleetView'
@@ -42,14 +42,12 @@ describe('FleetView — the agent family on its own page', () => {
     assert.ok(text(query(m.container, '.lc-foot')).startsWith(DICT_EN['footer'].slice(0, 24)))
     await m.unmount()
     ctx.dispose()
-  })
 
-  test('the slim head composes the card before the detail collections land', async () => {
-    // The read stays in flight for the whole test, so only the head's own counters can carry the card.
+    // The read stays in flight for the whole second mount, so only the head's own counters can carry the card.
     vi.stubGlobal('fetch', () => new Promise(() => {}))
-    const ctx = new TestClientCtx({ services: { sessions: selfOnly('sv-slim') } })
-    const View = makeView(ctx)
-    const m = await mount(h(View, {
+    const slimCtx = new TestClientCtx({ services: { sessions: selfOnly('sv-slim') } })
+    const SlimView = makeView(slimCtx)
+    const slim = await mount(h(SlimView, {
       sessionId: 'sv-slim',
       useProjection: projectionsFor(timeline({
         contextWindow: 128000,
@@ -58,12 +56,10 @@ describe('FleetView — the agent family on its own page', () => {
         detailRev: 6,
       })),
     }))
-
-    const self = query(m.container, '.lc-agent-card.lc-agent-self')
-    assert.equal(query(self, '.lc-agent-meta-text').textContent, '3 steps', 'the head counts the steps itself')
-    assert.ok(!text(m.container).includes(DICT_EN['detail.loading']), 'no waiting state once the head is served')
-    await m.unmount()
-    ctx.dispose()
+    assert.equal(query(query(slim.container, '.lc-agent-card.lc-agent-self'), '.lc-agent-meta-text').textContent, '3 steps', 'the slim head counts the steps itself')
+    assert.ok(!text(slim.container).includes(DICT_EN['detail.loading']), 'no waiting state once the head is served')
+    await slim.unmount()
+    slimCtx.dispose()
   })
 
   test('a cold session names its retryable read instead of spinning', async () => {
@@ -89,10 +85,7 @@ describe('FleetView — the agent family on its own page', () => {
   test('the baseline gate rides the Fleet tab too', async () => {
     const ctx = new TestClientCtx({ services: { sessions: selfOnly('sv-gate') } })
     const View = makeView(ctx)
-    const m = await mount(h(View, {
-      sessionId: 'sv-gate',
-      useProjection: projectionsFor(timeline({ unsupported: { current: '0.1.0', minimum: '0.2.0-rc.2' } })),
-    }))
+    const m = await mount(h(View, { sessionId: 'sv-gate', useProjection: projectionsFor(timeline({ unsupported: { current: '0.1.0', minimum: '0.2.0-rc.2' } })), }))
 
     assert.ok(query(m.container, '.lc-gate-card') !== null, 'the gate names the unsupported harness here as well')
     await m.unmount()
@@ -121,7 +114,7 @@ describe('FleetView — the agent family on its own page', () => {
     const ctx = new TestClientCtx({ services: { sessions: { list: { getSnapshot: (): unknown => snapshot, subscribe: (): (() => void) => () => {} } } } })
     const View = makeView(ctx)
     const m = await mount(h(View, { sessionId: id, useProjection: projectionsFor(richTimeline({ timing: TIMING })) }))
-    requestFleetMemberFocus(id, 'worker')
+    await act(async () => { requestFleetMemberFocus(id, 'worker') })
     await until(() => query(m.container, '[data-agent="worker"]').classList.contains('lc-agent-hover'), 'the relay never lit the member')
     assert.equal(currentFleetMemberFocus(id), 'worker', 'the resting pick is shared')
     await m.unmount()
@@ -130,51 +123,33 @@ describe('FleetView — the agent family on its own page', () => {
 })
 
 describe('FleetView — the shared scrollport claim', () => {
-  test("mount lands at the top: the chat's bottom-anchored scrollTop does not survive the tab switch", async () => {
+  test("mount lands at the top: the chat's bottom-anchored scrollTop does not survive the tab switch or a remount", async () => {
+    const props = { sessionId: 'sv-fleet', useProjection: projectionsFor(richTimeline({ timing: TIMING })) }
+    const ctx = new TestClientCtx({ services: { sessions: selfOnly('sv-fleet') } })
+    const View = makeView(ctx)
     const scroller = makeScroller()
     scroller.scrollTop = 3491
-    const ctx = new TestClientCtx({ services: { sessions: selfOnly('sv-fleet') } })
-    const View = makeView(ctx)
-    const m = await mountInScroller(
-      h(View, { sessionId: 'sv-fleet', useProjection: projectionsFor(richTimeline({ timing: TIMING })) }),
-      scroller,
-    )
-
+    const m = await mountInScroller(h(View, props), scroller)
     assert.equal(scroller.scrollTop, 0, 'the inherited position reset pre-paint')
+    scroller.scrollTop = 120
     await m.unmount()
-    ctx.dispose()
-  })
 
-  test('a session switch inside the tab re-claims the top', async () => {
-    const scroller = makeScroller()
-    const ctx = new TestClientCtx({ services: { sessions: selfOnly('sv-fleet') } })
-    const View = makeView(ctx)
-    const m = await mountInScroller(
+    const next = makeScroller()
+    next.scrollTop = 55
+    const remounted = await mountInScroller(h(View, props), next)
+    assert.equal(next.scrollTop, 0, 'the page is a dashboard: it opens at its top again')
+    await remounted.unmount()
+
+    const switched = makeScroller()
+    const switchView = await mountInScroller(
       h(View, { sessionId: 'sv-fleet', useProjection: projectionsFor(richTimeline({ timing: TIMING })) }),
-      scroller,
+      switched,
     )
-    scroller.scrollTop = 300
-    await m.update(h(View, { sessionId: 'sv-other', useProjection: projectionsFor(richTimeline({ timing: TIMING })) }))
-
-    assert.equal(scroller.scrollTop, 0, 'the next session lands at the top again')
-    await m.unmount()
+    switched.scrollTop = 300
+    await switchView.update(h(View, { sessionId: 'sv-other', useProjection: projectionsFor(richTimeline({ timing: TIMING })) }))
+    assert.equal(switched.scrollTop, 0, 'a session switch re-claims the top')
+    await switchView.unmount()
     ctx.dispose()
   })
 
-  test('a scrolled-away position does not come back: every entry re-claims the top', async () => {
-    const props = { sessionId: 'sv-roundtrip', useProjection: projectionsFor(richTimeline({ timing: TIMING })) }
-    const ctx = new TestClientCtx({ services: { sessions: selfOnly('sv-roundtrip') } })
-    const View = makeView(ctx)
-    const scroller1 = makeScroller()
-    const m1 = await mountInScroller(h(View, props), scroller1)
-    scroller1.scrollTop = 120
-    await m1.unmount()
-
-    const scroller2 = makeScroller()
-    scroller2.scrollTop = 55
-    const m2 = await mountInScroller(h(View, props), scroller2)
-    assert.equal(scroller2.scrollTop, 0, 'the page is a dashboard: it opens at its top again')
-    await m2.unmount()
-    ctx.dispose()
-  })
 })

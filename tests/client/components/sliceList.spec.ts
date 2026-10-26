@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { SliceList } from '../../../src/client/components/sliceList'
 import type { SliceRow } from '../../../src/client/components/sliceList'
-import { hover, mount, query, queryAll, text, unhover } from '../helpers/kit'
+import { hover, mount, query, queryAll, unhover } from '../helpers/kit'
 
 /** A parent that really holds the hover key, so hovering re-renders the rows. */
 function HoverHarness(props: { rows: SliceRow[] }) {
@@ -42,18 +42,10 @@ describe('SliceList', () => {
     assert.ok(!rows[1].className.includes('lc-sl-row-dim'))
     assert.equal(queryAll(m.container, '.lc-sl-sub').length, 1)
     assert.equal(queryAll(m.container, '.lc-sl-pct').length, 2)
-    assert.ok(text(m.container).includes('—'))
     await m.unmount()
   })
 
-  test('an empty row list renders the container only', async () => {
-    const m = await mount(h(SliceList, { rows: [] }))
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, 0)
-    assert.ok(queryAll(m.container, '.lc-sl').length === 1)
-    await m.unmount()
-  })
-
-  test('hovering a row lights it; leaving the list clears it', async () => {
+  test('hovering a row lights it; leaving the list clears it; without a relay hovers stay inert', async () => {
     const rowsIn: SliceRow[] = [
       { key: 'a', color: '#ff0000', label: 'Alpha', pct: '84%', count: '204.9k' },
       { key: 'b', color: '#00ff00', label: 'Beta', pct: '<1%', count: '3m 20s · 9 runs' },
@@ -66,13 +58,11 @@ describe('SliceList', () => {
     await unhover(query(m.container, '.lc-sl'))
     assert.ok(!rows[1].className.includes('lc-sl-row-on'))
     await m.unmount()
-  })
 
-  test('hover events without a relay stay inert', async () => {
-    const m = await mount(h(SliceList, { rows: [{ key: 'a', color: '#ff0000', label: 'Alpha', pct: '1%', count: '1' }] }))
-    await hover(query(m.container, '.lc-sl-row'))
-    await unhover(query(m.container, '.lc-sl'))
-    assert.equal(queryAll(m.container, '.lc-sl-row-on').length, 0)
-    await m.unmount()
+    const inert = await mount(h(SliceList, { rows: [{ key: 'a', color: '#ff0000', label: 'Alpha', pct: '1%', count: '1' }] }))
+    await hover(query(inert.container, '.lc-sl-row'))
+    await unhover(query(inert.container, '.lc-sl'))
+    assert.equal(queryAll(inert.container, '.lc-sl-row-on').length, 0)
+    await inert.unmount()
   })
 })

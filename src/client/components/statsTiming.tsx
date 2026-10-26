@@ -29,8 +29,6 @@ export interface StatsTimingProps {
   /** Per-step time slices; absent on the overview aggregate card and on rows folded before the collection existed. */
   spans?: TimingSpan[]
   locale?: string
-  /** The aggregate covers the whole agent team (self + dispatched subagents); absent keeps the session's own. */
-  scope?: 'team'
 }
 
 export function makeStatsTiming(kit: ViewKit, Donut: (props: DonutProps) => ReactElement): (props: StatsTimingProps) => ReactElement {
@@ -131,7 +129,6 @@ export function makeStatsTiming(kit: ViewKit, Donut: (props: DonutProps) => Reac
       <div className="lc-card lc-col-donut flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">
           <span className="lc-card-title-text">{t('timing.title')}</span>
-          <span className="lc-card-sub">{t(props.scope === 'team' ? 'timing.scopeTeam' : 'timing.scope')}</span>
           {tps !== null && (
             <span className="lc-card-rate" title={t('timing.tpsTip')}>{t('timing.tps', { tps })}</span>
           )}

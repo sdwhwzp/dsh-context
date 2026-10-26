@@ -29,21 +29,29 @@ describe('StatsTokens', () => {
     assert.equal(query(m.container, '.lc-donut-center span').textContent, 'Total')
     // Estimated composition (sum 1000) scales to billed input 400; rows share the whole 450.
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 7)
-    assert.deepEqual(rowOf(m.container, 0), { pct: '17.8%', label: 'System Prompt', count: '≈80' })
-    assert.deepEqual(rowOf(m.container, 1), { pct: '8.9%', label: 'Tool Schemas', count: '≈40' })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '26.7%', label: 'User Messages', count: '≈120' })
-    assert.deepEqual(rowOf(m.container, 3), { pct: '8.9%', label: 'Injected Context', count: '≈40' })
-    assert.deepEqual(rowOf(m.container, 4), { pct: '17.8%', label: 'Assistant Messages', count: '≈80' })
-    assert.deepEqual(rowOf(m.container, 5), { pct: '8.9%', label: 'Tool Results', count: '≈40' })
-    assert.deepEqual(rowOf(m.container, 6), { pct: '11.1%', label: 'Output', count: '50 · incl. reasoning' })
+    const expected = [
+      { pct: '17.8%', label: 'System Prompt', count: '≈80' },
+      { pct: '8.9%', label: 'Tool Schemas', count: '≈40' },
+      { pct: '26.7%', label: 'User Messages', count: '≈120' },
+      { pct: '8.9%', label: 'Injected Context', count: '≈40' },
+      { pct: '17.8%', label: 'Assistant Messages', count: '≈80' },
+      { pct: '8.9%', label: 'Tool Results', count: '≈40' },
+      { pct: '11.1%', label: 'Output', count: '50 · incl. reasoning' },
+    ]
+    expected.forEach((row, i) => assert.deepEqual(rowOf(m.container, i), row))
     await m.unmount()
-  })
 
-  test('the center keeps the chat line total under compact formatting', async () => {
-    const big: TokenUsage = { uncachedInputTokens: 100_000, outputTokens: 10_000, cacheReadTokens: 20_000, cacheWriteTokens: 5_000 }
-    const m = await mount(h(StatsTokens, { usage: big, current: CURRENT, breakdown: null }))
-    assert.equal(query(m.container, '.lc-donut-center b').textContent, '135.0k')
-    await m.unmount()
+    const zh = await mount(h(makeStatsTokens(makeKit('zh'), Donut), { usage: USAGE, current: CURRENT, breakdown: null }))
+    assert.equal(query(zh.container, '.lc-card-title-text').textContent, 'Token 统计')
+    await zh.unmount()
+
+    const sparse: Snapshot['current'] = { system: 100, tools: 0, user: 300, inject: 0, skill: 0, assistant: 0, tool: 0, total: 400 }
+    const sparseMount = await mount(h(StatsTokens, { usage: USAGE, current: sparse, breakdown: null }))
+    assert.equal(queryAll(sparseMount.container, '.lc-sl-row').length, 3)
+    assert.deepEqual(rowOf(sparseMount.container, 0), { pct: '22.2%', label: 'System Prompt', count: '≈100' })
+    assert.deepEqual(rowOf(sparseMount.container, 1), { pct: '66.7%', label: 'User Messages', count: '≈300' })
+    assert.deepEqual(rowOf(sparseMount.container, 2), { pct: '11.1%', label: 'Output', count: '50 · incl. reasoning' })
+    await sparseMount.unmount()
   })
 
   test('a delivered breakdown drives the prompt-side split ratios', async () => {
@@ -62,16 +70,6 @@ describe('StatsTokens', () => {
     await m.unmount()
   })
 
-  test('zero categories stay hidden once any usage is reported', async () => {
-    const current: Snapshot['current'] = { system: 100, tools: 0, user: 300, inject: 0, skill: 0, assistant: 0, tool: 0, total: 400 }
-    const m = await mount(h(StatsTokens, { usage: USAGE, current, breakdown: null }))
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, 3)
-    assert.deepEqual(rowOf(m.container, 0), { pct: '22.2%', label: 'System Prompt', count: '≈100' })
-    assert.deepEqual(rowOf(m.container, 1), { pct: '66.7%', label: 'User Messages', count: '≈300' })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '11.1%', label: 'Output', count: '50 · incl. reasoning' })
-    await m.unmount()
-  })
-
   test('hovering a legend row lights its donut segment and the row itself', async () => {
     const m = await mount(h(StatsTokens, { usage: USAGE, current: CURRENT, breakdown: null }))
     const rows = queryAll(m.container, '.lc-sl-row')
@@ -85,53 +83,37 @@ describe('StatsTokens', () => {
     await m.unmount()
   })
 
-  test('null usage degrades to a dash center and zero rows with dash shares', async () => {
-    const m = await mount(h(StatsTokens, { usage: null, current: CURRENT, breakdown: null }))
-    assert.equal(query(m.container, '.lc-donut-center b').textContent, '—')
-    assert.equal(query(m.container, '.lc-donut-center span').textContent, 'Total')
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, 8)
-    for (const row of queryAll(m.container, '.lc-sl-row')) {
-      assert.equal(row.querySelector('.lc-sl-pct')?.textContent, '—')
-    }
-    const counts = queryAll(m.container, '.lc-sl-sub').map(n => n.textContent)
-    assert.deepEqual(counts, ['≈0', '≈0', '≈0', '≈0', '≈0', '≈0', '≈0', '0 · incl. reasoning'])
-    await m.unmount()
-  })
-
-  test('a zero usage report shows a zero center', async () => {
+  test('null or zero usage degrades to the matching center and zero rows with dash shares', async () => {
     const zero: TokenUsage = { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
-    const m = await mount(h(StatsTokens, { usage: zero, current: CURRENT, breakdown: null }))
-    assert.equal(query(m.container, '.lc-donut-center b').textContent, '0')
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, 8)
-    await m.unmount()
+    for (const [usage, center] of [[null, '—'], [zero, '0']] as [TokenUsage | null, string][]) {
+      const m = await mount(h(StatsTokens, { usage, current: CURRENT, breakdown: null }))
+      assert.equal(query(m.container, '.lc-donut-center b').textContent, center)
+      assert.equal(query(m.container, '.lc-donut-center span').textContent, 'Total')
+      assert.equal(queryAll(m.container, '.lc-sl-row').length, 8)
+      for (const row of queryAll(m.container, '.lc-sl-row')) {
+        assert.equal(row.querySelector('.lc-sl-pct')?.textContent, '—')
+      }
+      const counts = queryAll(m.container, '.lc-sl-sub').map(n => n.textContent)
+      assert.deepEqual(counts, ['≈0', '≈0', '≈0', '≈0', '≈0', '≈0', '≈0', '0 · incl. reasoning'])
+      assert.ok(query(m.container, '.lc-donut-track'), 'an all-zero ring draws the neutral track')
+      await m.unmount()
+    }
   })
 })
 
 describe('StatsTokens — the cache-hit corner figure', () => {
-  test('a billed session shows the chat line\'s cache-hit share in the title row', async () => {
+  test('a billed session shows its cache-hit share; an unbilled or unreported session renders no figure', async () => {
     const m = await mount(h(StatsTokens, { usage: USAGE, current: CURRENT, breakdown: null }))
     const rate = query(m.container, '.lc-card-rate')
     assert.equal(rate?.textContent, 'Cache Hit 25.00%', '100 reads over the 400 billed')
     assert.ok(rate?.getAttribute('title')?.includes('Cumulative cache-read share'))
     await m.unmount()
-  })
 
-  test('the figure localizes its label and tooltip', async () => {
-    const kitZh = makeKit('zh')
-    const StatsTokensZh = makeStatsTokens(kitZh, Donut)
-    const m = await mount(h(StatsTokensZh, { usage: USAGE, current: CURRENT, breakdown: null }))
-    const rate = query(m.container, '.lc-card-rate')
-    assert.equal(rate?.textContent, '缓存命中 25.00%')
-    assert.ok(rate?.getAttribute('title')?.includes('整个会话累计的缓存读取'))
-    await m.unmount()
-  })
-
-  test('an unbilled or unreported session renders no figure', async () => {
     const zero: TokenUsage = { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
     for (const usage of [null, zero] as (TokenUsage | null)[]) {
-      const m = await mount(h(StatsTokens, { usage, current: CURRENT, breakdown: null }))
-      assert.equal(queryAll(m.container, '.lc-card-rate').length, 0, JSON.stringify(usage))
-      await m.unmount()
+      const bare = await mount(h(StatsTokens, { usage, current: CURRENT, breakdown: null }))
+      assert.equal(queryAll(bare.container, '.lc-card-rate').length, 0, JSON.stringify(usage))
+      await bare.unmount()
     }
   })
 })

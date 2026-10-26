@@ -32,6 +32,8 @@ describe('skillLoadsOf', () => {
 
   test('the range’s day floor scopes the aggregation; every member sums and the last load maximizes', () => {
     const rows = [
+      rowOf({ id: 'bare' }),
+      rowWith('empty-day', { [day(0)]: { tokens: 2, requests: 1 } }),
       rowWith('a', {
         [day(0)]: { tokens: 1, requests: 1, skills: { tdd: { n: 2, last: NOW - 1000 } } },
         [day(10)]: { tokens: 1, requests: 1, skills: { tdd: { n: 5, last: NOW - 900_000 }, stale: { n: 1, last: NOW - 900_000 } } },
@@ -52,10 +54,7 @@ describe('skillLoadsOf', () => {
       { name: 'grill', loads: 1, sessions: 1, last: NOW - 500 },
       { name: 'stale', loads: 1, sessions: 1, last: NOW - 900_000 },
     ])
-  })
-
-  test('a picked range closes the ledger window at its end day', () => {
-    const rows = [
+    const ranged = [
       rowWith('a', {
         [day(0)]: { tokens: 1, requests: 1, skills: { fresh: { n: 1, last: NOW } } },
         [day(1)]: { tokens: 1, requests: 1, skills: { edge: { n: 2, last: NOW } } },
@@ -64,9 +63,9 @@ describe('skillLoadsOf', () => {
     ]
     const scope = dayRangeWindow({ from: day(4), to: day(1) })
     assert.ok(scope !== null)
-    assert.deepEqual(skillLoadsOf(rows, { scope, day: null }).map(s => s.name), ['edge'], 'the end day counts whole; the day past it does not')
-    assert.equal(rowLoadedSkill(rows[0], 'late', { scope, day: null }), false)
-    assert.equal(rowLoadedSkill(rows[0], 'edge', { scope, day: null }), true)
+    assert.deepEqual(skillLoadsOf(ranged, { scope, day: null }).map(s => s.name), ['edge'], 'the end day counts whole; the day past it does not')
+    assert.equal(rowLoadedSkill(ranged[0], 'late', { scope, day: null }), false)
+    assert.equal(rowLoadedSkill(ranged[0], 'edge', { scope, day: null }), true)
   })
 
   test('the loader tally counts a row once however many of its days carry the name', () => {
@@ -104,6 +103,10 @@ describe('skillLoadsOf', () => {
     assert.deepEqual(names(), ['alpha', 'gamma', 'beta', 'delta', 'epsilon'], 'loads (the default): loads desc, then recent — the gamma/beta tie breaks on freshness')
     assert.deepEqual(names('loads'), ['alpha', 'gamma', 'beta', 'delta', 'epsilon'], 'the explicit key matches the omission')
     assert.deepEqual(names('recent'), ['gamma', 'delta', 'epsilon', 'beta', 'alpha'], 'recent: the freshest first')
+    const tied = [rowWith('t', {
+      [day(0)]: { tokens: 1, requests: 1, skills: { zeta: { n: 1, last: NOW }, eta: { n: 1, last: NOW } } },
+    })]
+    assert.deepEqual(skillLoadsOf(tied, { scope: win('all', NOW), day: null }).map(s => s.name), ['eta', 'zeta'], 'a full tie breaks on the name')
   })
 
   test('the heatmap’s pinned day scopes to that day exactly', () => {
@@ -116,26 +119,6 @@ describe('skillLoadsOf', () => {
     assert.deepEqual(skillLoadsOf(rows, { scope: win('all', NOW), day: day(1) }), [
       { name: 'grill', loads: 4, sessions: 1, last: NOW - 80_000 },
     ])
-  })
-
-  test('ties break recent-first, then by name; rows and days without skills skip', () => {
-    const rows = [
-      rowOf({ id: 'bare' }), // no ledger at all
-      rowWith('empty-day', { [day(0)]: { tokens: 2, requests: 1 } }),
-      rowWith('a', {
-        [day(0)]: {
-          tokens: 1,
-          requests: 1,
-          skills: {
-            beta: { n: 2, last: NOW - 1000 },
-            alpha: { n: 2, last: NOW - 1000 },
-            gamma: { n: 2, last: NOW - 1000 },
-            delta: { n: 5, last: NOW - 9000 },
-          },
-        },
-      }),
-    ]
-    assert.deepEqual(skillLoadsOf(rows, { scope: win('all', NOW), day: null }).map(s => s.name), ['delta', 'alpha', 'beta', 'gamma'])
   })
 })
 
@@ -179,14 +162,11 @@ describe('workspacesSnapshotOf', () => {
 })
 
 describe('sessionGroupsOf', () => {
-  test('unusable snapshots read null', () => {
+  test('unusable snapshots read null; membership projects to a session → title map with the first claim winning', () => {
     assert.equal(sessionGroupsOf(null), null)
     assert.equal(sessionGroupsOf(7), null)
     assert.equal(sessionGroupsOf({}), null, 'items missing')
     assert.equal(sessionGroupsOf({ items: 'x' }), null, 'items not an array')
-  })
-
-  test('membership projects to a session → title map; first claim wins', () => {
     const groups = sessionGroupsOf({
       items: [
         { title: 'dsh-context', sessionIds: ['a', 'b'] },
@@ -256,7 +236,7 @@ describe('groupCountsOf', () => {
     rowOf({ id: 'd' }),
   ]
 
-  test('counts rows per workspace in registry order, ungrouped last', () => {
+  test('counts rows per workspace in registry order; the first claim wins; unusable snapshots read empty', () => {
     const counts = groupCountsOf(rows, {
       items: [
         { title: 'one', sessionIds: ['a', 'b'] },
@@ -273,19 +253,15 @@ describe('groupCountsOf', () => {
       { key: 'two', count: 1 },
       { key: UNGROUPED_KEY, count: 1 },
     ], 'd has no claim; the empty group drops')
-  })
-
-  test('the first claim wins and unusable snapshots count every row ungrouped or empty', () => {
-    const counts = groupCountsOf(rows, {
+    assert.deepEqual(groupCountsOf(rows, {
       items: [
         { title: 'one', sessionIds: ['a'] },
         { title: 'two', sessionIds: ['a'] },
       ],
-    })
-    assert.deepEqual(counts, [
+    }), [
       { key: 'one', count: 1 },
       { key: UNGROUPED_KEY, count: 3 },
-    ])
+    ], 'the first claim wins')
     assert.deepEqual(groupCountsOf(rows, null), [])
     assert.deepEqual(groupCountsOf(rows, { items: 'x' }), [])
     assert.deepEqual(groupCountsOf([], { items: [{ title: 'one', sessionIds: ['a'] }] }), [], 'no rows, no chips')

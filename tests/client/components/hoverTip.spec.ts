@@ -80,7 +80,7 @@ describe('useHoverTip', () => {
     await m.unmount()
   })
 
-  test('moving across the anchor subtree keeps the tip; switching anchors re-anchors without hiding', async () => {
+  test('moving across the anchor subtree keeps the tip, switching anchors re-anchors, and focus/blur mirror hover', async () => {
     const m = await mount(h(Zone))
     const a = query(m.container, '#a')
     const b = query(m.container, '#b')
@@ -98,13 +98,8 @@ describe('useHoverTip', () => {
     assert.equal(bubble()?.textContent, 'tip B')
     assert.equal(a.getAttribute('aria-describedby'), null, 'the old anchor released')
     assert.equal(b.getAttribute('aria-describedby'), 'lc-hovertip-bubble')
-    await m.unmount()
-  })
 
-  test('focus and blur mirror hover; blur into another anchor keeps the tip', async () => {
-    const m = await mount(h(Zone))
-    const a = query(m.container, '#a')
-    const b = query(m.container, '#b')
+    // React implements onFocus/onBlur (and their captures) over the bubbling focusin/focusout pair.
     await focusIn(a)
     assert.equal(bubble()?.textContent, 'tip A')
     await blurOut(a, b)
@@ -116,7 +111,7 @@ describe('useHoverTip', () => {
     await m.unmount()
   })
 
-  test('a zone scroll hides the tip; non-anchors and empty labels never show one', async () => {
+  test('a zone scroll or a viewport resize retracts the tip; non-anchors and empty labels never show one', async () => {
     const m = await mount(h(Zone))
     const a = query(m.container, '#a')
     await mouseover(query(m.container, '#plain'))
@@ -131,12 +126,7 @@ describe('useHoverTip', () => {
     })
     assert.equal(bubble(), null, 'any zone scroll retracts the bubble')
     assert.equal(a.getAttribute('aria-describedby'), null)
-    await m.unmount()
-  })
 
-  test('a viewport resize retracts the tip (every anchor just moved)', async () => {
-    const m = await mount(h(Zone))
-    const a = query(m.container, '#a')
     await mouseover(a)
     assert.ok(bubble() !== null)
     await act(async () => {
@@ -206,20 +196,12 @@ describe('useHoverTip', () => {
     await mouseover(a)
     assert.equal(bubble()?.textContent, 'tip A, longer')
     assert.equal(renders, 2, 'a relabelled tip re-measures (show + measure)')
-    await m.unmount()
-  })
 
-  test('a hidden tip re-measures when the viewport it was clamped against changes', async () => {
-    let renders = 0
-    const m = await mount(h(CountingZone, { onRender: () => { renders += 1 } }))
-    const a = query(m.container, '#a')
-    pinRect(a, { left: 100, top: 100, width: 40, height: 20 })
-    await mouseover(a)
-    await mouseout(a, m.container)
-
+    // A changed viewport invalidates the cached clamp: the hidden tip re-measures on the next show.
     const width = window.innerWidth
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: width - 400 })
     try {
+      await mouseout(a, m.container)
       renders = 0
       await mouseover(a)
       assert.equal(renders, 2, 'a changed viewport re-measures (show + measure)')

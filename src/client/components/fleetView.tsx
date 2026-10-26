@@ -7,6 +7,7 @@ import type { AgentHeads } from '../agentHeads'
 import { agentSelfOf } from '../agentTree'
 import { displayCurrencyOf } from '../cost'
 import { mergeComms } from '../fleetDetail'
+import { attestedNamesOf, commsAgentsOf } from '../fleetAgents'
 import { useFleetDetails, useFleetModel } from '../fleetModel'
 import { teamMemberOf, teamOf } from '../fleetTeam'
 import { useModelPrices } from '../modelPrices'
@@ -25,6 +26,7 @@ import { FleetSummary } from './fleetSummary'
 import { MemberBoard } from './memberBoard'
 import { TaskBoard } from './taskBoard'
 import { makeUpgradeGate } from './upgradeGate'
+import { useConversationSurface } from './useConversationSurface'
 
 export function makeFleetView(
   ctx: ClientCtx,
@@ -42,6 +44,7 @@ export function makeFleetView(
     const sessionId = typeof props.sessionId === 'string' ? props.sessionId : undefined
     const { source, data, pressure, breakdown, usage } = useContextSession(props)
     const rootRef = useRef<HTMLDivElement | null>(null)
+    useConversationSurface(rootRef)
     // Re-claim the top per session in a layout effect: the harness carries the chat's bottom-anchored scrollTop across
     // tab switches, and no saved position would survive the page's late layout passes.
     useLayoutEffect(() => {
@@ -54,7 +57,7 @@ export function makeFleetView(
     }, [sessionId])
     const self = data !== null ? agentSelfOf(data, pressure, breakdown, usage) : undefined
     // The model arms only once the tab's timeline landed: while the loading/failure screen stands, no subscription or read fires.
-    const { forest, team: rowTeam } = useFleetModel(ctx, heads, sessionId, self, data !== null)
+    const { forest, team: rowTeam, titles } = useFleetModel(ctx, heads, sessionId, self, data !== null)
     // The freshest team value is the tab's OWN projection when the viewed session leads; a teammate falls back to the lead row's copy.
     const teamDirect = projectionOf(props, 'agentTeam', teamOf)
     const team = teamDirect ?? rowTeam
@@ -63,9 +66,9 @@ export function makeFleetView(
     const [pinnedId, setPinnedId] = useState<string | null>(null)
     // The stats card's roster pick: the resting member highlight the graph renders until a hover takes over.
     const focusMember = useFleetMemberFocus(sessionId)
-    // The boards' cap rides the network card: the task card grows with the graph and bottoms out at its own default
-    // otherwise. Measure the card's rendered height (last child's offset + card padding); when the members column
-    // stretches the card, the subtraction returns the task card's current height, so the cap cannot grow the row it measures.
+    // The boards' cap rides the network card's NATURAL height: the stage's top (the header above it included) plus its
+    // visible height, never the card's stretched height or a scrolled canvas offset. Measuring the stretch would let the
+    // task card's own growth feed its cap; measuring the canvas top would shrink the cap whenever the graph scrolls.
     const colsRef = useRef<HTMLDivElement | null>(null)
     useEffect(() => {
       const row = colsRef.current
@@ -76,9 +79,19 @@ export function makeFleetView(
       const write = (): void => {
         let graphH = 0
         const card = graph?.firstElementChild as HTMLElement | undefined
-        if (card !== undefined && card.lastElementChild !== null) {
-          const pad = window.parseFloat(window.getComputedStyle(card).paddingBottom)
-          graphH = card.lastElementChild.getBoundingClientRect().bottom - card.getBoundingClientRect().top + pad
+        if (card !== undefined) {
+          const cardRect = card.getBoundingClientRect()
+          const canvas = card.querySelector<HTMLElement>('.lc-agents-canvas')
+          const stage = canvas?.closest<HTMLElement>('.lc-agents-stage') ?? null
+          const stageRect = stage?.getBoundingClientRect() ?? null
+          const canvasRect = canvas?.getBoundingClientRect() ?? null
+          const top = stageRect?.top ?? canvasRect?.top
+          const basis = stage !== null ? window.parseFloat(window.getComputedStyle(stage).flexBasis) : Number.NaN
+          const visible = Number.isFinite(basis) ? basis : canvasRect?.height ?? 0
+          if (top !== undefined) {
+            const pad = window.parseFloat(window.getComputedStyle(card).paddingBottom)
+            graphH = top - cardRect.top + visible + pad
+          }
         }
         row.style.setProperty('--lc-graph-h', `${Math.ceil(graphH)}px`)
         row.style.setProperty('--lc-members-h', members !== null ? `${Math.ceil(members.getBoundingClientRect().height)}px` : '0px')
@@ -123,13 +136,13 @@ export function makeFleetView(
       return map
     }, [details.landed])
     const comms = useMemo(() => mergeComms(landedDetails), [landedDetails])
+    const attestedNames = useMemo(() => attestedNamesOf(comms), [comms])
 
-    const labelOf = (id: string): string => {
-      const node = byId.get(id)
-      if (node !== undefined) return node.label
-      const member = team?.members.find(m => m.id === id)
-      return member?.name ?? id
-    }
+    const leadDetail = leadId !== undefined ? landedDetails.get(leadId) ?? null : null
+    const agents = useMemo(
+      () => commsAgentsOf(forest?.nodes ?? [], team, leadDetail?.roster, attestedNames, t),
+      [attestedNames, forest, leadDetail, team, t],
+    )
 
     /** A member card's open: the right Sidebar's subagent chat (the header catalog's own aside verb), addressed by the
      * node's direct parent; a column that cannot take the resource, or a node without its parent edge, keeps the
@@ -181,7 +194,6 @@ export function makeFleetView(
 
     // The baseline gate must not hide behind whichever tab the reader opened: the dismissal ledger is keyed by session.
     const gate = unsupportedOf(data.unsupported)
-    const leadDetail = leadId !== undefined ? landedDetails.get(leadId) ?? null : null
     /** A task-board row pick toggles the pin; a release also lets go of a task-board narrowing still pointing at that
      * agent (the same pair select() manages for graph and member picks). */
     const pinToggle = (id: string | null): void => {
@@ -269,15 +281,23 @@ export function makeFleetView(
         {forest !== null && !forest.solo
           ? (
             <CommsPanel
-              nodes={forest.nodes}
               details={details}
               comms={comms}
-              labelOf={labelOf}
-              onPin={setPinnedId}
+              agents={agents}
+              titles={titles}
+              attested={attestedNames}
+              anchorId={sessionId}
               pickId={pickId}
-              onPickClear={() => { setOwnerFilter(null) }}
+              pinnedId={pinnedId}
+              onSelect={select}
+              onPickClear={() => {
+                setOwnerFilter(null)
+                setPinnedId(null)
+              }}
+              onOpen={open}
+              onEnter={enter}
+              rich={rich}
               t={t}
-              fmt={kit.fmt}
             />
           )
           : null}

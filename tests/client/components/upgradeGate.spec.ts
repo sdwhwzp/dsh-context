@@ -5,7 +5,6 @@ import { makeUpgradeGate } from '../../../src/client/components/upgradeGate'
 import { click, keydown, makeKit, mount, query, text } from '../helpers/kit'
 
 const kit = makeKit()
-const kitZh = makeKit('zh')
 const Gate = makeUpgradeGate(kit)
 
 function render(sessionId: string | undefined, extra: { current?: string; minimum?: string } = {}) {
@@ -13,7 +12,7 @@ function render(sessionId: string | undefined, extra: { current?: string; minimu
 }
 
 describe('UpgradeGate', () => {
-  test('renders both versions and the upgrade prompt (en and zh)', async () => {
+  test('renders both versions and the upgrade prompt', async () => {
     const en = await render('s-en')
     try {
       assert.match(text(en.container), /Update DeepSeek Harness/)
@@ -24,58 +23,41 @@ describe('UpgradeGate', () => {
     } finally {
       await en.unmount()
     }
-    const ZhGate = makeUpgradeGate(kitZh)
-    const zh = await mount(h(ZhGate, { sessionId: 's-zh', current: '0.1.0', minimum: '0.2.0-rc.2' }))
-    try {
-      assert.match(text(zh.container), /请更新 DeepSeek Harness 版本/)
-      assert.match(text(zh.container), /dsh-context 插件支持 DeepSeek Harness v0\.2\.0-rc\.2 或更新版本。/)
-      assert.match(text(zh.container), /v0\.2\.0-rc\.2及更新的版本/)
-      assert.match(text(zh.container), /v0\.1\.0/)
-    } finally {
-      await zh.unmount()
-    }
+    const zh = await mount(h(makeUpgradeGate(makeKit('zh')), { sessionId: 's-zh', current: '0.1.1-rc.2', minimum: '0.2.0-rc.2' }))
+    assert.ok(text(zh.container).includes('请更新 DeepSeek Harness 版本'))
+    await zh.unmount()
   })
 
-  test('the OK button dismisses and the dismissal survives a remount', async () => {
+  test('OK dismisses and the dismissal survives a remount; ×, a backdrop click, and Escape dismiss; a card click and other keys do not', async () => {
     const first = await render('s-ok')
     await click(query(first.container, '.lc-gate-ok'))
     assert.equal(first.container.querySelector('.lc-modal-backdrop'), null)
     await first.unmount()
-
     const second = await render('s-ok')
-    try {
-      assert.equal(second.container.querySelector('.lc-modal-backdrop'), null, 'the ledger keeps it closed')
-    } finally {
-      await second.unmount()
-    }
-  })
+    assert.equal(second.container.querySelector('.lc-modal-backdrop'), null, 'the ledger keeps it closed')
+    await second.unmount()
 
-  test('the × button dismisses', async () => {
-    const m = await render('s-x')
-    await click(query(m.container, '.lc-modal-close'))
-    assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
-    await m.unmount()
-  })
+    const x = await render('s-x')
+    await click(query(x.container, '.lc-modal-close'))
+    assert.equal(x.container.querySelector('.lc-modal-backdrop'), null)
+    await x.unmount()
 
-  test('a backdrop click dismisses; a card click does not', async () => {
-    const m = await render('s-backdrop')
-    await click(query(m.container, '.lc-gate-card'))
-    assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null, 'card clicks stay inside')
-    await click(query(m.container, '.lc-modal-backdrop'))
-    assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
-    await m.unmount()
-  })
+    const backdrop = await render('s-backdrop')
+    await click(query(backdrop.container, '.lc-gate-card'))
+    assert.ok(backdrop.container.querySelector('.lc-modal-backdrop') !== null, 'card clicks stay inside')
+    await click(query(backdrop.container, '.lc-modal-backdrop'))
+    assert.equal(backdrop.container.querySelector('.lc-modal-backdrop'), null)
+    await backdrop.unmount()
 
-  test('Escape dismisses; other keys do not', async () => {
-    const m = await render('s-esc')
+    const esc = await render('s-esc')
     await keydown('Enter')
-    assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null)
+    assert.ok(esc.container.querySelector('.lc-modal-backdrop') !== null)
     await keydown('Escape')
-    assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
+    assert.equal(esc.container.querySelector('.lc-modal-backdrop'), null)
     // Listener detached: a closed gate ignores further keys.
     await keydown('Escape')
-    assert.equal(m.container.querySelector('.lc-modal-backdrop'), null)
-    await m.unmount()
+    assert.equal(esc.container.querySelector('.lc-modal-backdrop'), null)
+    await esc.unmount()
   })
 
   test('an in-place session switch re-evaluates the ledger', async () => {

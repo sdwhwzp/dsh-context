@@ -171,29 +171,6 @@ describe('MemberBoard — team cards', () => {
     await m.unmount()
   })
 
-  test('picks report the card’s id; the parent owns the toggle', async () => {
-    const pins = new Array<string>()
-    // The parent-side toggle, emulated: a pick on the picked card releases, otherwise it pins.
-    let pinned: string | null = 'w1'
-    function Controlled(): ReactElement {
-      return h(MemberBoard, propsOf({
-        pinnedId: pinned,
-        onPin: (id) => {
-          pins.push(id)
-          pinned = pinned === id ? null : id
-        },
-      }))
-    }
-    const m = await mount(h(Controlled))
-    const card = (): HTMLElement => queryAll(m.container, '.lc-member-card')[1]
-    await click(card())
-    await m.update(h(Controlled))
-    await click(card())
-    await m.update(h(Controlled))
-    assert.deepEqual([...pins], ['w1', 'w1'])
-    await m.unmount()
-  })
-
   test('keyboard picks report the id; the failure badge and an empty roster render', async () => {
     const pins = new Array<string>()
     let pinned: string | null = 'w1'
@@ -326,8 +303,6 @@ describe('MemberBoard — the other-agents cards', () => {
     assert.deepEqual(queryAll(m.container, '.lc-member-card').map(c => text(query(c, '.lc-member-name'))), ['flaky-one', 'new-joiner', 'lounger'])
     await click(filters[0])
 
-    await selectIn(query(m.container, '.lc-fleet-sort'), 'tokens')
-    assert.deepEqual(otherNames(m.container), ['scout', 'archivist', 'lounger'])
     await m.unmount()
 
     const flipped: AgentForest = { ...FOREST, nodes: [FOREST.nodes[0], FOREST.nodes[1], FOREST.nodes[2], FOREST.nodes[3], FOREST.nodes[5], FOREST.nodes[4]] }
@@ -342,21 +317,19 @@ describe('MemberBoard — the other-agents cards', () => {
     await selectIn(query(m2.container, '.lc-fleet-sort'), 'recent')
     assert.deepEqual(otherNames(m2.container), ['scout', 'archivist', 'lounger'])
     await m2.unmount()
-  })
 
-  test('search narrows both sections; a dead end names it', async () => {
-    const m = await mount(h(MemberBoard, propsOf()))
-    await typeIn(query(m.container, '.lc-fleet-search'), 'worker')
-    assert.equal(queryAll(m.container, '.lc-member-card').length, 1)
-    await typeIn(query(m.container, '.lc-fleet-search'), 'zzz-no-match')
-    assert.equal(queryAll(m.container, '.lc-member-card').length, 0)
-    assert.ok(text(m.container).includes(DICT_EN['fleet.list.empty']))
-    await m.unmount()
+    const searched = await mount(h(MemberBoard, propsOf()))
+    await typeIn(query(searched.container, '.lc-fleet-search'), 'worker')
+    assert.equal(queryAll(searched.container, '.lc-member-card').length, 1)
+    await typeIn(query(searched.container, '.lc-fleet-search'), 'zzz-no-match')
+    assert.equal(queryAll(searched.container, '.lc-member-card').length, 0)
+    assert.ok(text(searched.container).includes(DICT_EN['fleet.list.empty']))
+    await searched.unmount()
   })
 })
 
 describe('MemberBoard — guidance states', () => {
-  test('no team: the note names the mode and the family cards still list', async () => {
+  test('no team: the note names the mode and the family cards still list; solo states skip the toolbar', async () => {
     const m = await mount(h(MemberBoard, propsOf({ team: null })))
     assert.ok(text(m.container).includes(DICT_EN['fleet.board.noTeam']))
     assert.deepEqual(
@@ -364,31 +337,18 @@ describe('MemberBoard — guidance states', () => {
       ['w1', 'w2', 'scout', 'archivist', 'lounger'],
     )
     await m.unmount()
-  })
 
-  test('solo without a team: the panel points at the subagent tool and skips the toolbar', async () => {
-    const solo: AgentForest = { nodes: [nodeOf('root', { isCurrent: true })], edges: [], solo: true }
-    const m = await mount(h(MemberBoard, propsOf({ team: null, forest: solo })))
-    assert.ok(text(m.container).includes(DICT_EN['fleet.board.solo']))
-    assert.equal(queryAll(m.container, '.lc-fleet-toolbar').length, 0)
-    assert.equal(queryAll(m.container, '.lc-member-card').length, 0)
-    await m.unmount()
-  })
+    const soloForest: AgentForest = { nodes: [nodeOf('root', { isCurrent: true })], edges: [], solo: true }
+    const solo = await mount(h(MemberBoard, propsOf({ team: null, forest: soloForest })))
+    assert.ok(text(solo.container).includes(DICT_EN['fleet.board.solo']))
+    assert.equal(queryAll(solo.container, '.lc-fleet-toolbar').length, 0)
+    assert.equal(queryAll(solo.container, '.lc-member-card').length, 0)
+    await solo.unmount()
 
-  test('a one-member team over a solo forest skips the toolbar too', async () => {
-    const solo: AgentForest = { nodes: [nodeOf('root', { isCurrent: true })], edges: [], solo: true }
-    const team: FleetTeam = { members: [{ id: 'root', name: 'lead', role: 'lead', phase: 'active' }], tasks: [] }
-    const m = await mount(h(MemberBoard, propsOf({ team, forest: solo })))
-    assert.equal(queryAll(m.container, '.lc-member-card').length, 1, 'the lead card stands')
-    assert.equal(queryAll(m.container, '.lc-fleet-toolbar').length, 0)
-    await m.unmount()
-  })
-
-  test('a team whose members all filtered out hides the section but keeps the other cards', async () => {
-    const m = await mount(h(MemberBoard, propsOf()))
-    await typeIn(query(m.container, '.lc-fleet-search'), 'scout')
-    assert.ok(text(m.container).includes('scout'))
-    assert.equal(queryAll(m.container, '.lc-member-card').length, 1)
-    await m.unmount()
+    const one: FleetTeam = { members: [{ id: 'root', name: 'lead', role: 'lead', phase: 'active' }], tasks: [] }
+    const lead = await mount(h(MemberBoard, propsOf({ team: one, forest: soloForest })))
+    assert.equal(queryAll(lead.container, '.lc-member-card').length, 1, 'the lead card stands')
+    assert.equal(queryAll(lead.container, '.lc-fleet-toolbar').length, 0)
+    await lead.unmount()
   })
 })

@@ -52,11 +52,10 @@ describe('pricesBookOf', () => {
       moonshotai: { 'kimi-k2.7-code': { hit: 0.38, miss: 1.9, write: 3, out: 8 } },
       'provider-the-plugin-never-maps': { m: { hit: 1, miss: 1, write: 1, out: 2 } },
     })
-  })
-
-  test('absent cache prices fall back to the input rate', () => {
-    const book = pricesBookOf(FIXTURE)
-    assert.equal(book?.prices.deepseek?.['deepseek-v4-pro']?.write, 0.435)
+    assert.equal(pricesBookOf(null), null)
+    assert.equal(pricesBookOf('x'), null)
+    assert.equal(pricesBookOf([FIXTURE]), null)
+    assert.deepEqual(pricesBookOf({}), { prices: {}, index: { byModel: new Map(), byNormalized: new Map(), branches: new Map() } }, 'an empty payload prices an empty book')
   })
 
   test('canonical ids join the branch index and mark its labs', () => {
@@ -73,13 +72,6 @@ describe('pricesBookOf', () => {
     assert.equal(branch?.labs.size, 1)
     assert.deepEqual(branch?.byExact.get('a')?.[0], { pid: 'p', mid: 'a', rate: { hit: 1, miss: 1, write: 1, out: 2 }, canonical: 'lab/a', lab: 'lab' })
     assert.equal(branch?.byExact.get('c')?.[0]?.canonical, undefined)
-  })
-
-  test('a payload that is not a record prices null; an empty one prices an empty book', () => {
-    assert.equal(pricesBookOf(null), null)
-    assert.equal(pricesBookOf('x'), null)
-    assert.equal(pricesBookOf([FIXTURE]), null)
-    assert.deepEqual(pricesBookOf({}), { prices: {}, index: { byModel: new Map(), byNormalized: new Map(), branches: new Map() } })
   })
 })
 

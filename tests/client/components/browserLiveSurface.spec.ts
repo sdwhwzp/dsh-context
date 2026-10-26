@@ -79,20 +79,18 @@ describe('ContextBrowser live surface', () => {
     assert.equal(queryAll(m.container, '.lc-br-body').length, 0)
     assert.ok(queryAll(m.container, '.lc-br-pct').some(el => text(el).endsWith('%')))
     await m.unmount()
-  })
 
-  test('zero-total surface renders no percentages; no requests means no delta pills', async () => {
-    const m = await mount(h(Browser, props({ data: tl({}) })))
-    assert.ok(queryAll(m.container, '.lc-br-pct').every(el => text(el) === ''))
-    assert.equal(queryAll(m.container, '.lc-br-delta').length, 0)
-    assert.equal(queryAll(m.container, '.lc-br-tdelta').length, 0)
-    await clickDeltaBase(m, 'prev turn')
-    assert.equal(queryAll(m.container, '.lc-br-delta').length, 0)
-    assert.equal(queryAll(m.container, '.lc-br-tdelta').length, 0)
-    const meta = text(query(m.container, '.lc-br-meta'))
-    assert.ok(meta.includes('Estimated ≈ 0'))
-    assert.ok(!meta.includes('Actual'), 'no requests, no actual figure')
-    await m.unmount()
+    const zero = await mount(h(Browser, props({ data: tl({}) })))
+    assert.ok(queryAll(zero.container, '.lc-br-pct').every(el => text(el) === ''))
+    assert.equal(queryAll(zero.container, '.lc-br-delta').length, 0)
+    assert.equal(queryAll(zero.container, '.lc-br-tdelta').length, 0)
+    await clickDeltaBase(zero, 'prev turn')
+    assert.equal(queryAll(zero.container, '.lc-br-delta').length, 0)
+    assert.equal(queryAll(zero.container, '.lc-br-tdelta').length, 0)
+    const zeroMeta = text(query(zero.container, '.lc-br-meta'))
+    assert.ok(zeroMeta.includes('Estimated ≈ 0'))
+    assert.ok(!zeroMeta.includes('Actual'), 'no requests, no actual figure')
+    await zero.unmount()
   })
 
   test('dropped live nodes raise the missing-window note, live and on later steps only', async () => {
@@ -315,8 +313,8 @@ describe('ContextBrowser live surface', () => {
     await m.unmount()
   })
 
-  test('pending tail stamp: a newest user message predicts the next turn\'s first step', async () => {
-    const data = tl({
+  test('pending tail stamps: a waiting user message opens the next turn, a final reply ends it, pending calls continue it', async () => {
+    const waiting = tl({
       current: { system: 0, tools: 0, user: 10, inject: 0, skill: 0, assistant: 0, tool: 10, total: 20 },
       requests: [req({ seq: 20, turn: 1, step: 1 })],
       nodes: [
@@ -325,15 +323,13 @@ describe('ContextBrowser live surface', () => {
         surfaceNode({ seq: 30, cat: 'user', tokens: 1 }),
       ],
     })
-    const m = await mount(h(Browser, props({ data })))
+    const m = await mount(h(Browser, props({ data: waiting })))
     await click(catRow(m, 'tool'))
     await flush()
     const toolBody = query(queryAll(m.container, '.lc-br-cat')[ROW.tool], '.lc-br-body')
     assert.equal(text(query(toolBody, '.lc-br-time')), 'T2 S1', 'a waiting user message opens the next turn')
     await m.unmount()
-  })
 
-  test('pending tail stamp: a text-only final reply ended the turn; a reply with pending calls continues it', async () => {
     const ended = tl({
       current: { system: 0, tools: 0, user: 10, inject: 0, skill: 0, assistant: 10, tool: 0, total: 20 },
       requests: [req({ seq: 20, turn: 1, step: 1 })],
@@ -366,19 +362,17 @@ describe('ContextBrowser live surface', () => {
 describe('stepStampOf', () => {
   const r = (seq: number, turn?: number, step?: number): RequestRecord => req({ seq, turn, step })
 
-  test('an item stamps to the FIRST request logged after it, whatever the wire order', () => {
+  test('an item stamps to the FIRST request logged after it, whatever the wire order; the live tail and turn-less introducers stamp null', () => {
     const input = [r(30, 2, 1), r(10, 1, 1), r(20, 1, 2)]
     const stamp = stepStampOf(input)
     assert.deepEqual(stamp(5), { turn: 1, step: 1 })
     assert.deepEqual(stamp(10), { turn: 1, step: 2 }, 'an item AT a request seq is carried by the NEXT request')
     assert.deepEqual(stamp(25), { turn: 2, step: 1 })
     assert.equal(input[0].seq, 30, 'the caller array is not reordered')
-  })
 
-  test('the live tail and turn-less introducers stamp null', () => {
-    const stamp = stepStampOf([r(10, undefined, undefined), r(20, 1, 1)])
-    assert.equal(stamp(5), null, 'the introducing request carries no turn/step numbers')
-    assert.deepEqual(stamp(15), { turn: 1, step: 1 })
-    assert.equal(stamp(25), null, 'no request follows the item yet')
+    const tail = stepStampOf([r(10, undefined, undefined), r(20, 1, 1)])
+    assert.equal(tail(5), null, 'the introducing request carries no turn/step numbers')
+    assert.deepEqual(tail(15), { turn: 1, step: 1 })
+    assert.equal(tail(25), null, 'no request follows the item yet')
   })
 })

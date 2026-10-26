@@ -12,6 +12,7 @@ export interface ClientSeam {
     file: string
     needles: readonly string[]
   }
+  /** The tag's declared platform module table (`PLATFORM_MODULES`); every bundle require must resolve here. */
   platformModules: readonly string[]
   detailChannel: {
     hostRpcFile: string
@@ -120,7 +121,7 @@ export interface Baseline {
     settingsFile: string
     settingsGetNeedle: string
     settingsGetPresent: boolean
-    settingsDescribeNeedle: string | undefined
+    settingsDescribeNeedle: string
     settingsRedactNeedle: string
     /** The provider directory: the route key's own settings id, whatever the entry is called. */
     providerDirectory: { file: string; needle: string }
@@ -147,7 +148,20 @@ export interface Baseline {
   }
 }
 
-function baseline(id: BaselineId, tag: string, session: string, line: { cordis?: string; stockIds?: readonly string[]; extraFoldEvents?: readonly string[] } = {}): Baseline {
+const DEFAULT_PLATFORM_MODULES = [
+  'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-store',
+  '@deepseek-ai/dsh-client-ui-slots',
+  '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-client-ui-dockkit',
+] as const
+
+function baseline(id: BaselineId, tag: string, session: string, line: {
+  cordis?: string
+  stockIds?: readonly string[]
+  extraFoldEvents?: readonly string[]
+  platformModules?: readonly string[]
+} = {}): Baseline {
   return {
     id,
     tag,
@@ -169,13 +183,7 @@ function baseline(id: BaselineId, tag: string, session: string, line: { cordis?:
         file: 'packages/client/ui-primitives/src/JsonTree.tsx',
         needles: ['data-json-expander', 'aria-expanded', 'css.summary', 'css.preview', 'css.punctuation', 'expandTopLevel', 'copyButtonTitle'],
       },
-      platformModules: [
-        'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
-        '@deepseek-ai/dsh-client-store',
-        '@deepseek-ai/dsh-client-ui-slots',
-        '@deepseek-ai/dsh-client-ui-primitives',
-        '@deepseek-ai/dsh-client-ui-dockkit',
-      ],
+      platformModules: line.platformModules ?? DEFAULT_PLATFORM_MODULES,
       detailChannel: {
         hostRpcFile: 'packages/client/connection/src/rpc.ts',
         hostRpcNeedle: 'HostConnectionRpc',
@@ -311,6 +319,7 @@ export const BASELINES: readonly Baseline[] = [
   baseline('v0.2.1-rc.2', 'dsh-v0.2.1-rc.2', '0.2.1-rc.2', {
     cordis: '4.0.5',
     stockIds: ['llm-deepseek', 'web-search-deepseek', 'web-deepseek-api'],
+    platformModules: [...DEFAULT_PLATFORM_MODULES, 'zod', '@tanstack/react-virtual'],
     extraFoldEvents: ['job/registered', 'job/settled'],
   }),
 ]

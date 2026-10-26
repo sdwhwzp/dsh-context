@@ -78,13 +78,19 @@ export interface FakeState {
   failReads: Map<string, unknown>
 }
 
-export function arm(ctx: Context, state: FakeState): RouteBox {
-  const route: RouteBox = {}
-  ctx.provide('connection', connectionOf(route))
-  ctx.provide('sessionQuery', {
-    listSessions: async () => state.listed,
-  })
-  ctx.provide('sessionProjectionCache', {
+export interface ColdFaceOverrides {
+  sessionQuery?: unknown
+  sessionProjectionCache?: unknown
+  sessionPersistence?: unknown
+  sessions?: unknown
+}
+
+/** The four cold-path services, each replaceable for the face-shape probes. */
+export function coldFaces(ctx: Context, state: FakeState, overrides: ColdFaceOverrides = {}): void {
+  const face = (name: keyof ColdFaceOverrides, fallback: object): object =>
+    name in overrides ? overrides[name] as object : fallback
+  ctx.provide('sessionQuery', face('sessionQuery', { listSessions: async () => state.listed }))
+  ctx.provide('sessionProjectionCache', face('sessionProjectionCache', {
     cachedSnapshot: (header: { id: string }) =>
       state.served.has(header.id)
         ? { asOfSeq: 0, values: { contextActivity: { days: {} }, contextTimeline: { ok: true } } }
@@ -93,8 +99,8 @@ export function arm(ctx: Context, state: FakeState): RouteBox {
       state.coldSnapshots.push(header.id)
       return { asOfSeq: 0, values: {} }
     },
-  })
-  ctx.provide('sessionPersistence', {
+  }))
+  ctx.provide('sessionPersistence', face('sessionPersistence', {
     open: async (id: string) => {
       state.coldReads.push(id)
       if (state.failReads.has(id)) throw state.failReads.get(id)
@@ -106,8 +112,14 @@ export function arm(ctx: Context, state: FakeState): RouteBox {
         close: async () => {},
       }
     },
-  })
-  ctx.provide('sessions', { get: (id: string) => (state.live.has(id) ? { id } : undefined) })
+  }))
+  ctx.provide('sessions', face('sessions', { get: (id: string) => (state.live.has(id) ? { id } : undefined) }))
+}
+
+export function arm(ctx: Context, state: FakeState, overrides: ColdFaceOverrides = {}): RouteBox {
+  const route: RouteBox = {}
+  ctx.provide('connection', connectionOf(route))
+  coldFaces(ctx, state, overrides)
   return route
 }
 

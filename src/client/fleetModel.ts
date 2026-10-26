@@ -4,8 +4,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentHeads } from './agentHeads'
 import { useSessionsSnapshot } from './agentHeads'
-import { agentForestOf, sessionsFaceOf, type AgentForest, type AgentNode, type AgentSelfStats } from './agentTree'
+import { agentForestOf, sessionTitlesOf, sessionsFaceOf, type AgentForest, type AgentSelfStats } from './agentTree'
 import { FleetDetailCache } from './fleetDetail'
+import { lruTrim } from './lru'
 import { teamOf, type FleetTeam } from './fleetTeam'
 import type { ClientCtx } from './services'
 import { asRecord } from './services'
@@ -14,6 +15,8 @@ import type { ContextTimeline, FleetDetail } from '../shared/types'
 export interface FleetModel {
   forest: AgentForest | null
   team: FleetTeam | null
+  /** Display titles for every session row, including parties outside the viewed family. */
+  titles: ReadonlyMap<string, string>
 }
 
 /** The family's `agentTeam` projection: DFS starts at the root (the team lives on the lead). */
@@ -72,8 +75,9 @@ export function useFleetModel(
   }, [forest, heads])
 
   const team = useMemo(() => teamOfSnapshot(snapshot, forest), [snapshot, forest])
+  const titles = useMemo(() => sessionTitlesOf(snapshot), [snapshot])
 
-  return { forest, team }
+  return { forest, team, titles }
 }
 
 export interface FleetDetailState {
@@ -82,32 +86,18 @@ export interface FleetDetailState {
   fullLanded: ReadonlyMap<string, FleetDetail | null>
   pending: ReadonlySet<string>
   fullPending: ReadonlySet<string>
-  /** Sessions the comms panel's scan/refresh claimed — inspector reads alone never join this set. */
-  scanned: ReadonlySet<string>
   request(id: string, updatedAt: number): void
   requestFull(id: string): void
-  scan(nodes: readonly AgentNode[]): void
-  refresh(nodes: readonly AgentNode[]): void
-}
-
-export function commsStaleOf(
-  nodes: readonly AgentNode[],
-  landed: ReadonlyMap<string, { detail: FleetDetail | null; updatedAt: number }>,
-): boolean {
-  for (const n of nodes) {
-    const entry = landed.get(n.id)
-    if (entry !== undefined && n.updatedAt > entry.updatedAt) return true
-  }
-  return false
 }
 
 /** The page-scope ledger every mount shares (the agentHeads pattern): a remount replays settled reads. */
 const sharedCache = new FleetDetailCache()
+/** Full details carry whole reports; only the most recently opened cards keep their payload mounted. */
+const FULL_STATE_MAX = 8
 
 export function useFleetDetails(cache: FleetDetailCache = sharedCache): FleetDetailState {
   const [landed, setLanded] = useState<ReadonlyMap<string, { detail: FleetDetail | null; updatedAt: number }>>(new Map())
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
-  const [scanned, setScanned] = useState<ReadonlySet<string>>(new Set())
   /** Requested stamps, for synchronous dedupe; the cache dedupes the network read too. */
   const requested = useRef(new Map<string, number>())
   const mounted = useRef(true)
@@ -122,10 +112,10 @@ export function useFleetDetails(cache: FleetDetailCache = sharedCache): FleetDet
     requested.current.set(id, updatedAt)
     setPending(prev => prev.has(id) ? prev : new Set(prev).add(id))
     void cache.fetch(id, updatedAt).then((detail) => {
-      if (!mounted.current) return
+      // A newer read may have claimed the session while this one was in flight; only the latest stamp may land.
+      if (!mounted.current || requested.current.get(id) !== updatedAt) return
       setLanded(prev => new Map(prev).set(id, { detail, updatedAt }))
       setPending((prev) => {
-        if (!prev.has(id)) return prev
         const next = new Set(prev)
         next.delete(id)
         return next
@@ -133,21 +123,36 @@ export function useFleetDetails(cache: FleetDetailCache = sharedCache): FleetDet
     })
   }
 
-  // Full reads ride their own state maps: an on-demand read must not make the scan's landed entries disagree.
+  // Full reads ride their own state maps: an on-demand read must not make the excerpt's landed entries disagree. The
+  // stamp map lets an opened card follow later activity — a newer excerpt stamp refetches the full text once.
   const [fullLanded, setFullLanded] = useState<ReadonlyMap<string, FleetDetail | null>>(new Map())
   const [fullPending, setFullPending] = useState<ReadonlySet<string>>(new Set())
-  const fullRequested = useRef<Set<string>>(new Set())
+  const fullRequested = useRef(new Map<string, number>())
+  // The landed keys survive a stale render closure, so a second click from the same paint cannot refetch; trimming the
+  // state map also releases them for a replay.
+  const fullKnown = useRef<ReadonlySet<string>>(new Set())
+  const fullInFlight = useRef<Set<string>>(new Set())
 
   const requestFull = (id: string): void => {
-    if (fullRequested.current.has(id)) return
-    // One full read per session per mount: a settled excerpt line serves an OLDER stamp, which the opened card wants.
-    fullRequested.current.add(id)
+    const stamp = requested.current.get(id) ?? 0
+    const known = fullRequested.current.get(id)
+    // An evicted state entry must be replayed from the cache; the stamp map alone would suppress the reread.
+    if (known !== undefined && known >= stamp && (fullKnown.current.has(id) || fullInFlight.current.has(id))) return
+    fullRequested.current.set(id, stamp)
+    fullInFlight.current.add(id)
     setFullPending(prev => prev.has(id) ? prev : new Set(prev).add(id))
-    void cache.fetch(id, requested.current.get(id) ?? 0, true).then((detail) => {
-      if (!mounted.current) return
-      setFullLanded(prev => prev.get(id) === detail ? prev : new Map(prev).set(id, detail))
+    void cache.fetch(id, stamp, true).then((detail) => {
+      if (!mounted.current || fullRequested.current.get(id) !== stamp) return
+      fullInFlight.current.delete(id)
+      setFullLanded((prev) => {
+        const next = new Map(prev)
+        next.delete(id)
+        next.set(id, detail)
+        lruTrim(next, FULL_STATE_MAX)
+        fullKnown.current = new Set(next.keys())
+        return next
+      })
       setFullPending((prev) => {
-        if (!prev.has(id)) return prev
         const next = new Set(prev)
         next.delete(id)
         return next
@@ -155,27 +160,5 @@ export function useFleetDetails(cache: FleetDetailCache = sharedCache): FleetDet
     })
   }
 
-  const claim = (nodes: readonly AgentNode[]): void => {
-    setScanned((prev) => {
-      const next = new Set(prev)
-      for (const n of nodes) next.add(n.id)
-      return next.size === prev.size ? prev : next
-    })
-  }
-
-  const scan = (nodes: readonly AgentNode[]): void => {
-    claim(nodes)
-    for (const n of nodes) request(n.id, n.updatedAt)
-  }
-
-  const refresh = (nodes: readonly AgentNode[]): void => {
-    claim(nodes)
-    for (const n of nodes) {
-      cache.invalidate(n.id)
-      requested.current.delete(n.id)
-      fullRequested.current.delete(n.id)
-      request(n.id, n.updatedAt)
-    }
-  }
-  return { landed, fullLanded, pending, fullPending, scanned, request, requestFull, scan, refresh }
+  return { landed, fullLanded, pending, fullPending, request, requestFull }
 }

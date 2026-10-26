@@ -27,6 +27,10 @@ function messageOf(value: unknown): FleetMessage | null {
   if (text === undefined) return null
   const from = strings(rec.from)
   const fromName = strings(rec.fromName)
+  const summary = strings(rec.summary)
+  const report = strings(rec.report)
+  const structured = strings(rec.structured)
+  const diagnostic = strings(rec.diagnostic)
   return {
     seq: numOf(rec.seq),
     time: numOf(rec.time),
@@ -34,6 +38,11 @@ function messageOf(value: unknown): FleetMessage | null {
     ...(from !== undefined ? { from } : {}),
     ...(fromName !== undefined ? { fromName } : {}),
     text,
+    ...(rec.clipped === true ? { clipped: true } : {}),
+    ...(summary !== undefined ? { summary } : {}),
+    ...(report !== undefined ? { report } : {}),
+    ...(structured !== undefined ? { structured } : {}),
+    ...(diagnostic !== undefined ? { diagnostic } : {}),
   }
 }
 
@@ -78,6 +87,7 @@ export function fleetDetailOf(value: unknown): FleetDetail | null {
     ...(replyText !== undefined ? { lastReply: { time: numOf(reply?.time), text: replyText } } : {}),
     ...(roster.length > 0 ? { roster } : {}),
     messages,
+    ...(numOf(rec.messagesTotal) > messages.length ? { messagesTotal: numOf(rec.messagesTotal) } : {}),
     truncated: rec.truncated === true,
   }
 }
@@ -109,9 +119,11 @@ interface FleetDetailEntry {
   pending: Promise<FleetDetail | null>
 }
 
-/** Page-scope ledger bounds: one FleetDetail holds up to 40 clipped messages, so an unbounded map would pin every
- * member the comms panels ever scanned for the page's whole life. */
+/** Page-scope ledger bounds: one FleetDetail holds up to 80 clipped messages, so an unbounded map would pin every
+ * member the comms panels ever scanned for the page's whole life. A full read carries much larger texts, so its own
+ * ledger stays tighter. */
 const FLEET_LEDGER_MAX = 64
+const FULL_LEDGER_MAX = 16
 
 /** Reads dedupe per (id, `updatedAt`): a NEWER stamp refetches once, and a settled failure stays cached so a
  * broken session never hammers the route; the `full` ledger runs beside the excerpt one. */
@@ -131,26 +143,16 @@ export class FleetDetailCache {
       ? fetcher().catch((): FleetDetail | null => null)
       : Promise.resolve(null)
     ledger.set(id, { updatedAt, pending })
-    lruTrim(ledger, FLEET_LEDGER_MAX)
+    lruTrim(ledger, full ? FULL_LEDGER_MAX : FLEET_LEDGER_MAX)
     return pending
-  }
-
-  invalidate(id: string): void {
-    this.entries.delete(id)
-    this.fullEntries.delete(id)
   }
 }
 
 /** One merged comms row: a message lifted from session `to`'s log, attributed to `from`. */
-export interface CommsRow {
-  /** seq is per-session, so the key pairs it with the log owner. */
+export interface CommsRow extends FleetMessage {
+  /** seq is per-session, so the key pairs it with the log owner and instant. */
   key: string
   to: string
-  time: number
-  kind: FleetMessage['kind']
-  from?: string
-  fromName?: string
-  text: string
 }
 
 /** The runtime's settled-notice vocabulary (dsh's settlementSummary), for localized rendering. */
@@ -158,12 +160,13 @@ export type SettledVariant = 'finished' | 'finishedFinal' | 'stopped' | 'outOfRo
 
 /** Classify a `subagent-settled` notice's English summary; null = an unrecognized (future) phrasing. */
 export function settledVariantOf(text: string): SettledVariant | null {
-  if (text.endsWith('finished and will do no further work unless you send it more.')) return 'finished'
-  if (text.endsWith('finished. It cannot receive follow-up messages.')) return 'finishedFinal'
-  if (text.endsWith('was stopped before it finished.')) return 'stopped'
-  if (text.endsWith('ran out of room before it finished.')) return 'outOfRoom'
-  if (text.endsWith('declined the task.')) return 'declined'
-  if (text.endsWith('failed before it finished.')) return 'failed'
+  const summary = text.trim()
+  if (summary.endsWith('finished and will do no further work unless you send it more.')) return 'finished'
+  if (summary.endsWith('finished. It cannot receive follow-up messages.')) return 'finishedFinal'
+  if (summary.endsWith('was stopped before it finished.')) return 'stopped'
+  if (summary.endsWith('ran out of room before it finished.')) return 'outOfRoom'
+  if (summary.endsWith('declined the task.')) return 'declined'
+  if (summary.endsWith('failed before it finished.')) return 'failed'
   return null
 }
 
@@ -171,15 +174,7 @@ export function mergeComms(details: ReadonlyMap<string, FleetDetail>): CommsRow[
   const rows: CommsRow[] = []
   for (const [to, detail] of details) {
     for (const message of detail.messages) {
-      rows.push({
-        key: `${to}:${message.seq}`,
-        to,
-        time: message.time,
-        kind: message.kind,
-        ...(message.from !== undefined ? { from: message.from } : {}),
-        ...(message.fromName !== undefined ? { fromName: message.fromName } : {}),
-        text: message.text,
-      })
+      rows.push({ ...message, key: `${to}:${message.seq}:${message.time}:${message.kind}`, to })
     }
   }
   rows.sort((a, b) => (b.time - a.time) || (a.key < b.key ? -1 : 1))

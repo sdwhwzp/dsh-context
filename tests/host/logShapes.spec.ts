@@ -3,13 +3,10 @@ import { describe, test } from 'vitest'
 import { decodeKindOfBlock, firstTokenTimeOfStream, isTokenChunk, replaceRangeOf, streamTimingOf } from '../../src/host/logShapes'
 
 describe('decodeKindOfBlock', () => {
-  test('maps the three block kinds the harness emits', () => {
+  test('maps the three block kinds the harness emits; an unknown or hostile marker stays unattributed', () => {
     assert.equal(decodeKindOfBlock('reasoning'), 'reasoning')
     assert.equal(decodeKindOfBlock('text'), 'text')
     assert.equal(decodeKindOfBlock('tool-call'), 'toolarg')
-  })
-
-  test('an unknown or hostile marker stays unattributed', () => {
     for (const value of [undefined, null, '', 'image', 7, {}]) {
       assert.equal(decodeKindOfBlock(value), undefined, JSON.stringify(value))
     }
@@ -21,7 +18,7 @@ describe('streamTimingOf', () => {
   const tally = { reasoning: 0, text: 0, toolarg: 0 }
   const zero = { spans: { ...tally }, blocks: { ...tally } }
 
-  test('tiles [first marker, endTime] by block, in marker order, counting each marker', () => {
+  test('tiles [first marker, endTime] in stream order, counting each marker; a lone block owns the tail and a repeated kind stays two spans', () => {
     const timing = streamTimingOf([
       chunk(1000, 'reasoning'),
       { type: 'reasoning-chunks', time0: 1010, index: 0, dt: [], texts: ['think'] },
@@ -40,6 +37,18 @@ describe('streamTimingOf', () => {
       { kind: 'toolarg', start: 1500, end: 2000 },
     ])
     assert.equal(timing.firstToken, 1010, 'the packed run supplies the token instant')
+    assert.deepEqual(streamTimingOf([chunk(500, 'text')], 900).tally, {
+      spans: { ...tally, text: 400 },
+      blocks: { ...tally, text: 1 },
+    }, 'a single block owns the whole tail to endTime')
+    // A repeated kind stays two spans — the strip paints stream order, not a tally.
+    assert.deepEqual(streamTimingOf([
+      chunk(1000, 'reasoning'), chunk(1300, 'text'), chunk(1500, 'reasoning'),
+    ], 2000).spans, [
+      { kind: 'reasoning', start: 1000, end: 1300 },
+      { kind: 'text', start: 1300, end: 1500 },
+      { kind: 'reasoning', start: 1500, end: 2000 },
+    ])
   })
 
   test('a later block closes the previous one even when its own kind is unknown', () => {
@@ -48,33 +57,13 @@ describe('streamTimingOf', () => {
     assert.deepEqual(timing.spans, [{ kind: 'reasoning', start: 1000, end: 1400 }])
   })
 
-  test('a single block owns the whole tail to endTime', () => {
-    assert.deepEqual(streamTimingOf([chunk(500, 'text')], 900).tally, {
-      spans: { ...tally, text: 400 },
-      blocks: { ...tally, text: 1 },
-    })
-  })
-
-  test('a zero-span block still counts (same-instant markers), and a zero-length interval drops from the spans', () => {
-    const timing = streamTimingOf([chunk(500, 'reasoning'), chunk(500, 'text')], 900)
-    assert.deepEqual(timing.tally, { spans: { ...tally, text: 400 }, blocks: { reasoning: 1, text: 1, toolarg: 0 } })
-    assert.deepEqual(timing.spans, [{ kind: 'text', start: 500, end: 900 }])
-  })
-
-  test('a backwards marker clamps to a zero span instead of a negative one', () => {
-    const timing = streamTimingOf([chunk(1000, 'text'), chunk(900, 'reasoning')], 950)
-    assert.deepEqual(timing.tally, { spans: { reasoning: 50, text: 0, toolarg: 0 }, blocks: { reasoning: 1, text: 1, toolarg: 0 } })
-    assert.deepEqual(timing.spans, [{ kind: 'reasoning', start: 900, end: 950 }])
-  })
-
-  test('a repeated kind stays two spans — the strip paints stream order, not a tally', () => {
-    assert.deepEqual(streamTimingOf([
-      chunk(1000, 'reasoning'), chunk(1300, 'text'), chunk(1500, 'reasoning'),
-    ], 2000).spans, [
-      { kind: 'reasoning', start: 1000, end: 1300 },
-      { kind: 'text', start: 1300, end: 1500 },
-      { kind: 'reasoning', start: 1500, end: 2000 },
-    ])
+  test('a zero-width block still counts; a backwards marker clamps to a zero span instead of a negative one', () => {
+    const sameInstant = streamTimingOf([chunk(500, 'reasoning'), chunk(500, 'text')], 900)
+    assert.deepEqual(sameInstant.tally, { spans: { ...tally, text: 400 }, blocks: { reasoning: 1, text: 1, toolarg: 0 } })
+    assert.deepEqual(sameInstant.spans, [{ kind: 'text', start: 500, end: 900 }])
+    const backwards = streamTimingOf([chunk(1000, 'text'), chunk(900, 'reasoning')], 950)
+    assert.deepEqual(backwards.tally, { spans: { reasoning: 50, text: 0, toolarg: 0 }, blocks: { reasoning: 1, text: 1, toolarg: 0 } })
+    assert.deepEqual(backwards.spans, [{ kind: 'reasoning', start: 900, end: 950 }])
   })
 
   test('a marker with an unusable time is skipped WHOLE; the previous block keeps its interval', () => {
@@ -135,14 +124,11 @@ describe('streamTimingOf', () => {
 })
 
 describe('isTokenChunk', () => {
-  test('accepts the three delta kinds the harness counts', () => {
+  test('accepts the three delta kinds the harness counts and rejects empty, non-delta, and hostile shapes', () => {
     assert.equal(isTokenChunk({ type: 'text-delta', text: 'x' }), true)
     assert.equal(isTokenChunk({ type: 'reasoning-delta', text: 'x' }), true)
     assert.equal(isTokenChunk({ type: 'tool-call-delta', argumentsDelta: '{}' }), true)
     assert.equal(isTokenChunk({ type: 'tool-call-delta', name: 'bash', argumentsDelta: '' }), true)
-  })
-
-  test('rejects empty deltas, non-delta chunks, and hostile shapes', () => {
     assert.equal(isTokenChunk({ type: 'text-delta', text: '' }), false)
     assert.equal(isTokenChunk({ type: 'text-delta' }), false)
     assert.equal(isTokenChunk({ type: 'reasoning-delta', text: 42 }), false)
@@ -156,22 +142,19 @@ describe('isTokenChunk', () => {
 })
 
 describe('firstTokenTimeOfStream', () => {
-  test('reads a raw chunk record', () => {
+  test('reads raw chunks and packed runs, including a leading empty fragment and a missing dt array', () => {
     assert.equal(firstTokenTimeOfStream([
       { type: 'chunk', time: 100, chunk: { type: 'block-start', index: 0, blockType: 'text' } },
       { type: 'chunk', time: 250, chunk: { type: 'text-delta', text: 'hi' } },
       { type: 'chunk', time: 300, chunk: { type: 'text-delta', text: 'there' } },
     ]), 250)
-  })
-
-  test('reads a packed text run, accumulating the inter-member gaps', () => {
-    // time0 anchors member 0; dt[k] is the gap BEFORE member k+1.
     assert.equal(firstTokenTimeOfStream([
       { type: 'text-chunks', time0: 1000, index: 0, dt: [10, 20], texts: ['a', 'b', 'c'] },
     ]), 1000)
     assert.equal(firstTokenTimeOfStream([
       { type: 'text-chunks', time0: 1000, index: 0, dt: [10, 20], texts: ['', 'b', 'c'] },
     ]), 1010, 'a leading empty fragment defers the stamp to the next member')
+    assert.equal(firstTokenTimeOfStream([{ type: 'text-chunks', time0: 9, index: 0, texts: ['a'] }]), 9)
   })
 
   test('reads a reasoning run and a name-bearing tool-call run', () => {
@@ -203,10 +186,6 @@ describe('firstTokenTimeOfStream', () => {
     assert.equal(firstTokenTimeOfStream([{ type: 'text-chunks', time0: 1, index: 0, texts: 'not-an-array' }]), undefined)
     assert.equal(firstTokenTimeOfStream([{ type: 'text-chunks', time0: 1, index: 0, dt: [], texts: [7] }]), undefined)
     assert.equal(firstTokenTimeOfStream([{ type: 'chunk', time: 5, chunk: { type: 'finish' } }]), undefined)
-  })
-
-  test('a run with a missing dt array still stamps its first member', () => {
-    assert.equal(firstTokenTimeOfStream([{ type: 'text-chunks', time0: 9, index: 0, texts: ['a'] }]), 9)
   })
 })
 

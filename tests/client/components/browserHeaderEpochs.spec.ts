@@ -44,20 +44,7 @@ describe('ContextBrowser header epochs', () => {
     await m.unmount()
   })
 
-  test('a past step reads the epoch in force at its seq', async () => {
-    const data = tl({
-      current: { system: 30, tools: 9, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 39 },
-      requests: [req({ seq: 20, turn: 1, step: 0 }), req({ seq: 40, turn: 1, step: 1 })],
-    })
-    const m = await mount(h(Browser, props({ data, ...lazy })))
-    await pickStep(m, '20')
-    await click(catRow(m, 'system'))
-    await flush()
-    assert.ok(text(query(m.container, '.lc-br-body')).includes('SYS A'), 'epoch before the request applies')
-    await m.unmount()
-  })
-
-  test('an epoch fetches once and the content stays cached across steps', async () => {
+  test('an epoch fetches once and the content stays cached across steps, each step reading the epoch in force at its seq', async () => {
     const data = tl({
       current: { system: 30, tools: 9, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 39 },
       requests: [req({ seq: 20, turn: 1, step: 0 }), req({ seq: 40, turn: 1, step: 1 })],
@@ -159,7 +146,7 @@ describe('ContextBrowser header epochs', () => {
     await m.unmount()
   })
 
-  test('a host without the history face degrades to the metadata-only note', async () => {
+  test('a host without the history face, or an absent headers projection, degrades to the metadata-only note', async () => {
     const data = tl({ current: { system: 30, tools: 9, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 39 } })
     const m = await mount(h(Browser, props({ data, headers: HEADERS })))
     await click(catRow(m, 'system'))
@@ -168,16 +155,13 @@ describe('ContextBrowser header epochs', () => {
     assert.equal(elemRows(m).length, 1, 'metadata rows still render')
     assert.ok(text(query(m.container, '.lc-br-content')).includes('token estimates only'))
     await m.unmount()
-  })
 
-  test('absent headers projection degrades to the tokens-only note', async () => {
-    const data = tl({ current: { system: 30, tools: 9, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 39 } })
-    const m = await mount(h(Browser, props({ data, headers: null })))
-    await click(catRow(m, 'system'))
-    assert.ok(text(query(m.container, '.lc-br-body')).includes('older plugin build'))
-    await click(catRow(m, 'tools'))
-    assert.ok(text(queryAll(m.container, '.lc-br-body')[0]).includes('older plugin build'))
-    await m.unmount()
+    const absent = await mount(h(Browser, props({ data, headers: null })))
+    await click(catRow(absent, 'system'))
+    assert.ok(text(query(absent.container, '.lc-br-body')).includes('older plugin build'))
+    await click(catRow(absent, 'tools'))
+    assert.ok(text(queryAll(absent.container, '.lc-br-body')[0]).includes('older plugin build'))
+    await absent.unmount()
   })
 
   test('an epoch outside retention degrades to the no-epoch note', async () => {
@@ -194,7 +178,7 @@ describe('ContextBrowser header epochs', () => {
     await m.unmount()
   })
 
-  test('an epoch without a system prompt keeps the system category shut', async () => {
+  test('an epoch without a system prompt keeps the system category shut, including a step before the system node', async () => {
     const headers: ContextHeaders = { headers: [{ seq: 1, time: 1, tools: [{ name: 'x', tokens: 1 }] }] }
     const data = tl({ current: { system: 0, tools: 1, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 1 } })
     const m = await mount(h(Browser, props({ data, ...withEpochContent(headers, { 1: { tools: [] } }) })))
@@ -202,6 +186,19 @@ describe('ContextBrowser header epochs', () => {
     await click(catRow(m, 'system'))
     assert.equal(queryAll(m.container, '.lc-br-body').length, 0, 'no prompt, no body')
     await m.unmount()
+
+    const scopedHeaders: ContextHeaders = { headers: [{ seq: 3, time: 300, tools: [] }] }
+    const scoped = tl({
+      current: { system: 30, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 30 },
+      requests: [req({ seq: 5, turn: 1, step: 0, system: 0, tools: 0, user: 5, total: 5 })],
+      systems: [{ seq: 7, time: 700, tokens: 30 }],
+    })
+    const before = await mount(h(Browser, props({ data: scoped, headers: scopedHeaders })))
+    await pickStep(before, '5')
+    assert.ok(text(catRow(before, 'system')).includes('0 Items'))
+    await click(catRow(before, 'system'))
+    assert.equal(queryAll(before.container, '.lc-br-body').length, 0, 'no prompt yet at this step')
+    await before.unmount()
   })
 
   test('a legacy content-bearing epoch (pre-#37 wire) still counts the system prompt', async () => {
@@ -221,7 +218,7 @@ describe('ContextBrowser header epochs', () => {
     await m.unmount()
   })
 
-  test('a fetched epoch without a system prompt explains its absence', async () => {
+  test('a fetched epoch or resolved prompt event without system text explains its absence', async () => {
     const headers: ContextHeaders = { headers: [{ seq: 3, time: 3, systemTokens: 0, tools: [] }] }
     const data = tl({ current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 0 } })
     const m = await mount(h(Browser, props({
@@ -231,6 +228,17 @@ describe('ContextBrowser header epochs', () => {
     await flush()
     assert.ok(text(query(m.container, '.lc-br-body')).includes('carried no system prompt'))
     await m.unmount()
+
+    // The node exists (so the category opens) but the fetched event maps to no prompt text.
+    const systems = tl({
+      current: { system: 30, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 30 },
+      systems: [{ seq: 7, time: 700, tokens: 30 }],
+    })
+    const blank = await mount(h(Browser, props({ data: systems, fetchHeader: () => Promise.resolve({ tools: [] }) })))
+    await click(catRow(blank, 'system'))
+    await flush()
+    assert.ok(text(query(blank.container, '.lc-br-body')).includes('carried no system prompt'))
+    await blank.unmount()
   })
 
   test('a system prompt rides the timeline systems list, fetched from its own event seq', async () => {
@@ -252,34 +260,6 @@ describe('ContextBrowser header epochs', () => {
     await flush()
     assert.deepEqual(asked, [7], 'the prompt is fetched from the system node, not the header epoch')
     assert.ok(text(query(m.container, '.lc-br-body')).includes('THE PROMPT'))
-    await m.unmount()
-  })
-
-  test('a resolved prompt whose event carries no text explains its absence', async () => {
-    // The node exists (so the category opens) but the fetched event maps to no prompt text — a foreign or truncated envelope.
-    const data = tl({
-      current: { system: 30, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 30 },
-      systems: [{ seq: 7, time: 700, tokens: 30 }],
-    })
-    const m = await mount(h(Browser, props({ data, fetchHeader: () => Promise.resolve({ tools: [] }) })))
-    await click(catRow(m, 'system'))
-    await flush()
-    assert.ok(text(query(m.container, '.lc-br-body')).includes('carried no system prompt'))
-    await m.unmount()
-  })
-
-  test('a step before the system node shows no prompt (the list is step-scoped)', async () => {
-    const headers: ContextHeaders = { headers: [{ seq: 3, time: 300, tools: [] }] }
-    const data = tl({
-      current: { system: 30, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 30 },
-      requests: [req({ seq: 5, turn: 1, step: 0, system: 0, tools: 0, user: 5, total: 5 })],
-      systems: [{ seq: 7, time: 700, tokens: 30 }],
-    })
-    const m = await mount(h(Browser, props({ data, headers })))
-    await pickStep(m, '5')
-    assert.ok(text(catRow(m, 'system')).includes('0 Items'))
-    await click(catRow(m, 'system'))
-    assert.equal(queryAll(m.container, '.lc-br-body').length, 0, 'no prompt yet at this step')
     await m.unmount()
   })
 })

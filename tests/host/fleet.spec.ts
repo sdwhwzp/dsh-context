@@ -69,9 +69,10 @@ async function call(captured: { fetch?: RouteFetch }, body: unknown): Promise<Re
   return await response.json() as Record<string, unknown>
 }
 
-function observing(events: unknown): { observeSession(id: string, options: unknown): Promise<unknown> } {
+function observing(events: unknown): { observeSession(id: string, options: unknown): Promise<unknown>; wasDisposed(): boolean } {
   let disposed = false
   return {
+    wasDisposed: () => disposed,
     observeSession: () => Promise.resolve({
       events,
       get disposed() { return disposed },
@@ -81,15 +82,14 @@ function observing(events: unknown): { observeSession(id: string, options: unkno
 }
 
 describe('watchFleetChannel gating', () => {
-  test('no route without the connection service or its fetch registry', () => {
-    assert.equal(ctxOf({}).captured.path, undefined)
-    assert.equal(ctxOf({ connection: {} }).captured.path, undefined)
-    assert.equal(ctxOf({ connection: { fetch: {} } }).captured.path, undefined)
+  test('no route without the connection service or its fetch registry; a rejecting registry keeps it absent without throwing', () => {
+    for (const spec of [{}, { connection: {} }, { connection: { fetch: {} } }]) {
+      const { ctx, captured } = ctxOf(spec)
+      watchFleetChannel(ctx, OPEN_GATE)
+      assert.equal(captured.path, undefined, JSON.stringify(spec))
+    }
     const { captured } = armed()
     assert.equal(captured.path, FLEET_ROUTE)
-  })
-
-  test('a rejecting registry keeps the route absent without throwing', () => {
     const ctx = {
       get: (name: string) => name === 'connection'
         ? {
@@ -115,19 +115,10 @@ describe('watchFleetChannel gating', () => {
     }
   })
 
-  test('no sessionQuery (or no observeSession verb) answers a typed null', async () => {
-    const { captured } = armed()
-    assert.deepEqual(await call(captured, { sessionId: 's1' }), { ok: true, value: null })
-    const withQuery = armed({ sessionQuery: {} })
-    assert.deepEqual(await call(withQuery.captured, { sessionId: 's1' }), { ok: true, value: null })
-  })
-
-  test('an observation without an events array answers a typed null', async () => {
-    const { captured } = armed({ sessionQuery: observing(null) })
-    assert.deepEqual(await call(captured, { sessionId: 's1' }), { ok: true, value: null })
-  })
-
-  test('a skipped cold read answers a typed null', async () => {
+  test('a missing query, a missing observeSession verb, a missing events array, or a skipped cold read answers a typed null', async () => {
+    assert.deepEqual(await call(armed().captured, { sessionId: 's1' }), { ok: true, value: null })
+    assert.deepEqual(await call(armed({ sessionQuery: {} }).captured, { sessionId: 's1' }), { ok: true, value: null })
+    assert.deepEqual(await call(armed({ sessionQuery: observing(null) }).captured, { sessionId: 's1' }), { ok: true, value: null })
     const { ctx, captured } = ctxOf({
       connection: { fetch: { register: () => () => {} } },
       sessionQuery: observing([]),
@@ -145,6 +136,7 @@ describe('watchFleetChannel gating', () => {
     assert.equal(r.ok, true)
     const value = r.value as { initialPrompt: string }
     assert.equal(value.initialPrompt, 'do the thing')
+    assert.equal(query.wasDisposed(), true, 'the observation is released after the fold')
   })
 
   test('a full body lifts the excerpt caps; an absent or junk full flag reads excerpts', async () => {
@@ -222,46 +214,34 @@ describe('fleetDetailOfEvents — the descriptor', () => {
 })
 
 describe('fleetDetailOfEvents — the delegation prompt', () => {
-  test('the first plain user message is the prompt; injections and agent traffic are not', () => {
+  test('the first plain user message is the prompt (minus the teammate reminder); injections and later prompts are not', () => {
     const detail = fleetDetailOfEvents([
       { type: 'user/message', seq: 1, time: 1, data: { source: { kind: 'plugin', form: 'notice' }, content: [{ type: 'text', text: 'injected' }] } },
       { type: 'user/message', seq: 2, time: 2, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '' }] } },
-      { type: 'user/message', seq: 3, time: 3, data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'build it' }] } },
+      {
+        type: 'user/message',
+        seq: 3,
+        time: 3,
+        data: { source: { kind: 'user' }, content: [{ type: 'text', text: '<system-reminder>\nYou are teammate "reviewer".\n</system-reminder>\n\nbuild it' }] },
+      },
       { type: 'user/message', seq: 4, time: 4, data: { content: [{ type: 'text', text: 'second prompt never wins' }] } },
     ])
     assert.equal(detail.initialPrompt, 'build it')
   })
 
-  test('the teammate framing reminder strips off the excerpt', () => {
-    const detail = fleetDetailOfEvents([
-      {
-        type: 'user/message',
-        seq: 1,
-        time: 1,
-        data: { content: [{ type: 'text', text: '<system-reminder>\nYou are teammate "reviewer".\n</system-reminder>\n\nreview the diff' }] },
-      },
-    ])
-    assert.equal(detail.initialPrompt, 'review the diff')
-  })
-
-  test('a long prompt clips and flags the payload', () => {
-    const detail = fleetDetailOfEvents([
-      { type: 'user/message', seq: 1, time: 1, data: { content: [{ type: 'text', text: 'x'.repeat(2000) }] } },
-    ])
-    assert.equal(detail.initialPrompt?.length, 1601)
-    assert.equal(detail.truncated, true)
-  })
-
-  test('the full read lifts the prompt cap to the hostile-payload bound', () => {
+  test('the full read lifts the prompt and reply caps to the hostile-payload bounds', () => {
     const events = [
       { type: 'user/message', seq: 1, time: 1, data: { content: [{ type: 'text', text: 'x'.repeat(80_000) }] } },
+      { type: 'assistant/message', seq: 2, time: 2, data: { message: { content: [{ type: 'text', text: 'z'.repeat(120_000) }] } } },
     ]
     const excerpt = fleetDetailOfEvents(events)
     assert.equal(excerpt.initialPrompt?.length, 1601)
+    assert.equal(excerpt.lastReply?.text.length, 301)
     assert.equal(excerpt.truncated, true)
     const full = fleetDetailOfEvents(events, true)
     assert.equal(full.initialPrompt?.length, 80_000)
-    assert.equal(full.truncated, false)
+    assert.equal(full.lastReply?.text.length, 100_001, 'the bound stands even in full mode')
+    assert.equal(full.truncated, true)
   })
 })
 
@@ -280,7 +260,7 @@ describe('fleetDetailOfEvents — roster facts and latest reply', () => {
     ])
   })
 
-  test('the latest assistant text is the reply; non-text and empty replies are skipped', () => {
+  test('the latest assistant text is the reply; a timeless reply zeros the clock', () => {
     const detail = fleetDetailOfEvents([
       { type: 'assistant/message', seq: 1, time: 10, data: { message: { content: [{ type: 'text', text: 'first' }] } } },
       { type: 'assistant/message', seq: 2, time: 20, data: { message: { content: [{ type: 'tool-call' }] } } },
@@ -299,44 +279,121 @@ describe('fleetDetailOfEvents — roster facts and latest reply', () => {
     ])
     assert.deepEqual(timeless.lastReply, { time: 0, text: 'hi' })
   })
-
-  test('a long reply clips and flags the payload', () => {
-    const detail = fleetDetailOfEvents([
-      { type: 'assistant/message', seq: 1, time: 1, data: { message: { content: [{ type: 'text', text: 'z'.repeat(400) }] } } },
-    ])
-    assert.equal(detail.lastReply?.text.length, 301)
-    assert.equal(detail.truncated, true)
-  })
-
-  test('the full read lifts the reply cap to the hostile-payload bound', () => {
-    const events = [
-      { type: 'assistant/message', seq: 1, time: 1, data: { message: { content: [{ type: 'text', text: 'z'.repeat(120_000) }] } } },
-    ]
-    const full = fleetDetailOfEvents(events, true)
-    assert.equal(full.lastReply?.text.length, 100_001, 'the bound stands even in full mode')
-    assert.equal(full.truncated, true)
-  })
-
-  test('the mailbox transport preamble strips off the excerpt', () => {
-    const detail = fleetDetailOfEvents([
-      { type: 'user/message', seq: 1, time: 1, data: { source: { kind: 'team-message', senderId: 'a', senderName: 'lead' }, content: [{ type: 'text', text: 'Team message team-message-abc from lead: 请继续 task-3' }] } },
-    ])
-    assert.equal(detail.messages[0].text, '请继续 task-3')
-  })
 })
 
 describe('fleetDetailOfEvents — inter-agent messages', () => {
-  test('relay, mailbox, and settled rows each carry their attribution', () => {
+  const SETTLEMENT = 'Background subagent w-2 finished and will do no further work unless you send it more.'
+  const settled = (text: string, summary?: string, seq = 1, time = 10) => ({
+    type: 'user/message',
+    seq,
+    time,
+    data: {
+      source: { kind: 'subagent-settled', form: 'notice', ...(summary === undefined ? {} : { summary }), senderSessionId: 'w-2' },
+      content: [{ type: 'text', text }],
+    },
+  })
+
+  test('relay, mailbox (transport preamble stripped), and settled rows each carry their attribution', () => {
     const detail = fleetDetailOfEvents([
       { type: 'user/message', seq: 3, time: 30, data: { source: { kind: 'agent-message', form: 'relay', senderSessionId: 'lead-1' }, content: [{ type: 'text', text: 'how far along?' }] } },
-      { type: 'user/message', seq: 1, time: 10, data: { source: { kind: 'team-message', senderId: 'w-1', senderName: 'worker' }, content: [{ type: 'text', text: 'done' }] } },
-      { type: 'user/message', seq: 2, time: 20, data: { source: { kind: 'subagent-settled', form: 'notice', summary: 'child finished', senderSessionId: 'w-2' }, content: [{ type: 'text', text: 'unused' }] } },
+      { type: 'user/message', seq: 1, time: 10, data: { source: { kind: 'team-message', senderId: 'w-1', senderName: 'worker' }, content: [{ type: 'text', text: 'Team message team-message-abc from lead: done' }] } },
+      settled('unused', 'child finished', 2, 20),
     ])
     assert.deepEqual(detail.messages, [
       { seq: 3, time: 30, kind: 'relay', from: 'lead-1', text: 'how far along?' },
-      { seq: 2, time: 20, kind: 'settled', from: 'w-2', text: 'child finished' },
+      { seq: 2, time: 20, kind: 'settled', from: 'w-2', text: 'child finished', summary: 'child finished' },
       { seq: 1, time: 10, kind: 'mailbox', from: 'w-1', fromName: 'worker', text: 'done' },
     ])
+    const framed = fleetDetailOfEvents([
+      { type: 'user/message', seq: 1, time: 10, data: { source: { kind: 'agent-message', form: 'relay', senderSessionId: 'w-1' }, content: [{ type: 'text', text: 'Team message from host-cleaner:task-2 is done' }] } },
+    ])
+    assert.deepEqual(framed.messages, [
+      { seq: 1, time: 10, kind: 'relay', from: 'w-1', fromName: 'host-cleaner', text: 'task-2 is done' },
+    ], 'a Team relay framing line attests the sender name the source id alone cannot')
+  })
+
+  test('a settled notice splits its summary, closing report, structured result, and diagnostic', () => {
+    const fullText = `${SETTLEMENT}Its closing message:All gates green {but not the end}.\nStructured result: {"ok":true,"note":"a } brace"}provider diagnostic tail`
+    const detail = fleetDetailOfEvents([settled(fullText, SETTLEMENT)])
+    assert.deepEqual(detail.messages, [{
+      seq: 1,
+      time: 10,
+      kind: 'settled',
+      from: 'w-2',
+      text: fullText,
+      summary: SETTLEMENT,
+      report: 'All gates green {but not the end}.',
+      structured: '{"ok":true,"note":"a } brace"}',
+      diagnostic: 'provider diagnostic tail',
+    }])
+    const structured = JSON.stringify({ note: 'a "quoted" \\ path', nested: { x: 1 } })
+    const nested = fleetDetailOfEvents([settled(`${SETTLEMENT}Its closing message:done.Structured result: ${structured}tail`, SETTLEMENT)])
+    assert.equal(nested.messages[0]?.structured, structured, 'nested braces and escaped characters stay whole')
+    assert.equal(nested.messages[0]?.diagnostic, 'tail')
+    const spaced = fleetDetailOfEvents([settled(`\n  ${SETTLEMENT}Its closing message:clean report.`, SETTLEMENT)])
+    assert.equal(spaced.messages[0]?.text, `${SETTLEMENT}Its closing message:clean report.`, 'leading whitespace before the settlement is trimmed')
+    assert.equal(spaced.messages[0]?.report, 'clean report.')
+  })
+
+  test('a non-JSON or unterminated structured tail stays whole without inventing a diagnostic', () => {
+    for (const [tail, expected] of [
+      ['not-json', 'not-json'],
+      ['[1,2]', '[1,2]'],
+      ['{"a":1', '{"a":1'],
+    ] as const) {
+      const detail = fleetDetailOfEvents([settled(`${SETTLEMENT}Structured result: ${tail}`, SETTLEMENT)])
+      assert.equal(detail.messages[0]?.structured, expected)
+      assert.equal(detail.messages[0]?.diagnostic, undefined)
+    }
+  })
+
+  test('runtime content blocks keep literal report markers and scalar results separate from diagnostics', () => {
+    const report = 'Document the literal Structured result: marker in the README.'
+    const event = (parts: unknown[]) => ({
+      type: 'user/message', seq: 1, time: 10,
+      data: { source: { kind: 'subagent-settled', summary: SETTLEMENT }, content: parts },
+    })
+    const block = (text: string) => ({ type: 'text', text })
+    for (const value of [42, true, null, 'quoted result', { ok: true }, [1, 2]]) {
+      const structured = JSON.stringify(value)
+      const detail = fleetDetailOfEvents([event([
+        block(SETTLEMENT), block('Its closing message:'), block(report),
+        block('Structured result: ' + structured), block('provider warning'),
+      ])])
+      assert.equal(detail.messages[0]?.report, report)
+      assert.equal(detail.messages[0]?.structured, structured)
+      assert.equal(detail.messages[0]?.diagnostic, 'provider warning')
+    }
+    for (const parts of [[report], [report, 'Structured result: not JSON', report], ['Structured result: {"answer":42}'], ['Structured result: true']]) {
+      const message = fleetDetailOfEvents([event([
+        block(SETTLEMENT), block('Its closing message:'), ...parts.map(block), { type: 'image' },
+      ])]).messages[0]
+      assert.equal(message?.report, parts.join(''))
+      assert.equal(message?.structured, undefined)
+      assert.equal(message?.diagnostic, undefined)
+    }
+    const noClosing = fleetDetailOfEvents([event([
+      block(SETTLEMENT), block('It left no closing message.'), block('Structured result: false'),
+    ])]).messages[0]
+    assert.equal(noClosing?.report, undefined)
+    assert.equal(noClosing?.structured, 'false')
+    assert.equal(noClosing?.diagnostic, undefined)
+  })
+
+  test('the no-closing markers leave no report; a long closing report clips and flags the row', () => {
+    const noClosing = fleetDetailOfEvents([settled(`${SETTLEMENT}It left no closing message.`, SETTLEMENT)])
+    assert.equal(noClosing.messages[0]?.report, undefined)
+    // Forward-compat guard: this marker landed after 0.2.1-rc.2 (dsh 70eab5706e); the fold must accept it on newer lines.
+    const omitted = fleetDetailOfEvents([settled(`${SETTLEMENT}It sent you a message just before finishing, so its closing message is omitted.`, SETTLEMENT)])
+    assert.equal(omitted.messages[0]?.report, undefined)
+    const clipped = fleetDetailOfEvents([settled(`${SETTLEMENT}Its closing message:${'r'.repeat(500)}`, SETTLEMENT)])
+    assert.equal(clipped.messages[0]?.report?.length, 401)
+    assert.equal(clipped.messages[0]?.clipped, true)
+    assert.equal(clipped.truncated, true)
+    const longSummary = 'Background subagent ' + 's'.repeat(500)
+    const summaryCut = fleetDetailOfEvents([settled(longSummary, longSummary)])
+    assert.equal(summaryCut.messages[0]?.summary?.length, 401)
+    assert.equal(summaryCut.messages[0]?.clipped, true)
   })
 
   test('a settled notice without a summary falls back to its content; empty text drops the row', () => {
@@ -352,34 +409,35 @@ describe('fleetDetailOfEvents — inter-agent messages', () => {
     ])
   })
 
-  test('long texts clip, and the list caps at the newest 40', () => {
-    const events = Array.from({ length: 45 }, (_, i) => ({
+  test('the message list caps at the newest 80 on an excerpt and lifts on a full read, keeping the total', () => {
+    const events = Array.from({ length: 85 }, (_, i) => ({
       type: 'user/message',
       seq: i + 1,
       time: i + 1,
-      data: { source: { kind: 'agent-message', senderSessionId: 'x' }, content: [{ type: 'text', text: `m${i}` }] },
+      data: { source: { kind: 'agent-message', senderSessionId: 'x' }, content: [{ type: 'text', text: 'z'.repeat(500) }] },
     }))
-    events.push({ type: 'user/message', seq: 99, time: 99, data: { source: { kind: 'agent-message', senderSessionId: 'x' }, content: [{ type: 'text', text: 'y'.repeat(500) }] } })
     const detail = fleetDetailOfEvents(events)
-    assert.equal(detail.messages.length, 40)
-    assert.equal(detail.messages[0].seq, 99)
+    assert.equal(detail.messages.length, 80)
+    assert.equal(detail.messages[0].seq, 85)
     assert.equal(detail.messages[0].text.length, 401)
+    assert.equal(detail.messages[0].clipped, true)
+    assert.equal(detail.messagesTotal, 85)
     assert.equal(detail.truncated, true)
+    const full = fleetDetailOfEvents(events, true)
+    assert.equal(full.messages.length, 85)
+    assert.equal(full.messages[0].text.length, 500)
+    assert.equal(full.messages[0].clipped, undefined)
+    assert.equal(full.messagesTotal, undefined)
+    assert.equal(full.truncated, false)
   })
 
-  test('non-finite seq/time zero out rather than reject the row', () => {
+  test('hostile rows drop or zero out instead of rejecting: non-finite seq/time, no content array, non-text blocks', () => {
     const detail = fleetDetailOfEvents([
       { type: 'user/message', seq: Number.NaN, time: Number.POSITIVE_INFINITY, data: { source: { kind: 'agent-message' }, content: [{ type: 'text', text: 'hi' }] } },
+      { type: 'user/message', seq: 2, time: 2, data: { source: { kind: 'agent-message' }, content: 'not-an-array' } },
+      { type: 'user/message', seq: 3, time: 3, data: { source: { kind: 'agent-message' }, content: [{ type: 'image' }, { type: 'text', text: 7 }] } },
     ])
     assert.deepEqual(detail.messages, [{ seq: 0, time: 0, kind: 'relay', text: 'hi' }])
-  })
-
-  test('a message with no content array reads as empty and drops', () => {
-    const detail = fleetDetailOfEvents([
-      { type: 'user/message', seq: 1, time: 1, data: { source: { kind: 'agent-message' }, content: 'not-an-array' } },
-      { type: 'user/message', seq: 2, time: 2, data: { source: { kind: 'agent-message' }, content: [{ type: 'image' }, { type: 'text', text: 7 }] } },
-    ])
-    assert.deepEqual(detail.messages, [])
   })
 })
 

@@ -6,7 +6,7 @@ import { resetTimelineDetailStores } from '../../../src/client/timelineSource'
 import type { ContextTimeline } from '../../../src/shared/types'
 import { TestClientCtx } from '../helpers/harness'
 import { click, mount, query, queryAll, text } from '../helpers/kit'
-import { eventLink, makeView, mountInScroller, overflowingScroller, projectionsFor, T0, timeline } from './contextViewHarness'
+import { eventLink, makeView, mountInScroller, overflowingScroller, projectionsFor, stubRevealRects, T0, timeline } from './contextViewHarness'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -44,11 +44,7 @@ describe('ContextView — injection rows reveal their item', () => {
   test('a click opens the browser on the injection\'s own item at its entry step and scrolls the card in', async () => {
     const scroller = overflowingScroller(800)
     // jsdom lays out nothing: fixed viewport tops make the reveal's rect delta deterministic (450 − 100).
-    const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const top = this.hasAttribute('data-conversation-scroll') ? 100
-        : this.classList.contains('lc-col-browser') ? 450 : 0
-      return { top } as DOMRect
-    })
+    const gBCR = stubRevealRects(scroller, el => (el.classList.contains('lc-col-browser') ? 450 : 0))
     try {
       const View = makeView(new TestClientCtx())
       const m = await mountInScroller(h(View, {

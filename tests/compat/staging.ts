@@ -118,7 +118,6 @@ export function evaluateAdmission(baseline: Baseline): AdmissionReport {
 }
 
 export interface DriverReport {
-  registered: boolean
   keys: string[]
   gateOk: boolean
   coldMatches: boolean
@@ -269,7 +268,6 @@ let poisonedSnapshotThrows = false
 try { registryB.snapshot(sessionB) } catch { poisonedSnapshotThrows = true }
 
 process.stdout.write('DRIVER-JSON ' + JSON.stringify({
-  registered: true,
   keys: Object.keys(snapshot.values).sort(),
   gateOk: gate !== undefined,
   coldMatches: JSON.stringify(cold.snapshot.values) === JSON.stringify(snapshot.values),

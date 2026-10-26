@@ -102,16 +102,14 @@ describe('ContextView — overview face', () => {
     await m.unmount()
   })
 
-  test('a log at the configured step count mounts on the ribbon face', async () => {
-    const { View, props } = viewWith('100', 'sv-overview-auto', 100)
-    const m = await mount(h(View, props))
-    assert.equal(queryAll(m.container, '.lc-bar').length, 0)
-    assert.ok(query(m.container, '.lc-fit-svg'))
-    assert.ok(buttonByText(m.container, DICT_EN['trend.overview']).className.includes('lc-gran-on'))
-    await m.unmount()
-  })
+  test('the configured step count mounts on the ribbon face; crossing it switches once, and a manual toggle-off sticks', async () => {
+    const atThreshold = viewWith('100', 'sv-overview-auto', 100)
+    const direct = await mount(h(atThreshold.View, atThreshold.props))
+    assert.equal(queryAll(direct.container, '.lc-bar').length, 0)
+    assert.ok(query(direct.container, '.lc-fit-svg'))
+    assert.ok(buttonByText(direct.container, DICT_EN['trend.overview']).className.includes('lc-gran-on'))
+    await direct.unmount()
 
-  test('crossing the threshold mid-session switches once, and a manual toggle-off sticks', async () => {
     const { View, props } = viewWith('100', 'sv-overview-auto-grow', 99)
     const m = await mount(h(View, props))
     assert.equal(queryAll(m.container, '.lc-bar').length, 99)

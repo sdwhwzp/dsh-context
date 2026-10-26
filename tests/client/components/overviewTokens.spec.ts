@@ -35,19 +35,20 @@ describe('OverviewTokens', () => {
     const m = await mount(h(Tokens, { tokens: TOKENS }))
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '210')
     assert.equal(query(m.container, '.lc-donut-center span').textContent, 'Total')
-    assert.deepEqual(rowOf(m.container, 0), { pct: '20.0%', label: 'System Prompt', count: '≈42' })
-    assert.deepEqual(rowOf(m.container, 1), { pct: '7.6%', label: 'Tool Schemas', count: '≈16' })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '4.8%', label: 'User Messages', count: '≈10' })
-    assert.deepEqual(rowOf(m.container, 3), { pct: '1.4%', label: 'Injected Context', count: '≈3' })
-    assert.deepEqual(rowOf(m.container, 4), { pct: '1.4%', label: 'Skill Injections', count: '≈3' })
-    assert.deepEqual(rowOf(m.container, 5), { pct: '30.5%', label: 'Assistant Messages', count: '≈64' })
-    assert.deepEqual(rowOf(m.container, 6), { pct: '15.2%', label: 'Tool Results', count: '≈32' })
-    assert.deepEqual(rowOf(m.container, 7), { pct: '19.0%', label: 'Output', count: '40 · incl. reasoning' })
+    const expected = [
+      { pct: '20.0%', label: 'System Prompt', count: '≈42' },
+      { pct: '7.6%', label: 'Tool Schemas', count: '≈16' },
+      { pct: '4.8%', label: 'User Messages', count: '≈10' },
+      { pct: '1.4%', label: 'Injected Context', count: '≈3' },
+      { pct: '1.4%', label: 'Skill Injections', count: '≈3' },
+      { pct: '30.5%', label: 'Assistant Messages', count: '≈64' },
+      { pct: '15.2%', label: 'Tool Results', count: '≈32' },
+      { pct: '19.0%', label: 'Output', count: '40 · incl. reasoning' },
+    ]
+    expected.forEach((row, i) => assert.deepEqual(rowOf(m.container, i), row))
     await m.unmount()
-  })
 
-  test('zero categories stay hidden once anything is billed', async () => {
-    const tokens = {
+    const sparse = {
       parts: [
         { key: 'system', color: 'var(--color-indigo-500)', value: 300 },
         { key: 'tools', color: 'var(--color-amber-500)', value: 0 },
@@ -56,13 +57,13 @@ describe('OverviewTokens', () => {
       ],
       total: 440,
     }
-    const m = await mount(h(Tokens, { tokens }))
-    assert.equal(query(m.container, '.lc-donut-center b').textContent, '440')
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, 3)
-    assert.deepEqual(rowOf(m.container, 0), { pct: '68.2%', label: 'System Prompt', count: '≈300' })
-    assert.deepEqual(rowOf(m.container, 1), { pct: '20.5%', label: 'User Messages', count: '≈90' })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '11.4%', label: 'Output', count: '50 · incl. reasoning' })
-    await m.unmount()
+    const sparseMount = await mount(h(Tokens, { tokens: sparse }))
+    assert.equal(query(sparseMount.container, '.lc-donut-center b').textContent, '440')
+    assert.equal(queryAll(sparseMount.container, '.lc-sl-row').length, 3)
+    assert.deepEqual(rowOf(sparseMount.container, 0), { pct: '68.2%', label: 'System Prompt', count: '≈300' })
+    assert.deepEqual(rowOf(sparseMount.container, 1), { pct: '20.5%', label: 'User Messages', count: '≈90' })
+    assert.deepEqual(rowOf(sparseMount.container, 2), { pct: '11.4%', label: 'Output', count: '50 · incl. reasoning' })
+    await sparseMount.unmount()
   })
 
   test('nothing billed in the range renders the empty note, no ring', async () => {

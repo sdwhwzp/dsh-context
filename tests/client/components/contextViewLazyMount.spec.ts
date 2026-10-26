@@ -9,7 +9,7 @@ import { makeView, projectionsFor, timeline } from './contextViewHarness'
 
 type ObserverCallback = IntersectionObserverCallback
 
-function stubIntersection(): { callbacks: ObserverCallback[]; restore: () => void } {
+function stubIntersection(): { callbacks: ObserverCallback[] } {
   const callbacks: ObserverCallback[] = []
   class FakeObserver {
     constructor(callback: ObserverCallback) { callbacks.push(callback) }
@@ -17,7 +17,7 @@ function stubIntersection(): { callbacks: ObserverCallback[]; restore: () => voi
     disconnect = (): void => {}
   }
   vi.stubGlobal('IntersectionObserver', FakeObserver)
-  return { callbacks, restore: () => { vi.unstubAllGlobals() } }
+  return { callbacks }
 }
 
 describe('ContextView below-fold lazy mount', () => {
@@ -67,7 +67,6 @@ describe('ContextView below-fold lazy mount', () => {
       await second.unmount()
     } finally {
       await m.unmount()
-      observer.restore()
     }
   })
 })

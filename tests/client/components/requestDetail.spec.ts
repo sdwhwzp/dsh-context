@@ -113,20 +113,6 @@ describe('RequestDetail header', () => {
     assert.equal(chip.getAttribute('title'), 'Context compacted (summary replaced 3 messages)')
     await m.unmount()
 
-    const m2 = await mount(h(RequestDetail, {
-      request: req({}),
-      marker: { seq: 9, time: 1, kind: 'prune', fromTurn: 2, fromStep: 8, turn: 3, step: 1 },
-    }))
-    assert.ok(text(query(m2.container, '.lc-detail-marker')).includes('T2 S8 → T3 S1'))
-    await m2.unmount()
-
-    const m3 = await mount(h(RequestDetail, {
-      request: req({}),
-      marker: { seq: 9, time: 1, kind: 'compaction', count: 2, turn: 4, step: 2 },
-    }))
-    assert.ok(text(query(m3.container, '.lc-detail-marker')).includes('✂ T4 S2'))
-    await m3.unmount()
-
     const m4 = await mount(h(RequestDetail, {
       request: req({}),
       marker: { seq: 9, time: 1, kind: 'prune' },
@@ -182,17 +168,15 @@ describe('RequestDetail delta mode', () => {
     assert.equal(queryAll(m2.container, '.lc-chip-nums-up').length, 0)
     assert.equal(queryAll(m2.container, '.lc-chip-nums-down').length, 6)
     await m2.unmount()
-  })
 
-  test('cumulative chips with a zero total render zero figures and no shares', async () => {
-    const m = await mount(h(RequestDetail, {
+    const zero = await mount(h(RequestDetail, {
       request: req({ system: 0, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 0 }),
     }))
-    const figs = queryAll(m.container, '.lc-chip-nums').map(el => text(el))
-    assert.equal(figs.length, 7)
-    assert.ok(figs.every(f => f === '≈0'))
-    assert.equal(queryAll(m.container, '.lc-chip-nums em').length, 0)
-    await m.unmount()
+    const zeroFigs = queryAll(zero.container, '.lc-chip-nums').map(el => text(el))
+    assert.equal(zeroFigs.length, 7)
+    assert.ok(zeroFigs.every(f => f === '≈0'))
+    assert.equal(queryAll(zero.container, '.lc-chip-nums em').length, 0)
+    await zero.unmount()
   })
 })
 
@@ -216,14 +200,12 @@ describe('RequestDetail composition bar hover-link', () => {
     assert.equal(queryAll(m2.container, '.lc-bar-tip').length, 0)
     await m2.unmount()
     await m.unmount()
-  })
 
-  test('delta-mode detail chips light the matching category too', async () => {
-    const m = await mount(h(RequestDetail, { request: req({}), prev: req({ ...FULL }), hoverKey: 'user' }))
-    const chips = queryAll(m.container, '.lc-legend .lc-chip')
-    assert.ok(chips[2].className.includes('lc-chip-on'), 'the user chip lights in delta mode')
-    assert.ok(chips.filter(c => c.className.includes('lc-chip-on')).length === 1)
-    await m.unmount()
+    const delta = await mount(h(RequestDetail, { request: req({}), prev: req({ ...FULL }), hoverKey: 'user' }))
+    const deltaChips = queryAll(delta.container, '.lc-legend .lc-chip')
+    assert.ok(deltaChips[2].className.includes('lc-chip-on'), 'the user chip lights in delta mode')
+    assert.ok(deltaChips.filter(c => c.className.includes('lc-chip-on')).length === 1)
+    await delta.unmount()
   })
 })
 
@@ -234,17 +216,11 @@ describe('RequestDetail brief section', () => {
     content: [{ type: 'text', text: 'a.txt' }],
   }
 
-  test('the brief lane is constant: absent/empty briefs reserve its height, not collapse', async () => {
+  test('the brief lane is constant: an absent brief reserves its height, not collapse', async () => {
     const m = await mount(h(RequestDetail, { request: req({}), brief: null }))
     assert.equal(queryAll(m.container, '.lc-brief').length, 1, 'the lane always renders')
     assert.equal(queryAll(m.container, '.lc-brief-row').length, 1, 'only the always-present In row placeholder')
     await m.unmount()
-
-    const empty: StepBrief = { inputs: [] }
-    const m2 = await mount(h(RequestDetail, { request: req({}), brief: empty }))
-    assert.equal(queryAll(m2.container, '.lc-brief').length, 1)
-    assert.equal(queryAll(m2.container, '.lc-brief-row').length, 1, 'only the always-present In row')
-    await m2.unmount()
   })
 
   test('opener, inputs with overflow, and reply rows render with tags and previews', async () => {

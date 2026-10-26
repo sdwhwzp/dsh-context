@@ -44,6 +44,7 @@ import { stepStampOf } from './browserHelpers'
 import { cachedByData } from './derivedCache'
 import { assemble } from '../assemble'
 import { useLazyMount } from './useLazyMount'
+import { useConversationSurface } from './useConversationSurface'
 import { trendBandsOf } from '../dna'
 import type { TrendBand } from '../dna'
 
@@ -284,6 +285,7 @@ export function makeContextView(
     )
 
     const rootRef = useRef<HTMLDivElement | null>(null)
+    useConversationSurface(rootRef)
     const scrollerRef = useRef<HTMLElement | null>(null)
     // The session whose position was already applied this mount — re-applying on re-renders would yank the reader's scroll.
     const restoredRef = useRef<string | null>(null)

@@ -3,7 +3,7 @@ import { settledVariantOf, type CommsRow } from '../fleetDetail'
 import type { ViewKit } from '../viewkit'
 
 export function commsTextOf(row: CommsRow, t: ViewKit['t']): string {
-  const settled = row.kind === 'settled' ? settledVariantOf(row.text) : null
+  const settled = row.kind === 'settled' ? settledVariantOf(row.summary ?? row.text) : null
   return settled !== null ? t(`fleet.settled.${settled}`) : row.text
 }
 

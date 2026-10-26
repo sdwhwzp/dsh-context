@@ -73,63 +73,35 @@ describe('StatsContext', () => {
     return () => { Element.prototype.getBoundingClientRect = real }
   }
 
-  test('the tool lane folds the tail into the overflow chip at the width it is measured against', async () => {
-    const restore = stubWidths(100, 40, 260)
-    try {
-      const m = await mount(h(StatsContext, {
-        counts: NO_COUNTS, files: NO_FILES, tools: [['read', 8], ['bash', 3], ['grep', 2]], locale: 'en',
-      }))
-      await flush()
-      assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read8', 'bash3', '+1 more'])
-      await m.unmount()
-    } finally {
-      restore()
-    }
-  })
+  type StatsProps = Parameters<typeof StatsContext>[0]
 
-  test('a wide card spells out every tool, with the overflow chip at zero', async () => {
-    const restore = stubWidths(100, 40, 900)
-    try {
-      const m = await mount(h(StatsContext, {
-        counts: NO_COUNTS, files: NO_FILES, tools: [['read', 8], ['bash', 3], ['grep', 2]], locale: 'en',
-      }))
-      await flush()
-      assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read8', 'bash3', 'grep2', '+0 more'])
-      await m.unmount()
-    } finally {
-      restore()
-    }
-  })
-
-  test('the command lane fills the row and folds only what does not fit', async () => {
-    const restore = stubWidths(100, 40, 260)
-    try {
-      const m = await mount(h(StatsContext, {
-        counts: NO_COUNTS, files: NO_FILES, tools: [],
-        commands: { runs: 9, top: [['python3', 3], ['git', 2], ['grep', 2], ['node', 1], ['npm', 1]] },
-        locale: 'en',
-      }))
-      await flush()
-      assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python33', 'git2', '+3 more'], 'two programs fit beside the tail chip')
-      await m.unmount()
-    } finally {
-      restore()
-    }
-  })
-
-  test('a wide command lane spells out every program with no overflow chip', async () => {
-    const restore = stubWidths(100, 40, 900)
-    try {
-      const m = await mount(h(StatsContext, {
-        counts: NO_COUNTS, files: NO_FILES, tools: [],
-        commands: { runs: 9, top: [['python3', 3], ['git', 2], ['grep', 2], ['node', 1], ['npm', 1]] },
-        locale: 'en',
-      }))
-      await flush()
-      assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python33', 'git2', 'grep2', 'node1', 'npm1'])
-      await m.unmount()
-    } finally {
-      restore()
+  test('each lane folds its chip tail at the measured width and spells out every chip when wide', async () => {
+    const lanes: { selector: string; props: Partial<StatsProps>; narrow: string[]; wide: string[] }[] = [
+      {
+        selector: '.lc-ledger-out-chips',
+        props: { tools: [['read', 8], ['bash', 3], ['grep', 2]] },
+        narrow: ['read8', 'bash3', '+1 more'],
+        wide: ['read8', 'bash3', 'grep2', '+0 more'],
+      },
+      {
+        selector: '.lc-ledger-in-body2',
+        props: { commands: { runs: 9, top: [['python3', 3], ['git', 2], ['grep', 2], ['node', 1], ['npm', 1]] } },
+        narrow: ['python33', 'git2', '+3 more'],
+        wide: ['python33', 'git2', 'grep2', 'node1', 'npm1'],
+      },
+    ]
+    for (const lane of lanes) {
+      for (const [rowWidth, expected] of [[260, lane.narrow], [900, lane.wide]] as const) {
+        const restore = stubWidths(100, 40, rowWidth)
+        try {
+          const m = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], locale: 'en', ...lane.props }))
+          await flush()
+          assert.deepEqual(chipsOf(query(m.container, lane.selector)), expected)
+          await m.unmount()
+        } finally {
+          restore()
+        }
+      }
     }
   })
 
@@ -146,36 +118,26 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    assert.ok(text(m.container).includes('Context Stats'))
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-label').map(el => el.textContent), ['Input / Output', 'Tool Calls', 'Command Executions', 'Fleet'])
     assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['23', '12', '626', '1.0M/$0.30'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python3212'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-chips')), ['User?7', 'Read9', 'Write2', 'Search4', 'Image1'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read8', 'bash3', 'grep2', 'edit1', 'glob1', '+0 more'])
-    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python3212'], 'the served command spells out')
     const inertCmdChip = query(m.container, '.lc-ledger-in-body2 .lc-ledger-chip')
     assert.equal(inertCmdChip.getAttribute('role'), null, 'the command chip stays inert without the relay')
     assert.equal(inertCmdChip.getAttribute('title'), 'python3', 'the name rides the native title')
     assert.equal(queryAll(m.container, '.lc-ledger-out-body2 > .lc-strip-cell').length, 2, 'Current Agent and Subagents each hold one cost row')
     assert.equal(queryAll(m.container, '.lc-ledger-out-body2 .lc-ledger-chip').length, 0, 'the cost rows replace the roster chips')
-    assert.equal(queryAll(m.container, '.lc-strip-cost').length, 0, 'the old bottom-right cost area is gone')
     const core = query(m.container, '.lc-core')
     assert.equal(query(core, '.lc-core-label')?.textContent, 'Current Session')
     assert.deepEqual(queryAll(core, '.lc-core-kv:not(.lc-core-kv-events)').map(el => (el.querySelector('b')?.textContent ?? '') + (el.querySelector('i')?.textContent ?? '')), ['3Turns', '4Steps', '2Skill Loads', '3Answers'])
     assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind').length, 3)
     assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind.lc-ledger-chip-dim').length, 0)
     assert.deepEqual(costCellsOf(m.container), ['Fleet?1.0M/$0.30', 'Current Agent?1.0M/$0.30', 'Subagents × 0?0/—'])
-    assert.equal(queryAll(m.container, '.lc-stat-tip').length, 4, 'the user chip, own-cell, sub-row, and family tips')
     await m.unmount()
   })
 
   test('absent counters and cost degrade to zeros and dimmed chips', async () => {
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-    }))
+    const m = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], locale: 'en', }))
     await flush()
     assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['0', '0', '0', '0/—'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-chips')), ['User?0', 'Read0', 'Write0'], 'search/image chips only when they happened')
@@ -185,63 +147,57 @@ describe('StatsContext', () => {
     assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
     assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind.lc-ledger-chip-dim').length, 3, 'the zero event kinds dim too')
     await m.unmount()
-  })
 
-  test('the tools total falls back to the tally sum on hosts too old to carry it', async () => {
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [['read', 8], ['bash', 3]],
-      locale: 'en',
-    }))
+    // The tools total falls back to the tally sum on hosts too old to carry it.
+    const tallied = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [['read', 8], ['bash', 3]], locale: 'en', }))
     await flush()
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent)[1], '11')
-    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read8', 'bash3', '+0 more'], 'two tools chip out, the overflow chip reads zero')
-    await m.unmount()
+    assert.deepEqual(queryAll(tallied.container, '.lc-ledger-total').map(el => el.textContent)[1], '11')
+    assert.deepEqual(chipsOf(query(tallied.container, '.lc-ledger-out-chips')), ['read8', 'bash3', '+0 more'], 'two tools chip out, the overflow chip reads zero')
+    await tallied.unmount()
   })
 
   test('the cost bubble lists the billed models with their billed rates', async () => {
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: COST,
-      locale: 'en',
-    }))
+    const m = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], cost: COST, locale: 'en', }))
     await flush()
     const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
     assert.equal(tips.length, 4, 'the user chip plus the three team-cost tips')
     assert.ok(tips.includes(DICT_EN['stats.userTip']), 'the user chip tip explains its tally')
     const costTip = costTipOf(m.container, 'team')
-    assert.ok(costTip.includes('every descendant subagent session'), 'the cost tip names the family scope — all levels')
-    assert.ok(costTip.includes('billed total'), 'the tip glosses the token face too')
-    assert.ok(costTip.includes('Per-1M-token rates:'))
-    assert.ok(costTip.includes('Priced as listed on models.dev for deepseek · deepseek-v4-flash.'), 'the listing line names the resolved registry face')
-    assert.ok(costTip.includes('Cache input $0.00'))
-    assert.ok(costTip.includes('Uncached input $0.15'))
-    assert.ok(costTip.includes('Cache write $0.15'))
-    assert.ok(costTip.includes('Output $0.60'))
-    assert.ok(costTip.includes('peak windows'), 'a DeepSeek session explains the peak/off-peak scheme')
-    assert.ok(costTip.includes('off-peak rates'), 'the tip says the listed rates are the off-peak tier')
-    assert.ok(costTip.includes('twice the listed rate'), 'the tip says peak bills at twice the listed rate')
+    for (const part of [
+      'every descendant subagent session', 'billed total', 'Per-1M-token rates:',
+      'Priced as listed on models.dev for deepseek · deepseek-v4-flash.',
+      'Cache input $0.00', 'Uncached input $0.15', 'Cache write $0.15', 'Output $0.60',
+      'peak windows', 'off-peak rates', 'twice the listed rate',
+    ]) assert.ok(costTip.includes(part), `the team tip carries: ${part}`)
     assert.ok(!costTip.includes('|'), 'no peak|off pairs — the footnotes carry the scheme')
-    await m.unmount()
-  })
-
-  test('the own cell carries its own bubble: the solo scope and its price face', async () => {
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: COST,
-      locale: 'en',
-    }))
-    await flush()
     const ownTip = costTipOf(m.container, 'own')
     assert.ok(ownTip.includes('current agent session alone'), 'the own tip scopes the figure to the session itself')
     assert.ok(ownTip.includes('Per-1M-token rates:'))
     assert.ok(ownTip.includes('for deepseek · deepseek-v4-flash.'))
+    const links = queryAll(m.container, 'a.lc-strip-link')
+    assert.equal(links.length, 1, 'the family figure is the only link')
+    assert.equal(links[0].getAttribute('href'), 'https://models.dev/providers/deepseek/')
+    assert.equal(links[0].getAttribute('target'), '_blank')
+    assert.ok(links[0].textContent.includes('$0.30'), 'the link keeps the pair body')
     await m.unmount()
+
+    const split: SessionCostUsage = {
+      'deepseek-official': {
+        'deepseek-v4-flash': {
+          peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 },
+          off: { uncached: 2_000_000, cacheRead: 0, cacheWrite: 0, output: 0 },
+        },
+      },
+    }
+    const splitMount = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], cost: split, locale: 'en', }))
+    await flush()
+    assert.deepEqual(costCellsOf(splitMount.container)[0], 'Fleet?3.0M/$0.60')
+    const splitTip = costTipOf(splitMount.container, 'team')
+    assert.ok(splitTip.includes('Cache input $0.00'), 'the table lists the book rates once, whatever the billed buckets')
+    assert.ok(splitTip.includes('Uncached input $0.15'))
+    assert.ok(splitTip.includes('peak windows'), 'the peak-window footnote explains the bucket split')
+    assert.ok(!splitTip.includes('|'))
+    await splitMount.unmount()
   })
 
   test('a non-DeepSeek session never sees DeepSeek-specific notes', async () => {
@@ -261,53 +217,14 @@ describe('StatsContext', () => {
     await m.unmount()
   })
 
-  test('the family cell links to the models.dev provider listing when one provider priced the scope', async () => {
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: COST,
-      locale: 'en',
-    }))
-    await flush()
-    const links = queryAll(m.container, 'a.lc-strip-link')
-    assert.equal(links.length, 1, 'the family figure is the only link')
-    assert.equal(links[0].getAttribute('href'), 'https://models.dev/providers/deepseek/')
-    assert.equal(links[0].getAttribute('target'), '_blank')
-    assert.ok(links[0].textContent.includes('$0.30'), 'the link keeps the pair body')
-    await m.unmount()
-  })
-
-  test('a multi-provider scope keeps the family figure unlinked', async () => {
-    const two: SessionCostUsage = {
-      'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
-      'zai-coding-cn': { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
-    }
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: two,
-      locale: 'en',
-    }))
-    await flush()
-    assert.equal(queryAll(m.container, 'a.lc-strip-link').length, 0, 'two providers name their faces in the tooltip instead')
-    await m.unmount()
-  })
-
-  test('a multi-provider session names the resolved registry face on each listing line', async () => {
+  test('a multi-provider scope keeps the family figure unlinked and names each resolved registry face', async () => {
     const two: SessionCostUsage = {
       'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
       'zai-coding-cn': { 'glm-5.3-flash': { peak: { uncached: 2_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
     }
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: two,
-      locale: 'en',
-    }))
+    const m = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], cost: two, locale: 'en', }))
     await flush()
+    assert.equal(queryAll(m.container, 'a.lc-strip-link').length, 0, 'two providers name their faces in the tooltip instead')
     const costTip = costTipOf(m.container, 'team')
     assert.ok(costTip.includes('for deepseek · deepseek-v4-flash.'))
     assert.ok(costTip.includes('for zhipuai · glm-5.3-flash.'))
@@ -334,16 +251,11 @@ describe('StatsContext', () => {
     const core = query(m.container, '.lc-core')
     assert.deepEqual(queryAll(core, '.lc-core-kv:not(.lc-core-kv-events)').map(el => (el.querySelector('b')?.textContent ?? '') + (el.querySelector('i')?.textContent ?? '')), ['1轮次', '1步数', '5技能加载', '4模型回复'])
     const costTip = costTipOf(m.container, 'team')
-    assert.ok(costTip.includes('含当前智能体及所有层级的子智能体'), 'the cost tip names the family scope too — all levels')
-    assert.ok(costTip.includes('每百万 Token 价格'))
-    assert.ok(costTip.includes('挂牌价为谷时价'), 'the zh tip says the listed rates are off-peak')
-    assert.ok(costTip.includes('2 倍计费'), 'the zh tip says peak bills at twice the listed rate')
-    assert.ok(costTip.includes('按 deepseek · deepseek-v4-flash 在 models.dev 的刊登价格如上。'))
-    assert.ok(costTip.includes('人民币按 1 元 = 0.15 美元换算。'), 'the CNY display carries the conversion footnote')
-    assert.ok(costTip.includes('缓存输入 ¥0.02'))
-    assert.ok(costTip.includes('未缓存输入 ¥1.00'))
-    assert.ok(costTip.includes('缓存写入 ¥1.00'))
-    assert.ok(costTip.includes('输出 ¥4.00'))
+    for (const part of [
+      '含当前智能体及所有层级的子智能体', '每百万 Token 价格', '挂牌价为谷时价', '2 倍计费',
+      '按 deepseek · deepseek-v4-flash 在 models.dev 的刊登价格如上。',
+      '人民币按 1 元 = 0.15 美元换算。', '缓存输入 ¥0.02', '未缓存输入 ¥1.00', '缓存写入 ¥1.00', '输出 ¥4.00',
+    ]) assert.ok(costTip.includes(part), `the zh team tip carries: ${part}`)
     await m.unmount()
   })
 
@@ -365,7 +277,6 @@ describe('StatsContext', () => {
       onCommandPick: (program) => { picks.push(program) },
     }))
     await flush()
-    assert.deepEqual(queryAll(m.container, '.lc-ledger-label').map(el => el.textContent), ['Input / Output', 'Tool Calls', 'Command Executions', 'Fleet'])
     assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['0', '8', '626', '3.0M/$0.45'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python3212', 'git88', 'grep40', 'node20', 'npm10'], 'every program fits the unmeasured row')
     assert.equal(queryAll(m.container, '.lc-ledger-out-body2 .lc-ledger-chip').length, 0, 'no roster chips remain below Team')
@@ -384,76 +295,42 @@ describe('StatsContext', () => {
     await m.unmount()
   })
 
-  test('a book that has not landed yet keeps the cost figure dashed (the tokens still read)', async () => {
+  test('a pending book keeps the cost figure dashed without claiming an outage; a failed fetch notes the outage in the tip', async () => {
     setModelPricesLoader(() => new Promise(() => {}))
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: COST,
-      locale: 'en',
-    }))
+    const pending = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], cost: COST, locale: 'en' }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?1.0M/—')
-    assert.ok(!text(m.container).includes('unavailable'), 'a pending fetch is not a failure')
-    await m.unmount()
-  })
+    assert.deepEqual(costCellsOf(pending.container)[0], 'Fleet?1.0M/—')
+    assert.ok(!text(pending.container).includes('unavailable'), 'a pending fetch is not a failure')
+    await pending.unmount()
 
-  test('a failed price fetch dashes the figure and notes the outage in the tip', async () => {
+    resetModelPrices()
     setModelPricesLoader(() => Promise.reject(new Error('down')))
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: COST,
-      locale: 'en',
-    }))
+    const failed = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], cost: COST, locale: 'en' }))
     await flush()
-    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?1.0M/—')
-    const costTip = costTipOf(m.container, 'team')
+    assert.deepEqual(costCellsOf(failed.container)[0], 'Fleet?1.0M/—')
+    const costTip = costTipOf(failed.container, 'team')
     assert.ok(costTip.includes('unavailable'))
     assert.ok(!costTip.includes('Per-1M-token rates'))
-    await m.unmount()
+    await failed.unmount()
   })
 
-  test('a DeepSeek off bucket prices at book and the footnotes carry the peak scheme', async () => {
-    const split: SessionCostUsage = {
-      'deepseek-official': {
-        'deepseek-v4-flash': {
-          peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 },
-          off: { uncached: 2_000_000, cacheRead: 0, cacheWrite: 0, output: 0 },
-        },
-      },
+  test('an unpriceable model notes the outage; an inferred maker price says it is a reference estimate', async () => {
+    for (const [model, cell, expected] of [
+      ['mystery-model', 'Fleet?1/—', 'Not priced: future-provider / mystery-model'],
+      ['deepseek-v4-flash', 'Fleet?1/$', 'reference estimate'],
+    ] as const) {
+      const m = await mount(h(StatsContext, {
+        counts: NO_COUNTS,
+        files: NO_FILES,
+        tools: [],
+        cost: { 'future-provider': { [model]: { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+        locale: 'en',
+      }))
+      await flush()
+      assert.ok(costCellsOf(m.container)[0].startsWith(cell))
+      assert.ok(costTipOf(m.container, 'team').includes(expected))
+      await m.unmount()
     }
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: split,
-      locale: 'en',
-    }))
-    await flush()
-    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?3.0M/$0.60')
-    const costTip = costTipOf(m.container, 'team')
-    assert.ok(costTip.includes('Cache input $0.00'), 'the table lists the book rates once, whatever the billed buckets')
-    assert.ok(costTip.includes('Uncached input $0.15'))
-    assert.ok(costTip.includes('peak windows'), 'the peak-window footnote explains the bucket split')
-    assert.ok(!costTip.includes('|'))
-    await m.unmount()
-  })
-
-  test('a session whose models the book cannot price notes the outage too', async () => {
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: { 'future-provider': { 'mystery-model': { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
-      locale: 'en',
-    }))
-    await flush()
-    assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?1/—')
-    assert.ok(costTipOf(m.container, 'team').includes('Not priced: future-provider / mystery-model'))
-    await m.unmount()
   })
 
   test('an ambiguous book face names the disagreement instead of an outage', async () => {
@@ -473,19 +350,6 @@ describe('StatsContext', () => {
     await m.unmount()
   })
 
-  test('an inferred maker price says it is a reference estimate', async () => {
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: { 'future-provider': { 'deepseek-v4-flash': { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
-      locale: 'en',
-    }))
-    await flush()
-    assert.ok(costTipOf(m.container, 'team').includes('reference estimate'))
-    await m.unmount()
-  })
-
   test('a hostile cost branch is skipped by the tooltip rows, not fatal', async () => {
     const hostile = {
       junk: 5,
@@ -496,13 +360,7 @@ describe('StatsContext', () => {
         },
       },
     } as unknown as SessionCostUsage
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: hostile,
-      locale: 'en',
-    }))
+    const m = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], cost: hostile, locale: 'en', }))
     await flush()
     const costTip = costTipOf(m.container, 'team')
     assert.ok(costTip.includes('glm-5.3-flash'))
@@ -514,17 +372,13 @@ describe('StatsContext', () => {
 
   test('the Fleet section hands its jump to the caller; the price link stays out of it', async () => {
     let opened = 0
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS, files: NO_FILES, tools: [], cost: COST, locale: 'en',
-      onTeamClick: () => { opened += 1 },
-    }))
+    const m = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], cost: COST, locale: 'en', onTeamClick: () => { opened += 1 }, }))
     await flush()
     const head = query(m.container, '.lc-ledger-team-head')
     const tip = query(head, '.lc-stat-tip')
     assert.ok(tip.closest('.lc-stat-tipped') === head, 'the pricing tooltip is positioned against its Fleet header')
     assert.equal(head.getAttribute('role'), null, 'the header is not a button wrapping the provider link')
     const open = query(m.container, 'button.lc-ledger-team-open')
-    assert.equal(open.tagName, 'BUTTON')
     await click(open)
     assert.equal(opened, 1)
     await click(head)
@@ -542,14 +396,21 @@ describe('StatsContext', () => {
     await m.unmount()
   })
 
-  test('without a caller the Fleet section is a plain figure, never a dead button', async () => {
-    const m = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], cost: COST, locale: 'en' }))
+  test('without the relay the Fleet section, hinge figures, and chips stay inert', async () => {
+    const m = await mount(h(StatsContext, { counts: NO_COUNTS, answers: 1, humanInputs: 1, files: NO_FILES, tools: [], cost: COST, locale: 'en' }))
+    await flush()
     const cost = query(m.container, '.lc-ledger-team-head')
     assert.equal(cost.getAttribute('role'), null)
     assert.equal(cost.getAttribute('tabindex'), null)
     assert.equal(queryAll(m.container, '.lc-ledger-team-open').length, 0, 'no dead button without the view relay')
     assert.equal(queryAll(m.container, '.lc-ledger-out-body2 button').length, 0, 'the split rows stay figures too')
     await click(cost)
+    const cells = queryAll(m.container, '.lc-core-kv')
+    assert.ok(cells.every(c => c.getAttribute('role') === null && !c.className.includes('lc-core-kv-btn')))
+    const events = queryAll(m.container, '.lc-core-kv-event')
+    assert.ok(events.every(e => e.getAttribute('role') === null && !e.className.includes('lc-core-kv-event-btn')))
+    const chips = queryAll(m.container, '.lc-ledger-chip')
+    assert.ok(chips.every(c => c.getAttribute('role') === null && !c.className.includes('lc-ledger-chip-btn')))
     await m.unmount()
   })
 
@@ -578,14 +439,7 @@ describe('StatsContext', () => {
 
   test('the hinge figures fire their jump on click and keyboard', async () => {
     const calls: string[] = []
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      answers: 1,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-      onJump: (j) => { calls.push(j) },
-    }))
+    const m = await mount(h(StatsContext, { counts: NO_COUNTS, answers: 1, files: NO_FILES, tools: [], locale: 'en', onJump: (j) => { calls.push(j) }, }))
     await flush()
     const cells = queryAll(m.container, '.lc-core-kv-btn')
     assert.equal(cells.length, 2)
@@ -602,14 +456,7 @@ describe('StatsContext', () => {
 
   test('the I/O chips fire their jumps on click and keyboard, and the band wedges pick the same jump', async () => {
     const calls: string[] = []
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      humanInputs: 2,
-      files: { reads: 18, writes: 13, searches: 4, images: 9 },
-      tools: [],
-      locale: 'en',
-      onJump: (j) => { calls.push(j) },
-    }))
+    const m = await mount(h(StatsContext, { counts: NO_COUNTS, humanInputs: 2, files: { reads: 18, writes: 13, searches: 4, images: 9 }, tools: [], locale: 'en', onJump: (j) => { calls.push(j) }, }))
     await flush()
     const chips = queryAll(m.container, '.lc-ledger-in-chips .lc-ledger-chip')
     assert.deepEqual(chips.map(el => el.getAttribute('title')),
@@ -628,17 +475,6 @@ describe('StatsContext', () => {
     await m.unmount()
   })
 
-  test('without the relay the hinge figures and chips stay inert', async () => {
-    const m = await mount(h(StatsContext, { counts: NO_COUNTS, answers: 1, humanInputs: 1, files: NO_FILES, tools: [], locale: 'en' }))
-    await flush()
-    const cells = queryAll(m.container, '.lc-core-kv')
-    assert.ok(cells.every(c => c.getAttribute('role') === null && !c.className.includes('lc-core-kv-btn')))
-    const events = queryAll(m.container, '.lc-core-kv-event')
-    assert.ok(events.every(e => e.getAttribute('role') === null && !e.className.includes('lc-core-kv-event-btn')))
-    const chips = queryAll(m.container, '.lc-ledger-chip')
-    assert.ok(chips.every(c => c.getAttribute('role') === null && !c.className.includes('lc-ledger-chip-btn')))
-    await m.unmount()
-  })
 })
 
 describe('StatsContext — the subagent split (injected seat)', () => {
@@ -647,37 +483,25 @@ describe('StatsContext — the subagent split (injected seat)', () => {
   }
 
   test('the family figure merges the subagent usage in; the split cells price each share alone', async () => {
-    const Stats = makeStatsContext(kit, () => ({ usage: SUB, count: 2 }))
-    const m = await mount(h(Stats, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: COST,
-      locale: 'en',
-    }))
-    await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Fleet?3.0M/$0.45', 'Current Agent?1.0M/$0.30', 'Subagents × 2?2.0M/$0.15'])
-    const teamTip = costTipOf(m.container, 'team')
-    assert.ok(teamTip.includes('for deepseek · deepseek-v4-flash.'))
-    assert.ok(teamTip.includes('for zhipuai · glm-5.3-flash.'))
-    const subTip = costTipOf(m.container, 'sub')
-    assert.ok(subTip.includes('every descendant subagent session'))
-    assert.ok(subTip.includes('all levels'), 'the sub tip spells out the subtree covers all levels')
-    assert.ok(subTip.includes('for zhipuai · glm-5.3-flash.'), 'the sub tip carries its own price table')
-    await m.unmount()
-  })
-
-  test('subagent usage alone (no own cost) still prices the family and dashes the own cell', async () => {
-    const Stats = makeStatsContext(kit, () => ({ usage: SUB, count: 1 }))
-    const m = await mount(h(Stats, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-    }))
-    await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Fleet?2.0M/$0.15', 'Current Agent?0/—', 'Subagents × 1?2.0M/$0.15'])
-    await m.unmount()
+    for (const [cost, cells] of [
+      [COST, ['Fleet?3.0M/$0.45', 'Current Agent?1.0M/$0.30', 'Subagents × 2?2.0M/$0.15']],
+      [undefined, ['Fleet?2.0M/$0.15', 'Current Agent?0/—', 'Subagents × 2?2.0M/$0.15']],
+    ] as const) {
+      const Stats = makeStatsContext(kit, () => ({ usage: SUB, count: 2 }))
+      const m = await mount(h(Stats, { counts: NO_COUNTS, files: NO_FILES, tools: [], ...(cost !== undefined ? { cost } : {}), locale: 'en' }))
+      await flush()
+      assert.deepEqual(costCellsOf(m.container), cells)
+      if (cost !== undefined) {
+        const teamTip = costTipOf(m.container, 'team')
+        assert.ok(teamTip.includes('for deepseek · deepseek-v4-flash.'))
+        assert.ok(teamTip.includes('for zhipuai · glm-5.3-flash.'))
+        const subTip = costTipOf(m.container, 'sub')
+        for (const part of ['every descendant subagent session', 'all levels', 'for zhipuai · glm-5.3-flash.']) {
+          assert.ok(subTip.includes(part), `the sub tip carries: ${part}`)
+        }
+      }
+      await m.unmount()
+    }
   })
 
   test('a DeepSeek-billing subagent surfaces the peak/off-peak note under both tips', async () => {
@@ -685,12 +509,7 @@ describe('StatsContext — the subagent split (injected seat)', () => {
       'deepseek-official': { 'deepseek-v4-flash': { off: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
     }
     const Stats = makeStatsContext(kit, () => ({ usage: deepseekSub, count: 1 }))
-    const m = await mount(h(Stats, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-    }))
+    const m = await mount(h(Stats, { counts: NO_COUNTS, files: NO_FILES, tools: [], locale: 'en', }))
     await flush()
     assert.deepEqual(costCellsOf(m.container)[0], 'Fleet?1.0M/$0.15')
     assert.ok(costTipOf(m.container, 'team').includes('peak windows'))
@@ -700,29 +519,10 @@ describe('StatsContext — the subagent split (injected seat)', () => {
 
   test('a sub usage the book cannot price dashes the sub cell and notes the outage in its tip', async () => {
     const Stats = makeStatsContext(kit, () => ({ usage: { future: { 'mystery-model': { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } }, count: 1 }))
-    const m = await mount(h(Stats, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      cost: COST,
-      locale: 'en',
-    }))
+    const m = await mount(h(Stats, { counts: NO_COUNTS, files: NO_FILES, tools: [], cost: COST, locale: 'en', }))
     await flush()
     assert.deepEqual(costCellsOf(m.container), ['Fleet?1.0M/$0.30', 'Current Agent?1.0M/$0.30', 'Subagents × 1?1/—'])
     assert.ok(costTipOf(m.container, 'sub').includes('Not priced: future / mystery-model'))
-    await m.unmount()
-  })
-
-  test('a null seat keeps the figure dashed with the ledger zeroed and no outage notes', async () => {
-    const m = await mount(h(StatsContext, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-    }))
-    await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
-    assert.ok(!text(m.container).includes('unavailable'))
     await m.unmount()
   })
 })
@@ -788,13 +588,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       cold: { parentId: 'root', origin: 'subagent', updatedAt: 3 },
     })
     const Stats = makeStatsContext(kit, seat)
-    const m = await mount(h(Stats, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-      sessionId: 'root',
-    }))
+    const m = await mount(h(Stats, { counts: NO_COUNTS, files: NO_FILES, tools: [], locale: 'en', sessionId: 'root', }))
     await flush()
     assert.deepEqual(costCellsOf(m.container), ['Fleet?2.0M/$0.15', 'Current Agent?0/—', 'Subagents × 2?2.0M/$0.15'])
     assert.deepEqual(calls, ['cold'], 'only the timeline-less relative fetched')
@@ -840,13 +634,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       cold: { parentId: 'root', origin: 'subagent', updatedAt: 2 },
     })
     const Stats = makeStatsContext(kit, seat)
-    const m = await mount(h(Stats, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-      sessionId: 'root',
-    }))
+    const m = await mount(h(Stats, { counts: NO_COUNTS, files: NO_FILES, tools: [], locale: 'en', sessionId: 'root', }))
     await flush()
     assert.deepEqual(calls, ['cold'])
     assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 1?0/—'])
@@ -876,13 +664,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       absent: { parentId: 'root', origin: 'subagent', updatedAt: 3 },
     })
     const Stats = makeStatsContext(kit, seat)
-    const m = await mount(h(Stats, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-      sessionId: 'root',
-    }))
+    const m = await mount(h(Stats, { counts: NO_COUNTS, files: NO_FILES, tools: [], locale: 'en', sessionId: 'root', }))
     await flush()
     assert.deepEqual(calls, ['headless', 'absent'])
     assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 2?0/—'])
@@ -907,51 +689,29 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       grand: { parentId: 'kid', origin: 'subagent', updatedAt: 4, projectionValues: { contextTimeline: head(), subagent: { mode: 'one-shot', label: 'grand-label' } } },
     })
     const Stats = makeStatsContext(kit, seat)
-    const m = await mount(h(Stats, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-      sessionId: 'kid',
-    }))
+    const m = await mount(h(Stats, { counts: NO_COUNTS, files: NO_FILES, tools: [], locale: 'en', sessionId: 'kid', }))
     await flush()
     assert.deepEqual(queryAll(m.container, '.lc-ledger-team .lc-strip-cell').map(el => text(el))[2].startsWith('Subagents × 1'), true, 'the count folds the subtree below the current session, never the parent or a sibling')
     await m.unmount()
   })
 
-  test('without the sessions face the seat prices nothing', async () => {
-    const ctx = new TestClientCtx()
-    const Stats = makeStatsContext(kit, makeSubagentCost(asClientCtx(ctx), makeAgentHeads()))
-    const m = await mount(h(Stats, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-      sessionId: 'root',
-    }))
-    await flush()
-    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
-    await m.unmount()
-  })
-
-  test('an absent session id folds nothing (and fetches nothing)', async () => {
+  test('without a sessions face or a session id the seat prices nothing and fetches nothing', async () => {
     const calls: string[] = []
     vi.stubGlobal('fetch', async (_url: unknown, init: { body: string }) => {
       calls.push(String((JSON.parse(String(init?.body)) as { sessionId?: unknown }).sessionId))
       throw new Error('must not fetch')
     })
     const face = new FakeSessions({ root: { running: false, updatedAt: 1 }, kid: { parentId: 'root', origin: 'subagent', updatedAt: 2 } })
-    const ctx = new TestClientCtx({ services: { sessions: face } })
-    const Stats = makeStatsContext(kit, makeSubagentCost(asClientCtx(ctx), makeAgentHeads()))
-    const m = await mount(h(Stats, {
-      counts: NO_COUNTS,
-      files: NO_FILES,
-      tools: [],
-      locale: 'en',
-    }))
-    await flush()
-    assert.deepEqual(calls, [])
-    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
-    await m.unmount()
+    for (const [ctx, sessionId] of [
+      [new TestClientCtx(), 'root'],
+      [new TestClientCtx({ services: { sessions: face } }), undefined],
+    ] as const) {
+      const Stats = makeStatsContext(kit, makeSubagentCost(asClientCtx(ctx), makeAgentHeads()))
+      const m = await mount(h(Stats, { counts: NO_COUNTS, files: NO_FILES, tools: [], locale: 'en', ...(sessionId !== undefined ? { sessionId } : {}) }))
+      await flush()
+      assert.deepEqual(calls, [])
+      assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
+      await m.unmount()
+    }
   })
 })

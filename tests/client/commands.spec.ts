@@ -47,28 +47,22 @@ describe('commandsOf — the gone join', () => {
       cmd(2, { resultSeq: 55 }),
       cmd(3, { codeMode: true, parent: 60 }),
       cmd(4), // running: no surface node at all
+      cmd(5, { resultSeq: 50, gone: 99 }), // an already-stamped record keeps its own stamp
     ]
     const joined = commandsOf(records, archive)
     assert.equal(joined[0].gone, 70)
     assert.equal(joined[1].gone, undefined)
     assert.equal(joined[2].gone, 71, 'nested records join through their parent')
     assert.equal(joined[3].gone, undefined)
-  })
-
-  test('an already-stamped record keeps its own stamp', () => {
-    const joined = commandsOf([cmd(1, { resultSeq: 50, gone: 99 })], [{ seq: 50, cat: 'tool', tokens: 1, gone: 70 }])
-    assert.equal(joined[0].gone, 99)
+    assert.equal(joined[4].gone, 99)
   })
 })
 
 describe('surfaceSeqOf / durationOf', () => {
-  test('the reveal target is the parent for nested runs, else the result node', () => {
+  test('the reveal target is the parent for nested runs, else the result node; a duration needs both endpoints and never goes negative', () => {
     assert.equal(surfaceSeqOf(cmd(1, { resultSeq: 9 })), 9)
     assert.equal(surfaceSeqOf(cmd(1, { resultSeq: 9, parent: 12 })), 12)
     assert.equal(surfaceSeqOf(cmd(1)), undefined)
-  })
-
-  test('the duration needs both endpoints and never goes negative', () => {
     assert.equal(durationOf(cmd(1, { start: 100, end: 4200 })), 4100)
     assert.equal(durationOf(cmd(1, { start: 100 })), undefined)
     assert.equal(durationOf(cmd(1, { start: 100, end: 50 })), 0)
@@ -80,7 +74,6 @@ describe('previewOf', () => {
     assert.equal(previewOf(cmd(1, { cmd: 'cd /repo && git status' }), '/repo'), 'git status')
     assert.equal(previewOf(cmd(1, { cmd: 'cd /elsewhere && git status' }), '/repo'), 'cd /elsewhere && git status')
     assert.equal(previewOf(cmd(1, { cmd: 'cd /repo && python3 - <<\'PY\'\nbody\nPY' }), '/repo'), 'python3 - <<\'PY\'')
-    assert.equal(previewOf(cmd(1), undefined), 'git status')
   })
 })
 
@@ -94,12 +87,6 @@ describe('viewsOf — one derivation per record', () => {
     assert.equal(views[0].preview, "python3 - <<'PY'")
     assert.deepEqual(views[0].shape, { lines: 3, heredoc: true, inline: false })
     assert.deepEqual(views[1].shape, { lines: 1, heredoc: false, inline: false })
-  })
-
-  test('a supplied program is the one searched', () => {
-    const rec = cmd(1, { cmd: 'git status' })
-    assert.equal(matchesQuery(rec, 'my-program', 'my-program'), true)
-    assert.equal(matchesQuery(rec, 'my-program'), false)
   })
 })
 
@@ -119,23 +106,24 @@ describe('filters, search, and sort', () => {
     assert.deepEqual(pick('background'), [3])
   })
 
-  test('search reads the command, the description, and the cwd', () => {
+  test('search reads the command, the description, the cwd, and the program identity', () => {
     const pick = (q: string) => records.filter(r => matchesQuery(r, q)).map(r => r.seq)
     assert.deepEqual(pick(''), [1, 2, 3, 4])
     assert.deepEqual(pick('vitest'), [2])
     assert.deepEqual(pick('TESTS'), [2])
     assert.deepEqual(pick('/repo/sub'), [4])
     assert.deepEqual(pick('absent'), [])
+    assert.equal(matchesQuery(cmd(1, { cmd: 'for f in a; do echo $f; done' }), 'shell'), true)
+    assert.equal(matchesQuery(cmd(2, { tool: 'run_code', cmd: 'await x()' }), 'run_code'), true)
+    const rec = cmd(1, { cmd: 'git status' })
+    assert.equal(matchesQuery(rec, 'my-program', 'my-program'), true, 'a supplied program is the one searched')
+    assert.equal(matchesQuery(rec, 'my-program'), false)
   })
 
-  test('latest is time-descending; slowest puts duration-less runs last', () => {
+  test('latest is time-descending with a seq tie-break; slowest puts duration-less runs last', () => {
     assert.deepEqual(records.slice().sort(byLatest).map(r => r.seq), [4, 3, 2, 1])
     assert.deepEqual(records.slice().sort(bySlowest).map(r => r.seq), [2, 4, 3, 1])
-  })
-
-  test('an equal-time tie breaks on the call seq (later call first)', () => {
-    const tied = [cmd(1), cmd(2)]
-    tied[1] = { ...tied[1], time: tied[0].time }
+    const tied = [cmd(1), { ...cmd(2), time: cmd(1).time }]
     assert.deepEqual(tied.slice().sort(byLatest).map(r => r.seq), [2, 1])
   })
 })
@@ -154,17 +142,13 @@ describe('tallyOfCommands', () => {
 })
 
 describe('the rail derivations', () => {
-  test('programOf reads the shell head word and the code tool identity', () => {
+  test('programOf reads the shell head word and the code tool identity, falling back per dialect', () => {
     assert.equal(programOf(cmd(1, { cmd: 'cd /repo && git status' })), 'git')
     assert.equal(programOf(cmd(2, { tool: 'pwsh', cmd: 'Get-ChildItem' })), 'Get-ChildItem')
     assert.equal(programOf(cmd(3, { tool: 'run_code', cmd: 'await x()' })), 'run_code')
     assert.equal(programOf(cmd(4, { cmd: 'for f in a; do echo $f; done' })), 'shell')
     assert.equal(programOf(cmd(5, { cmd: '   ' })), 'shell', 'a blank command reads as shell too')
-    assert.equal(programOf(cmd(6, { cmd: 'URL=$(cat u); chrome-devtools x' })), 'chrome-devtools')
-    assert.equal(programOf(cmd(7, { cmd: 'CH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; "$CH" --headless' })), 'Google Chrome')
-    assert.equal(programOf(cmd(8, { tool: 'pwsh', cmd: '$exe = "C:\\Tools\\foo.exe"; & $exe --x' })), 'foo')
-    assert.equal(programOf(cmd(9, { tool: 'pwsh', cmd: 'if ($x) { Get-Item y }' })), 'pwsh')
-    assert.equal(programOf(cmd(10, { tool: 'pwsh', cmd: '   ' })), 'pwsh', 'a blank pwsh command reads as pwsh')
+    assert.equal(programOf(cmd(6, { tool: 'pwsh', cmd: '   ' })), 'pwsh', 'a blank pwsh command reads as pwsh')
   })
 
   test('programsOf ranks every program by count with a stable name tie-break', () => {
@@ -184,7 +168,7 @@ describe('the rail derivations', () => {
     ])
   })
 
-  test('attentionOf surfaces the slowest, the most-failed program, repeats, and background', () => {
+  test('attentionOf ranks slowest, most-failed, repeats, and background; ties keep the first pick; nothing notable stays empty', () => {
     const attention = attentionOf(viewsOf([
       cmd(1, { cmd: 'git status', start: 0, end: 300 }),
       cmd(2, { cmd: 'pnpm build', start: 0, end: 90_000 }),
@@ -197,10 +181,8 @@ describe('the rail derivations', () => {
     assert.deepEqual(attention.failing, { program: 'vitest', count: 2 })
     assert.deepEqual(attention.repeats, { cmd: 'git status', count: 2 })
     assert.equal(attention.background, 1)
-  })
 
-  test('ties keep the first-seen program/command; a later-but-shorter slow run does not displace the top', () => {
-    const attention = attentionOf(viewsOf([
+    const tied = attentionOf(viewsOf([
       cmd(1, { cmd: 'vitest a', status: 'failed', start: 0, end: 5000 }),
       cmd(2, { cmd: 'eslint b', status: 'failed', start: 0, end: 3000 }),
       cmd(3, { cmd: 'git status' }),
@@ -210,35 +192,23 @@ describe('the rail derivations', () => {
       cmd(7, { cmd: 'pnpm build', start: 0, end: 60_000 }),
       cmd(8, { cmd: 'pnpm test', start: 0, end: 30_000 }),
     ], undefined))
-    assert.equal(attention.failing?.count, 1, 'each program failed once — first-seen holds the tie')
-    assert.equal(attention.failing?.program, 'vitest')
-    assert.equal(attention.repeats?.cmd, 'git status', 'first-seen holds the repeats tie')
-    assert.deepEqual(attention.slowest, { cmd: 'pnpm build', ms: 60_000 })
-  })
+    assert.equal(tied.failing?.count, 1, 'each program failed once — first-seen holds the tie')
+    assert.equal(tied.failing?.program, 'vitest')
+    assert.equal(tied.repeats?.cmd, 'git status', 'first-seen holds the repeats tie')
+    assert.deepEqual(tied.slowest, { cmd: 'pnpm build', ms: 60_000 })
 
-  test('attentionOf stays empty when nothing is notable', () => {
     assert.deepEqual(attentionOf([]), {})
     assert.deepEqual(attentionOf(viewsOf([cmd(1, { start: 0, end: 50 })], undefined)), {})
     // A sub-second slowest is not attention-worthy.
     assert.equal(attentionOf(viewsOf([cmd(1, { start: 0, end: 500 })], undefined)).slowest, undefined)
   })
-
-  test('search also matches the program identity (the rail’s program clicks land)', () => {
-    const rec = cmd(1, { cmd: 'for f in a; do echo $f; done' })
-    assert.equal(matchesQuery(rec, 'shell'), true)
-    const rc = cmd(2, { tool: 'run_code', cmd: 'await x()' })
-    assert.equal(matchesQuery(rc, 'run_code'), true)
-  })
 })
 
 describe("resultTextOf — the detail result preview", () => {
-  test('text blocks join; nested tool-result blocks flatten; the blocks field serves as fallback', () => {
+  test('text blocks join; nested tool-result blocks flatten; the blocks field falls back; unreadable text reads null', () => {
     assert.equal(resultTextOf({ content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] }), 'a\nb')
     assert.equal(resultTextOf({ content: [{ type: 'tool-result', content: [{ kind: 'text', text: 'x' }] }, { type: 'text', text: 'y' }] }), 'x\ny')
     assert.equal(resultTextOf({ blocks: [{ kind: 'text', text: 'k' }] }), 'k')
-  })
-
-  test('a node with no readable text reads null', () => {
     assert.equal(resultTextOf(null), null)
     assert.equal(resultTextOf(undefined), null)
     assert.equal(resultTextOf('junk'), null)

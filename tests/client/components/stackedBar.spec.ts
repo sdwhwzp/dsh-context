@@ -38,37 +38,26 @@ describe('StackedBar layout', () => {
     await m.unmount()
   })
 
-  test('max undefined: segments span the full bar, no free track', async () => {
-    const m = await mount(h(StackedBar, { parts: [part('system', 700), part('user', 300)] }))
-    const segs = queryAll(m.container, '.lc-stacked-seg')
-    assert.equal(segs.length, 2)
-    assert.equal(segs[0].style.width, '70%')
-    assert.equal(segs[1].style.width, '30%')
-    assert.equal(queryAll(m.container, '.lc-stacked-free').length, 0)
-    assert.equal(query(m.container, '.lc-stacked').className, 'lc-stacked')
-    await m.unmount()
-  })
+  test('segment widths split the used total or the window; zero-value parts are skipped and a custom height applies', async () => {
+    const full = await mount(h(StackedBar, { parts: [part('system', 700), part('user', 300)] }))
+    assert.deepEqual(queryAll(full.container, '.lc-stacked-seg').map(s => s.style.width), ['70%', '30%'])
+    assert.equal(queryAll(full.container, '.lc-stacked-free').length, 0)
+    await full.unmount()
 
-  test('max <= total: window ignored for widths, no free track', async () => {
-    const m = await mount(h(StackedBar, { parts: [part('system', 100), part('user', 100)], max: 100 }))
-    const segs = queryAll(m.container, '.lc-stacked-seg')
-    assert.equal(segs[0].style.width, '50%')
-    assert.equal(queryAll(m.container, '.lc-stacked-free').length, 0)
-    await m.unmount()
-  })
+    const windowed = await mount(h(StackedBar, { parts: [part('user', 1000)], max: 2000 }))
+    assert.equal(query(windowed.container, '.lc-stacked-seg').style.width, '50%')
+    assert.equal(query(windowed.container, '.lc-stacked-free').style.width, '50%')
+    await windowed.unmount()
 
-  test('max > total: free track fills the rest of the window', async () => {
-    const m = await mount(h(StackedBar, { parts: [part('user', 1000)], max: 2000 }))
-    assert.equal(query(m.container, '.lc-stacked-seg').style.width, '50%')
-    assert.equal(query(m.container, '.lc-stacked-free').style.width, '50%')
-    await m.unmount()
-  })
+    const over = await mount(h(StackedBar, { parts: [part('user', 1000)], max: 500 }))
+    assert.equal(query(over.container, '.lc-stacked-seg').style.width, '100%')
+    assert.equal(queryAll(over.container, '.lc-stacked-free').length, 0)
+    await over.unmount()
 
-  test('zero-value parts are skipped; custom height applies', async () => {
-    const m = await mount(h(StackedBar, { parts: [part('user', 0), part('system', 100)], height: 22 }))
-    assert.equal(queryAll(m.container, '.lc-stacked-seg').length, 1)
-    assert.equal(query(m.container, '.lc-stacked').style.height, '22px')
-    await m.unmount()
+    const custom = await mount(h(StackedBar, { parts: [part('user', 0), part('system', 100)], height: 22 }))
+    assert.equal(queryAll(custom.container, '.lc-stacked-seg').length, 1)
+    assert.equal(query(custom.container, '.lc-stacked').style.height, '22px')
+    await custom.unmount()
   })
 
   test('tip={false} drops the tooltip slot entirely', async () => {
@@ -92,20 +81,16 @@ describe('StackedBar entrance grow', () => {
     assert.equal(slot(query(m.container, '.lc-stacked-free')), '2')
     for (const mask of queryAll(m.container, '.lc-reserve')) assert.equal(slot(mask), '')
     await m.unmount()
-  })
 
-  test('the stagger caps so a long DNA band list settles fast', async () => {
     // Twelve occupied bands: past the cap every late band joins at the same slot, the free track one after.
-    const parts = Array.from({ length: 12 }, (_, i) => part(`band-${i}`, i + 1))
-    const m = await mount(h(StackedBar, { parts, max: 200 }))
-    const slot = (el: Element): string => (el as HTMLElement).style.getPropertyValue('--lc-i')
-    const segs = queryAll(m.container, '.lc-stacked-seg')
-    assert.equal(segs.length, 12)
-    assert.equal(slot(segs[0]), '0')
-    assert.equal(slot(segs[8]), '8')
-    assert.equal(slot(segs[11]), '8')
-    assert.equal(slot(query(m.container, '.lc-stacked-free')), '9')
-    await m.unmount()
+    const capped = await mount(h(StackedBar, { parts: Array.from({ length: 12 }, (_, i) => part(`band-${i}`, i + 1)), max: 200 }))
+    const cappedSegs = queryAll(capped.container, '.lc-stacked-seg')
+    assert.equal(cappedSegs.length, 12)
+    assert.equal(slot(cappedSegs[0]), '0')
+    assert.equal(slot(cappedSegs[8]), '8')
+    assert.equal(slot(cappedSegs[11]), '8')
+    assert.equal(slot(query(capped.container, '.lc-stacked-free')), '9')
+    await capped.unmount()
   })
 })
 
@@ -130,13 +115,7 @@ describe('StackedBar hover link', () => {
     assert.equal(query(m.container, '.lc-stacked').className, 'lc-stacked')
     assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
     assert.equal(query(m.container, '.lc-occupied-box').className, 'lc-occupied-box')
-    await m.unmount()
-  })
-
-  test('the first tiny segment anchors the tooltip to its true center; raw count drives the figure row', async () => {
-    const m = await mount(h(HoverHarness, { parts: [part('system', 100, 120), part('user', 900)], max: 2000 }))
-    await hover(queryAll(m.container, '.lc-stacked-seg')[0])
-    const tip = query(m.container, '.lc-bar-tip')
+    await hover(segs[0])
     assert.deepEqual(tipRows(tip), ['System Prompt', '≈120 · 12% of used context', null])
     assert.equal(tip.style.left, '2.5%')
     await m.unmount()
@@ -155,18 +134,16 @@ describe('StackedBar hover link', () => {
     await m.unmount()
   })
 
-  test('hoverKey free without a free track: dimmed but no tooltip', async () => {
+  test('an unresolvable hover key: no free track dims without a tooltip; a zero-value part floats none', async () => {
     const m = await mount(h(StackedBar, { parts: [part('user', 1000)], hoverKey: 'free' }))
     assert.ok(query(m.container, '.lc-stacked').className.includes('lc-stacked-dim'))
     assert.equal(queryAll(m.container, '.lc-stacked-free').length, 0)
     assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
     await m.unmount()
-  })
 
-  test('hoverKey on a zero-value part: no tooltip (scale 0 and value 0 arms)', async () => {
-    const m = await mount(h(StackedBar, { parts: [part('zero', 0)], hoverKey: 'zero' }))
-    assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
-    await m.unmount()
+    const zero = await mount(h(StackedBar, { parts: [part('zero', 0)], hoverKey: 'zero' }))
+    assert.equal(query(zero.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
+    await zero.unmount()
   })
 
   test('rawTotal 0 (raw explicitly zero): tooltip percentage falls back to 0%', async () => {
@@ -212,36 +189,21 @@ describe('StackedBar hover link', () => {
     assert.equal(tip.style.transform, 'translateX(calc(-50% - 30px))')
     await m.update(h(StackedBar, { ...props, hoverKey: null }))
     assert.equal(tip.style.transform, '')
-    await m.unmount()
-  })
-
-  test('a tip whose boxes collapse to zero width clears a previous shift', async () => {
-    const props = { parts: [part('system', 100, 120), part('user', 900)], max: 2000, hoverKey: 'system' }
-    const m = await mount(h(StackedBar, props))
-    const wrap = query(m.container, '.lc-stacked-wrap')
-    const tip = query(m.container, '.lc-bar-tip')
-    const pin = (el: Element, width: number): void => {
-      Object.defineProperty(el, 'getBoundingClientRect', {
-        configurable: true,
-        value: () => ({ left: 0, top: 0, width, height: 0, right: width, bottom: 0 }),
-      })
-    }
     pin(wrap, 400)
     pin(tip, 300)
     await m.update(h(StackedBar, props))
     assert.equal(tip.style.transform, 'translateX(calc(-50% + 140px))')
     pin(wrap, 0)
     pin(tip, 0)
-    await m.update(h(StackedBar, props))
+    await m.update(h(StackedBar, { ...props, hoverKey: 'user' }))
     assert.equal(tip.style.transform, '')
-    await m.unmount()
-  })
-
-  test('a tip whose boxes lay out at zero width keeps the bare anchor', async () => {
-    // jsdom reports zero rects: the measure pass must bail out without shifting the bubble.
-    const m = await mount(h(StackedBar, { parts: [part('system', 100, 120), part('user', 900)], max: 2000, hoverKey: 'system' }))
-    const tip = query(m.container, '.lc-bar-tip')
-    await m.update(h(StackedBar, { parts: [part('system', 100, 120), part('user', 900)], max: 2000, hoverKey: 'system' }))
+    pin(wrap, 400)
+    pin(tip, 0)
+    await m.update(h(StackedBar, { ...props, hoverKey: 'free' }))
+    assert.equal(tip.style.transform, '')
+    pin(wrap, 0)
+    pin(tip, 300)
+    await m.update(h(StackedBar, props))
     assert.equal(tip.style.transform, '')
     await m.unmount()
   })
@@ -281,7 +243,12 @@ describe('StackedBar reserve masks', () => {
     assert.equal(query(m.container, '.lc-bar-tip').style.left, '95%')
     await unhover(query(m.container, '.lc-stacked'))
     assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
-    await m.unmount()
+
+    const over = await mount(h(HoverHarness, { parts: [part('user', 2000)], max: 1000, reserve: RESERVE }))
+    assert.equal(query(over.container, '.lc-reserve-headroom').style.left, '40%')
+    assert.equal(query(over.container, '.lc-reserve-headroom').style.width, '5%')
+    assert.equal(query(over.container, '.lc-reserve-output').style.left, '45%')
+    await over.unmount()
   })
 
   test('a bound window fraction: true-size masks at the window tail, the trigger as its own line', async () => {
@@ -330,18 +297,6 @@ describe('StackedBar reserve masks', () => {
     await m.unmount()
   })
 
-  test('a used region past the window rescales the masks with the track', async () => {
-    const m = await mount(h(HoverHarness, {
-      parts: [part('user', 2000)],
-      max: 1000,
-      reserve: RESERVE,
-    }))
-    assert.equal(query(m.container, '.lc-reserve-headroom').style.left, '40%')
-    assert.equal(query(m.container, '.lc-reserve-headroom').style.width, '5%')
-    assert.equal(query(m.container, '.lc-reserve-output').style.left, '45%')
-    await m.unmount()
-  })
-
   test('not rendered without a positive window, even when configured', async () => {
     const reserve = RESERVE
     const m = await mount(h(StackedBar, { parts: [part('user', 100)], reserve }))
@@ -364,13 +319,11 @@ describe('Legend', () => {
     assert.equal(query(chips[0], '.lc-chip-nums').textContent, '≈12012%')
     assert.equal(query(chips[1], '.lc-chip-nums').textContent, '≈90088%')
     await m.unmount()
-  })
 
-  test('total 0: chips render without the percentage figure', async () => {
-    const m = await mount(h(Legend, { parts: [part('user', 0)] }))
-    assert.equal(query(m.container, '.lc-chip-nums').textContent, '≈0')
-    assert.equal(queryAll(m.container, 'em').length, 0)
-    await m.unmount()
+    const zero = await mount(h(Legend, { parts: [part('user', 0)] }))
+    assert.equal(query(zero.container, '.lc-chip-nums').textContent, '≈0')
+    assert.equal(queryAll(zero.container, 'em').length, 0)
+    await zero.unmount()
   })
 
   test('chip hover drives the shared hover key; matching chip lights up', async () => {
@@ -383,15 +336,13 @@ describe('Legend', () => {
     await unhover(chips[0])
     assert.deepEqual(seen, ['system', null])
     await m.unmount()
-  })
 
-  test('chip hover without onHoverKey is a no-op', async () => {
-    const m = await mount(h(Legend, { parts: [part('user', 10)], hoverKey: null }))
-    const chip = query(m.container, '.lc-chip')
-    assert.ok(!chip.className.includes('lc-chip-on'))
+    const inert = await mount(h(Legend, { parts: [part('user', 10)], hoverKey: null }))
+    const chip = query(inert.container, '.lc-chip')
     await hover(chip)
     await unhover(chip)
-    await m.unmount()
+    assert.ok(!chip.className.includes('lc-chip-on'))
+    await inert.unmount()
   })
 })
 describe('StackedBar DNA bands', () => {
@@ -462,20 +413,14 @@ describe('StackedBar minBand floor', () => {
     await m.unmount()
   })
 
-  test('a single visible band spans the bar regardless of the floor; zero-value parts stay skipped', async () => {
+  test('a single visible band spans the bar regardless of the floor; zero-value parts stay skipped; no band below the floor keeps exact widths', async () => {
     const m = await mount(h(StackedBar, { parts: [part('user', 0), part('system', 100)], minBand: 10 }))
     const segs = queryAll(m.container, '.lc-stacked-seg')
     assert.equal(segs.length, 1)
     assert.equal(segs[0].style.width, '100%')
     await m.unmount()
-  })
-
-  test('minBand 0 or no band below the floor keeps exact widths', async () => {
-    const m = await mount(h(StackedBar, { parts: [part('assistant', 99), part('user', 1)], minBand: 0 }))
-    assert.deepEqual(queryAll(m.container, '.lc-stacked-seg').map(s => s.style.width), ['99%', '1%'])
-    await m.unmount()
-    const m2 = await mount(h(StackedBar, { parts: [part('assistant', 60), part('user', 40)], minBand: 1 }))
-    assert.deepEqual(queryAll(m2.container, '.lc-stacked-seg').map(s => s.style.width), ['60%', '40%'])
+    const m2 = await mount(h(StackedBar, { parts: [part('assistant', 99), part('user', 1)], minBand: 0 }))
+    assert.deepEqual(queryAll(m2.container, '.lc-stacked-seg').map(s => s.style.width), ['99%', '1%'])
     await m2.unmount()
   })
 

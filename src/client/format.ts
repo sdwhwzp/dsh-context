@@ -32,6 +32,23 @@ export function fmtTime(t: number): string {
   return TIME_FMT.format(d)
 }
 
+const DATE_TIME_FMT = new Intl.DateTimeFormat('en-GB', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour12: false,
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+})
+
+/** Full local timestamp for a message detail; same dash-on-invalid contract as fmtTime. */
+export function fmtDateTime(t: number): string {
+  const d = new Date(t)
+  if (isNaN(d.getTime())) return '—'
+  return DATE_TIME_FMT.format(d)
+}
+
 /** Share of a whole: '<0.1%' for non-zero crumbs a 0.1%-precision figure would erase; shares cap at 100%. */
 export function fmtShare(part: number, total: number): string {
   if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0) return '—'

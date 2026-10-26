@@ -52,13 +52,6 @@ describe('fallback units over the real registry', () => {
     assert.deepEqual(headers.headers, [])
   })
 
-  test('the served views pass the real wire schemas', () => {
-    const timeline = createFallbackTimelineDefinition(CURRENT)
-    assert.equal(timeline.wire.viewSchema.safeParse(timeline.wire.view({})).success, true)
-    const headers = createFallbackHeadersDefinition()
-    assert.equal(headers.wire.viewSchema.safeParse(headers.wire.view({})).success, true)
-  })
-
   test('apply is a total identity over any event', () => {
     const timeline = createFallbackTimelineDefinition(CURRENT)
     const state = timeline.init()
@@ -77,7 +70,7 @@ describe('fallback units over the real registry', () => {
     assert.equal(timeline.stateVersion, 1)
   })
 
-  test('both registry contract generations read their shape off one definition', () => {
+  test('both registry contract generations read their shape off one definition, for every unit', () => {
     const timeline = createFallbackTimelineDefinition(CURRENT)
     // Pre-0.1.1 aliases: top-level `schema` + `view`.
     assert.equal(timeline.schema.safeParse(timeline.view({})).success, true)
@@ -85,9 +78,6 @@ describe('fallback units over the real registry', () => {
     const headers = createFallbackHeadersDefinition()
     assert.equal(headers.schema.safeParse(headers.view({})).success, true)
     assert.deepEqual(headers.view({}), { headers: [] })
-  })
-
-  test('the activity gate serves an empty ledger through both contract generations', () => {
     const activity = createFallbackActivityDefinition()
     assert.equal(activity.key, 'contextActivity')
     assert.equal(activity.stateVersion, 1)

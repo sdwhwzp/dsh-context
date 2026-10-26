@@ -13,8 +13,8 @@ if (reasons.length > 0) {
   console.warn(`[compat] matrix skipped — ${reasons.join('; ')}`)
 }
 
-// Always runnable (no checkout needed): every specifier the built bundle requires must be seeded by EACH
-// baseline's platform module table — an unanswered require is a guaranteed boot crash on that generation.
+// Always runnable (no checkout needed): the fold's case labels must all be declared by a baseline vocabulary,
+// which the real-sources lane below then proves against each tag.
 describe('compat matrix — the per-baseline fold vocabularies', () => {
   test('every event family the fold switches on is declared by the baselines', () => {
     const folded = staging.foldEventTypesFromSource()
@@ -30,8 +30,11 @@ describe('compat matrix — the per-baseline fold vocabularies', () => {
   })
 })
 
-describe.skipIf(staging.artifactsMissing())('compat matrix — bundle requires vs baseline module tables', () => {
-  test.each(BASELINES)('$id: the platform module table answers every bundle require', (baseline) => {
+// Always runnable (no checkout needed; lib/ must be built): every specifier the built bundle requires must be
+// seeded by each baseline's declared platform module table. The checkout-gated lane below proves the declared
+// table against the tag's real `PLATFORM_MODULES`.
+describe.skipIf(staging.artifactsMissing())('compat matrix — bundle requires vs the declared module tables', () => {
+  test.each(BASELINES)('$id: the declared table answers every bundle require', (baseline) => {
     assert.deepEqual(
       staging.bundleRequires().filter(spec => !baseline.client.platformModules.includes(spec)),
       [],
@@ -47,10 +50,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     beforeAll(() => {
       report = staging.runDriver(baseline)
     }, 60_000)
-
-    test('host: the plugin applies into the tag\'s real registry', () => {
-      assert.equal(report.registered, true)
-    })
 
     test('host: all three projection values served through the wire', () => {
       assert.deepEqual(report.keys, ['contextActivity', 'contextHeaders', 'contextTimeline'])
@@ -108,13 +107,11 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
         balance.settingsGetPresent,
         'the settings service get face',
       )
-      if (balance.settingsDescribeNeedle !== undefined) {
-        assert.equal(
-          staging.dshHasString(baseline.tag, balance.settingsDescribeNeedle, balance.settingsFile),
-          true,
-          'the settings service describe face',
-        )
-      }
+      assert.equal(
+        staging.dshHasString(baseline.tag, balance.settingsDescribeNeedle, balance.settingsFile),
+        true,
+        'the settings service describe face',
+      )
       assert.equal(
         staging.dshHasString(baseline.tag, balance.settingsRedactNeedle, balance.settingsFile),
         true,

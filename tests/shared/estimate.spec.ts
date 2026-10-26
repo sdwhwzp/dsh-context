@@ -18,27 +18,21 @@ describe('estimateSystemTokens', () => {
 })
 
 describe('estimateSystemContent', () => {
-  test('prices every text block with no per-block overhead', () => {
+  test('prices every text block with no per-block overhead; no content prices 0', () => {
     assert.equal(estimateSystemContent([{ type: 'text', text: 'abcdefgh' }]), 2 + 4)
     assert.equal(
       estimateSystemContent([{ type: 'text', text: 'abcd' }, { type: 'text', text: 'efgh' }]),
       2 + 4,
       'blocks are summed before the density divide, exactly like the harness estimator',
     )
-  })
-
-  test('empty content and non-array input price 0 (the harness reads "no system prompt")', () => {
     assert.equal(estimateSystemContent([]), 0)
     assert.equal(estimateSystemContent(undefined), 0)
     assert.equal(estimateSystemContent('text'), 0)
   })
 
-  test('a non-text block falls back to its JSON length', () => {
+  test('a non-text element falls back to its JSON length; hostile elements degrade instead of throwing', () => {
     const block = { type: 'image', attachment: { width: 1, height: 1 } }
     assert.equal(estimateSystemContent([block]), Math.ceil(JSON.stringify(block).length / 4) + 4)
-  })
-
-  test('hostile elements degrade instead of throwing', () => {
     assert.equal(estimateSystemContent([7]), Math.ceil('7'.length / 4) + 4)
     assert.equal(estimateSystemContent([undefined]), 0 + 4)
     assert.equal(estimateSystemContent([{ type: 'text', text: 42 }]), Math.ceil('{"type":"text","text":42}'.length / 4) + 4)

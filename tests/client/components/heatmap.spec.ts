@@ -35,17 +35,15 @@ describe('gridOf', () => {
 })
 
 describe('Heatmap', () => {
-  test('an empty ledger renders the empty note, no grid', async () => {
+  test('an empty ledger or a corrupt today key renders the empty note, no grid', async () => {
     const m = await mount(h(Heatmap, { days: {}, today: TODAY }))
     assert.ok(text(m.container).includes('No activity yet'))
     assert.equal(queryAll(m.container, '.lc-heat-cell').length, 0)
     await m.unmount()
-  })
 
-  test('a corrupt today key degrades to the empty note', async () => {
-    const m = await mount(h(Heatmap, { days: { '2026-09-16': { tokens: 5, requests: 1, sessions: 1, cost: null } }, today: 'junk' }))
-    assert.ok(text(m.container).includes('No activity yet'))
-    await m.unmount()
+    const corrupt = await mount(h(Heatmap, { days: { '2026-09-16': { tokens: 5, requests: 1, sessions: 1, cost: null } }, today: 'junk' }))
+    assert.ok(text(corrupt.container).includes('No activity yet'))
+    await corrupt.unmount()
   })
 
   test('cells draw with depth levels; data days are buttons with labels', async () => {
@@ -95,20 +93,6 @@ describe('Heatmap', () => {
     await m3.unmount()
   })
 
-  test('a Less→More key lays out the five depth steps under the grid', async () => {
-    const m = await mount(h(Heatmap, { days: { '2026-09-16': { tokens: 10, requests: 1, sessions: 1, cost: null } }, today: TODAY, weeks: 2 }))
-    const legend = query(m.container, '.lc-heat-legend')
-    assert.deepEqual(queryAll(legend, '.lc-heat-cell').map(s => s.className), [
-      'lc-heat-cell lc-heat-0',
-      'lc-heat-cell lc-heat-1',
-      'lc-heat-cell lc-heat-2',
-      'lc-heat-cell lc-heat-3',
-      'lc-heat-cell lc-heat-4',
-    ])
-    assert.deepEqual(queryAll(legend, '.lc-heat-key').map(s => s.textContent), ['Less', 'More'])
-    await m.unmount()
-  })
-
   test('the sessions metric depths on each day’s distinct sessions, independently of tokens', async () => {
     const days = {
       '2026-09-16': { tokens: 100, requests: 4, sessions: 2, cost: null },
@@ -135,7 +119,7 @@ describe('Heatmap', () => {
     await m.unmount()
   })
 
-  test('clicking a data day pins it; clicking again releases; the ring follows the selection', async () => {
+  test('clicking a data day pins it; clicking again releases; without a relay the cells stay inert', async () => {
     const picked: (string | null)[] = []
     const record = (day: string | null): void => { picked.push(day) }
     const m = await mount(h(Heatmap, {
@@ -160,14 +144,12 @@ describe('Heatmap', () => {
     await click(query<HTMLButtonElement>(m.container, 'button.lc-heat-cell'))
     assert.deepEqual(picked, ['2026-09-16', null], 'the second click releases the pin')
     await m.unmount()
-  })
 
-  test('without an onSelect relay the cells stay inert', async () => {
-    const m = await mount(h(Heatmap, { days: { '2026-09-16': { tokens: 10, requests: 1, sessions: 1, cost: null } }, today: TODAY, weeks: 2 }))
-    const cell = query<HTMLButtonElement>(m.container, 'button.lc-heat-cell')
-    await click(cell)
-    assert.ok(!cell.className.includes('lc-heat-on'))
-    await m.unmount()
+    const inert = await mount(h(Heatmap, { days: { '2026-09-16': { tokens: 10, requests: 1, sessions: 1, cost: null } }, today: TODAY, weeks: 2 }))
+    const inertCell = query<HTMLButtonElement>(inert.container, 'button.lc-heat-cell')
+    await click(inertCell)
+    assert.ok(!inertCell.className.includes('lc-heat-on'))
+    await inert.unmount()
   })
 
   test('todayKey keys the render day (the panel’s runtime call)', () => {

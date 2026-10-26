@@ -26,7 +26,7 @@ describe('rangeWindowOf', () => {
 })
 
 describe('dayRangeWindow', () => {
-  test('a picked range spans both of its days whole', () => {
+  test('a picked range spans both of its days whole, orders a backwards pair, and rejects a malformed key', () => {
     assert.deepEqual(dayRangeWindow({ from: '2026-09-10', to: '2026-09-12' }), {
       start: new Date(2026, 8, 10).getTime(),
       end: new Date(2026, 8, 12, 23, 59, 59, 999).getTime(),
@@ -35,15 +35,9 @@ describe('dayRangeWindow', () => {
       start: new Date(2026, 8, 10).getTime(),
       end: new Date(2026, 8, 10, 23, 59, 59, 999).getTime(),
     }, 'a one-day range counts that whole day')
-  })
-
-  test('a malformed key on either end yields no window at all', () => {
+    assert.deepEqual(dayRangeWindow({ from: '2026-09-12', to: '2026-09-10' }), dayRangeWindow({ from: '2026-09-10', to: '2026-09-12' }), 'a backwards pair is ordered on the way in')
     assert.equal(dayRangeWindow({ from: 'garbage', to: '2026-09-12' }), null)
     assert.equal(dayRangeWindow({ from: '2026-09-10', to: '2026-02-30' }), null)
-  })
-
-  test('a pair that arrives backwards is ordered on the way in', () => {
-    assert.deepEqual(dayRangeWindow({ from: '2026-09-12', to: '2026-09-10' }), dayRangeWindow({ from: '2026-09-10', to: '2026-09-12' }))
   })
 })
 
@@ -69,7 +63,7 @@ describe('filterRows', () => {
     }),
   ]
 
-  test('the range window admits a last prompt or a daily activity day', () => {
+  test('the range window admits a last prompt or a daily activity day; a picked range closes both ends', () => {
     assert.deepEqual(filterRows(rows, { scope: win('today', now), day: null, query: '' }).map(r => r.id), ['new', 'active'])
     assert.deepEqual(filterRows(rows, { scope: win('7d', now), day: null, query: '' }).map(r => r.id), ['new', 'active'])
     assert.deepEqual(filterRows(rows, { scope: win('all', now), day: null, query: '' }).map(r => r.id), ['old', 'new', 'active'])
@@ -79,18 +73,18 @@ describe('filterRows', () => {
     ]
     assert.deepEqual(filterRows(dRows, { scope: win('today', now), day: null, query: '' }).map(r => r.id), ['in'])
     assert.deepEqual(filterRows(dRows, { scope: win('7d', now), day: null, query: '' }).map(r => r.id), ['in', 'out'], 'last night is still inside the week')
-  })
-
-  test('a bounded window also admits a ledger-active session whose last prompt is older', () => {
-    const rows = [
-      rowOf({ id: 'long-run', updatedAt: midnight - 3 * 86_400_000, activity: { days: { '2026-09-11': { tokens: 5, requests: 1 } } } }),
-      rowOf({ id: 'prompt-only', updatedAt: now }),
-      rowOf({ id: 'stale', updatedAt: midnight - 3 * 86_400_000 }),
+    const scope = dayRangeWindow({ from: '2026-09-10', to: '2026-09-11' })
+    assert.ok(scope !== null)
+    const window = [
+      rowOf({ id: 'before', updatedAt: new Date(2026, 8, 9, 23, 59).getTime() }),
+      rowOf({ id: 'first', updatedAt: new Date(2026, 8, 10).getTime() }),
+      rowOf({ id: 'last', updatedAt: new Date(2026, 8, 11, 23, 59, 59, 999).getTime() }),
+      rowOf({ id: 'after', updatedAt: new Date(2026, 8, 12).getTime() }),
     ]
-    assert.deepEqual(filterRows(rows, { scope: win('today', now), day: null, query: '' }).map(r => r.id), ['long-run', 'prompt-only'])
+    assert.deepEqual(filterRows(window, { scope, day: null, query: '' }).map(r => r.id), ['first', 'last'])
   })
 
-  test('each daily tally is enough to admit a session to a bounded window', () => {
+  test('each daily tally is enough to admit a session to a bounded window, even with an older prompt', () => {
     const dayRow = (id: string, day: Record<string, unknown>) => rowOf({
       id,
       updatedAt: midnight - 3 * 86_400_000,
@@ -109,18 +103,6 @@ describe('filterRows', () => {
       filterRows(rows, { scope: win('today', now), day: null, query: '' }).map(r => r.id),
       ['tokens', 'requests', 'turns', 'toolCalls', 'wallMs', 'skills'],
     )
-  })
-
-  test('a picked range closes both ends of the window', () => {
-    const scope = dayRangeWindow({ from: '2026-09-10', to: '2026-09-11' })
-    assert.ok(scope !== null)
-    const window = [
-      rowOf({ id: 'before', updatedAt: new Date(2026, 8, 9, 23, 59).getTime() }),
-      rowOf({ id: 'first', updatedAt: new Date(2026, 8, 10).getTime() }),
-      rowOf({ id: 'last', updatedAt: new Date(2026, 8, 11, 23, 59, 59, 999).getTime() }),
-      rowOf({ id: 'after', updatedAt: new Date(2026, 8, 12).getTime() }),
-    ]
-    assert.deepEqual(filterRows(window, { scope, day: null, query: '' }).map(r => r.id), ['first', 'last'])
   })
 
   test('the day pin keeps only sessions contributing to that day', () => {
@@ -167,19 +149,13 @@ describe('sortRows', () => {
 describe('pageOf', () => {
   const rows = Array.from({ length: 50 }, (_, i) => `s${i}`)
 
-  test('a short list renders as one page holding everything', () => {
+  test('a short list renders as one page; a long one slices at the fixed size; an out-of-range request clamps', () => {
     assert.deepEqual(pageOf(['a', 'b'], 0), { items: ['a', 'b'], index: 0, count: 1 })
     assert.deepEqual(pageOf([], 0), { items: [], index: 0, count: 1 }, 'an empty list still renders one page')
-  })
-
-  test('pages slice the rows at the fixed size', () => {
     const first = pageOf(rows, 0)
     assert.equal(first.count, 5)
     assert.equal(first.items.length, 12)
     assert.deepEqual(pageOf(rows, 4), { items: rows.slice(48), index: 4, count: 5 }, 'the tail page holds the rest')
-  })
-
-  test('an out-of-range request clamps into the live range', () => {
     assert.equal(pageOf(rows, -1).index, 0, 'a negative request lands on the first page')
     assert.equal(pageOf(rows, 9).index, 4, 'a page that a shrink left out of range lands on the last')
   })
@@ -190,7 +166,7 @@ describe('relativeTime', () => {
     params === undefined ? key : `${key}:${String(params.n)}`
   const now = 10 * 86_400_000
 
-  test('steps through just-now, minutes, hours, days', () => {
+  test('steps through just-now, minutes, hours, days; future and invalid stamps read as just-now', () => {
     assert.equal(relativeTime(t, now, now), 'ov.time.now')
     assert.equal(relativeTime(t, now - 59_000, now), 'ov.time.now')
     assert.equal(relativeTime(t, now - 5 * 60_000, now), 'ov.time.m:5')
@@ -198,9 +174,6 @@ describe('relativeTime', () => {
     assert.equal(relativeTime(t, now - 3 * 3_600_000, now), 'ov.time.h:3')
     assert.equal(relativeTime(t, now - 23 * 3_600_000, now), 'ov.time.h:23')
     assert.equal(relativeTime(t, now - 9 * 86_400_000, now), 'ov.time.d:9')
-  })
-
-  test('future and invalid stamps read as just-now (clock skew is not an error)', () => {
     assert.equal(relativeTime(t, now + 60_000, now), 'ov.time.now')
     assert.equal(relativeTime(t, Number.NaN, now), 'ov.time.now')
   })
