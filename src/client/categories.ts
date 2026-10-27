@@ -65,7 +65,7 @@ export function officialParts(
   }))
 }
 
-/** Reproportion heuristic parts to a provider-anchored target: the heuristic supplies ratios, the provider the total. */
+/** Round cumulative heuristic shares so the integer parts preserve the rounded provider total. */
 export function anchoredParts(parts: PartsPart[], target: number | null): PartsPart[] {
   const sourced = parts.map(p => ({ ...p, raw: p.raw ?? p.value }))
   if (target === null || target <= 0) return sourced
@@ -73,8 +73,17 @@ export function anchoredParts(parts: PartsPart[], target: number | null): PartsP
   for (const p of sourced) total += p.raw
   if (total <= 0) return sourced
   if (total === target) return sourced.map(p => ({ ...p, value: p.raw }))
-  const scale = target / total
-  return sourced.map(p => ({ ...p, value: Math.round(p.raw * scale) }))
+  let cumulative = 0
+  let assigned = 0
+  return sourced.map((p, index) => {
+    cumulative += p.raw
+    const through = index === sourced.length - 1
+      ? Math.round(target)
+      : Math.min(Math.round(target), Math.round(cumulative / total * target))
+    const value = through - assigned
+    assigned = through
+    return { ...p, value }
+  })
 }
 
 /** The thinking slice reuses the retired output slice's hue. */

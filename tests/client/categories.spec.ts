@@ -64,6 +64,23 @@ describe('anchoredParts', () => {
     ])
   })
 
+  test('cumulative rounding keeps provider totals, category order and raw values', () => {
+    assert.deepEqual(anchoredParts([part(1), part(1), part(1)], 2).map(p => p.value), [1, 0, 1])
+    assert.deepEqual(anchoredParts([part(1), part(1), part(1)], 1).map(p => p.value), [0, 1, 0])
+    const large = anchoredParts([part(120385779766366), part(376133583020419)], 9007199254731386)
+    assert.equal(large.reduce((sum, p) => sum + p.value, 0), 9007199254731386)
+    assert.ok(large.every(p => Number.isSafeInteger(p.value) && p.value >= 0))
+    for (const weights of [[1, 1, 1], [3, 18, 6, 1, 35], [30, 10, 10, 200, 100]]) {
+      for (let target = 1; target <= 64; target++) {
+        const original = weights.map(value => part(value))
+        const scaled = anchoredParts(original, target)
+        assert.equal(scaled.reduce((sum, p) => sum + p.value, 0), target)
+        assert.ok(scaled.every(p => Number.isInteger(p.value) && p.value >= 0))
+        assert.deepEqual(original.map(p => p.value), weights)
+      }
+    }
+  })
+
   test('a target equal to the raw total rewrites value to raw; otherwise values scale by the raw ratios', () => {
     assert.deepEqual(anchoredParts([part(10, 60), part(90, 40)], 100).map(p => [p.value, p.raw]), [[60, 60], [40, 40]])
     assert.deepEqual(anchoredParts([part(0, 20), part(0, 50)], 40).map(p => p.value), [11, 29])
