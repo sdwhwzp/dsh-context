@@ -117,7 +117,7 @@ describe('StatsTiming — the generation split', () => {
     const m = await mount(h(StatsTiming, { timing: SPLIT }))
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 6)
     assert.deepEqual(rowOf(m.container, 0), { pct: '16.7%', label: 'TTFT', count: '1m40s · 10 calls', dim: false })
-    assert.deepEqual(rowOf(m.container, 1), { pct: '15.0%', label: 'Thinking', count: '1m30s', dim: false })
+    assert.deepEqual(rowOf(m.container, 1), { pct: '15.0%', label: 'Reasoning', count: '1m30s', dim: false })
     assert.deepEqual(rowOf(m.container, 2), { pct: '5.0%', label: 'Answers', count: '30.0s', dim: false })
     assert.deepEqual(rowOf(m.container, 3), { pct: '3.3%', label: 'Tool args', count: '20.0s', dim: false })
     assert.deepEqual(rowOf(m.container, 4), { pct: '50.0%', label: 'Tool runs', count: '5m0s · 25 runs', dim: false })
@@ -140,7 +140,7 @@ describe('StatsTiming — the generation split', () => {
     await borrowed.unmount()
 
     const folded = await mount(h(StatsTiming, { timing: { ...SPLIT, reasoningBlocks: 14, textBlocks: 5, toolArgBlocks: 26 } }))
-    assert.deepEqual(rowOf(folded.container, 1), { pct: '15.0%', label: 'Thinking', count: '1m30s · 14 blocks', dim: false })
+    assert.deepEqual(rowOf(folded.container, 1), { pct: '15.0%', label: 'Reasoning', count: '1m30s · 14 blocks', dim: false })
     assert.deepEqual(rowOf(folded.container, 2), { pct: '5.0%', label: 'Answers', count: '30.0s · 5 blocks', dim: false })
     assert.deepEqual(rowOf(folded.container, 3), { pct: '3.3%', label: 'Tool args', count: '20.0s · 26 blocks', dim: false })
     await folded.unmount()
@@ -156,7 +156,7 @@ describe('StatsTiming — the generation split', () => {
     // The buckets claim 500s inside a 140s window: the ring caps them, every row keeps its own figure.
     const timing: TimingTotals = { ...SPLIT, reasoningMs: 400_000, textMs: 100_000, toolArgMs: 0 }
     const m = await mount(h(StatsTiming, { timing }))
-    assert.deepEqual(rowOf(m.container, 1), { pct: '66.7%', label: 'Thinking', count: '6m40s', dim: false })
+    assert.deepEqual(rowOf(m.container, 1), { pct: '66.7%', label: 'Reasoning', count: '6m40s', dim: false })
     assert.deepEqual(rowOf(m.container, 2), { pct: '16.7%', label: 'Answers', count: '1m40s', dim: false })
     assert.equal(rowOf(m.container, 3).label, 'Tool runs')
     await m.unmount()

@@ -27,15 +27,14 @@ describe('StatsTokens', () => {
     const m = await mount(h(StatsTokens, { usage: USAGE, current: CURRENT, breakdown: null }))
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '450')
     assert.equal(query(m.container, '.lc-donut-center span').textContent, 'Total')
-    // Estimated composition (sum 1000) scales to billed input 400; the output joins the assistant remainder, so rows share the whole 450.
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, 6)
+    // Estimated composition (sum 1000) scales to billed input 400; the assistant rest joins tool results and the output, so rows share the whole 450.
+    assert.equal(queryAll(m.container, '.lc-sl-row').length, 5)
     const expected = [
       { pct: '17.8%', label: 'System Prompt', count: '≈80' },
       { pct: '8.9%', label: 'Tool Schemas', count: '≈40' },
       { pct: '26.7%', label: 'User Messages', count: '≈120' },
       { pct: '8.9%', label: 'Injected Context', count: '≈40' },
-      { pct: '28.9%', label: 'Assistant Messages', count: '≈130' },
-      { pct: '8.9%', label: 'Tool Results', count: '≈40' },
+      { pct: '37.8%', label: 'Tool Calls', count: '≈170' },
     ]
     expected.forEach((row, i) => assert.deepEqual(rowOf(m.container, i), row))
     await m.unmount()
@@ -49,22 +48,46 @@ describe('StatsTokens', () => {
     assert.equal(queryAll(sparseMount.container, '.lc-sl-row').length, 3)
     assert.deepEqual(rowOf(sparseMount.container, 0), { pct: '22.2%', label: 'System Prompt', count: '≈100' })
     assert.deepEqual(rowOf(sparseMount.container, 1), { pct: '66.7%', label: 'User Messages', count: '≈300' })
-    assert.deepEqual(rowOf(sparseMount.container, 2), { pct: '11.1%', label: 'Assistant Messages', count: '≈50' })
+    assert.deepEqual(rowOf(sparseMount.container, 2), { pct: '11.1%', label: 'Tool Calls', count: '≈50' })
     await sparseMount.unmount()
   })
 
+  test('the Tool Calls and Answers rows explain their scope in the tooltip', async () => {
+    const toolTip = 'What Tool Calls counts:\n• Call names and arguments, replayed in the prompt and generated in the output\n• Tool results: everything the tools returned\nExcludes model replies and reasoning; tool schemas are counted separately.'
+    const answersTip = 'What Answers counts:\n• Reply prose replayed in the prompt\n• Reply prose generated in the output\nExcludes reasoning, tool-call arguments, and tool results.'
+    const zhToolTip = '工具调用统计的内容：\n• 调用名称与参数：提示词中重放的 + 输出中生成的\n• 工具结果：工具返回的全部内容\n不含模型回复正文与模型思考；工具定义单独统计。'
+    const zhAnswersTip = '模型回复统计的内容：\n• 提示词中重放的模型回复正文\n• 输出中生成的模型回复正文\n不含模型思考、工具调用参数与工具结果。'
+    const withAnswers: Snapshot['current'] = { ...CURRENT, assistantAnswerTokens: 50 }
+
+    for (const [kitFor, labels, tips, answerRow] of [
+      [kit, ['Tool Calls', 'Answers'], [toolTip, answersTip], { pct: '28.9%', label: 'Answers', count: '≈130' }],
+      [makeKit('zh'), ['工具调用', '模型回复'], [zhToolTip, zhAnswersTip], { pct: '28.9%', label: '模型回复', count: '≈130' }],
+    ] as [ReturnType<typeof makeKit>, string[], string[], { pct: string; label: string; count: string }][]) {
+      const Tokens = makeStatsTokens(kitFor, Donut)
+      const m = await mount(h(Tokens, { usage: USAGE, current: withAnswers, breakdown: null, generatedAnswerTokens: 10 }))
+      const rows = queryAll(m.container, '.lc-sl-row')
+      for (const [i, label] of labels.entries()) {
+        const row = rows.find(r => r.querySelector('.lc-sl-label')?.textContent === label)
+        assert.equal(row?.getAttribute('title'), tips[i])
+        assert.equal(row?.querySelector('.lc-sl-label')?.getAttribute('title'), tips[i])
+      }
+      assert.deepEqual(rowOf(m.container, 5), answerRow)
+      await m.unmount()
+    }
+  })
+
   test('the thinking slice splits the assistant bucket and the generated output, in both locales', async () => {
-    const current: Snapshot['current'] = { system: 100, tools: 0, user: 0, inject: 0, skill: 0, assistant: 100, assistantReasoning: 60, tool: 0, total: 200 }
+    const current: Snapshot['current'] = { system: 100, tools: 0, user: 0, inject: 0, skill: 0, assistant: 100, assistantReasoning: 60, assistantCallTokens: 40, tool: 0, total: 200 }
     const usage: TokenUsage = { uncachedInputTokens: 200, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 }
-    const m = await mount(h(StatsTokens, { usage, current, breakdown: null, generatedReasoning: 40 }))
+    const m = await mount(h(StatsTokens, { usage, current, breakdown: null, generatedReasoning: 40, generatedCallTokens: 60 }))
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '300')
-    // Assistant anchored at 100 splits 60/40; the 100 output keeps 40 thinking and 60 assistant.
-    assert.deepEqual(rowOf(m.container, 1), { pct: '33.3%', label: 'Assistant Messages', count: '≈100' })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '33.3%', label: 'Thinking', count: '≈100' })
+    // Assistant anchored at 100 splits 60 reasoning / 40 tool calls; the 100 output keeps 40 thinking and 60 tool calls.
+    assert.deepEqual(rowOf(m.container, 1), { pct: '33.3%', label: 'Tool Calls', count: '≈100' })
+    assert.deepEqual(rowOf(m.container, 2), { pct: '33.3%', label: 'Reasoning', count: '≈100' })
     await m.unmount()
 
-    const zh = await mount(h(makeStatsTokens(makeKit('zh'), Donut), { usage, current, breakdown: null, generatedReasoning: 40 }))
-    assert.deepEqual(rowOf(zh.container, 2), { pct: '33.3%', label: '思考', count: '≈100' })
+    const zh = await mount(h(makeStatsTokens(makeKit('zh'), Donut), { usage, current, breakdown: null, generatedReasoning: 40, generatedCallTokens: 60 }))
+    assert.deepEqual(rowOf(zh.container, 2), { pct: '33.3%', label: '模型思考', count: '≈100' })
     await zh.unmount()
   })
 
@@ -78,7 +101,7 @@ describe('StatsTokens', () => {
     assert.deepEqual(rowOf(m.container, 0), { pct: '23.8%', label: 'System Prompt', count: '≈200' })
     assert.deepEqual(rowOf(m.container, 1), { pct: '23.8%', label: 'Tool Schemas', count: '≈200' })
     assert.deepEqual(rowOf(m.container, 2), { pct: '23.8%', label: 'User Messages', count: '≈200' })
-    assert.deepEqual(rowOf(m.container, 3), { pct: '28.6%', label: 'Assistant Messages', count: '≈240' })
+    assert.deepEqual(rowOf(m.container, 3), { pct: '28.6%', label: 'Tool Calls', count: '≈240' })
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 4)
     await m.unmount()
   })

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import {
+  estimateAnswerTokens,
+  estimateCallTokens,
   estimateMessage,
   estimateReasoningTokens,
   estimateToolSchema,
@@ -28,6 +30,31 @@ describe('estimateReasoningTokens', () => {
     assert.equal(estimateReasoningTokens([null, 7, { type: 'text', text: '0123456789abcdef' }]), 0)
     assert.equal(estimateReasoningTokens([{ type: 'reasoning', text: '0123456789abcdef' }]), 8)
     assert.equal(estimateReasoningTokens([{ type: 'reasoning' }]), 4, 'an empty reasoning block is overhead only')
+  })
+})
+
+describe('estimateAnswerTokens', () => {
+  test('only text blocks price; a missing array, junk members, and other arms contribute nothing', () => {
+    assert.equal(estimateAnswerTokens(undefined), 0)
+    assert.equal(estimateAnswerTokens('x'), 0)
+    assert.equal(estimateAnswerTokens([null, 7, { type: 'reasoning', text: '0123456789abcdef' }]), 0)
+    assert.equal(estimateAnswerTokens([{ type: 'text', text: '0123456789abcdef' }]), 8)
+    assert.equal(estimateAnswerTokens([{ type: 'text' }]), 4, 'an empty text block is overhead only')
+    assert.equal(estimateAnswerTokens([
+      { type: 'text', text: 'hello' },
+      { type: 'text', text: 'world' },
+      { type: 'tool-call', name: 'bash', arguments: '{}' },
+    ]), 12, 'two 5-char blocks at 2 + 4 each')
+  })
+})
+
+describe('estimateCallTokens', () => {
+  test('only tool-call blocks price: the name, the arguments and one block overhead', () => {
+    assert.equal(estimateCallTokens(undefined), 0)
+    assert.equal(estimateCallTokens('x'), 0)
+    assert.equal(estimateCallTokens([null, 7, { type: 'text', text: '0123456789abcdef' }]), 0)
+    assert.equal(estimateCallTokens([{ type: 'tool-call', name: 'bash', arguments: '{}' }]), 6)
+    assert.equal(estimateCallTokens([{ type: 'tool-call' }]), 4)
   })
 })
 

@@ -109,9 +109,13 @@ export function toolTallyOf(nodes: readonly SurfaceNode[]): [string, number][] {
   return [...tally].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
 }
 
-export type StatsJump = 'skills' | 'answers' | 'inputs' | 'read' | 'write' | 'search' | 'image'
+export type StatsJump = 'turns' | 'steps' | 'skills' | 'answers' | 'inputs' | 'read' | 'write' | 'search' | 'image'
+
+type FigureJump = Extract<StatsJump, 'turns' | 'steps' | 'skills' | 'answers'>
 
 const JUMP_TIPS: Record<StatsJump, string> = {
+  turns: 'stats.sessionJump',
+  steps: 'stats.sessionJump',
   skills: 'stats.skillsJump',
   answers: 'stats.answersJump',
   inputs: 'stats.userJump',
@@ -482,7 +486,7 @@ export function makeStatsContext(
         </span>
       )
     }
-    const figure = (key: 'skills' | 'answers', value: number, label: string): ReactElement => {
+    const figure = (key: FigureJump, value: number, label: string): ReactElement => {
       const wire = jumpWire(key)
       return (
         <span key={key} className={'lc-core-kv lc-core-kv-' + key + (wire === undefined ? '' : ' lc-core-kv-btn')} {...(wire ?? {})}>
@@ -503,7 +507,9 @@ export function makeStatsContext(
     const ownTokens = billedTokensOf(props.cost)
     const subTokens = billedTokensOf(subUsage)
     const pair = (tokens: number | null, costText: string): ReactElement => (
-      <span className="lc-strip-pair"><b>{fmt(tokens)}</b><i>/</i><b>{costText}</b></span>
+      tokens === null
+        ? <span className="lc-strip-pair">{fmt(tokens)}<i>/</i>{costText}</span>
+        : <span className="lc-strip-pair"><b>{fmt(tokens)}</b><i>/</i><b>{costText}</b></span>
     )
     const costText = cost === null ? '—' : formatCost(cost, currency)
     const ownText = ownCost === null ? '—' : formatCost(ownCost, currency)
@@ -533,8 +539,8 @@ export function makeStatsContext(
             <div className="lc-core">
               <span className="lc-core-label">{t('stats.session')}</span>
               <span className="lc-core-kvs lc-core-kvs-main">
-                <span className="lc-core-kv lc-core-kv-turns"><b>{fmt(props.counts.turns)}</b><i>{t('stats.turns')}</i></span>
-                <span className="lc-core-kv lc-core-kv-steps"><b>{fmt(props.counts.steps)}</b><i>{t('stats.steps')}</i></span>
+                {figure('turns', props.counts.turns, t('stats.turns'))}
+                {figure('steps', props.counts.steps, t('stats.steps'))}
               </span>
               <span className="lc-core-kvs">
                 {figure('skills', props.counts.skills ?? 0, t('stats.skills'))}
@@ -605,7 +611,11 @@ export function makeStatsContext(
                 </>)}
                 {costRow('subs', <>
                   <i>
-                    {t('stats.teamSubs', { n: sub.count })}
+                    {t('stats.teamSubs')}
+                    {' '}
+                    {sub.count > 0
+                      ? <b className="lc-ledger-team-count">{t('stats.teamSubsCount', { n: sub.count })}</b>
+                      : t('stats.teamSubsCount', { n: sub.count })}
                     <i className="lc-stat-q group-hover/tip:text-(--dsw-alias-label-primary) group-hover/tip:border-(--dsw-alias-label-primary)" aria-hidden="true">?</i>
                   </i>
                   {pair(sub.count === 0 ? null : subTokens, subText)}

@@ -1,7 +1,7 @@
 /** The timeline fold's persisted state shape, event envelope, construction and retention bounds — the plain JSON the projection cache
  * checkpoints. `fold.ts` owns the reducer that writes it. */
 
-import type { Category, CommandRecord, CommandStats, ContextEventRecord, FileOpRecord, RequestRecord, SessionCostUsage, SurfaceNode, SystemPromptNode, TimingSpan, TimingTotals } from '../shared/types'
+import type { OutputTokenParts, Category, CommandRecord, CommandStats, ContextEventRecord, FileOpRecord, RequestRecord, SessionCostUsage, SurfaceNode, SystemPromptNode, TimingSpan, TimingTotals } from '../shared/types'
 import type { FoldBounds } from './config'
 
 /** The state's command record: the wire record plus the callId the fold pairs result/job events on. Never served —
@@ -26,6 +26,10 @@ export interface TimelineState {
   sums: Record<Category, number>
   /** Live assistant-node reasoning price — a running subset of `sums.assistant` (the thinking split's prompt-side share). */
   assistantReasoning: number
+  /** Live assistant-node text price — a running subset of `sums.assistant` (the answers split's prompt-side share). */
+  assistantAnswerTokens: number
+  /** Live assistant-node tool-call price — a running subset of `sums.assistant` (the tool-call split's prompt-side share). */
+  assistantCallTokens: number
   systemTokens: number
   /** The live system-prompt nodes, oldest first; `systemTokens` is the LAST nonempty one (the harness rule), so an empty dormant node
    * keeps its position. Absent rows fall back to the header epoch's envelope figure. */
@@ -54,6 +58,12 @@ export interface TimelineState {
   cost?: SessionCostUsage
   /** Cumulative generated reasoning price over the COMPLETE log (the thinking split's output side); never trimmed. */
   generatedReasoning?: number
+  /** Cumulative generated text price over the COMPLETE log (the answers split's output side); never trimmed. */
+  generatedAnswerTokens?: number
+  /** Cumulative generated tool-call price over the COMPLETE log (the tool-call split's output side); never trimmed. */
+  generatedCallTokens?: number
+  /** Per-message allocation of reported output; retained across trimming and reset at the seed boundary. */
+  billedGenerated?: OutputTokenParts
   humanInputs?: number
   answers?: number
   /** The user's newest own message as a bounded one-line preview. Last-wins: a text-less input keeps the previous line. */
@@ -206,6 +216,8 @@ export function createTimelineState(): TimelineState {
     surface: [],
     sums: { user: 0, inject: 0, skill: 0, assistant: 0, tool: 0 },
     assistantReasoning: 0,
+    assistantAnswerTokens: 0,
+    assistantCallTokens: 0,
     systemTokens: 0,
     toolsTokens: 0,
     requests: [],

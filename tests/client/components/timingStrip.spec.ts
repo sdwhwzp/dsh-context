@@ -77,7 +77,7 @@ describe('TimingStrip', () => {
     assert.equal(relayed, 'reasoning')
     const tip = query(m.container, '.lc-bar-tip')
     assert.ok(tip.className.includes('lc-bar-tip-on'))
-    assert.equal(tip.textContent, `Thinking 10.0s · ${timeOf(6_000)}`)
+    assert.equal(tip.textContent, `Reasoning 10.0s · ${timeOf(6_000)}`)
     assert.equal((tip as HTMLElement).style.left, '25%')
     await unhover(query(m.container, '.lc-tstrip-bar'))
     assert.equal(relayed, null)

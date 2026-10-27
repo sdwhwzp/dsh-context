@@ -123,8 +123,8 @@ button.lc-ledger-cost-row { appearance: none; border: 0; padding: 0; background:
 /* Context housekeeping rides the Fleet section; only its cell shells remain shared. */
 .lc-strip-cell { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 12px; }
 .lc-strip-cell > i { flex: none; font-style: normal; font-size: 11px; color: var(--dsw-alias-label-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-ledger-team-count, .lc-strip-pair b { font-weight: 700; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
 .lc-strip-pair { flex: none; display: inline-flex; align-items: baseline; gap: 5px; font-variant-numeric: tabular-nums; }
-.lc-strip-pair b { font-weight: 700; color: var(--dsw-alias-label-primary); }
 .lc-strip-pair i { font-style: normal; opacity: 0.55; }
 a.lc-strip-link { color: inherit; text-decoration: none; }
 a.lc-strip-link:hover .lc-strip-pair b { text-decoration: underline; }

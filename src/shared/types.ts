@@ -196,6 +196,14 @@ export interface PluginSettings {
 
 export type SettingsField = keyof PluginSettings
 
+/** Generated provider output allocated per message; unclassified content stays explicit. */
+export interface OutputTokenParts {
+  reasoning: number
+  answers: number
+  calls: number
+  unclassified: number
+}
+
 export interface Snapshot {
   ok: boolean
   /** Present ONLY below the supported baseline: the host folds nothing (all figures zero) and the client shows the upgrade gate. */
@@ -222,6 +230,12 @@ export interface Snapshot {
     /** Heuristic reasoning tokens INSIDE the live assistant nodes — a subset of `assistant` (the thinking split's prompt-side share).
      * Absent on rows folded before the field existed, and on foreign hosts. */
     assistantReasoning?: number
+    /** Heuristic text-block tokens INSIDE the live assistant nodes — a subset of `assistant` (the answers split's prompt-side share).
+     * Absent on rows folded before the field existed, and on foreign hosts. */
+    assistantAnswerTokens?: number
+    /** Heuristic tool-call tokens INSIDE the live assistant nodes — a subset of `assistant` (the tool-call split's prompt-side share).
+     * Absent on rows folded before the field existed, and on foreign hosts. */
+    assistantCallTokens?: number
     tool: number
     total: number
   }
@@ -230,6 +244,12 @@ export interface Snapshot {
   /** Heuristic reasoning tokens GENERATED across the complete log (the thinking split's output side; a provider `reasoningTokens` count
    * wins when reported). Absent = none. */
   generatedReasoning?: number
+  /** Heuristic text-block tokens GENERATED across the complete log (the answers split's output side). Absent = none. */
+  generatedAnswerTokens?: number
+  /** Heuristic tool-call tokens GENERATED across the complete log (the tool-call split's output side). Absent = none. */
+  generatedCallTokens?: number
+  /** Per-message provider output allocation; absent on earlier hosts. */
+  billedGenerated?: OutputTokenParts
   /** Tool calls whose result is live (a `skill`-tool node keeps counting). Absent = 0. */
   toolCalls?: number
   /** Whole-session tally of non-injection `user/message` plus answered `ask_user_question` over the COMPLETE log. Absent = 0. */
@@ -491,6 +511,10 @@ export interface SurfaceNode {
   tokens: number
   /** Reasoning-block price inside an assistant node (absent when zero); a subset of `tokens`. */
   reasoning?: number
+  /** Text-block price inside an assistant node (absent when zero); a subset of `tokens`. */
+  answerTokens?: number
+  /** Tool-call price inside an assistant node (absent when zero); a subset of `tokens`. */
+  callTokens?: number
   /** Image blocks inside this node's message (absent when zero). */
   imgs?: number
   /** Set only on `archive` entries: the seq of the replacement event that shadowed this node. */

@@ -269,3 +269,56 @@ describe('surfaceOp variants', () => {
     assert.ok(!('pendingShadowEventSeq' in missingEvent))
   })
 })
+
+describe('assistant content subsets', () => {
+  const reasoning = (t: string) => ({ type: 'reasoning', text: t })
+
+  test('a node prices its text blocks as a live subset and the whole text as the generated tally', () => {
+    const drive = driveTimeline([assistantMessage(1, {
+      content: [...text('reply'), reasoning('think'), { type: 'tool-call', name: 'bash', arguments: '{}' }],
+    })])
+    const node = drive.state.surface.at(-1)
+    // text 6 + reasoning 6 + call 6, plus the role's 4.
+    assert.deepEqual([node?.tokens, node?.answerTokens, node?.reasoning, node?.callTokens], [22, 6, 6, 6])
+    assert.equal(drive.state.assistantAnswerTokens, 6)
+    assert.equal(drive.state.assistantCallTokens, 6)
+    assert.equal(drive.state.generatedAnswerTokens, 6)
+    assert.equal(drive.state.generatedCallTokens, 6)
+    assert.equal(drive.view.current.assistantAnswerTokens, 6)
+    assert.equal(drive.view.current.assistantCallTokens, 6)
+    assert.equal(drive.view.generatedAnswerTokens, 6)
+    assert.equal(drive.view.generatedCallTokens, 6)
+    assert.equal(drive.def.wire.viewSchema.safeParse(drive.view).success, true)
+  })
+
+  test('a replacement drops the live price but keeps the generated tally; a text-less log stays absent', () => {
+    const drive = driveTimeline([
+      assistantMessage(1, { content: text('hello') }),
+      compaction(2, 'summary', { shadowedTokenCount: 10, shadowedSeqs: [1] }),
+      assistantMessage(3, { content: text('more'), surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }),
+    ])
+    assert.equal(drive.state.assistantAnswerTokens, 5, "'more' is 4 chars: ceil(4/4) + 4")
+    assert.equal(drive.state.generatedAnswerTokens, 11, 'the shadowed message was still generated')
+    assert.equal(drive.state.archived[0]?.answerTokens, 6)
+    assert.deepEqual([drive.view.current.assistant, drive.view.current.assistantAnswerTokens], [9, 5])
+    const toolOnly = driveTimeline([assistantMessage(1, { content: [{ type: 'tool-call', name: 'bash', arguments: '{}' }] })])
+    assert.deepEqual([toolOnly.view.current.assistantAnswerTokens, toolOnly.view.generatedAnswerTokens], [0, undefined])
+    assert.ok(!('generatedAnswerTokens' in toolOnly.view))
+  })
+
+  test('a replacement drops the live tool-call price but keeps the generated tally', () => {
+    const call = (name: string) => ({ type: 'tool-call', name, arguments: '{}' })
+    const drive = driveTimeline([
+      assistantMessage(1, { content: [call('bash')] }),
+      compaction(2, 'summary', { shadowedTokenCount: 10, shadowedSeqs: [1] }),
+      assistantMessage(3, { content: [call('ls')], surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }),
+    ])
+    assert.equal(drive.state.assistantCallTokens, 6)
+    assert.equal(drive.state.generatedCallTokens, 12, 'the shadowed message was still generated')
+    assert.equal(drive.state.archived[0]?.callTokens, 6)
+    assert.deepEqual([drive.view.current.assistant, drive.view.current.assistantCallTokens], [10, 6])
+    const plain = driveTimeline([assistantMessage(1, { content: text('reply') })])
+    assert.deepEqual([plain.view.current.assistantCallTokens, plain.view.generatedCallTokens], [0, undefined])
+    assert.ok(!('generatedCallTokens' in plain.view))
+  })
+})

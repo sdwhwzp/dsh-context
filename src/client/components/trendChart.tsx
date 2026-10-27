@@ -49,6 +49,8 @@ export interface TrendChartProps {
   onSelect: (seq: number | null) => void
   onHover: (seq: number | null) => void
   onHoverTurn: (turn: number | null) => void
+  /** Wall-clock deadline until which pointer hover stays ignored; the local hover path bypasses the parent's relay. */
+  hoverLock?: { current: number }
   onPickTurn: (turn: number) => void
   onFocusTurnHandled: () => void
   onFocusSeqHandled: () => void
@@ -367,9 +369,10 @@ export function makeTrendChart(kit: ViewKit): (props: TrendChartProps) => ReactE
     const [localHover, setLocalHover] = useState<number | null>(null)
     const hoverSeq = localHover ?? props.hoveredSeq
     const handleBarHover = useCallback((seq: number | null): void => {
+      if (seq !== null && props.hoverLock !== undefined && performance.now() < props.hoverLock.current) return
       setLocalHover(seq)
       props.onHover(seq)
-    }, [props.onHover])
+    }, [props.onHover, props.hoverLock])
     // An externally driven hover wins over the pointer's last position; the pointer value is kept only while the prop names the same bar.
     useEffect(() => {
       setLocalHover(prev => (prev === null || props.hoveredSeq === prev ? prev : null))

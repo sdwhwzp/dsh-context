@@ -108,15 +108,15 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
     }
 
     const cells = queryAll(m.container, '.lc-core-kv-btn:not(.lc-core-kv-events)')
-    assert.equal(cells.length, 2)
-    await click(cells[1])
+    assert.equal(cells.length, 4)
+    await click(query(m.container, '.lc-core-kv-answers.lc-core-kv-btn'))
     await flush()
     const assistantCat = openCat()
     const answerChip = queryAll(assistantCat, '.lc-gran-btn').find(b => text(b).includes('Answer'))
     assert.ok(answerChip !== undefined && answerChip.className.includes('lc-gran-on'), 'the Answer chip is picked')
     assert.equal(queryAll(assistantCat, '.lc-br-elem').length, 3, 'all three textual replies survive the filter')
 
-    await click(cells[0])
+    await click(query(m.container, '.lc-core-kv-skills.lc-core-kv-btn'))
     await flush()
     const skillCat = openCat()
     assert.ok(text(skillCat).includes('pdf'), 'the loaded skill row shows')

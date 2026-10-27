@@ -8,6 +8,8 @@ export interface SliceRow {
   pct: string
   /** Preformatted secondary line; empty omits it. */
   count: string
+  /** Native tooltip override for the row and its label; absent falls back to the label. */
+  tip?: string
   /** A zero-figure slice dims whole; the owning card decides whether its row still renders. */
   dim?: boolean
 }
@@ -28,11 +30,12 @@ export function SliceList(props: SliceListProps): ReactElement {
           className={'lc-sl-row'
             + (r.dim ? ' lc-sl-row-dim' : '')
             + (props.hoverKey !== undefined && props.hoverKey === r.key ? ' lc-sl-row-on' : '')}
+          title={r.tip}
           onMouseEnter={() => { if (props.onHoverKey !== undefined) props.onHoverKey(r.key) }}
         >
           <div className="lc-sl-main">
             <i className="lc-sl-dot" style={{ background: r.color }} />
-            <span className="lc-sl-label" title={r.label}>{r.label}</span>
+            <span className="lc-sl-label" title={r.tip ?? r.label}>{r.label}</span>
             <span className="lc-sl-pct">{r.pct}</span>
           </div>
           {r.count !== '' ? <div className="lc-sl-sub" title={r.count}>{r.count}</div> : null}

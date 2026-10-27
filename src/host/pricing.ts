@@ -26,6 +26,26 @@ export interface ContentBlock {
   attachment?: { width?: unknown; height?: unknown } | null
 }
 
+/** One text or reasoning block's price, the meter's shared text arm. */
+const textBlockPrice = (block: ContentBlock): number => estimateTextTokens(block.text || '')
+
+/** One tool-call block's price, the meter's tool-call arm. */
+const callBlockPrice = (block: ContentBlock): number =>
+  Math.ceil((block.name || '').length / CHARS_PER_TOKEN)
+  + Math.ceil((block.arguments || '').length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
+
+/** Sum one block arm over a message's content. */
+function sumBlocks(blocks: unknown, type: string, price: (block: ContentBlock) => number): number {
+  let tokens = 0
+  if (!Array.isArray(blocks)) return tokens
+  for (const item of blocks) {
+    if (item === null || typeof item !== 'object') continue
+    const block = item as ContentBlock
+    if (block.type === type) tokens += price(block)
+  }
+  return tokens
+}
+
 function estimateBlocks(blocks: unknown): number {
   let tokens = 0
   if (!Array.isArray(blocks)) return 0
@@ -39,11 +59,10 @@ function estimateBlocks(blocks: unknown): number {
     switch (block.type) {
       case 'text':
       case 'reasoning':
-        tokens += estimateTextTokens(block.text || '')
+        tokens += textBlockPrice(block)
         break
       case 'tool-call':
-        tokens += Math.ceil((block.name || '').length / CHARS_PER_TOKEN)
-          + Math.ceil((block.arguments || '').length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
+        tokens += callBlockPrice(block)
         break
       case 'image': {
         const ref = block.attachment
@@ -63,14 +82,17 @@ function estimateBlocks(blocks: unknown): number {
 
 /** The reasoning-block share of a message's price (the meter's reasoning arm only) — a subset of `estimateMessage`. */
 export function estimateReasoningTokens(blocks: unknown): number {
-  let tokens = 0
-  if (!Array.isArray(blocks)) return tokens
-  for (const item of blocks) {
-    if (item === null || typeof item !== 'object') continue
-    const block = item as ContentBlock
-    if (block.type === 'reasoning') tokens += estimateTextTokens(block.text || '')
-  }
-  return tokens
+  return sumBlocks(blocks, 'reasoning', textBlockPrice)
+}
+
+/** The tool-call share of a message's price (the meter's tool-call arm only) — a subset of `estimateMessage`. */
+export function estimateCallTokens(blocks: unknown): number {
+  return sumBlocks(blocks, 'tool-call', callBlockPrice)
+}
+
+/** The text-block share of a message's price (the meter's text arm only) — a subset of `estimateMessage`. */
+export function estimateAnswerTokens(blocks: unknown): number {
+  return sumBlocks(blocks, 'text', textBlockPrice)
 }
 
 /** Price one surface message exactly like dsh's meter: an empty-content assistant/developer event projects to NO message, so it prices 0.

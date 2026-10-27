@@ -4,7 +4,7 @@ import { describe, test, vi } from 'vitest'
 import { requestContextFocus, takeContextFocus } from '../../../src/client/viewFocus'
 import { DICT_EN } from '../../../src/client/i18n'
 import { TestClientCtx } from '../helpers/harness'
-import { click, flush, mount, query, queryAll, text } from '../helpers/kit'
+import { click, flush, hover, mount, query, queryAll, text } from '../helpers/kit'
 import { buttonByText, eventLink, makeView, mountInScroller, mountRich, overflowingScroller, projectionsFor, richTimeline, settingsWith, stubRevealRects, T0, timeline } from './contextViewHarness'
 
 describe('ContextView — chat→Context jump', () => {
@@ -106,6 +106,55 @@ describe('ContextView — the stats board\'s pill jumps', () => {
       ],
     })
   }
+
+  test('the session figures scroll the trend card into view', async () => {
+    const scroller = overflowingScroller(900)
+    const gBCR = stubRevealRects(scroller, el => (el.hasAttribute('data-lc-trend') ? 450 : 0))
+    try {
+      const View = makeView(new TestClientCtx())
+      const m = await mountInScroller(h(View, { sessionId: 'sv-trendjump', useProjection: projectionsFor(jumpTimeline()) }), scroller)
+      await click(query(m.container, '.lc-core-kv-turns.lc-core-kv-btn'))
+      await flush()
+      assert.equal(scroller.scrollTop, 350, 'the turn figure lands on the trend card')
+      scroller.scrollTop = 0
+      await click(query(m.container, '.lc-core-kv-steps.lc-core-kv-btn'))
+      await flush()
+      assert.equal(scroller.scrollTop, 350, 'the step figure lands on the same card')
+      await m.unmount()
+    } finally {
+      gBCR.mockRestore()
+    }
+  })
+
+  test('a session-figure jump ignores the hover its own scroll leaves under the pointer', async () => {
+    const scroller = overflowingScroller(900)
+    const gBCR = stubRevealRects(scroller, el => (el.hasAttribute('data-lc-trend') ? 450 : 0))
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1_000)
+    try {
+      const View = makeView(new TestClientCtx())
+      const m = await mountInScroller(h(View, { sessionId: 'sv-hoverlock', useProjection: projectionsFor(jumpTimeline()) }), scroller)
+      await click(query(m.container, '.lc-core-kv-steps.lc-core-kv-btn'))
+      await flush()
+      const bar = query(m.container, '.lc-bar')
+      const turn = query(m.container, '.lc-turn')
+      now.mockReturnValue(1_100)
+      await hover(turn)
+      assert.equal(queryAll(m.container, '.lc-chart-dim').length, 0, 'the landing turn hover is swallowed')
+      now.mockReturnValue(1_200)
+      await hover(bar)
+      assert.equal(queryAll(m.container, '.lc-chart-tip').length, 0, 'the landing bar hover is swallowed')
+      now.mockReturnValue(1_400)
+      await hover(turn)
+      assert.equal(queryAll(m.container, '.lc-chart-dim').length, 1, 'a later turn hover dims as usual')
+      now.mockReturnValue(1_500)
+      await hover(bar)
+      assert.equal(queryAll(m.container, '.lc-chart-tip').length, 1, 'a later bar hover shows the tip')
+      await m.unmount()
+    } finally {
+      now.mockRestore()
+      gBCR.mockRestore()
+    }
+  })
 
   test('the input pill opens the browser\'s user messages; a file pill picks the card\'s kind chip and scrolls it in', async () => {
     const scroller = document.createElement('div')

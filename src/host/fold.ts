@@ -5,6 +5,8 @@ import type { Category, ContextEventRecord, FileOpRecord, RequestRecord, Surface
 import { estimateSystemContent } from '../shared/estimate'
 import type { FoldBounds } from './config'
 import {
+  estimateAnswerTokens,
+  estimateCallTokens,
   estimateMessage,
   estimateReasoningTokens,
   estimateToolsTotal,
@@ -35,6 +37,7 @@ import { countTurnRuns, trimState } from './foldState'
 import type { CommandStateRecord, TimelineEvent, TimelineState } from './foldState'
 import { accumulateCost, addDecode, bumpToolTotals, DECODE_KINDS, durOf, ensureTiming, tokenCountOf } from './foldMetering'
 import type { UsageLike } from './foldMetering'
+import { outputParts } from './generatedOutput'
 
 function categoryOf(type: string, message: { source?: MessageSource } | undefined): Category {
   if (type === 'assistant/message') return 'assistant'
@@ -104,14 +107,10 @@ function archiveRemoved(st: TimelineState, removed: SurfaceNode[], goneSeq: numb
   for (const n of removed) st.archived.push({ ...n, gone: goneSeq })
 }
 
-function addLiveReasoning(st: TimelineState, node: SurfaceNode): void {
-  if (node.reasoning === undefined) return
-  st.assistantReasoning += node.reasoning
-}
-
-function dropLiveReasoning(st: TimelineState, node: SurfaceNode): void {
-  if (node.reasoning === undefined) return
-  st.assistantReasoning -= node.reasoning
+function applyLiveSubsets(st: TimelineState, node: SurfaceNode, sign: 1 | -1): void {
+  if (node.reasoning !== undefined) st.assistantReasoning += sign * node.reasoning
+  if (node.answerTokens !== undefined) st.assistantAnswerTokens += sign * node.answerTokens
+  if (node.callTokens !== undefined) st.assistantCallTokens += sign * node.callTokens
 }
 
 /** Removal follows the SEQ list, not the declared range: pruned replacement nodes keep seqs beyond the range end. */
@@ -122,7 +121,7 @@ function removeSurfaceSeqs(st: TimelineState, claimed: ReadonlySet<number>, gone
   for (const n of st.surface) {
     if (claimed.has(n.seq)) {
       st.sums[n.cat] -= n.tokens
-      dropLiveReasoning(st, n)
+      applyLiveSubsets(st, n, -1)
       removed.push(n)
     } else {
       kept.push(n)
@@ -182,6 +181,10 @@ function applySurface(
   if (cat === 'assistant') {
     const reasoning = estimateReasoningTokens(message?.content)
     if (reasoning > 0) node.reasoning = reasoning
+    const answers = estimateAnswerTokens(message?.content)
+    if (answers > 0) node.answerTokens = answers
+    const calls = estimateCallTokens(message?.content)
+    if (calls > 0) node.callTokens = calls
   }
   // Image blocks ride the NODE (absent when zero): the stats board sums the live surface, not the archive.
   const imgs = imageCountOf(message?.content)
@@ -247,7 +250,7 @@ function applySurface(
     if (Array.isArray(shadowedSeqs) && shadowedSeqs.length > 0) {
       const removed = removeSurfaceSeqs(st, new Set(shadowedSeqs), ev.seq)
       st.sums[cat] += node.tokens
-      addLiveReasoning(st, node)
+      applyLiveSubsets(st, node, 1)
       st.surface.push(node)
       // Rewrite the metering row to the NET freed amount, matching the trend chart's drop. Cloned: elements are
       // shared with the persisted state.
@@ -271,16 +274,16 @@ function applySurface(
       archiveRemoved(st, removed, ev.seq)
       for (const r of removed) {
         st.sums[r.cat] -= r.tokens
-        dropLiveReasoning(st, r)
+        applyLiveSubsets(st, r, -1)
       }
       st.sums[cat] += node.tokens
-      addLiveReasoning(st, node)
+      applyLiveSubsets(st, node, 1)
       return node
     }
   }
   st.surface.push(node)
   st.sums[cat] += node.tokens
-  addLiveReasoning(st, node)
+  applyLiveSubsets(st, node, 1)
   return node
 }
 
@@ -835,16 +838,33 @@ export function applyTimeline(state: TimelineState, event: TimelineEvent, bounds
           ? (asstNode.reasoning ?? 0)
           : output === null ? providerReasoning : Math.min(providerReasoning, output)
         if (generated > 0) s.generatedReasoning = (s.generatedReasoning ?? 0) + generated
+        const generatedAnswers = asstNode.answerTokens ?? 0
+        if (generatedAnswers > 0) s.generatedAnswerTokens = (s.generatedAnswerTokens ?? 0) + generatedAnswers
+        const generatedCalls = asstNode.callTokens ?? 0
+        if (generatedCalls > 0) s.generatedCallTokens = (s.generatedCallTokens ?? 0) + generatedCalls
+        if (output !== null) {
+          const parts = outputParts(output, asstNode.reasoning ?? 0, generatedAnswers, generatedCalls, providerReasoning)
+          const previous = s.billedGenerated
+          s.billedGenerated = previous === undefined ? parts : {
+            reasoning: previous.reasoning + parts.reasoning,
+            answers: previous.answers + parts.answers,
+            calls: previous.calls + parts.calls,
+            unclassified: previous.unclassified + parts.unclassified,
+          }
+        }
         break
       }
       case 'session/end-seed': {
-        // The fork/seed boundary: a TAGGED marker (`inherited: true`) zeroes the spend tallies (cost and generated
-        // reasoning) so a seeded session counts post-seed spend only. The UNTAGGED resume marker must leave the state
+        // The fork/seed boundary: a TAGGED marker (`inherited: true`) zeroes the spend tallies (cost and the generated
+        // splits) so a seeded session counts post-seed spend only. The UNTAGGED resume marker must leave the state
         // reference untouched, or every resume wipes history.
         if (data?.inherited !== true) break
         const s = ensure([])
         s.cost = {}
         delete s.generatedReasoning
+        delete s.generatedAnswerTokens
+        delete s.generatedCallTokens
+        delete s.billedGenerated
         break
       }
       case 'plan/mode': {

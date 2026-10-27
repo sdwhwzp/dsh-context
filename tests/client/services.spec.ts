@@ -83,7 +83,7 @@ describe('numOf', () => {
 })
 
 describe('timelineOf', () => {
-  const current = { system: 1, tools: 2, user: 3, inject: 4, skill: 0, assistant: 5, assistantReasoning: 3, tool: 6, total: 7 }
+  const current = { system: 1, tools: 2, user: 3, inject: 4, skill: 0, assistant: 5, assistantReasoning: 3, assistantAnswerTokens: 2, assistantCallTokens: 1, tool: 6, total: 7 }
 
   test('non-records stay null', () => {
     assert.equal(timelineOf(null), null)
@@ -113,7 +113,7 @@ describe('timelineOf', () => {
     for (const bad of [{}, { current: null }, { current: 7 }]) {
       assert.deepEqual(timelineOf(bad), {
         ok: true,
-        current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, assistantReasoning: 0, tool: 0, total: 0 },
+        current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, assistantReasoning: 0, assistantAnswerTokens: 0, assistantCallTokens: 0, tool: 0, total: 0 },
         requests: [],
         events: [],
         nodes: [],
@@ -126,17 +126,23 @@ describe('timelineOf', () => {
   test('current with some non-number fields is numOf-coerced', () => {
     const out = timelineOf({ current: { system: 12, tools: 'x', user: undefined } })
     assert.ok(out !== null)
-    assert.deepEqual(out.current, { system: 12, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, assistantReasoning: 0, tool: 0, total: 0 })
+    assert.deepEqual(out.current, { system: 12, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, assistantReasoning: 0, assistantAnswerTokens: 0, assistantCallTokens: 0, tool: 0, total: 0 })
   })
 
-  test('the reasoning fields survive the sanitizing path; a hostile generated count drops alone', () => {
-    const out = timelineOf({ current: { system: 1, assistant: 5, assistantReasoning: 3 }, generatedReasoning: 4, requests: 'nope' })
+  test('the assistant subset fields survive the sanitizing path; a hostile generated count drops alone', () => {
+    const out = timelineOf({ current: { system: 1, assistant: 5, assistantReasoning: 3, assistantAnswerTokens: 2, assistantCallTokens: 1 }, generatedReasoning: 4, generatedAnswerTokens: 1, generatedCallTokens: 1, requests: 'nope' })
     assert.equal(out?.current.assistantReasoning, 3)
+    assert.equal(out?.current.assistantAnswerTokens, 2)
+    assert.equal(out?.current.assistantCallTokens, 1)
     assert.equal(out?.generatedReasoning, 4)
+    assert.equal(out?.generatedAnswerTokens, 1)
+    assert.equal(out?.generatedCallTokens, 1)
     for (const bad of [-1, '4', Number.NaN, Number.POSITIVE_INFINITY]) {
-      const dropped = timelineOf({ current: 1, generatedReasoning: bad, requests: 'nope' })
+      const dropped = timelineOf({ current: 1, generatedReasoning: bad, generatedAnswerTokens: bad, generatedCallTokens: bad, requests: 'nope' })
       assert.ok(dropped !== null)
       assert.ok(!('generatedReasoning' in dropped), String(bad))
+      assert.ok(!('generatedAnswerTokens' in dropped), String(bad))
+      assert.ok(!('generatedCallTokens' in dropped), String(bad))
     }
   })
 
@@ -915,4 +921,24 @@ describe('seedConversationViewVia — the pre-jump view preference', () => {
     assert.equal(globalThis.localStorage.getItem('dsh.conversation.session-5'), null)
     globalThis.localStorage.clear()
   })
+})
+
+
+test('billed generated figures survive sanitization and malformed tuples drop whole', () => {
+  const parts = { reasoning: 1, answers: 2, calls: 3, unclassified: 4 }
+  assert.deepEqual(timelineOf({ current: null, billedGenerated: parts })?.billedGenerated, parts)
+  for (const bad of [null, {}, { ...parts, reasoning: -1 }, { ...parts, answers: '2' }, { ...parts, calls: Number.NaN }, { ...parts, unclassified: Number.POSITIVE_INFINITY }]) {
+    assert.equal(timelineOf({ current: null, billedGenerated: bad })?.billedGenerated, undefined)
+  }
+})
+
+
+test('a complete timeline keeps valid billed figures reference stable and sanitizes malformed figures', () => {
+  const wire = {
+    current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 0 },
+    requests: [], events: [], nodes: [], archive: [],
+    billedGenerated: { reasoning: 1, answers: 2, calls: 3, unclassified: 4 },
+  }
+  assert.equal(timelineOf(wire), wire)
+  assert.equal(timelineOf({ ...wire, billedGenerated: { ...wire.billedGenerated, calls: -1 } })?.billedGenerated, undefined)
 })

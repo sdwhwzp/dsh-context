@@ -1,4 +1,4 @@
-import type { Category, ContextBreakdown, RequestRecord, Snapshot, TokenUsage } from '../shared/types'
+import type { OutputTokenParts, Category, ContextBreakdown, RequestRecord, Snapshot, TokenUsage } from '../shared/types'
 
 export interface PartsPart {
   key: string
@@ -86,20 +86,35 @@ export function anchoredParts(parts: PartsPart[], target: number | null): PartsP
   })
 }
 
-/** The thinking slice reuses the retired output slice's hue. */
-const THINKING_COLOR = 'var(--color-pink-500)'
+/** The timing card's reasoning hue, so both thinking surfaces read as one category. */
+const THINKING_COLOR = 'var(--color-violet-500)'
+
+/** The timing card's reply hue, so both answers surfaces read as one category. */
+const ANSWERS_COLOR = 'var(--color-pink-500)'
 
 const countOf = (value: number | undefined): number =>
   typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
 
-/** The Token card's billed split: composition categories share the provider prompt total; the assistant bucket's live
- * reasoning share and the generated reasoning count move into a closing thinking slice, and the non-thinking remainder
- * stays on assistant. The parts total the chat line's count by construction. */
+/** The billed ring's canonical order: the Token card and the overview aggregate share it, so Answers always closes. */
+export const RING_ORDER: readonly string[] = ['system', 'tools', 'user', 'inject', 'skill', 'modelContent', 'toolCalls', 'thinking', 'answers']
+
+/** The generated assistant content, as the fold's own block prices. */
+export interface GeneratedTokens {
+  reasoning?: number
+  answers?: number
+  calls?: number
+  billed?: OutputTokenParts
+  unsplit?: boolean
+}
+
+/** The Token card's billed split: shares follow the assistant's content ratios on both the prompt and generated sides, so
+ * framing never lands on Tool Calls and the parts total the chat line's count. A row without the split fields (an older
+ * host, or foreign data) keeps the historic Tool Calls home. */
 export function billedParts(
   current: Snapshot['current'],
   breakdown: ContextBreakdown | null,
   usage: TokenUsage,
-  generatedReasoning = 0,
+  generated: GeneratedTokens = {},
 ): PartsPart[] {
   const input = usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
   const output = countOf(usage.outputTokens)
@@ -107,14 +122,63 @@ export function billedParts(
   const prompt = input > 0
     ? anchoredParts(estimated, input)
     : estimated.map(p => ({ ...p, value: 0 }))
+  if (generated.unsplit) {
+    const assistant = prompt.reduce((sum, p) => p.key === 'assistant' ? sum + p.value : sum, 0)
+    return [
+      ...prompt.filter(p => p.key !== 'assistant').map(p => p.key === 'tool' ? { ...p, key: 'toolCalls' } : p),
+      { key: 'modelContent', color: CAT_COLOR.assistant, value: assistant + output },
+    ]
+  }
   const liveAssistant = countOf(current.assistant)
   const liveReasoning = Math.min(countOf(current.assistantReasoning), liveAssistant)
-  const generatedThinking = Math.min(countOf(generatedReasoning), output)
+  const liveAnswers = Math.min(countOf(current.assistantAnswerTokens), liveAssistant - liveReasoning)
+  const liveCalls = Math.min(countOf(current.assistantCallTokens), liveAssistant - liveReasoning - liveAnswers)
+  const liveContent = liveReasoning + liveAnswers + liveCalls
+  const genReasoning = countOf(generated.reasoning)
+  const genAnswers = countOf(generated.answers)
+  const genCalls = countOf(generated.calls)
   let promptThinking = 0
-  const parts = prompt.map((p) => {
-    if (p.key !== 'assistant') return p
-    promptThinking = liveAssistant > 0 ? Math.round(p.value * liveReasoning / liveAssistant) : 0
-    return { ...p, value: p.value - promptThinking + output - generatedThinking }
-  })
-  return [...parts, { key: 'thinking', color: THINKING_COLOR, value: promptThinking + generatedThinking }]
+  let promptAnswers = 0
+  let promptCalls = 0
+  let promptToolResults = 0
+  const parts: PartsPart[] = []
+  for (const p of prompt) {
+    if (p.key === 'assistant') {
+      const nonCall = liveContent > 0
+        ? Math.min(p.value, Math.round((liveReasoning + liveAnswers) / liveContent * p.value))
+        : 0
+      promptThinking = liveContent > 0 ? Math.min(nonCall, Math.round(liveReasoning / liveContent * p.value)) : 0
+      promptAnswers = nonCall - promptThinking
+      promptCalls = Math.max(0, liveContent > 0 ? p.value - nonCall : p.value)
+      continue
+    }
+    if (p.key === 'tool') promptToolResults = p.value
+    parts.push(p)
+  }
+  const genThinking = Math.min(genReasoning, output)
+  const nonThinking = output - genThinking
+  const genNonThinking = genAnswers + genCalls
+  let outThinking = genThinking
+  let outAnswers = 0
+  let outCalls = 0
+  let unclassified = 0
+  if (generated.billed !== undefined) {
+    outThinking = Math.min(countOf(generated.billed.reasoning), output)
+    outAnswers = Math.min(countOf(generated.billed.answers), output - outThinking)
+    outCalls = Math.min(countOf(generated.billed.calls), output - outThinking - outAnswers)
+    unclassified = output - outThinking - outAnswers - outCalls
+  } else if (genNonThinking > 0) {
+    outAnswers = Math.round(nonThinking * genAnswers / genNonThinking)
+    outCalls = nonThinking - outAnswers
+  } else if (genThinking > 0) {
+    outThinking = output
+  } else {
+    outCalls = nonThinking
+  }
+  return [
+    ...parts.map(p => p.key === 'tool' ? { ...p, key: 'toolCalls', value: promptToolResults + promptCalls + outCalls } : p),
+    ...(unclassified > 0 ? [{ key: 'modelContent', color: CAT_COLOR.assistant, value: unclassified }] : []),
+    { key: 'thinking', color: THINKING_COLOR, value: promptThinking + outThinking },
+    { key: 'answers', color: ANSWERS_COLOR, value: promptAnswers + outAnswers },
+  ]
 }

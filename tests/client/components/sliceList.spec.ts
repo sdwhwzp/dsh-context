@@ -30,6 +30,22 @@ describe('SliceList', () => {
     await m.unmount()
   })
 
+  test('a row tip overrides the label tooltip and rides the row; a tipless row keeps the label title', async () => {
+    const tip = 'Line one\n• Line two'
+    const m = await mount(h(SliceList, {
+      rows: [
+        { key: 'a', color: '#ff0000', label: 'Alpha', pct: '1%', count: '1', tip },
+        { key: 'b', color: '#00ff00', label: 'Beta', pct: '1%', count: '1' },
+      ],
+    }))
+    const rows = queryAll(m.container, '.lc-sl-row')
+    assert.equal(rows[0].getAttribute('title'), tip)
+    assert.equal(rows[0].querySelector('.lc-sl-label')?.getAttribute('title'), tip)
+    assert.equal(rows[1].getAttribute('title'), null)
+    assert.equal(rows[1].querySelector('.lc-sl-label')?.getAttribute('title'), 'Beta')
+    await m.unmount()
+  })
+
   test('a zero-figure row dims; an empty count renders no secondary line', async () => {
     const m = await mount(h(SliceList, {
       rows: [

@@ -198,7 +198,7 @@ describe('rowsOfSnapshot: the family fold', () => {
       total: 500,
       parts: [
         { key: 'user', color: 'var(--color-green-500)', value: 460 },
-        { key: 'assistant', color: 'var(--color-blue-500)', value: 40 },
+        { key: 'toolCalls', color: 'var(--color-teal-500)', value: 40 },
       ],
     })
   })

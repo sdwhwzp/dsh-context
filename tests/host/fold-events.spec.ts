@@ -373,6 +373,32 @@ describe('session/end-seed', () => {
     assert.equal(state.assistantReasoning, 11, 'the inherited surface stays live')
   })
 
+  test('a tagged marker cuts the generated-answers tally with the spend; the live prefix keeps its price', () => {
+    const say = (text: string) => ({ type: 'text', text })
+    const { states, state } = driveTimeline([
+      assistantMessage(1, { content: [say('hello')] }),
+      endSeed(2, { inherited: true }),
+      assistantMessage(3, { content: [say('more')] }),
+    ])
+    assert.equal(states[1].generatedAnswerTokens, 6)
+    assert.equal(states[2].generatedAnswerTokens, undefined)
+    assert.equal(state.generatedAnswerTokens, 5)
+    assert.equal(state.assistantAnswerTokens, 11, 'the inherited surface stays live')
+  })
+
+  test('a tagged marker cuts the generated tool-call tally with the spend; the live prefix keeps its price', () => {
+    const call = () => ({ type: 'tool-call', name: 'bash', arguments: '{}' })
+    const { states, state } = driveTimeline([
+      assistantMessage(1, { content: [call()] }),
+      endSeed(2, { inherited: true }),
+      assistantMessage(3, { content: [call()] }),
+    ])
+    assert.equal(states[1].generatedCallTokens, 6)
+    assert.equal(states[2].generatedCallTokens, undefined)
+    assert.equal(state.generatedCallTokens, 6)
+    assert.equal(state.assistantCallTokens, 12, 'the inherited surface stays live')
+  })
+
   test('a marker without a strict `inherited: true` flag is a no-op', () => {
     const { def, state } = driveTimeline(inherited)
     const before = state.cost

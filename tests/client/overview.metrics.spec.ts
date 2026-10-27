@@ -140,13 +140,12 @@ describe('tokenPartsOf', () => {
         { key: 'user', color: 'var(--color-green-500)', value: 10 },
         { key: 'inject', color: 'var(--color-purple-500)', value: 3 },
         { key: 'skill', color: 'var(--color-orange-500)', value: 3 },
-        { key: 'assistant', color: 'var(--color-blue-500)', value: 104 },
-        { key: 'tool', color: 'var(--color-teal-500)', value: 32 },
+        { key: 'toolCalls', color: 'var(--color-teal-500)', value: 136 },
       ],
     })
   })
 
-  test('the members\' reasoning shares fold into one thinking part', () => {
+  test('the members\' reasoning shares fold into one thinking part, and reasoning-only output stays on thinking', () => {
     const reasoningCurrent = { ...STANDARD_CURRENT, assistantReasoning: 150 }
     const rows = [
       rowOf({ timeline: { current: reasoningCurrent, cost: COST, generatedReasoning: 12, requests: [] } as unknown as ContextTimeline }),
@@ -160,11 +159,25 @@ describe('tokenPartsOf', () => {
         { key: 'user', color: 'var(--color-green-500)', value: 10 },
         { key: 'inject', color: 'var(--color-purple-500)', value: 3 },
         { key: 'skill', color: 'var(--color-orange-500)', value: 3 },
-        { key: 'assistant', color: 'var(--color-blue-500)', value: 44 },
-        { key: 'tool', color: 'var(--color-teal-500)', value: 32 },
-        { key: 'thinking', color: 'var(--color-pink-500)', value: 60 },
+        { key: 'toolCalls', color: 'var(--color-teal-500)', value: 32 },
+        { key: 'thinking', color: 'var(--color-violet-500)', value: 104 },
       ],
     })
+  })
+
+  test('the aggregate keeps the ring order, so Answers closes whatever member contributes first', () => {
+    const member = (over: Record<string, number>): OverviewRow => rowOf({
+      timeline: {
+        current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 100, ...over, tool: 0, total: 100 },
+        cost: { deepseek: { m: { peak: { uncached: 100, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+        requests: [],
+      } as unknown as ContextTimeline,
+    })
+    const answersOnly = member({ assistantAnswerTokens: 100 })
+    const callsOnly = member({ assistantCallTokens: 100 })
+    for (const rows of [[answersOnly, callsOnly], [callsOnly, answersOnly]]) {
+      assert.deepEqual(tokenPartsOf(rows)?.parts.map(p => [p.key, p.value]), [['toolCalls', 100], ['answers', 100]])
+    }
   })
 
   test('a non-finite composition estimate drops whole instead of poisoning the sums', () => {
@@ -183,11 +196,11 @@ describe('tokenPartsOf', () => {
     })
   })
 
-  test('a ledger-scoped split does not attribute lifetime thinking to a selected day', () => {
+  test('a ledger-scoped split does not attribute lifetime content subsets to a selected day', () => {
     const member = timelineOf({
-      current: { ...STANDARD_CURRENT, assistantReasoning: 150 },
+      current: { ...STANDARD_CURRENT, assistantReasoning: 150, assistantAnswerTokens: 25, assistantCallTokens: 10 },
       cost: { deepseek: { m: { peak: { uncached: 200, cacheRead: 100, cacheWrite: 20, output: 80 } } } },
-      generatedReasoning: 80,
+      generatedReasoning: 40, generatedAnswerTokens: 20, generatedCallTokens: 10,
       requests: [],
     })
     assert.ok(member !== null)
@@ -203,8 +216,10 @@ describe('tokenPartsOf', () => {
     const scoped = tokenPartsOf([row], scope)
     assert.equal(scoped?.total, 200)
     assert.equal(scoped?.parts.find(part => part.key === 'thinking'), undefined)
-    assert.equal(scoped?.parts.find(part => part.key === 'assistant')?.value, 104)
-    assert.equal(member.generatedReasoning, 80)
+    assert.equal(scoped?.parts.find(part => part.key === 'answers'), undefined)
+    assert.equal(scoped?.parts.find(part => part.key === 'modelContent')?.value, 104)
+    assert.equal(scoped?.parts.find(part => part.key === 'toolCalls')?.value, 32)
+    assert.deepEqual([member.generatedReasoning, member.generatedAnswerTokens, member.generatedCallTokens], [40, 20, 10])
     assert.ok((tokenPartsOf([row])?.parts.find(part => part.key === 'thinking')?.value ?? 0) > 0)
   })
 

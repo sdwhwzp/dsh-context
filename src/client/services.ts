@@ -11,7 +11,7 @@ import { estimateSystemTokens } from '../shared/estimate'
 import type { SpendRates } from './spendMoney'
 import { PLUGIN_NAME } from './meta'
 import { commandRecordsOf, isCommandRecord } from './commandRecords'
-import type { ContextBreakdown, ContextHeaders, ContextPressure, ContextTimeline, HeaderEpochContent, SystemPromptNode, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
+import type { OutputTokenParts, ContextBreakdown, ContextHeaders, ContextPressure, ContextTimeline, HeaderEpochContent, SystemPromptNode, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
 
 export interface LocaleService {
   register(ns: string, dicts: Record<string, Record<string, string>>): () => void
@@ -242,6 +242,15 @@ function costFastOk(value: unknown): boolean {
   })
 }
 
+function outputPartsOf(value: unknown): OutputTokenParts | undefined {
+  const data = asRecord(value)
+  if (data === null) return undefined
+  const reasoning = optNumOf(data.reasoning), answers = optNumOf(data.answers)
+  const calls = optNumOf(data.calls), unclassified = optNumOf(data.unclassified)
+  if (reasoning === undefined || answers === undefined || calls === undefined || unclassified === undefined) return undefined
+  return { reasoning, answers, calls, unclassified }
+}
+
 /** Non-record → null (the loading screen); a malformed record is SANITIZED so render cannot throw and unmount the conversation view. */
 export function timelineOf(value: unknown): ContextTimeline | null {
   const data = asRecord(value)
@@ -258,7 +267,8 @@ export function timelineOf(value: unknown): ContextTimeline | null {
     && (data.commands === undefined || (Array.isArray(data.commands) && data.commands.every(isCommandRecord)))
     && systemsFastOk(data.systems)
     && timingFastOk(data.timing)
-    && costFastOk(data.cost)) {
+    && costFastOk(data.cost)
+    && (data.billedGenerated === undefined || outputPartsOf(data.billedGenerated) !== undefined)) {
     // The untouched pass-through keeps the value reference-stable for the selector equality.
     return data as unknown as ContextTimeline
   }
@@ -269,6 +279,9 @@ export function timelineOf(value: unknown): ContextTimeline | null {
   const counts = countsOf(data.counts)
   const last = lastOf(data.last)
   const generatedReasoning = optNumOf(data.generatedReasoning)
+  const generatedAnswerTokens = optNumOf(data.generatedAnswerTokens)
+  const generatedCallTokens = optNumOf(data.generatedCallTokens)
+  const billedGenerated = outputPartsOf(data.billedGenerated)
   const safe: ContextTimeline = {
     ok: true,
     ...(unsupported !== null ? { unsupported } : {}),
@@ -287,12 +300,17 @@ export function timelineOf(value: unknown): ContextTimeline | null {
       skill: numOf(safeCurrent.skill),
       assistant: numOf(safeCurrent.assistant),
       assistantReasoning: numOf(safeCurrent.assistantReasoning),
+      assistantAnswerTokens: numOf(safeCurrent.assistantAnswerTokens),
+      assistantCallTokens: numOf(safeCurrent.assistantCallTokens),
       tool: numOf(safeCurrent.tool),
       total: numOf(safeCurrent.total),
     },
     ...collectionsOf(data),
     ...(typeof data.images === 'number' ? { images: data.images } : {}),
     ...(generatedReasoning !== undefined ? { generatedReasoning } : {}),
+    ...(generatedAnswerTokens !== undefined ? { generatedAnswerTokens } : {}),
+    ...(generatedCallTokens !== undefined ? { generatedCallTokens } : {}),
+    ...(billedGenerated !== undefined ? { billedGenerated } : {}),
     ...(typeof data.toolCalls === 'number' ? { toolCalls: data.toolCalls } : {}),
     ...(typeof data.humanInputs === 'number' ? { humanInputs: data.humanInputs } : {}),
     ...(typeof data.answers === 'number' && Number.isFinite(data.answers) ? { answers: data.answers } : {}),

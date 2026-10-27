@@ -228,8 +228,7 @@ export default defineConfig([
     // The host half's Config/projection types are the integration contract other plugins compile against.
     dts: !WATCH,
     clean: true,
-    // The banner stays off index.d.ts so the published types remain a pure declaration file.
-    banner: () => ({ js: artifactBanner() }),
+    banner: () => ({ js: artifactBanner(), dts: artifactBanner() }),
     onSuccess: collectGarbage,
     outputOptions: { comments: OUTPUT_COMMENTS },
     deps: {

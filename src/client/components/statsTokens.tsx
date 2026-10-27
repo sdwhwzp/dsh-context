@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import type { ContextBreakdown, Snapshot, TokenUsage } from '../../shared/types'
+import type { OutputTokenParts, ContextBreakdown, Snapshot, TokenUsage } from '../../shared/types'
 import { billedParts } from '../categories'
 import { cacheHitPercent } from '../format'
 import { numOf } from '../services'
@@ -16,6 +16,9 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
   current: Snapshot['current']
   breakdown: ContextBreakdown | null
   generatedReasoning?: number
+  generatedAnswerTokens?: number
+  generatedCallTokens?: number
+  billedGenerated?: OutputTokenParts
 }) => ReactElement {
   const { t, fmt } = kit
   return function StatsTokens(props: {
@@ -23,6 +26,9 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
     current: Snapshot['current']
     breakdown: ContextBreakdown | null
     generatedReasoning?: number
+    generatedAnswerTokens?: number
+    generatedCallTokens?: number
+    billedGenerated?: OutputTokenParts
   }): ReactElement {
     const [hoverKey, setHoverKey] = useState<string | null>(null)
     const input = props.usage !== null
@@ -35,7 +41,12 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
       ? null
       : cacheHitPercent(numOf(props.usage.cacheReadTokens), input)
     // Null usage (no provider report) takes the same zeroed split billedParts produces for a zero report.
-    const parts = billedParts(props.current, props.breakdown, props.usage ?? NO_USAGE, props.generatedReasoning)
+    const parts = billedParts(props.current, props.breakdown, props.usage ?? NO_USAGE, {
+      reasoning: props.generatedReasoning,
+      answers: props.generatedAnswerTokens,
+      calls: props.generatedCallTokens,
+      billed: props.billedGenerated,
+    })
     const shown = total > 0 ? parts.filter(p => p.value > 0) : parts
     const rows = tokenRowsOf(kit, shown, total)
     return (
