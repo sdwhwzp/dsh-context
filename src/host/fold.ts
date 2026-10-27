@@ -6,6 +6,7 @@ import { estimateSystemContent } from '../shared/estimate'
 import type { FoldBounds } from './config'
 import {
   estimateMessage,
+  estimateReasoningTokens,
   estimateToolsTotal,
   firstText,
   imageCountOf,
@@ -103,6 +104,16 @@ function archiveRemoved(st: TimelineState, removed: SurfaceNode[], goneSeq: numb
   for (const n of removed) st.archived.push({ ...n, gone: goneSeq })
 }
 
+function addLiveReasoning(st: TimelineState, node: SurfaceNode): void {
+  if (node.reasoning === undefined) return
+  st.assistantReasoning += node.reasoning
+}
+
+function dropLiveReasoning(st: TimelineState, node: SurfaceNode): void {
+  if (node.reasoning === undefined) return
+  st.assistantReasoning -= node.reasoning
+}
+
 /** Removal follows the SEQ list, not the declared range: pruned replacement nodes keep seqs beyond the range end. */
 function removeSurfaceSeqs(st: TimelineState, claimed: ReadonlySet<number>, goneSeq: number): SurfaceNode[] {
   if (claimed.size === 0) return []
@@ -111,6 +122,7 @@ function removeSurfaceSeqs(st: TimelineState, claimed: ReadonlySet<number>, gone
   for (const n of st.surface) {
     if (claimed.has(n.seq)) {
       st.sums[n.cat] -= n.tokens
+      dropLiveReasoning(st, n)
       removed.push(n)
     } else {
       kept.push(n)
@@ -166,6 +178,10 @@ function applySurface(
     time: ev.time,
     cat,
     tokens: estimateMessage(message, type === 'assistant/message' || type === 'developer/message'),
+  }
+  if (cat === 'assistant') {
+    const reasoning = estimateReasoningTokens(message?.content)
+    if (reasoning > 0) node.reasoning = reasoning
   }
   // Image blocks ride the NODE (absent when zero): the stats board sums the live surface, not the archive.
   const imgs = imageCountOf(message?.content)
@@ -231,6 +247,7 @@ function applySurface(
     if (Array.isArray(shadowedSeqs) && shadowedSeqs.length > 0) {
       const removed = removeSurfaceSeqs(st, new Set(shadowedSeqs), ev.seq)
       st.sums[cat] += node.tokens
+      addLiveReasoning(st, node)
       st.surface.push(node)
       // Rewrite the metering row to the NET freed amount, matching the trend chart's drop. Cloned: elements are
       // shared with the persisted state.
@@ -252,13 +269,18 @@ function applySurface(
     if (si >= 0 && ei >= si) {
       const removed = st.surface.splice(si, ei - si + 1, node)
       archiveRemoved(st, removed, ev.seq)
-      for (const r of removed) st.sums[r.cat] -= r.tokens
+      for (const r of removed) {
+        st.sums[r.cat] -= r.tokens
+        dropLiveReasoning(st, r)
+      }
       st.sums[cat] += node.tokens
+      addLiveReasoning(st, node)
       return node
     }
   }
   st.surface.push(node)
   st.sums[cat] += node.tokens
+  addLiveReasoning(st, node)
   return node
 }
 
@@ -807,15 +829,22 @@ export function applyTimeline(state: TimelineState, event: TimelineEvent, bounds
         const asstNode = applySurface(s, event, event.type, asstMsg)
         // The node carries `text` exactly when the message said something, so a text-less tool dispatch does not count.
         if (asstNode.text !== undefined) s.answers = (s.answers ?? 0) + 1
+        // A reported reasoning bucket is exact; the live-surface estimate is the fallback when the route omits it.
+        const providerReasoning = usage !== null && typeof usage === 'object' ? tokenCountOf(usage.reasoningTokens) : null
+        const generated = providerReasoning === null
+          ? (asstNode.reasoning ?? 0)
+          : output === null ? providerReasoning : Math.min(providerReasoning, output)
+        if (generated > 0) s.generatedReasoning = (s.generatedReasoning ?? 0) + generated
         break
       }
       case 'session/end-seed': {
-        // The fork/seed boundary: a TAGGED marker (`inherited: true`) zeroes the cost totals so a seeded session
-        // counts post-seed spend only. The UNTAGGED resume marker must leave the state reference untouched, or every
-        // resume wipes history. `{}`, not `undefined`: an undefined-valued property fails the plain-JSON precondition.
+        // The fork/seed boundary: a TAGGED marker (`inherited: true`) zeroes the spend tallies (cost and generated
+        // reasoning) so a seeded session counts post-seed spend only. The UNTAGGED resume marker must leave the state
+        // reference untouched, or every resume wipes history.
         if (data?.inherited !== true) break
         const s = ensure([])
         s.cost = {}
+        delete s.generatedReasoning
         break
       }
       case 'plan/mode': {

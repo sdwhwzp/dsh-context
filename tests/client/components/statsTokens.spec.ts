@@ -27,16 +27,15 @@ describe('StatsTokens', () => {
     const m = await mount(h(StatsTokens, { usage: USAGE, current: CURRENT, breakdown: null }))
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '450')
     assert.equal(query(m.container, '.lc-donut-center span').textContent, 'Total')
-    // Estimated composition (sum 1000) scales to billed input 400; rows share the whole 450.
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, 7)
+    // Estimated composition (sum 1000) scales to billed input 400; the output joins the assistant remainder, so rows share the whole 450.
+    assert.equal(queryAll(m.container, '.lc-sl-row').length, 6)
     const expected = [
       { pct: '17.8%', label: 'System Prompt', count: '≈80' },
       { pct: '8.9%', label: 'Tool Schemas', count: '≈40' },
       { pct: '26.7%', label: 'User Messages', count: '≈120' },
       { pct: '8.9%', label: 'Injected Context', count: '≈40' },
-      { pct: '17.8%', label: 'Assistant Messages', count: '≈80' },
+      { pct: '28.9%', label: 'Assistant Messages', count: '≈130' },
       { pct: '8.9%', label: 'Tool Results', count: '≈40' },
-      { pct: '11.1%', label: 'Output', count: '50 · incl. reasoning' },
     ]
     expected.forEach((row, i) => assert.deepEqual(rowOf(m.container, i), row))
     await m.unmount()
@@ -50,8 +49,23 @@ describe('StatsTokens', () => {
     assert.equal(queryAll(sparseMount.container, '.lc-sl-row').length, 3)
     assert.deepEqual(rowOf(sparseMount.container, 0), { pct: '22.2%', label: 'System Prompt', count: '≈100' })
     assert.deepEqual(rowOf(sparseMount.container, 1), { pct: '66.7%', label: 'User Messages', count: '≈300' })
-    assert.deepEqual(rowOf(sparseMount.container, 2), { pct: '11.1%', label: 'Output', count: '50 · incl. reasoning' })
+    assert.deepEqual(rowOf(sparseMount.container, 2), { pct: '11.1%', label: 'Assistant Messages', count: '≈50' })
     await sparseMount.unmount()
+  })
+
+  test('the thinking slice splits the assistant bucket and the generated output, in both locales', async () => {
+    const current: Snapshot['current'] = { system: 100, tools: 0, user: 0, inject: 0, skill: 0, assistant: 100, assistantReasoning: 60, tool: 0, total: 200 }
+    const usage: TokenUsage = { uncachedInputTokens: 200, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 }
+    const m = await mount(h(StatsTokens, { usage, current, breakdown: null, generatedReasoning: 40 }))
+    assert.equal(query(m.container, '.lc-donut-center b').textContent, '300')
+    // Assistant anchored at 100 splits 60/40; the 100 output keeps 40 thinking and 60 assistant.
+    assert.deepEqual(rowOf(m.container, 1), { pct: '33.3%', label: 'Assistant Messages', count: '≈100' })
+    assert.deepEqual(rowOf(m.container, 2), { pct: '33.3%', label: 'Thinking', count: '≈100' })
+    await m.unmount()
+
+    const zh = await mount(h(makeStatsTokens(makeKit('zh'), Donut), { usage, current, breakdown: null, generatedReasoning: 40 }))
+    assert.deepEqual(rowOf(zh.container, 2), { pct: '33.3%', label: '思考', count: '≈100' })
+    await zh.unmount()
   })
 
   test('a delivered breakdown drives the prompt-side split ratios', async () => {
@@ -64,9 +78,8 @@ describe('StatsTokens', () => {
     assert.deepEqual(rowOf(m.container, 0), { pct: '23.8%', label: 'System Prompt', count: '≈200' })
     assert.deepEqual(rowOf(m.container, 1), { pct: '23.8%', label: 'Tool Schemas', count: '≈200' })
     assert.deepEqual(rowOf(m.container, 2), { pct: '23.8%', label: 'User Messages', count: '≈200' })
-    assert.deepEqual(rowOf(m.container, 3), { pct: '23.8%', label: 'Assistant Messages', count: '≈200' })
-    assert.deepEqual(rowOf(m.container, 4), { pct: '4.8%', label: 'Output', count: '40 · incl. reasoning' })
-    assert.equal(queryAll(m.container, '.lc-sl-row').length, 5)
+    assert.deepEqual(rowOf(m.container, 3), { pct: '28.6%', label: 'Assistant Messages', count: '≈240' })
+    assert.equal(queryAll(m.container, '.lc-sl-row').length, 4)
     await m.unmount()
   })
 
@@ -94,7 +107,7 @@ describe('StatsTokens', () => {
         assert.equal(row.querySelector('.lc-sl-pct')?.textContent, '—')
       }
       const counts = queryAll(m.container, '.lc-sl-sub').map(n => n.textContent)
-      assert.deepEqual(counts, ['≈0', '≈0', '≈0', '≈0', '≈0', '≈0', '≈0', '0 · incl. reasoning'])
+      assert.deepEqual(counts, ['≈0', '≈0', '≈0', '≈0', '≈0', '≈0', '≈0', '≈0'])
       assert.ok(query(m.container, '.lc-donut-track'), 'an all-zero ring draws the neutral track')
       await m.unmount()
     }

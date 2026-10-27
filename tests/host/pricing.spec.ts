@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import {
   estimateMessage,
+  estimateReasoningTokens,
   estimateToolSchema,
   estimateToolsTotal,
   firstText,
@@ -17,6 +18,16 @@ describe('estimateToolsTotal', () => {
     assert.equal(estimateToolsTotal([]), 0)
     const tools = [{ name: 'bash', description: 'run a command' }]
     assert.equal(estimateToolsTotal(tools), Math.ceil(JSON.stringify(tools).length / 4) + 4)
+  })
+})
+
+describe('estimateReasoningTokens', () => {
+  test('only reasoning blocks price; a missing array, junk members, and other arms contribute nothing', () => {
+    assert.equal(estimateReasoningTokens(undefined), 0)
+    assert.equal(estimateReasoningTokens('x'), 0)
+    assert.equal(estimateReasoningTokens([null, 7, { type: 'text', text: '0123456789abcdef' }]), 0)
+    assert.equal(estimateReasoningTokens([{ type: 'reasoning', text: '0123456789abcdef' }]), 8)
+    assert.equal(estimateReasoningTokens([{ type: 'reasoning' }]), 4, 'an empty reasoning block is overhead only')
   })
 })
 

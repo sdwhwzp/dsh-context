@@ -892,7 +892,7 @@ export function makeContextView(
           </div>
         )}
         <div className="lc-cols lc-head">
-          <StatsTokens usage={usage} current={data.current} breakdown={breakdown} />
+          <StatsTokens usage={usage} current={data.current} breakdown={breakdown} generatedReasoning={data.generatedReasoning} />
           <StatsTiming timing={data.timing ?? null} spans={data.spans} locale={activeLocale} />
         </div>
 

@@ -16,6 +16,7 @@ import {
 import { priceIndexOf } from '../../src/client/cost'
 import type { ContextActivity, ContextTimeline, SessionCostUsage } from '../../src/shared/types'
 import { COST, rowOf } from './overview.fixtures'
+import { timelineOf } from '../../src/client/services'
 
 describe('billedOf / turnsOf', () => {
   test('billed sums the team’s merged cost buckets; absent cost reads null', () => {
@@ -139,9 +140,29 @@ describe('tokenPartsOf', () => {
         { key: 'user', color: 'var(--color-green-500)', value: 10 },
         { key: 'inject', color: 'var(--color-purple-500)', value: 3 },
         { key: 'skill', color: 'var(--color-orange-500)', value: 3 },
-        { key: 'assistant', color: 'var(--color-blue-500)', value: 64 },
+        { key: 'assistant', color: 'var(--color-blue-500)', value: 104 },
         { key: 'tool', color: 'var(--color-teal-500)', value: 32 },
-        { key: 'output', color: 'var(--color-pink-500)', value: 40 },
+      ],
+    })
+  })
+
+  test('the members\' reasoning shares fold into one thinking part', () => {
+    const reasoningCurrent = { ...STANDARD_CURRENT, assistantReasoning: 150 }
+    const rows = [
+      rowOf({ timeline: { current: reasoningCurrent, cost: COST, generatedReasoning: 12, requests: [] } as unknown as ContextTimeline }),
+      rowOf({ timeline: { current: TINY_CURRENT, cost: { deepseek: { m: { peak: { uncached: 10, cacheRead: 0, cacheWrite: 0, output: 0 } } } }, requests: [] } as unknown as ContextTimeline }),
+    ]
+    assert.deepEqual(tokenPartsOf(rows), {
+      total: 210,
+      parts: [
+        { key: 'system', color: 'var(--color-indigo-500)', value: 42 },
+        { key: 'tools', color: 'var(--color-amber-500)', value: 16 },
+        { key: 'user', color: 'var(--color-green-500)', value: 10 },
+        { key: 'inject', color: 'var(--color-purple-500)', value: 3 },
+        { key: 'skill', color: 'var(--color-orange-500)', value: 3 },
+        { key: 'assistant', color: 'var(--color-blue-500)', value: 44 },
+        { key: 'tool', color: 'var(--color-teal-500)', value: 32 },
+        { key: 'thinking', color: 'var(--color-pink-500)', value: 60 },
       ],
     })
   })
@@ -160,6 +181,31 @@ describe('tokenPartsOf', () => {
       total: 10,
       parts: [{ key: 'system', color: 'var(--color-indigo-500)', value: 10 }],
     })
+  })
+
+  test('a ledger-scoped split does not attribute lifetime thinking to a selected day', () => {
+    const member = timelineOf({
+      current: { ...STANDARD_CURRENT, assistantReasoning: 150 },
+      cost: { deepseek: { m: { peak: { uncached: 200, cacheRead: 100, cacheWrite: 20, output: 80 } } } },
+      generatedReasoning: 80,
+      requests: [],
+    })
+    assert.ok(member !== null)
+    const activity: ContextActivity = {
+      days: {
+        '2026-09-16': { tokens: 200, requests: 1, cost: COST },
+        '2026-09-17': { tokens: 200, requests: 1, cost: COST },
+      },
+    }
+    const row = rowOf({ timeline: member, family: [member], familyActivity: [activity] })
+    const scope = dayRangeWindow({ from: '2026-09-17', to: '2026-09-17' })
+    assert.ok(scope !== null)
+    const scoped = tokenPartsOf([row], scope)
+    assert.equal(scoped?.total, 200)
+    assert.equal(scoped?.parts.find(part => part.key === 'thinking'), undefined)
+    assert.equal(scoped?.parts.find(part => part.key === 'assistant')?.value, 104)
+    assert.equal(member.generatedReasoning, 80)
+    assert.ok((tokenPartsOf([row])?.parts.find(part => part.key === 'thinking')?.value ?? 0) > 0)
   })
 
   test('a scoped split folds only the daily ledger days inside the window', () => {

@@ -27,6 +27,50 @@ describe('applySurface assistant branch', () => {
   })
 })
 
+describe('assistant reasoning accounting', () => {
+  const reasoning = (t: string) => ({ type: 'reasoning', text: t })
+
+  test('a node prices its reasoning blocks as a live subset, and the whole message as the generated tally', () => {
+    const drive = driveTimeline([assistantMessage(1, {
+      content: [reasoning('think'), ...text('reply')],
+    })])
+    const node = drive.state.surface.at(-1)
+    // 'think' and 'reply' are 5 chars: ceil(5/4) + 4 block overhead each; the role adds 4.
+    assert.deepEqual([node?.tokens, node?.reasoning], [16, 6])
+    assert.equal(drive.state.sums.assistant, 16)
+    assert.equal(drive.state.assistantReasoning, 6)
+    assert.equal(drive.state.generatedReasoning, 6)
+    assert.equal(drive.view.current.assistantReasoning, 6)
+    assert.equal(drive.view.generatedReasoning, 6)
+    assert.equal(drive.def.wire.viewSchema.safeParse(drive.view).success, true)
+  })
+
+  test('a replacement drops the live price but keeps the generated tally; a reasoning-less log stays absent', () => {
+    const drive = driveTimeline([
+      assistantMessage(1, { content: [reasoning('think')] }),
+      compaction(2, 'summary', { shadowedTokenCount: 10, shadowedSeqs: [1] }),
+      assistantMessage(3, { content: [reasoning('more')], surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }),
+    ])
+    assert.equal(drive.state.assistantReasoning, 5, "'more' is 4 chars: ceil(4/4) + 4")
+    assert.equal(drive.state.generatedReasoning, 11, 'the shadowed message was still generated')
+    assert.equal(drive.state.archived[0]?.reasoning, 6)
+    assert.deepEqual([drive.view.current.assistant, drive.view.current.assistantReasoning], [9, 5])
+    const plain = driveTimeline([assistantMessage(1, { content: text('reply') })])
+    assert.deepEqual([plain.view.current.assistantReasoning, plain.view.generatedReasoning], [0, undefined])
+    assert.ok(!('generatedReasoning' in plain.view))
+  })
+
+  test("a provider reasoning count wins over the estimate, clamps to output, and survives without an output bucket; an unreadable count falls back", () => {
+    const generated = (usage: Record<string, unknown>): number | undefined =>
+      driveTimeline([assistantMessage(1, { content: [reasoning('think')], usage })]).state.generatedReasoning
+    assert.equal(generated({ inputTokens: 1, outputTokens: 3, reasoningTokens: 2 }), 2)
+    assert.equal(generated({ inputTokens: 1, outputTokens: 3, reasoningTokens: 9 }), 3)
+    assert.equal(generated({ reasoningTokens: 2 }), 2)
+    assert.equal(generated({ inputTokens: 1, outputTokens: 3, reasoningTokens: 'x' }), 6, 'the estimate stands in')
+    assert.equal(generated({ inputTokens: 1, outputTokens: 3, reasoningTokens: -1 }), undefined, 'a zero provider count stays zero')
+  })
+})
+
 describe('applySurface tool/result branch', () => {
   test('a source callId armed by tool/call names the node, is consumed, and leaves other pending calls armed', () => {
     const { state } = driveTimeline([

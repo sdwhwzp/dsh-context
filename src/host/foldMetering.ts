@@ -12,6 +12,8 @@ export interface UsageLike {
   cacheReadTokens?: unknown
   cacheWriteTokens?: unknown
   outputTokens?: unknown
+  /** An output subset when the route reports it; absent on the supported DeepSeek routes. */
+  reasoningTokens?: unknown
 }
 
 export type BilledUsage = CostBucketTotals

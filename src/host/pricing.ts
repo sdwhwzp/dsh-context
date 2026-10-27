@@ -61,6 +61,18 @@ function estimateBlocks(blocks: unknown): number {
   return tokens
 }
 
+/** The reasoning-block share of a message's price (the meter's reasoning arm only) — a subset of `estimateMessage`. */
+export function estimateReasoningTokens(blocks: unknown): number {
+  let tokens = 0
+  if (!Array.isArray(blocks)) return tokens
+  for (const item of blocks) {
+    if (item === null || typeof item !== 'object') continue
+    const block = item as ContentBlock
+    if (block.type === 'reasoning') tokens += estimateTextTokens(block.text || '')
+  }
+  return tokens
+}
+
 /** Price one surface message exactly like dsh's meter: an empty-content assistant/developer event projects to NO message, so it prices 0.
  */
 export function estimateMessage(message: { content?: ContentBlock[] } | undefined | null, emptyIsZero = false): number {

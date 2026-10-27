@@ -17,7 +17,7 @@ const PARTS: TokenPartTotal[] = [
   { key: 'skill', color: 'var(--color-orange-500)', value: 3 },
   { key: 'assistant', color: 'var(--color-blue-500)', value: 64 },
   { key: 'tool', color: 'var(--color-teal-500)', value: 32 },
-  { key: 'output', color: 'var(--color-pink-500)', value: 40 },
+  { key: 'thinking', color: 'var(--color-pink-500)', value: 40 },
 ]
 const TOKENS = { parts: PARTS, total: 210 }
 
@@ -43,7 +43,7 @@ describe('OverviewTokens', () => {
       { pct: '1.4%', label: 'Skill Injections', count: '≈3' },
       { pct: '30.5%', label: 'Assistant Messages', count: '≈64' },
       { pct: '15.2%', label: 'Tool Results', count: '≈32' },
-      { pct: '19.0%', label: 'Output', count: '40 · incl. reasoning' },
+      { pct: '19.0%', label: 'Thinking', count: '≈40' },
     ]
     expected.forEach((row, i) => assert.deepEqual(rowOf(m.container, i), row))
     await m.unmount()
@@ -53,7 +53,7 @@ describe('OverviewTokens', () => {
         { key: 'system', color: 'var(--color-indigo-500)', value: 300 },
         { key: 'tools', color: 'var(--color-amber-500)', value: 0 },
         { key: 'user', color: 'var(--color-green-500)', value: 90 },
-        { key: 'output', color: 'var(--color-pink-500)', value: 50 },
+        { key: 'thinking', color: 'var(--color-pink-500)', value: 50 },
       ],
       total: 440,
     }
@@ -62,7 +62,7 @@ describe('OverviewTokens', () => {
     assert.equal(queryAll(sparseMount.container, '.lc-sl-row').length, 3)
     assert.deepEqual(rowOf(sparseMount.container, 0), { pct: '68.2%', label: 'System Prompt', count: '≈300' })
     assert.deepEqual(rowOf(sparseMount.container, 1), { pct: '20.5%', label: 'User Messages', count: '≈90' })
-    assert.deepEqual(rowOf(sparseMount.container, 2), { pct: '11.4%', label: 'Output', count: '50 · incl. reasoning' })
+    assert.deepEqual(rowOf(sparseMount.container, 2), { pct: '11.4%', label: 'Thinking', count: '≈50' })
     await sparseMount.unmount()
   })
 

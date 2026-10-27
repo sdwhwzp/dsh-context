@@ -77,17 +77,35 @@ export function anchoredParts(parts: PartsPart[], target: number | null): PartsP
   return sourced.map(p => ({ ...p, value: Math.round(p.raw * scale) }))
 }
 
-/** The Token card's billed split: composition categories share the provider prompt total, and output closes
- * the ring, so the parts total the chat line's count by construction. */
+/** The thinking slice reuses the retired output slice's hue. */
+const THINKING_COLOR = 'var(--color-pink-500)'
+
+const countOf = (value: number | undefined): number =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
+
+/** The Token card's billed split: composition categories share the provider prompt total; the assistant bucket's live
+ * reasoning share and the generated reasoning count move into a closing thinking slice, and the non-thinking remainder
+ * stays on assistant. The parts total the chat line's count by construction. */
 export function billedParts(
   current: Snapshot['current'],
   breakdown: ContextBreakdown | null,
   usage: TokenUsage,
+  generatedReasoning = 0,
 ): PartsPart[] {
   const input = usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+  const output = countOf(usage.outputTokens)
   const estimated = officialParts(current, breakdown)
   const prompt = input > 0
     ? anchoredParts(estimated, input)
     : estimated.map(p => ({ ...p, value: 0 }))
-  return [...prompt, { key: 'output', color: 'var(--color-pink-500)', value: Math.max(0, usage.outputTokens) }]
+  const liveAssistant = countOf(current.assistant)
+  const liveReasoning = Math.min(countOf(current.assistantReasoning), liveAssistant)
+  const generatedThinking = Math.min(countOf(generatedReasoning), output)
+  let promptThinking = 0
+  const parts = prompt.map((p) => {
+    if (p.key !== 'assistant') return p
+    promptThinking = liveAssistant > 0 ? Math.round(p.value * liveReasoning / liveAssistant) : 0
+    return { ...p, value: p.value - promptThinking + output - generatedThinking }
+  })
+  return [...parts, { key: 'thinking', color: THINKING_COLOR, value: promptThinking + generatedThinking }]
 }

@@ -360,6 +360,19 @@ describe('session/end-seed', () => {
     assert.equal(state.cost?.['']?.['deepseek-v3']?.peak?.uncached, 2)
   })
 
+  test('a tagged marker cuts the generated-reasoning tally with the spend; the live prefix keeps its price', () => {
+    const think = (text: string) => ({ type: 'reasoning', text })
+    const { states, state } = driveTimeline([
+      assistantMessage(1, { content: [think('think')] }),
+      endSeed(2, { inherited: true }),
+      assistantMessage(3, { content: [think('more')] }),
+    ])
+    assert.equal(states[1].generatedReasoning, 6)
+    assert.equal(states[2].generatedReasoning, undefined)
+    assert.equal(state.generatedReasoning, 5)
+    assert.equal(state.assistantReasoning, 11, 'the inherited surface stays live')
+  })
+
   test('a marker without a strict `inherited: true` flag is a no-op', () => {
     const { def, state } = driveTimeline(inherited)
     const before = state.cost

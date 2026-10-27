@@ -268,6 +268,7 @@ export function timelineOf(value: unknown): ContextTimeline | null {
   const unsupported = unsupportedOf(data.unsupported)
   const counts = countsOf(data.counts)
   const last = lastOf(data.last)
+  const generatedReasoning = optNumOf(data.generatedReasoning)
   const safe: ContextTimeline = {
     ok: true,
     ...(unsupported !== null ? { unsupported } : {}),
@@ -285,11 +286,13 @@ export function timelineOf(value: unknown): ContextTimeline | null {
       inject: numOf(safeCurrent.inject),
       skill: numOf(safeCurrent.skill),
       assistant: numOf(safeCurrent.assistant),
+      assistantReasoning: numOf(safeCurrent.assistantReasoning),
       tool: numOf(safeCurrent.tool),
       total: numOf(safeCurrent.total),
     },
     ...collectionsOf(data),
     ...(typeof data.images === 'number' ? { images: data.images } : {}),
+    ...(generatedReasoning !== undefined ? { generatedReasoning } : {}),
     ...(typeof data.toolCalls === 'number' ? { toolCalls: data.toolCalls } : {}),
     ...(typeof data.humanInputs === 'number' ? { humanInputs: data.humanInputs } : {}),
     ...(typeof data.answers === 'number' && Number.isFinite(data.answers) ? { answers: data.answers } : {}),

@@ -73,7 +73,7 @@ describe('anchoredParts', () => {
 describe('billedParts', () => {
   const USAGE: TokenUsage = { uncachedInputTokens: 300, outputTokens: 60, cacheReadTokens: 100, cacheWriteTokens: 0 }
 
-  test('the billed input splits by the estimated ratios, output closes exact, and the split scales when billed input differs', () => {
+  test('the billed input splits by the estimated ratios, output joins the assistant remainder, and the split scales when billed input differs', () => {
     const cur = current({ system: 50, tools: 50, user: 100, inject: 0, assistant: 100, tool: 100, total: 400 })
     assert.deepEqual(billedParts(cur, null, USAGE).map(p => [p.key, p.color, p.value]), [
       ['system', 'var(--color-indigo-500)', 50],
@@ -81,25 +81,52 @@ describe('billedParts', () => {
       ['user', 'var(--color-green-500)', 100],
       ['inject', 'var(--color-purple-500)', 0],
       ['skill', 'var(--color-orange-500)', 0],
-      ['assistant', 'var(--color-blue-500)', 100],
+      ['assistant', 'var(--color-blue-500)', 160],
       ['tool', 'var(--color-teal-500)', 100],
-      ['output', 'var(--color-pink-500)', 60],
+      ['thinking', 'var(--color-pink-500)', 0],
     ])
     const scaled = billedParts(current({ system: 100, user: 100, total: 200 }), null, { ...USAGE, uncachedInputTokens: 400, cacheReadTokens: 0, outputTokens: 0 })
-    assert.deepEqual(values(scaled), { system: 200, tools: 0, user: 200, inject: 0, skill: 0, assistant: 0, tool: 0, output: 0 })
+    assert.deepEqual(values(scaled), { system: 200, tools: 0, user: 200, inject: 0, skill: 0, assistant: 0, tool: 0, thinking: 0 })
   })
 
-  test('a delivered breakdown supplies the split ratios; a zero billed input zeroes the prompt split but keeps the exact output', () => {
+  test('a delivered breakdown supplies the split ratios; a zero billed input zeroes the prompt split but keeps the output remainder', () => {
     const cur = current({ user: 150, assistant: 150, total: 300 })
     const split = billedParts(cur, { systemTokens: 100, toolsTokens: 100, messageTokens: 200 }, { ...USAGE, uncachedInputTokens: 800, cacheReadTokens: 0 })
-    assert.deepEqual(values(split), { system: 200, tools: 200, user: 200, inject: 0, skill: 0, assistant: 200, tool: 0, output: 60 })
+    assert.deepEqual(values(split), { system: 200, tools: 200, user: 200, inject: 0, skill: 0, assistant: 260, tool: 0, thinking: 0 })
     const zero = billedParts(current({ system: 100, user: 100, total: 200 }), null, { uncachedInputTokens: 0, outputTokens: 25, cacheReadTokens: 0, cacheWriteTokens: 0 })
-    assert.deepEqual(values(zero), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, output: 25 })
+    assert.deepEqual(values(zero), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 25, tool: 0, thinking: 0 })
   })
 
-  test('an all-zero composition leaves the billed input unattributed, and hostile negative buckets never yield negative parts', () => {
-    assert.deepEqual(values(billedParts(current(), null, USAGE)), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, output: 60 })
-    const hostile = billedParts(current({ system: 100, total: 100 }), null, { uncachedInputTokens: -10, outputTokens: -5, cacheReadTokens: 0, cacheWriteTokens: 0 })
-    assert.deepEqual(values(hostile), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, output: 0 })
+  test('the live reasoning share moves out of assistant into thinking, and the generated reasoning share moves out of output', () => {
+    const cur = current({ system: 100, assistant: 100, assistantReasoning: 75, total: 200 })
+    const parts = billedParts(cur, null, { uncachedInputTokens: 200, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 }, 30)
+    // Anchored assistant 100 splits 75/25; the 50 output keeps 30 thinking and 20 assistant.
+    assert.deepEqual(values(parts), { system: 100, tools: 0, user: 0, inject: 0, skill: 0, assistant: 45, tool: 0, thinking: 105 })
+    assert.deepEqual(parts.map(p => p.value).reduce((a, b) => a + b, 0), 250, 'the parts still total the chat line')
+  })
+
+  test('reasoning never exceeds its source bucket: a hostile live share takes the whole assistant slice, an over-large generated count the whole output', () => {
+    const cur = current({ assistant: 100, assistantReasoning: 200, total: 100 })
+    const parts = billedParts(cur, null, { uncachedInputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }, 999)
+    assert.deepEqual(values(parts), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, thinking: 110 })
+  })
+
+  test('generated reasoning needs no live reasoning, and a zero billed input still splits the output remainder', () => {
+    const cur = current({ assistant: 200, total: 200 })
+    const parts = billedParts(cur, null, { uncachedInputTokens: 200, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 }, 20)
+    assert.deepEqual(values(parts), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 230, tool: 0, thinking: 20 })
+    const noInput = billedParts(current({ assistant: 100, total: 100 }), null, { uncachedInputTokens: 0, outputTokens: 25, cacheReadTokens: 0, cacheWriteTokens: 0 }, 10)
+    assert.deepEqual(values(noInput), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 15, tool: 0, thinking: 10 })
+  })
+
+  test('an all-zero composition leaves the billed input unattributed, and hostile buckets never yield negative parts', () => {
+    assert.deepEqual(values(billedParts(current(), null, USAGE)), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 60, tool: 0, thinking: 0 })
+    const hostile = billedParts(
+      current({ system: 100, assistantReasoning: -5, total: 100 }),
+      null,
+      { uncachedInputTokens: -10, outputTokens: -5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      -10,
+    )
+    assert.deepEqual(values(hostile), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, thinking: 0 })
   })
 })

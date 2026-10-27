@@ -83,7 +83,7 @@ describe('numOf', () => {
 })
 
 describe('timelineOf', () => {
-  const current = { system: 1, tools: 2, user: 3, inject: 4, skill: 0, assistant: 5, tool: 6, total: 7 }
+  const current = { system: 1, tools: 2, user: 3, inject: 4, skill: 0, assistant: 5, assistantReasoning: 3, tool: 6, total: 7 }
 
   test('non-records stay null', () => {
     assert.equal(timelineOf(null), null)
@@ -99,6 +99,7 @@ describe('timelineOf', () => {
       provider: 'deepseek',
       contextWindow: 128000,
       current,
+      generatedReasoning: 2,
       requests: [],
       events: [],
       nodes: [],
@@ -112,7 +113,7 @@ describe('timelineOf', () => {
     for (const bad of [{}, { current: null }, { current: 7 }]) {
       assert.deepEqual(timelineOf(bad), {
         ok: true,
-        current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 0 },
+        current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, assistantReasoning: 0, tool: 0, total: 0 },
         requests: [],
         events: [],
         nodes: [],
@@ -125,7 +126,18 @@ describe('timelineOf', () => {
   test('current with some non-number fields is numOf-coerced', () => {
     const out = timelineOf({ current: { system: 12, tools: 'x', user: undefined } })
     assert.ok(out !== null)
-    assert.deepEqual(out.current, { system: 12, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 0 })
+    assert.deepEqual(out.current, { system: 12, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, assistantReasoning: 0, tool: 0, total: 0 })
+  })
+
+  test('the reasoning fields survive the sanitizing path; a hostile generated count drops alone', () => {
+    const out = timelineOf({ current: { system: 1, assistant: 5, assistantReasoning: 3 }, generatedReasoning: 4, requests: 'nope' })
+    assert.equal(out?.current.assistantReasoning, 3)
+    assert.equal(out?.generatedReasoning, 4)
+    for (const bad of [-1, '4', Number.NaN, Number.POSITIVE_INFINITY]) {
+      const dropped = timelineOf({ current: 1, generatedReasoning: bad, requests: 'nope' })
+      assert.ok(dropped !== null)
+      assert.ok(!('generatedReasoning' in dropped), String(bad))
+    }
   })
 
   test('non-array collections become empty lists', () => {

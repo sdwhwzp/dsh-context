@@ -636,7 +636,9 @@ export function tokenPartsOf(
         cacheWriteTokens: totals.cacheWrite,
         outputTokens: totals.output,
       }
-      for (const part of billedParts(member.current, null, usage)) {
+      const current = scope === undefined ? member.current : { ...member.current, assistantReasoning: 0 }
+      const generatedReasoning = scope === undefined ? member.generatedReasoning : 0
+      for (const part of billedParts(current, null, usage, generatedReasoning)) {
         if (!Number.isFinite(part.value) || part.value <= 0) continue
         total += part.value
         const sumsGet: Map<string, TokenPartTotal | undefined> = sums

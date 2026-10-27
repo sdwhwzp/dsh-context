@@ -3,28 +3,21 @@ import type { TokenPartTotal } from '../overview'
 import type { ViewKit } from '../viewkit'
 
 import { SliceList } from './sliceList'
-import type { SliceRow } from './sliceList'
 import type { DonutProps } from './donut'
+import { tokenRowsOf } from './tokenRows'
 
 export function makeOverviewTokens(kit: ViewKit, Donut: (props: DonutProps) => ReactElement): (props: {
   /** Category-folded billed split; null when nothing billed. */
   tokens: { parts: TokenPartTotal[]; total: number } | null
 }) => ReactElement {
-  const { t, fmt, fmtShare, catLabel } = kit
+  const { t, fmt } = kit
   return function OverviewTokens(props: { tokens: { parts: TokenPartTotal[]; total: number } | null }): ReactElement {
     const [hoverKey, setHoverKey] = useState<string | null>(null)
     const tokens = props.tokens
     const total = tokens?.total ?? 0
     // Zero categories hide once anything is billed (the per-session card's convention); nothing billed shows the empty note.
     const shown = tokens !== null && total > 0 ? tokens.parts.filter(p => p.value > 0) : []
-    const rows: SliceRow[] = shown.map(p => ({
-      key: p.key,
-      color: p.color,
-      label: p.key === 'output' ? t('tokens.output') : catLabel(p.key),
-      pct: fmtShare(p.value, total),
-      // Category counts are summed per-session ratio estimates (≈); the output figure is provider-exact.
-      count: p.key === 'output' ? `${fmt(p.value)} · ${t('tokens.outputNote')}` : '≈' + fmt(p.value),
-    }))
+    const rows = tokenRowsOf(kit, shown, total)
     return (
       <div className="lc-card lc-col-donut flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">

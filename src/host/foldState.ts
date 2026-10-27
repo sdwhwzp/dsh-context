@@ -24,6 +24,8 @@ export interface TimelineState {
   /** Model-visible surface, newest last. */
   surface: SurfaceNode[]
   sums: Record<Category, number>
+  /** Live assistant-node reasoning price — a running subset of `sums.assistant` (the thinking split's prompt-side share). */
+  assistantReasoning: number
   systemTokens: number
   /** The live system-prompt nodes, oldest first; `systemTokens` is the LAST nonempty one (the harness rule), so an empty dormant node
    * keeps its position. Absent rows fall back to the header epoch's envelope figure. */
@@ -50,6 +52,8 @@ export interface TimelineState {
   archived: SurfaceNode[]
   /** Cumulative billed-token totals per (provider, model, period); never trimmed, so the estimate covers the COMPLETE log. */
   cost?: SessionCostUsage
+  /** Cumulative generated reasoning price over the COMPLETE log (the thinking split's output side); never trimmed. */
+  generatedReasoning?: number
   humanInputs?: number
   answers?: number
   /** The user's newest own message as a bounded one-line preview. Last-wins: a text-less input keeps the previous line. */
@@ -201,6 +205,7 @@ export function createTimelineState(): TimelineState {
   return {
     surface: [],
     sums: { user: 0, inject: 0, skill: 0, assistant: 0, tool: 0 },
+    assistantReasoning: 0,
     systemTokens: 0,
     toolsTokens: 0,
     requests: [],

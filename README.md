@@ -86,7 +86,7 @@ The top row uses a 3:1 flex split between Context Stats and Plugin Info when bot
 | Card | The question it answers |
 | --- | --- |
 | **Context Stats** | Session KPIs and event filters sit above I/O, command, tool and Fleet sections. Chips jump to matching details. Fleet costs use the authorized dsh-spend family ledger and display currency when available; otherwise they use models.dev estimates. Current-agent and subagent shares remain separate estimates. Hover each `?` for its pricing source and model breakdown. |
-| **Token Stats** | Where the billed tokens went — the same total as the chat stats line under the composer, split by composition (system, tools, messages…) with the provider-exact output closing the ring, and the session's cache-hit rate in the corner. |
+| **Token Stats** | Where the billed tokens went — the same total as the chat stats line under the composer, split by composition (system, tools, messages, thinking…). Thinking estimates the reasoning content billed across the session: the replayed share is split out of assistant messages, the generated share out of output, the thinking slice closes the ring, and the session's cache-hit rate sits in the corner. |
 | **Timing Stats** | How active time splits across model calls, tool runs, and overhead, plus decode throughput for calls with both output-token usage and first-token timing. A packed time strip shows completed steps in order, excludes idle gaps, and links its hover details with the timing legend. |
 | **Current Context** | What's in the window *right now*. |
 | **Context Trend** | Every request's size — and its story. |

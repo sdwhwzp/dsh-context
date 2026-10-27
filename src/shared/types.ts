@@ -219,11 +219,17 @@ export interface Snapshot {
     inject: number
     skill: number
     assistant: number
+    /** Heuristic reasoning tokens INSIDE the live assistant nodes — a subset of `assistant` (the thinking split's prompt-side share).
+     * Absent on rows folded before the field existed, and on foreign hosts. */
+    assistantReasoning?: number
     tool: number
     total: number
   }
   /** Image blocks in the CURRENT context (uploads plus nested tool-result images). Absent = 0. */
   images?: number
+  /** Heuristic reasoning tokens GENERATED across the complete log (the thinking split's output side; a provider `reasoningTokens` count
+   * wins when reported). Absent = none. */
+  generatedReasoning?: number
   /** Tool calls whose result is live (a `skill`-tool node keeps counting). Absent = 0. */
   toolCalls?: number
   /** Whole-session tally of non-injection `user/message` plus answered `ask_user_question` over the COMPLETE log. Absent = 0. */
@@ -483,6 +489,8 @@ export interface SurfaceNode {
   time?: number
   cat: Category
   tokens: number
+  /** Reasoning-block price inside an assistant node (absent when zero); a subset of `tokens`. */
+  reasoning?: number
   /** Image blocks inside this node's message (absent when zero). */
   imgs?: number
   /** Set only on `archive` entries: the seq of the replacement event that shadowed this node. */

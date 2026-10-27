@@ -6,8 +6,8 @@ import { numOf } from '../services'
 import type { ViewKit } from '../viewkit'
 
 import { SliceList } from './sliceList'
-import type { SliceRow } from './sliceList'
 import type { DonutProps } from './donut'
+import { tokenRowsOf } from './tokenRows'
 
 const NO_USAGE: TokenUsage = { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
 
@@ -15,12 +15,14 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
   usage: TokenUsage | null
   current: Snapshot['current']
   breakdown: ContextBreakdown | null
+  generatedReasoning?: number
 }) => ReactElement {
-  const { t, fmt, fmtShare, catLabel } = kit
+  const { t, fmt } = kit
   return function StatsTokens(props: {
     usage: TokenUsage | null
     current: Snapshot['current']
     breakdown: ContextBreakdown | null
+    generatedReasoning?: number
   }): ReactElement {
     const [hoverKey, setHoverKey] = useState<string | null>(null)
     const input = props.usage !== null
@@ -33,16 +35,9 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
       ? null
       : cacheHitPercent(numOf(props.usage.cacheReadTokens), input)
     // Null usage (no provider report) takes the same zeroed split billedParts produces for a zero report.
-    const parts = billedParts(props.current, props.breakdown, props.usage ?? NO_USAGE)
+    const parts = billedParts(props.current, props.breakdown, props.usage ?? NO_USAGE, props.generatedReasoning)
     const shown = total > 0 ? parts.filter(p => p.value > 0) : parts
-    const rows: SliceRow[] = shown.map(p => ({
-      key: p.key,
-      color: p.color,
-      label: p.key === 'output' ? t('tokens.output') : catLabel(p.key),
-      pct: fmtShare(p.value, total),
-      // Prompt-side shares are ratio estimates (≈, the composition card's convention); output alone is provider-exact.
-      count: p.key === 'output' ? `${fmt(p.value)} · ${t('tokens.outputNote')}` : '≈' + fmt(p.value),
-    }))
+    const rows = tokenRowsOf(kit, shown, total)
     return (
       <div className="lc-card lc-col-donut flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">
