@@ -8,7 +8,7 @@ import { DICT_EN } from '../../../src/client/i18n'
 import { click, flush, makeKit, mount, query, queryAll, text } from '../helpers/kit'
 
 const kit = makeKit()
-const { eventLabel, eventAt } = makeEventText(kit.t)
+const { eventLabel, eventLabelParts, eventAt } = makeEventText(kit.t)
 const EventList = makeEventList(kit)
 
 function ev(over: Partial<ContextEventRecord> & { kind: ContextEventRecord['kind'] }): ContextEventRecord {
@@ -29,13 +29,31 @@ describe('makeEventText.eventLabel', () => {
   })
 
   test('inject labels: skill injects name the skill, plain injects label their form then append name and detail', () => {
-    assert.equal(eventLabel(ev({ kind: 'inject', sub: 'skill', name: 'code-review' })), 'Skill injected (code-review)')
-    assert.equal(eventLabel(ev({ kind: 'inject', sub: 'skill' })), 'Skill injected (?)')
+    assert.equal(eventLabel(ev({ kind: 'inject', sub: 'skill', name: 'code-review' })), 'Skill Injection · code-review')
+    assert.equal(eventLabel(ev({ kind: 'inject', sub: 'skill' })), 'Skill Injection · ?')
     assert.equal(eventLabel(ev({ kind: 'inject' })), 'Context Injection')
     assert.equal(eventLabel(ev({ kind: 'inject', form: 'notice' })), 'Notice')
     assert.equal(eventLabel(ev({ kind: 'inject', form: 'notice', name: 'hook' })), 'Notice · hook')
     assert.equal(eventLabel(ev({ kind: 'inject', detail: 'from the producer' })), 'Context Injection · from the producer')
     assert.equal(eventLabel(ev({ kind: 'inject', form: 'notice', name: 'hook', detail: 'd' })), 'Notice · hook · d')
+  })
+})
+
+describe('makeEventText.eventLabelParts', () => {
+  test('an injection leads with its context form and trails its source name and account; other kinds are all tail', () => {
+    assert.deepEqual(eventLabelParts(ev({ kind: 'inject', form: 'notice' })), { lead: 'Notice', tail: '' })
+    assert.deepEqual(
+      eventLabelParts(ev({ kind: 'inject', form: 'notice', name: 'hook', detail: 'd' })),
+      { lead: 'Notice', tail: ' · hook · d' },
+    )
+    assert.deepEqual(
+      eventLabelParts(ev({ kind: 'inject', sub: 'skill', name: 'code-review' })),
+      { lead: 'Skill Injection', tail: ' · code-review' },
+    )
+    assert.deepEqual(
+      eventLabelParts(ev({ kind: 'compaction', count: 2 })),
+      { lead: '', tail: 'Context compacted (summary replaced 2 messages)' },
+    )
   })
 })
 
@@ -67,6 +85,7 @@ describe('EventList', () => {
     assert.equal(rows.length, 5)
 
     assert.ok(text(rows[0]).includes('Context Injection'))
+    assert.equal(query(rows[0], '.lc-event-label b').textContent, 'Context Injection')
     assert.equal(queryAll(rows[0], '.lc-event-tokens').length, 0)
 
     assert.equal(query(rows[1], '.lc-event-icon').textContent, '•')
@@ -80,9 +99,11 @@ describe('EventList', () => {
 
     assert.ok(query(rows[3], '.lc-event-icon svg') instanceof SVGElement)
     assert.ok(text(rows[3]).includes('Model switched: a → b'))
+    assert.equal(rows[3].querySelector('.lc-event-label b'), null, 'only an injection form is emphasized')
     assert.equal(query(rows[3], '.lc-kind').textContent, 'Switch')
 
     assert.ok(query(rows[4], '.lc-event-icon svg') instanceof SVGElement)
+    assert.equal(query(rows[4], '.lc-event-label b').textContent, 'Notice')
     const up = query(rows[4], '.lc-event-tokens')
     assert.ok(up.className.includes('lc-up'))
     assert.equal(up.textContent, '+50')

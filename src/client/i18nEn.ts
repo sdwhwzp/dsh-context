@@ -464,7 +464,7 @@ export const DICT_EN = {
   'tip.duration': 'Duration {n}',
   'ev.compaction': 'Context compacted (summary replaced {n} messages)',
   'ev.prune': 'Tool output pruned',
-  'ev.skill': 'Skill injected ({name})',
+  'ev.skillLead': 'Skill Injection',
   'ev.model': 'Model switched: {a} → {b}',
   'ev.mode.plan.on': 'Plan mode on',
   'ev.mode.plan.off': 'Plan mode off',

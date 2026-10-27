@@ -132,7 +132,7 @@ dsh plugin --profile web update dsh-context@latest
 
 ![Tool schemas with source chips, filter, and sort](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-browser-tools.png)
 
-- **按类型筛选助手回复** — 助手类别的搜索框包含 **Thinking / Tools / Answer** 标签，并显示所选步骤中的消息数（一次回复可包含多种类型）；点击某个标签即可只保留匹配的回复，再次点击可清除筛选：
+- **按类型筛选助手回复** — 助手类别的搜索框包含 **Thinking / Tools / Answer** 标签，每个标签显示当前搜索结果中该类型的回复数（一次回复可包含多种类型）；点击某个标签即可只保留匹配的回复，再次点击可清除筛选：
 
 ![Assistant replies with kind filter chips](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-browser-assistant-kinds.png)
 

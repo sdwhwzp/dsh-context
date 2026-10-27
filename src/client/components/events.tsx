@@ -23,21 +23,33 @@ export interface EventListProps {
   canEventFocus?: (ev: ContextEventRecord) => boolean
 }
 
+export interface EventLabelParts {
+  /** Empty when the kind's label is one sentence (compaction, prune, model, mode) and carries no emphasized segment. */
+  lead: string
+  tail: string
+}
+
 export function makeEventText(t: Translate): {
   eventLabel: (ev: ContextEventRecord) => string
+  eventLabelParts: (ev: ContextEventRecord) => EventLabelParts
   eventAt: (ev: ContextEventRecord) => string | null
 } {
+  function labelParts(ev: ContextEventRecord): EventLabelParts {
+    if (ev.kind === 'compaction') return { lead: '', tail: t('ev.compaction', { n: ev.count || 0 }) }
+    if (ev.kind === 'prune') return { lead: '', tail: t('ev.prune') }
+    if (ev.kind === 'model') return { lead: '', tail: t('ev.model', { a: ev.from || '?', b: ev.to || '?' }) }
+    if (ev.kind === 'mode') return { lead: '', tail: t('ev.mode.' + (ev.name || '?')) }
+    if (ev.sub === 'skill') return { lead: t('ev.skillLead'), tail: ' · ' + (ev.name || '?') }
+    // A kind this client doesn't know yet, or a missing form, still renders the default injection label.
+    return {
+      lead: t('form.' + (ev.form || 'context')),
+      tail: (ev.name ? ' · ' + ev.name : '') + (ev.detail ? ' · ' + ev.detail : ''),
+    }
+  }
+
   function eventLabel(ev: ContextEventRecord): string {
-    if (ev.kind === 'compaction') return t('ev.compaction', { n: ev.count || 0 })
-    if (ev.kind === 'prune') return t('ev.prune')
-    if (ev.kind === 'model') return t('ev.model', { a: ev.from || '?', b: ev.to || '?' })
-    if (ev.kind === 'mode') return t('ev.mode.' + (ev.name || '?'))
-    // The kind union narrows to 'inject' here; a new kind breaks the compile (sub/form/name are inject-only), forcing a label.
-    if (ev.sub === 'skill') return t('ev.skill', { name: ev.name || '?' })
-    const base = t('form.' + (ev.form || 'context'))
-    let label = ev.name ? base + ' · ' + ev.name : base
-    if (ev.detail) label += ' · ' + ev.detail
-    return label
+    const { lead, tail } = labelParts(ev)
+    return lead + tail
   }
 
   /** Boundary events (compaction/prune) label the GAP they sit in — same-turn 'T2 S3→4', cross-turn
@@ -59,7 +71,7 @@ export function makeEventText(t: Translate): {
     return null
   }
 
-  return { eventLabel, eventAt }
+  return { eventLabel, eventLabelParts: labelParts, eventAt }
 }
 
 /** Set native `title` on labels whose text overflows (the styled tips cover cards; a plain ellipsis row still needs the
@@ -71,7 +83,7 @@ function syncTitles(root: HTMLElement): void {
 }
 
 export function makeEventList(kit: ViewKit): (props: EventListProps) => ReactElement {
-  const { t, fmt, fmtTime, eventLabel, eventAt } = kit
+  const { t, fmt, fmtTime, eventLabelParts, eventAt } = kit
   const DetailNote = makeDetailNote(kit)
   // The lane both row shapes share; its 92px basis reservation covers icon + gap + the widest kind chip in both locales.
   const labelClass = 'lc-event-label flex-1 @max-[380px]/lc-card:basis-[calc(100%-92px)]'
@@ -105,7 +117,7 @@ export function makeEventList(kit: ViewKit): (props: EventListProps) => ReactEle
     return (
       <div className="lc-events" ref={rootRef}>
         {sorted.map((ev) => {
-          const label = eventLabel(ev)
+          const { lead, tail } = eventLabelParts(ev)
           const at = eventAt(ev)
           const glyph = ev.kind === 'inject' ? <IconPlus />
             : ev.kind === 'model' ? <IconBranch />
@@ -118,6 +130,8 @@ export function makeEventList(kit: ViewKit): (props: EventListProps) => ReactEle
           const reveal = jumpable && (props.canEventFocus === undefined || props.canEventFocus(ev))
             ? props.onEventFocus
             : undefined
+          // The injection's form leads its source name and account, so it carries the row's scanning weight.
+          const label = lead === '' ? tail : <><b>{lead}</b>{tail}</>
           return (
             <div key={ev.seq} className="lc-event @max-[380px]/lc-card:flex-wrap">
               <span className={'lc-event-icon lc-event-' + ev.kind}>{glyph}</span>

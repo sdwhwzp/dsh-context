@@ -462,7 +462,7 @@ export const DICT_ZH = {
   'tip.duration': '耗时 {n}',
   'ev.compaction': '压缩上下文（摘要替换 {n} 条消息）',
   'ev.prune': '剪枝工具输出',
-  'ev.skill': 'Skill 注入（{name}）',
+  'ev.skillLead': '技能注入',
   'ev.model': '模型切换：{a} → {b}',
   'ev.mode.plan.on': '进入计划模式',
   'ev.mode.plan.off': '退出计划模式',

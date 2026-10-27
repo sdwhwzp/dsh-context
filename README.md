@@ -141,7 +141,7 @@ Pick **Live (next request)** or any retained step, and browse what that request 
 
 ![Tool schemas with source chips, filter, and sort](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-browser-tools.png)
 
-- **Filter assistant replies by kind** — the assistant category's search box carries **Thinking / Tools / Answer** chips, each with the shown step's message count (one reply can carry several); click one to keep only the matching replies, click again to clear:
+- **Filter assistant replies by kind** — the assistant category's search box carries **Thinking / Tools / Answer** chips, each counting the replies of that kind in the current search results (one reply can carry several); click one to keep only the matching replies, click again to clear:
 
 ![Assistant replies with kind filter chips](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-browser-assistant-kinds.png)
 

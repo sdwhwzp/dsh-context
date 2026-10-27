@@ -132,7 +132,7 @@ describe('StatsContext', () => {
     assert.deepEqual(queryAll(core, '.lc-core-kv:not(.lc-core-kv-events)').map(el => (el.querySelector('b')?.textContent ?? '') + (el.querySelector('i')?.textContent ?? '')), ['3Turns', '4Steps', '2Skill Loads', '3Answers'])
     assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind').length, 3)
     assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind.lc-ledger-chip-dim').length, 0)
-    assert.deepEqual(costCellsOf(m.container), ['Fleet?1.0M/$0.30', 'Current Agent?1.0M/$0.30', 'Subagents × 0?0/—'])
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?1.0M/$0.30', 'Current Agent?1.0M/$0.30', 'Subagents × 0?—/—'])
     await m.unmount()
   })
 
@@ -144,7 +144,7 @@ describe('StatsContext', () => {
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['+0 more'], 'the overflow chip always renders, so the lane reads as a figure')
     assert.equal(queryAll(m.container, '.lc-ledger-in-body2 .lc-ledger-chip-more').length, 0, 'no command overflow control appears without extra programs')
     assert.equal(queryAll(m.container, '.lc-ledger-in-chips .lc-ledger-chip-dim').length, 3, 'every zero chip dims')
-    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
+    assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?—/—'])
     assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind.lc-ledger-chip-dim').length, 3, 'the zero event kinds dim too')
     await m.unmount()
 
@@ -710,7 +710,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       const m = await mount(h(Stats, { counts: NO_COUNTS, files: NO_FILES, tools: [], locale: 'en', ...(sessionId !== undefined ? { sessionId } : {}) }))
       await flush()
       assert.deepEqual(calls, [])
-      assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?0/—'])
+      assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?—/—'])
       await m.unmount()
     }
   })

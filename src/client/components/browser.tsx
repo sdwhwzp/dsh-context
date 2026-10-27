@@ -642,15 +642,12 @@ export function makeContextBrowser(
          which requires count > 0 ⟺ byCat[c] exists; defensive. */
       const rows = (byCat[c as Category] ?? []).slice().reverse().map(nodeRowOf)
       const q = rowQuery.trim().toLowerCase()
-      // Kind chips count over ALL of the shown step's rows — the step's composition, not the text-lens survivors.
+      const matchedRows = q === '' ? rows : rows.filter(r => rowMatches(r, q))
+      // Kind chips count the text-lens survivors per kind, so the numbers follow the search box.
       const kindCounts = c === 'assistant'
-        ? ROW_KINDS.map(k => ({ k, n: rows.reduce((acc, r) => acc + (r.kinds[k] ? 1 : 0), 0) }))
+        ? ROW_KINDS.map(k => ({ k, n: matchedRows.reduce((acc, r) => acc + (r.kinds[k] ? 1 : 0), 0) }))
         : null
-      const shown = q === '' && rowKind === null
-        ? rows
-        : rows.filter(r =>
-          (rowKind === null || r.kinds[rowKind])
-          && (q === '' || rowMatches(r, q)))
+      const shown = rowKind === null ? matchedRows : matchedRows.filter(r => r.kinds[rowKind])
       // A complete set mirrors the category row's meter total; a filtered subset has only the shown rows to sum.
       const shownTokens = shown.length === rows.length
         ? breakdown[c as Category] || 0

@@ -193,24 +193,33 @@ describe('ContextBrowser message categories', () => {
     assert.equal(query(toolctl, '.lc-gran').getAttribute('title'), kit.t('browser.kindTip'))
     assert.equal(query<HTMLInputElement>(toolctl, '.lc-br-tool-search').placeholder, 'Filter by reply, calls, or thinking…')
     const chips = () => queryAll<HTMLButtonElement>(m.container, '.lc-br-toolctl .lc-gran-btn')
-    // Counts span ALL shown rows: reasoning rides the join's block, tools join calls plus an
+    // Kinds classify the shown step's rows: reasoning rides the join's block, tools join calls plus an
     // unjoined node's `calls` stamp, answers the nodes' own `text` stamps.
     assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools5', 'Answer4'])
     const previews = () => elemRows(m).map(r => text(query(r, '.lc-br-preview')))
     assert.equal(elemRows(m).length, 8)
+
+    await typeToolSearch(m, 'bash')
+    assert.equal(elemRows(m).length, 2)
+    assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools2', 'Answer2'], 'counts follow the search lens')
+    await typeToolSearch(m, '')
+    assert.equal(elemRows(m).length, 8)
+    assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools5', 'Answer4'], 'clearing the search restores the step totals')
 
     await click(chips()[1])
     assert.ok(chips()[1].className.includes('lc-gran-on'))
     assert.deepEqual(previews(), ['full cascade', 'b.ts', '(empty reply)', 'a.ts', 'done all'])
     await typeToolSearch(m, 'done')
     assert.deepEqual(previews(), ['done all'])
-    assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools5', 'Answer4'])
+    assert.deepEqual(chips().map(c => text(c)), ['Thinking0', 'Tools1', 'Answer1'], 'counts follow the search lens')
     await typeToolSearch(m, 'zzz')
     assert.equal(elemRows(m).length, 0)
     assert.ok(text(query(m.container, '.lc-br-body')).includes('No rows match the current filter'))
     assert.equal(chips().length, 3, 'the chips stay mounted on an empty match')
+    assert.deepEqual(chips().map(c => text(c)), ['Thinking0', 'Tools0', 'Answer0'])
     await typeToolSearch(m, '')
     assert.equal(elemRows(m).length, 5)
+    assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools5', 'Answer4'], 'the kind pick does not narrow the restored totals')
 
     await click(chips()[1])
     assert.equal(elemRows(m).length, 8)
