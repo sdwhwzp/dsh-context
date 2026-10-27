@@ -85,7 +85,7 @@ dsh plugin --profile web update dsh-context@latest
 | **Timing Stats** | 活跃时间如何分布在模型调用、工具运行和开销之间。 |
 | **Current Context** | 此刻窗口中的内容。 |
 | **Context Trend** | 每个请求的大小及其变化过程。 |
-| **Context Browser** | 任意请求实际由哪些内容组成。 |
+| **Context Browser** | 任意请求实际由哪些内容组成。窄面板将分类计数与 Token 数值分别另起一行，避免相互遮挡。 |
 | **Context Events** | 上下文窗口何时以及为何发生变化。 |
 | **File Activity** | Agent 对你的文件做了什么。 |
 | **命令执行** | Agent 执行了哪些命令、每次运行如何结束、主要用到了哪些程序。 |

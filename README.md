@@ -90,7 +90,7 @@ The top row uses a 3:1 flex split between Context Stats and Plugin Info when bot
 | **Timing Stats** | How active time splits across model calls, tool runs, and overhead, plus decode throughput for calls with both output-token usage and first-token timing. A packed time strip shows completed steps in order, excludes idle gaps, and links its hover details with the timing legend. |
 | **Current Context** | What's in the window *right now*. |
 | **Context Trend** | Every request's size — and its story. |
-| **Context Browser** | What any request was *actually* assembled from. |
+| **Context Browser** | What any request was *actually* assembled from. Narrow panes put category counts and token figures on separate rows. |
 | **Context Events** | When and why the window changed. |
 | **File Activity** | What the agent *did* to your files. |
 | **Command Executions** | What the agent ran, how each run ended, and which programs it leaned on. |

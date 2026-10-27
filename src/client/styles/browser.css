@@ -87,3 +87,13 @@
 .lc-br-hits { flex: none; color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .lc-br-content { padding: 2px 6px 8px 26px; display: flex; flex-direction: column; gap: 6px; }
 .lc-br-dim { color: var(--dsw-alias-label-secondary); }
+
+@container lc-card (max-width: 380px) {
+  .lc-br-cat-row { display: grid; grid-template-columns: 12px 8px minmax(0, 1fr) auto; grid-template-areas: "chev dot label pct" "counts counts counts counts" "tokens tokens tokens tokens"; gap: 4px 8px; }
+  .lc-br-cat-row > .lc-br-chev { grid-area: chev; }
+  .lc-br-cat-row > i { grid-area: dot; }
+  .lc-br-cat-row > .lc-br-cat-label { grid-area: label; }
+  .lc-br-cat-row > .lc-br-count-grp { grid-area: counts; flex-wrap: wrap; }
+  .lc-br-cat-row > .lc-br-tokens-grp { grid-area: tokens; justify-self: end; flex-wrap: wrap; justify-content: flex-end; }
+  .lc-br-cat-row > .lc-br-pct { grid-area: pct; justify-self: end; }
+}
