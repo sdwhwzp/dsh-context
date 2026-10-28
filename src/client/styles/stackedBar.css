@@ -1,5 +1,6 @@
 .lc-stacked-wrap { position: relative; width: 100%; }
 .lc-stacked { display: flex; width: 100%; border-radius: 5px; overflow: hidden; background: color-mix(in srgb, var(--color-neutral-500) 18%, transparent); position: relative; }
+body[data-ds-dark-theme] .lc-stacked { background: color-mix(in srgb, var(--color-neutral-500) 32%, transparent); }
 /* Boxes the used/window boundary the legend's "share of used" percentages refer to; `pointer-events: none` keeps hover on the segments. */
 .lc-occupied-box { position: absolute; top: 0; bottom: 0; left: 0; border: 2px solid var(--dsw-alias-label-tertiary); border-radius: 5px; box-sizing: border-box; pointer-events: none; opacity: 0; box-shadow: 0 0 0 1px var(--dsw-alias-bg-layer-2); transition: opacity var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-occupied-box-on { opacity: 1; }

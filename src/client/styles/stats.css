@@ -97,7 +97,6 @@ button.lc-ledger-cost-row { appearance: none; border: 0; padding: 0; background:
 .lc-ledger-chip-more { opacity: 0.7; }
 .lc-ledger-gauge { display: block; position: absolute; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
 .lc-core { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding-bottom: 12px; }
-.lc-core-label { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary); white-space: nowrap; }
 .lc-core-kvs { display: contents; }
 .lc-core-kv { min-width: 0; min-height: 54px; box-sizing: border-box; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 6px 9px; border-radius: 7px; background: var(--lc-control-track); line-height: 1.2; }
 .lc-core-kv b { font-size: 18px; line-height: 1.15; font-weight: 700; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
@@ -107,6 +106,11 @@ button.lc-ledger-cost-row { appearance: none; border: 0; padding: 0; background:
 .lc-core-kv-answers b { color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 60%, var(--dsw-alias-label-primary)); }
 .lc-core-kv i { font-style: normal; font-size: 11px; color: var(--dsw-alias-label-secondary); white-space: nowrap; }
 .lc-core-kv-events { grid-column: span 2; gap: 1px; }
+/* The lighter tint keeps an inner pill's own hover visible. */
+.lc-core-kv-events-btn { cursor: pointer; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
+.lc-core-kv-events-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.lc-core-kv-events-open:hover { color: var(--dsw-alias-label-primary); }
+.lc-core-kv-events-open:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; border-radius: 3px; }
 .lc-core-kv-events-list { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; min-width: 0; font-size: 12px; font-weight: 600; line-height: 1.2; }
 /* The event kinds reuse their identity colors as text, without the pill chrome the event list wears. */
 .lc-core-kv-events .lc-kind { font-size: inherit; font-weight: inherit; }

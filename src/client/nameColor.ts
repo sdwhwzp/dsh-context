@@ -1,5 +1,5 @@
-/** The name-hash dot/bar palette shared by the Skills list (overviewSkills.tsx) and the command panel's Programs
- * ranking: one stable color per name across every surface. */
+/** The name-hash dot/bar palette for every per-name list (skills, program rankings, the stats command lane):
+ * one stable color per name across every surface. */
 
 const NAME_COLORS = [
   'var(--color-blue-500)',

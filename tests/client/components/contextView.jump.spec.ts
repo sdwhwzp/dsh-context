@@ -264,7 +264,7 @@ describe('ContextView — the stats board\'s lower-lane jumps', () => {
     }
   })
 
-  test('an event kind filters the card to that kind and scrolls it in', async () => {
+  test('the whole tile reveals the events card as-is; a kind narrows it and scrolls it in', async () => {
     const scroller = overflowingScroller(1200)
     const gBCR = stubRevealRects(scroller, el => (el.classList.contains('lc-events-card') ? 700 : 0))
     try {
@@ -276,11 +276,17 @@ describe('ContextView — the stats board\'s lower-lane jumps', () => {
       })
       const View = makeView(new TestClientCtx())
       const m = await mountInScroller(h(View, { sessionId: 'sv-eventsjump', useProjection: projectionsFor(data) }), scroller)
+      await click(query(m.container, '.lc-core-kv-events'))
+      await flush()
+      const card = query(m.container, '.lc-events-card')
+      assert.equal(queryAll(card, '.lc-gran-on').length, 5, 'every kind stays picked')
+      assert.equal(queryAll(card, '.lc-event').length, 3, 'the unfiltered list keeps every row')
+      assert.equal(scroller.scrollTop, 600, 'the events card scrolled to the scrollport top')
+
       const entry = query(m.container, '.lc-core-kv-event[data-kind="compaction"]')
       assert.equal(entry.getAttribute('role'), 'button')
       await click(entry)
       await flush()
-      const card = query(m.container, '.lc-events-card')
       assert.deepEqual(
         queryAll(card, '.lc-gran-on').map(el => el.getAttribute('data-kind')),
         ['compaction'],
@@ -288,7 +294,6 @@ describe('ContextView — the stats board\'s lower-lane jumps', () => {
       )
       assert.equal(queryAll(card, '.lc-event').length, 1, 'only the compaction row survives')
       assert.ok(text(card).includes(DICT_EN['kind.compaction']))
-      assert.equal(scroller.scrollTop, 600, 'the events card scrolled to the scrollport top')
       await m.unmount()
     } finally {
       gBCR.mockRestore()

@@ -22,7 +22,7 @@ This `sdwhwzp/dsh-context` fork follows the [DSH fork synchronization rules](../
 - Make the minimal change that fully solves the problem, with the most efficient implementation.
 - User experience, features, and especially the data accuracy and integrity are the top priority. Never sacrifice them for code refactors, performance, or any other reason. Dive deep and run real tests to verify the correctness of every change.
 - Reuse the classes, utilities, styles, style tokens, events, presets, and lifecycles that DeepSeek Harness already provides.
-- Keep code and tests small, loosely coupled, and modular; avoid duplication.
+- Keep code and tests small, loosely coupled, and modular; avoid duplication. Reuse existing test suites, cases and assertions where possible. Drop and shrink any code or test that is outdated and no longer needed.
 - After updating tests, firstly run `pnpm exec vitest run tests/<area>/<name>.spec.ts -t "<test case name>"` (regex, use `"a|b"`) to iterate on the touched test cases.
 - Ensure every source code file or test code file has less than 1000 lines.
 - Comments: default to none. Never add one unless it records a non-obvious decision, constraint, or invariant the code cannot express — if you cannot name that reason, do not write it.
@@ -38,7 +38,10 @@ Complete ALL of these before ANY commit:
 - Close out the to-do list, ensuring every item is completed, cleaned up or explicitly closed.
 - Review the full diff independently: every change necessary, correct, and not over-engineered.
 - Clean up generated temporary files and temporary or unhelpful comments.
-- Load the [code-review](https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review) skill, run it to review all the changes, and independently verify or follow each of its suggestions after its multi-axis analysis done.
+- Load the [code-review](https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review) skill, run it to review all the changes.
+  - Independently verify or follow each of its suggestions after its multi-axis analysis done. 
+  - Tell its subagents to skip typecheck, lint, and test coverage, which the main agent covers.
+  - Pass its subagents the relevant filenames and line number ranges during the work.
 - Run `pnpm run check`: it runs `pnpm run lint`, `pnpm run typecheck` and `pnpm run coverage` concurrently, prints each tool's COMPLETE output, and fails when any of them does (the same logs stay in `.tmp/check-logs/`).
   - Fix every lint and type error, and ensure 100% per-file coverage. Please capture the ALL content of the full output without truncation or tailing.
     - Example for per-file 100% coverage output:

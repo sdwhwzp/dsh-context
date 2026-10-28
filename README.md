@@ -55,7 +55,7 @@ Five surfaces, one story — what your agent is carrying, how it got there, and 
 | **`/context` command** | A centered modal with the same composition and context browser, without leaving the chat. |
 | **Preferences card** | Per-user defaults: the panel entry, Insights range, trend and sort defaults, and the system prompt prefix/suffix joined around every session. |
 
-Context Browser category rows wrap at narrow widths so item counts, token estimates, and percentages remain readable.
+Context Browser category rows wrap in narrow panes and the `/context` dialog, keeping item counts and token deltas on separate rows.
 
 The command panel keeps summaries, attention items, and program rankings visible on narrow panes. Malformed command entries are skipped independently; precise job outcomes remain authoritative when a later result arrives.
 

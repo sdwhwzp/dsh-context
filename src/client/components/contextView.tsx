@@ -300,10 +300,10 @@ export function makeContextView(
     // One-shot kind request from the stats board's file pills.
     const [filterFocus, setFilterFocus] = useState<FileFilter | null>(null)
     const clearFilterFocus = useCallback(() => { setFilterFocus(null) }, [])
-    // The stats events tile's one-shot reveal: filter the Context Events card to that kind and scroll to it.
+    // The stats events tile's one-shot reveal: scroll to the Context Events card, narrowed to that kind when given.
     const [eventsFocus, setEventsFocus] = useState(0)
-    const onEventsClick = useCallback((kind: StatsEventKind): void => {
-      setPickedKinds([kind])
+    const onEventsClick = useCallback((kind: StatsEventKind | null): void => {
+      if (kind !== null) setPickedKinds([kind])
       setEventsFocus(n => n + 1)
     }, [])
     // The command lane's one-shot pick: the program the Command Executions card opens its query lens with.

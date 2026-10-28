@@ -3,8 +3,9 @@ import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi, beforeEach } from 'vitest'
 import { makeStatsContext, makeSubagentCost } from '../../../src/client/components/statsContext'
-import type { SubagentStats } from '../../../src/client/components/statsContext'
+import type { StatsEventKind, SubagentStats } from '../../../src/client/components/statsContext'
 import { DICT_EN } from '../../../src/client/i18n'
+import { nameColorOf } from '../../../src/client/nameColor'
 import { makeAgentHeads } from '../../../src/client/agentHeads'
 import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
 import type { ContextTimeline, SessionCostUsage } from '../../../src/shared/types'
@@ -30,10 +31,14 @@ const COST: SessionCostUsage = {
 const NO_FILES = { reads: 0, writes: 0, searches: 0, images: 0 }
 const NO_COUNTS = { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 }
 
-/** One lane's VISIBLE chips as 'label+figure' strings; the off-flow gauge (the fit's hidden measuring copy) never
- *  shows, so it is not part of what a reader sees. */
-function chipsOf(row: HTMLElement): string[] {
+/** A lane's visible chips: the off-flow gauge (the fit's hidden measuring copy) never shows. */
+function visibleChipsOf(row: HTMLElement): HTMLElement[] {
   return queryAll(row, '.lc-ledger-chip').filter(el => el.closest('.lc-ledger-gauge') === null)
+}
+
+/** One lane's visible chips as 'label+figure' strings. */
+function chipsOf(row: HTMLElement): string[] {
+  return visibleChipsOf(row)
     .map(el => (el.querySelector('.lc-ledger-chip-label')?.textContent ?? '') + (el.querySelector('b')?.textContent ?? ''))
 }
 
@@ -128,7 +133,6 @@ describe('StatsContext', () => {
     assert.equal(queryAll(m.container, '.lc-ledger-out-body2 > .lc-strip-cell').length, 2, 'Current Agent and Subagents each hold one cost row')
     assert.equal(queryAll(m.container, '.lc-ledger-out-body2 .lc-ledger-chip').length, 0, 'the cost rows replace the roster chips')
     const core = query(m.container, '.lc-core')
-    assert.equal(query(core, '.lc-core-label')?.textContent, 'Current Session')
     assert.deepEqual(queryAll(core, '.lc-core-kv:not(.lc-core-kv-events)').map(el => (el.querySelector('b')?.textContent ?? '') + (el.querySelector('i')?.textContent ?? '')), ['3Turns', '4Steps', '2Skill Loads', '3Answers'])
     assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind').length, 3)
     assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind.lc-ledger-chip-dim').length, 0)
@@ -250,7 +254,6 @@ describe('StatsContext', () => {
     assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['3', '2', '0', '1.0M/¥2.00'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-chips')), ['用户?0', '读取2', '写入1'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read2', '其他 +0'])
-    assert.equal(query(m.container, '.lc-core-label')?.textContent, '当前会话')
     const core = query(m.container, '.lc-core')
     assert.deepEqual(queryAll(core, '.lc-core-kv:not(.lc-core-kv-events)').map(el => (el.querySelector('b')?.textContent ?? '') + (el.querySelector('i')?.textContent ?? '')), ['1轮次', '1步数', '5技能加载', '4模型回复'])
     const costTip = costTipOf(m.container, 'team')
@@ -268,12 +271,13 @@ describe('StatsContext', () => {
     }
     const picks: string[] = []
     const toolPicks: string[] = []
+    const programs = [['python3', 212], ['git', 88], ['grep', 40], ['node', 20], ['npm', 10]] as const
     const Stats = makeStatsContext(kit, () => ({ usage: SUB, count: 5 }))
     const m = await mount(h(Stats, {
       counts: NO_COUNTS,
       files: NO_FILES,
       tools: [['read', 8]],
-      commands: { runs: 626, top: [['python3', 212], ['git', 88], ['grep', 40], ['node', 20], ['npm', 10]] },
+      commands: { runs: 626, top: programs },
       cost: COST,
       locale: 'en',
       onToolPick: (tool) => { toolPicks.push(tool) },
@@ -281,14 +285,19 @@ describe('StatsContext', () => {
     }))
     await flush()
     assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['0', '8', '626', '3.0M/$0.45'])
-    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python3212', 'git88', 'grep40', 'node20', 'npm10'], 'every program fits the unmeasured row')
+    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), programs.map(([name, n]) => name + String(n)), 'every program fits the unmeasured row')
     assert.equal(queryAll(m.container, '.lc-ledger-out-body2 .lc-ledger-chip').length, 0, 'no roster chips remain below Team')
     assert.deepEqual(costCellsOf(m.container), ['Fleet?3.0M/$0.45', 'Current Agent?1.0M/$0.30', 'Subagents × 5?2.0M/$0.15'])
     const subCell = queryAll(m.container, '.lc-ledger-out-body2 > .lc-strip-cell')[1]
     assert.deepEqual(queryAll(subCell, '.lc-strip-pair b').map(el => el.textContent), ['2.0M', '$0.15'], 'a counted subagent row bolds both figures')
     assert.equal(query(m.container, '.lc-ledger-team-count').textContent, '× 5', 'a positive count bolds as its own figure')
-    const cmdChips = queryAll(m.container, '.lc-ledger-in-body2 .lc-ledger-chip')
+    const cmdChips = visibleChipsOf(query(m.container, '.lc-ledger-in-body2'))
     assert.equal(cmdChips[0].getAttribute('title'), DICT_EN['stats.commandJump'])
+    assert.deepEqual(
+      cmdChips.map(el => [el.querySelector('.lc-ledger-chip-label')?.textContent, el.querySelector('i')?.style.background]),
+      programs.map(([name]) => [name, nameColorOf(name)]),
+      'programs keep the shared name-hash color',
+    )
     await click(cmdChips[2])
     cmdChips[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     assert.deepEqual(picks, ['grep', 'git'])
@@ -415,31 +424,48 @@ describe('StatsContext', () => {
     assert.ok(cells.every(c => c.getAttribute('role') === null && !c.className.includes('lc-core-kv-btn')))
     const events = queryAll(m.container, '.lc-core-kv-event')
     assert.ok(events.every(e => e.getAttribute('role') === null && !e.className.includes('lc-core-kv-event-btn')))
+    const tile = query(m.container, '.lc-core-kv-events')
+    assert.ok(!tile.className.includes('lc-core-kv-events-btn'), 'no hover affordance without the relay')
+    assert.equal(tile.getAttribute('role'), null)
+    assert.equal(query(tile, 'i').getAttribute('role'), null, 'the label carries no dead wire')
     const chips = queryAll(m.container, '.lc-ledger-chip')
     assert.ok(chips.every(c => c.getAttribute('role') === null && !c.className.includes('lc-ledger-chip-btn')))
     await m.unmount()
   })
 
-  test('each event kind jumps to the card filtered to that kind on click and keyboard', async () => {
-    const opened: string[] = []
+  test('the events tile reveals the card as a whole, and each kind narrows it on click and keyboard', async () => {
+    const opened: (StatsEventKind | null)[] = []
     const m = await mount(h(StatsContext, {
       counts: { turns: 1, steps: 2, injects: 3, compactions: 2, prunes: 1, skills: 0 },
       files: NO_FILES, tools: [], locale: 'en',
       onEventsClick: (kind) => { opened.push(kind) },
     }))
     await flush()
+    const tile = query(m.container, '.lc-core-kv-events')
+    assert.ok(tile.className.includes('lc-core-kv-events-btn'), 'the tile body reads as one jump')
+    assert.equal(tile.getAttribute('role'), null, 'the tile keeps the pills’ semantics; the label carries the wire')
+    const label = query(tile, '.lc-core-kv-events-open')
+    assert.equal(label.getAttribute('role'), 'button')
+    assert.equal(label.getAttribute('title'), DICT_EN['stats.eventsJump'])
+    await click(tile)
+    assert.deepEqual(opened, [null], 'the tile body reveals the card without narrowing its lens')
+    await click(label)
+    assert.deepEqual(opened, [null, null], 'the label fires once, not through the tile too')
+    label.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    assert.deepEqual(opened, [null, null, null])
+
     const entries = queryAll(m.container, '.lc-core-kv-event-btn')
     assert.equal(queryAll(m.container, '.lc-core-kv-sep').length, 2, 'the slash separators hold the three kinds apart')
     assert.deepEqual(entries.map(el => el.getAttribute('data-kind')), ['inject', 'compaction', 'prune'])
     assert.equal(entries[0].getAttribute('title'), DICT_EN['stats.eventsKindJump'].replace('{kind}', 'Inject'))
     await click(entries[0])
-    assert.deepEqual(opened, ['inject'])
+    assert.deepEqual(opened, [null, null, null, 'inject'], 'a pill jump stays single')
     entries[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    assert.deepEqual(opened, ['inject', 'prune'])
+    assert.deepEqual(opened, [null, null, null, 'inject', 'prune'])
     entries[1].dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
-    assert.deepEqual(opened, ['inject', 'prune', 'compaction'])
+    assert.deepEqual(opened, [null, null, null, 'inject', 'prune', 'compaction'])
     entries[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }))
-    assert.deepEqual(opened, ['inject', 'prune', 'compaction'])
+    assert.deepEqual(opened, [null, null, null, 'inject', 'prune', 'compaction'])
     await m.unmount()
   })
 

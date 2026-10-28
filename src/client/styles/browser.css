@@ -3,7 +3,7 @@
 /* The card is a fixed-head flex column: the head, composition bar, notices, DNA lens and block map never scroll —
    only the rows region below them does, in every host (the capped tab column via browserCapOf, the /context modal's
    filled dialog via modal.css). Its 28px floor keeps a readable slice while the map folds under pane pressure. */
-.lc-br { display: flex; flex-direction: column; min-height: 0; }
+.lc-br { container: lc-card / inline-size; display: flex; flex-direction: column; min-height: 0; }
 .lc-br-head { flex: none; }
 .lc-br-scroll { flex: 1 1 auto; min-height: 28px; overflow-y: auto; overscroll-behavior-x: contain; }
 .lc-br-head .lc-br-toolctl { margin-top: 10px; }

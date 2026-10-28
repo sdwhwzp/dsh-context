@@ -13,6 +13,7 @@ import { useSessionsSnapshot } from '../agentHeads'
 import type { AgentHeads } from '../agentHeads'
 import type { Translate } from '../i18n'
 import { useModelPrices } from '../modelPrices'
+import { nameColorOf } from '../nameColor'
 import { spendTokensOf, type ClientCtx } from '../services'
 import type { SessionSpend } from '../services'
 import { formatSpendCost, spendDisplayCurrency } from '../spendMoney'
@@ -148,6 +149,14 @@ function pickWire(title: string | undefined, fire: () => void): JumpWire {
   }
 }
 
+/** A row-level jump fires only when the click missed an inner control (a link, button, or wired span). */
+function rowJump(fire: () => void): (ev: MouseEvent) => void {
+  return (ev) => {
+    if ((ev.target as HTMLElement).closest('a, button, [role="button"]') !== null) return
+    fire()
+  }
+}
+
 interface StatsContextProps {
   counts: TimelineCounts
   humanInputs?: number
@@ -158,8 +167,8 @@ interface StatsContextProps {
   onToolPick?: (tool: string) => void
   /** The command lane's chip pick: filter that program in the Command Executions card. */
   onCommandPick?: (program: string) => void
-  /** The events tile's per-kind jump: reveal the Context Events card filtered to that kind. */
-  onEventsClick?: (kind: StatsEventKind) => void
+  /** The events tile's jump: reveal the Context Events card, narrowed to `kind` when one is given. */
+  onEventsClick?: (kind: StatsEventKind | null) => void
   toolCalls?: number
   files: { reads: number; writes: number; searches: number; images: number }
   tools: readonly (readonly [string, number])[]
@@ -321,7 +330,7 @@ function CommandChips(props: CommandChipsProps): ReactElement {
         className={'lc-ledger-chip' + (wire !== undefined ? ' lc-ledger-chip-btn' : '')}
         {...(wire ?? { title: name })}
       >
-        <i style={{ background: TOOL_SHADE(1) }} />
+        <i style={{ background: nameColorOf(name) }} />
         <span className="lc-ledger-chip-label">{name}</span>
         <b>{fmt(n)}</b>
       </span>
@@ -516,15 +525,17 @@ export function makeStatsContext(
     const subText = subCost === null ? '—' : formatCost(subCost, currency)
     const teamPair = pair(familyTokens, priced !== null ? priced.money(priced.cost) : costText)
     const openTeam = props.onTeamClick
-    const onTeamClick = (ev: MouseEvent): void => {
-      if ((ev.target as HTMLElement).closest('a, button') !== null) return
-      openTeam?.()
-    }
+    const onTeamClick = openTeam === undefined ? undefined : rowJump(openTeam)
     const costRow = (key: string, content: ReactNode): ReactElement => (
       openTeam === undefined
         ? <span key={key} className="lc-strip-cell lc-ledger-cost-row lc-stat-tipped group/tip">{content}</span>
         : <button key={key} type="button" className="lc-strip-cell lc-ledger-cost-row lc-ledger-cost-row-btn lc-stat-tipped group/tip" onClick={openTeam}>{content}</button>
     )
+    // The tile body is one mouse jump too (null = the card's current lens); the pills inside rule out a nested
+    // button, so the label carries the keyboard wire while the pills keep their own narrowing jumps.
+    const openEvents = props.onEventsClick
+    const eventsJump = openEvents === undefined ? undefined : (): void => { openEvents(null) }
+    const onEventsTile = eventsJump === undefined ? undefined : rowJump(eventsJump)
     return (
       <div className="lc-card flex-[3] min-w-[min(360px,100%)]">
         <div className="lc-card-title">
@@ -537,7 +548,6 @@ export function makeStatsContext(
               <b className="lc-ledger-total">{fmt(ioTotal)}</b>
             </div>
             <div className="lc-core">
-              <span className="lc-core-label">{t('stats.session')}</span>
               <span className="lc-core-kvs lc-core-kvs-main">
                 {figure('turns', props.counts.turns, t('stats.turns'))}
                 {figure('steps', props.counts.steps, t('stats.steps'))}
@@ -546,8 +556,13 @@ export function makeStatsContext(
                 {figure('skills', props.counts.skills ?? 0, t('stats.skills'))}
                 {figure('answers', props.answers ?? 0, t('stats.answers'))}
               </span>
-              <span className="lc-core-kv lc-core-kv-events">
-                <i>{t('stats.events')}</i>
+              <span
+                className={'lc-core-kv lc-core-kv-events' + (eventsJump === undefined ? '' : ' lc-core-kv-events-btn')}
+                onClick={onEventsTile}
+              >
+                {eventsJump === undefined
+                  ? <i>{t('stats.events')}</i>
+                  : <i className="lc-core-kv-events-open" {...pickWire(t('stats.eventsJump'), eventsJump)}>{t('stats.events')}</i>}
                 <span className="lc-core-kv-events-list">
                   {EVENT_PILLS.map((p, index) => {
                     const n = props.counts[p.tally]
@@ -584,8 +599,8 @@ export function makeStatsContext(
             </div>
             <div className="lc-ledger-team">
               <div
-                className={'lc-ledger-head lc-ledger-out-head2 lc-ledger-team-head lc-ledger-cost-row lc-stat-tipped' + (openTeam === undefined ? '' : ' lc-ledger-cost-row-btn')}
-                onClick={openTeam === undefined ? undefined : onTeamClick}
+                className={'lc-ledger-head lc-ledger-out-head2 lc-ledger-team-head lc-ledger-cost-row lc-stat-tipped' + (onTeamClick === undefined ? '' : ' lc-ledger-cost-row-btn')}
+                onClick={onTeamClick}
               >
                 <span className="lc-strip-cell lc-ledger-team-pair group/tip">
                   <i>
