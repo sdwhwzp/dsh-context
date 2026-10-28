@@ -102,10 +102,9 @@ body:not([data-ds-dark-theme]) .lc-cmd-kpi { background: var(--lc-subpanel-bg); 
 .lc-cmd-time-link { cursor: pointer; border-radius: 4px; padding: 0 3px; margin-right: -3px; }
 .lc-cmd-time-link:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; text-underline-offset: 2px; }
 /* The expanded detail: the Context Browser's section-card idiom — one card wrapping the whole command (view, find,
-   copy), one for the run's result. The description rides inside the command card; the facts close the last card, so
+   copy), one for the run's result. The description rides the command card's head; the facts close the last card, so
    no band floats loose between the cards. */
-.lc-cmd-detail { margin: 0 8px 8px 15px; display: flex; flex-direction: column; gap: 8px; }
-.lc-cmd-why { padding: 7px 10px 1px; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.lc-cmd-detail { margin: 8px 8px 8px 15px; display: flex; flex-direction: column; gap: 8px; }
 .lc-cmd-full { margin: 0; padding: 8px 10px; max-height: 220px; overflow-y: auto; font-family: var(--dsw-alias-mono-font-family, ui-monospace, monospace); font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: var(--dsw-alias-label-primary); }
 .lc-cmd-result-note { padding: 6px 10px; font-size: 11px; color: var(--dsw-alias-label-secondary); }
 .lc-cmd-detail-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 10px; border-top: var(--lc-line-fine, 1px solid var(--dsw-alias-border-l1)); font-size: 11px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }

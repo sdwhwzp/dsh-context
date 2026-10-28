@@ -75,6 +75,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
   function FindCard(props: {
     label: string
     text: string
+    headNote?: string
     meta?: ReactNode
     leading?: ReactNode
     trailing?: ReactNode
@@ -85,6 +86,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
       <Section
         label={props.label}
         foldHead
+        headNote={props.headNote}
         meta={props.meta}
         actions={<>
           {props.leading}
@@ -425,6 +427,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
           <FindCard
             label={t('cmds.kv.cmd')}
             text={rec.cmd}
+            headNote={rec.description}
             meta={<span className="lc-ts-card-meta">{t('cmds.lines', { n: view.shape.lines })}</span>}
             leading={locatable ? (
               <button
@@ -437,7 +440,6 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
             ) : undefined}
             trailing={resultCard === null ? factsEl : undefined}
           >
-            {rec.description !== undefined ? <div className="lc-cmd-why">{rec.description}</div> : null}
             <pre className="lc-cmd-full"><CmdText text={rec.cmd} runs={runsOf(rec.tool, rec.cmd)} />{rec.cmdTruncated === true ? ' …' : ''}</pre>
           </FindCard>
           {resultCard}

@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type ComponentType, type MouseEvent, type ReactElement } from 'react'
-import { absPathOf, baseNameOf, displayPathOf, glyphOf, surfaceSeqOf } from '../fileActivity'
+import { absPathOf, baseNameOf, displayPathOf, glyphOf, surfaceSeqOf, totalsOf } from '../fileActivity'
 import type { FileActivity, FileEntry, FileOp, FileOpKind } from '../fileActivity'
 import type { ContextSettings, DefaultFileSort } from '../settings'
 import type { DetailState } from '../timelineSource'
@@ -104,9 +104,12 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
       name: byName,
       path: byPath,
     }
-    const shown = activity.entries
-      .filter(e => matches(e, filter) && (q === '' || displayOf(e).toLowerCase().includes(q)))
-      .sort(comparators[sort])
+    // Chip tallies cover the path-matched set only: the kind lens must not zero the other chips, which advertise
+    // what switching to them would show.
+    const matched = q === '' ? activity.entries : activity.entries.filter(e => displayOf(e).toLowerCase().includes(q))
+    const shown = matched.filter(e => matches(e, filter)).sort(comparators[sort])
+    const matchedTotals = totalsOf(matched)
+    const shownTotals = totalsOf(shown)
 
     useEffect(() => {
       const el = listRef.current
@@ -154,13 +157,13 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
     const chips: { key: FileFilter; files: number; ops: number }[] = [
       {
         key: 'all',
-        files: activity.entries.length,
-        ops: activity.totals.read.ops + activity.totals.write.ops + activity.totals.search.ops,
+        files: matched.length,
+        ops: matchedTotals.read.ops + matchedTotals.write.ops + matchedTotals.search.ops,
       },
-      { key: 'read', files: activity.totals.read.files, ops: activity.totals.read.ops },
-      { key: 'write', files: activity.totals.write.files, ops: activity.totals.write.ops },
-      { key: 'search', files: activity.totals.search.files, ops: activity.totals.search.ops },
-      { key: 'image', files: activity.totals.image.files, ops: activity.totals.image.ops },
+      { key: 'read', files: matchedTotals.read.files, ops: matchedTotals.read.ops },
+      { key: 'write', files: matchedTotals.write.files, ops: matchedTotals.write.ops },
+      { key: 'search', files: matchedTotals.search.files, ops: matchedTotals.search.ops },
+      { key: 'image', files: matchedTotals.image.files, ops: matchedTotals.image.ops },
     ]
 
     const opLine = (op: FileOp): ReactElement => {
@@ -206,11 +209,11 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
         <div className="lc-card-title">
           <span className="lc-card-title-text">{t('files.title')}</span>
           <span className="lc-fa-meta">
-            <span>{t('files.files', { n: activity.entries.length })}</span>
-            {activity.totals.added + activity.totals.removed > 0 ? (
+            <span>{t(shown.length === 1 ? 'files.file' : 'files.files', { n: shown.length })}</span>
+            {shownTotals.added + shownTotals.removed > 0 ? (
               /* The one styled tip of the card lives OUTSIDE the scrolling list, so the bubble never clips. */
               <span className="lc-fa-meta-delta group/tip">
-                <DeltaPair added={activity.totals.added} removed={activity.totals.removed} />
+                <DeltaPair added={shownTotals.added} removed={shownTotals.removed} />
                 <span className="lc-tip lc-fa-meta-tip group-hover/tip:opacity-100" role="tooltip">{t('files.deltaTip')}</span>
               </span>
             ) : null}

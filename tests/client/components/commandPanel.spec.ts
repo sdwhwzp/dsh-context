@@ -282,6 +282,17 @@ describe('CommandPanel — the row detail and actions', () => {
     await nested.unmount()
   })
 
+  test('the description rides the command card head instead of the command body', async () => {
+    const m = await mount(h(Panel, { commands: [cmd(1, { cmd: 'git status', description: 'check the tree' })] }))
+    await click(query(m.container, '.lc-cmd-row'))
+    const head = query(m.container, '.lc-cmd-detail .lc-ts-card-head')
+    const note = query(head, '.lc-ts-card-head-note')
+    assert.equal(text(note), 'check the tree')
+    assert.equal(note.getAttribute('title'), 'check the tree')
+    assert.ok(!text(query(m.container, '.lc-cmd-full')).includes('check the tree'))
+    await m.unmount()
+  })
+
 })
 
 

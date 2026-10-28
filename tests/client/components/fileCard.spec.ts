@@ -191,6 +191,38 @@ describe('FileCard — header, rows, and filters', () => {
     await m.unmount()
   })
 
+  test('the title tallies follow both lenses while the chip counts follow the path lens', async () => {
+    const m = await mount(h(FileCard, { activity: richActivity() }))
+    const meta = (): string => text(query(m.container, '.lc-fa-meta'))
+    const count = (label: string): string | null => query(chipByLabel(m.container, label), '.lc-fa-n').textContent
+
+    await typeSearch(m.container, 'a.ts')
+    assert.match(meta(), /\b1 file\b/, 'the singular label carries the matched count')
+    assert.ok(meta().includes('+2') && meta().includes('−3'), 'the delta sums the matched file only')
+    assert.equal(count('All'), '4')
+    assert.equal(count('Read'), '2')
+    assert.equal(count('Written'), '2')
+    assert.equal(count('Searched'), '0')
+    assert.equal(count('Images'), '0')
+
+    await typeSearch(m.container, 'zzz')
+    assert.match(meta(), /\b0 files\b/)
+    assert.equal(queryAll(m.container, '.lc-fa-meta-delta').length, 0)
+    assert.deepEqual(
+      ['All', 'Read', 'Written', 'Searched', 'Images'].map(count),
+      ['0', '0', '0', '0', '0'],
+    )
+
+    await typeSearch(m.container, '')
+    assert.match(meta(), /\b5 files\b/)
+    assert.equal(count('All'), '16')
+    await click(chipByLabel(m.container, 'Searched'))
+    assert.match(meta(), /\b1 file\b/, 'the kind chip narrows the title tally too')
+    assert.equal(queryAll(m.container, '.lc-fa-meta-delta').length, 0)
+    assert.equal(count('All'), '16', 'the chips keep tallying the path lens, not their own kind')
+    await m.unmount()
+  })
+
   test('the count sort keys on the selected kind once a kind chip is active', async () => {
     const activity: FileActivity = {
       entries: [

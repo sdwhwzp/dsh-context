@@ -197,7 +197,8 @@ export function displayPathOf(path: string, workspace: string | undefined): stri
   return bareOf(path)
 }
 
-function aggregateOps(ops: readonly FileOp[], before: number | null): FileActivity {
+/** Kind and line-change totals over a set of entries — the card's tallies for any lens. */
+export function totalsOf(entries: readonly FileEntry[]): FileActivity['totals'] {
   const totals: FileActivity['totals'] = {
     read: { files: 0, ops: 0 },
     write: { files: 0, ops: 0 },
@@ -206,11 +207,28 @@ function aggregateOps(ops: readonly FileOp[], before: number | null): FileActivi
     added: 0,
     removed: 0,
   }
+  for (const e of entries) {
+    if (e.reads > 0) totals.read.files++
+    if (e.writes > 0) totals.write.files++
+    if (e.searches > 0) totals.search.files++
+    totals.read.ops += e.reads
+    totals.write.ops += e.writes
+    totals.search.ops += e.searches
+    if (e.form === 'image') {
+      totals.image.files++
+      totals.image.ops += e.ops.length
+    }
+    totals.added += e.added
+    totals.removed += e.removed
+  }
+  return totals
+}
+
+function aggregateOps(ops: readonly FileOp[], before: number | null): FileActivity {
   const byPath = new Map<string, FileEntry>()
   for (const op of ops) {
     const key = surfaceSeqOf(op)
     if (before !== null && key >= before) continue
-    totals[op.kind].ops++
     let entry = byPath.get(op.path)
     if (entry === undefined) {
       entry = {
@@ -234,20 +252,9 @@ function aggregateOps(ops: readonly FileOp[], before: number | null): FileActivi
     entry.ops.push(op)
   }
   const entries = [...byPath.values()]
-  for (const e of entries) {
-    e.ops.sort((a, b) => b.seq - a.seq)
-    if (e.reads > 0) totals.read.files++
-    if (e.writes > 0) totals.write.files++
-    if (e.searches > 0) totals.search.files++
-    if (e.form === 'image') {
-      totals.image.files++
-      totals.image.ops += e.ops.length
-    }
-    totals.added += e.added
-    totals.removed += e.removed
-  }
+  for (const e of entries) e.ops.sort((a, b) => b.seq - a.seq)
   entries.sort((a, b) => b.ops[0].seq - a.ops[0].seq)
-  return { entries, totals }
+  return { entries, totals: totalsOf(entries) }
 }
 
 /** Op-log generation's read; `gone` is joined from the detail's archive at render time. */

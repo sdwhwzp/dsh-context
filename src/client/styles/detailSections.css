@@ -5,6 +5,7 @@
 .lc-ts-card-head b { color: var(--dsw-alias-label-primary); }
 /* MCP tool names have no break points, so a long name must ellipsize instead of pushing the head's status group out of the card. */
 .lc-ts-call-name { font-size: 13px; font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-ts-card-head-note { flex: 1 1 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 400; color: var(--dsw-alias-label-primary); }
 .lc-ts-card-count { margin-left: auto; }
 .lc-ts-card-right { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
 .lc-ts-card-meta { color: var(--dsw-alias-label-secondary); font-size: 11px; font-weight: 400; white-space: nowrap; font-variant-numeric: tabular-nums; }

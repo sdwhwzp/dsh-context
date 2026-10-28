@@ -5,6 +5,8 @@ export function Section(props: {
   labelClass?: string
   /** Fold the head's trailing group onto a second line under width pressure; the call-name head must stay one-line. */
   foldHead?: boolean
+  /** Optional note after the label, preserving line breaks and wrapping within the header. */
+  headNote?: string
   count?: number
   actions?: ReactNode
   meta?: ReactNode
@@ -15,6 +17,7 @@ export function Section(props: {
     <div className="lc-ts-card">
       <div className={'lc-ts-card-head' + (props.foldHead === true ? ' lc-ts-card-head-wrap' : '')}>
         <b className={props.labelClass} title={props.label}>{props.label}</b>
+        {props.headNote ? <span className="lc-ts-card-head-note" title={props.headNote}>{props.headNote}</span> : null}
         {right ? <span className="lc-ts-card-right">{props.meta}{props.actions}</span> : null}
         {props.count !== undefined ? <span className="lc-ts-card-count">{props.count}</span> : null}
       </div>
