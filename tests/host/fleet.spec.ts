@@ -11,6 +11,7 @@ interface CtxSpec {
   requestPrincipal?: unknown
   connection?: unknown
   sessionQuery?: unknown
+  sessionPersistence?: unknown
 }
 
 /** A minimal host ctx double with cordis inject semantics (the detail route spec's own shape): the callback fires
@@ -23,6 +24,7 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?
   if ('requestPrincipal' in spec) services.set('requestPrincipal', spec.requestPrincipal)
   if ('connection' in spec) services.set('connection', spec.connection)
   if ('sessionQuery' in spec) services.set('sessionQuery', spec.sessionQuery)
+  if ('sessionPersistence' in spec) services.set('sessionPersistence', spec.sessionPersistence)
   const ctx = {
     get: (name: string) => services.get(name),
     effect(fn: () => unknown, _label?: string) {
@@ -206,6 +208,7 @@ describe('fleetDetailOfEvents — the descriptor', () => {
       { seq: 5, time: 5, data: {} },
       { type: 9, seq: 6, data: {} },
       { type: 'assistant/message', seq: 7, time: 7, data: { message: { content: [{ type: 'text', text: 'hi' }] } } },
+      { type: 'tool/result', seq: 8, time: 8, data: { message: { content: [] } } },
     ])
     assert.deepEqual(detail.descriptor, { mode: 'one-shot' })
     assert.deepEqual(detail.messages, [])
@@ -461,5 +464,73 @@ describe('authenticated session reads', () => {
       method: 'POST', body: JSON.stringify({ sessionId: 'own', attachmentId: 'sha256:abc' }),
     }), principal)
     assert.equal(reads, 1)
+  })
+})
+
+describe('the fleet fold cache', () => {
+  test('an unkeyed stored observation is never extended from an old fold', async () => {
+    const relay = (seq: number, text: string): unknown => ({
+      type: 'user/message', seq, time: seq, data: { source: { kind: 'agent-message', senderSessionId: 'lead' }, content: [{ type: 'text', text }] },
+    })
+    let events: unknown[] = [relay(1, 'one')]
+    const { captured } = armed({ sessionQuery: { observeSession: () => Promise.resolve({ events }) } })
+    const first = await call(captured, { sessionId: 's1' }) as { value: { messages: Array<{ text: string }> } }
+    assert.deepEqual(first.value.messages.map(m => m.text), ['one'])
+    events = [...events, relay(2, 'two')]
+    const grown = await call(captured, { sessionId: 's1' }) as { value: { messages: Array<{ text: string }> } }
+    assert.deepEqual(grown.value.messages.map(m => m.text).sort(), ['one', 'two'], 'the appended message is served, not a cached prefix')
+  })
+
+  test('a keyed stored cache trims past its bound and a live append extends its fold', async () => {
+    const { captured } = armed({
+      sessionQuery: {
+        observeSession: (id: string) => Promise.resolve({
+          source: 'stored', revision: 'r-' + id,
+          events: [{ type: 'user/message', seq: 1, time: 1, data: { content: [{ type: 'text', text: id }] } }],
+        }),
+      },
+      sessionPersistence: { id: 'p1' },
+    })
+    for (let i = 0; i < 9; i++) await call(captured, { sessionId: 's' + i })
+    assert.equal((await call(captured, { sessionId: 's0' }) as { value: { initialPrompt: string } }).value.initialPrompt, 's0')
+    assert.equal((await call(captured, { sessionId: 's8' }) as { value: { initialPrompt: string } }).value.initialPrompt, 's8')
+
+    let liveEvents: unknown[] = [{ type: 'user/message', seq: 1, time: 1, data: { content: [{ type: 'text', text: 'live' }] } }]
+    const live = armed({ sessionQuery: { observeSession: () => Promise.resolve({ source: 'live', events: liveEvents }) } })
+    assert.equal((await call(live.captured, { sessionId: 'l1' }) as { value: { initialPrompt: string } }).value.initialPrompt, 'live')
+    liveEvents = [...liveEvents, { type: 'team/member', seq: 2, time: 2, data: { member: { name: 'worker' } } }]
+    const extended = await call(live.captured, { sessionId: 'l1' }) as { value: { roster: unknown } }
+    assert.deepEqual(extended.value.roster, [{ name: 'worker', description: '' }])
+  })
+
+  test('a stored observation with no finite seq serves its fold', async () => {
+    const { captured } = armed({ sessionQuery: observing([{}, { seq: 'bad' }]) })
+    const r = await call(captured, { sessionId: 's1' })
+    assert.equal(r.ok, true)
+    assert.deepEqual((r.value as { messages: unknown[] }).messages, [])
+  })
+})
+
+describe('fleet observeSession live source', () => {
+  test('a live observation uses the live revision branch and extends its fold', async () => {
+    const events = [{ type: 'user/message', seq: 1, time: 1, data: { content: [{ type: 'text', text: 'live-observe' }] } }]
+    const { captured } = armed({ sessionQuery: { observeSession: () => Promise.resolve({ source: 'live', events }) } })
+    const r = await call(captured, { sessionId: 's1' })
+    assert.equal((r.value as { initialPrompt: string }).initialPrompt, 'live-observe')
+  })
+})
+
+describe('a live fold prefix reset', () => {
+  test('a shorter live log refolds instead of serving the longer cached prefix', async () => {
+    const relay = (seq: number, text: string): unknown => ({
+      type: 'user/message', seq, time: seq, data: { source: { kind: 'agent-message', senderSessionId: 'lead' }, content: [{ type: 'text', text }] },
+    })
+    let events: unknown[] = [relay(1, 'one'), relay(2, 'two')]
+    const { captured } = armed({ sessionQuery: { observeSession: () => Promise.resolve({ source: 'live', events }) } })
+    const first = await call(captured, { sessionId: 'l2' }) as { value: { messages: Array<{ text: string }> } }
+    assert.deepEqual(first.value.messages.map(m => m.text).sort(), ['one', 'two'])
+    events = [relay(2, 'two')]
+    const reset = await call(captured, { sessionId: 'l2' }) as { value: { messages: Array<{ text: string }> } }
+    assert.deepEqual(reset.value.messages.map(m => m.text), ['two'])
   })
 })

@@ -26,7 +26,7 @@ describe('Config validator (cordis Standard Schema face)', () => {
       defaultFileSort: 'lines',
       insightsEntry: 'show',
       defaultDurationCurve: 'show',
-      overviewAutoSteps: '200',
+      overviewAutoSteps: '100',
       defaultOverviewRange: '30d',
       fleetTab: 'show',
       promptPrefix: '',
@@ -69,7 +69,7 @@ describe('preference fields (the Config-form generation surface)', () => {
   test('preferences resolve to defaults, stale values degrade, and stored values survive', () => {
     const resolved = Config({ defaultGranularity: 'bogus', overviewAutoSteps: '50', defaultOverviewRange: 'bogus', promptPrefix: 7, promptSuffix: {} } as unknown as Config)
     assert.equal(deref(resolved.defaultGranularity), 'step')
-    assert.equal(deref(resolved.overviewAutoSteps), '200')
+    assert.equal(deref(resolved.overviewAutoSteps), '100')
     assert.equal(deref(resolved.defaultOverviewRange), '30d')
     assert.equal(deref(resolved.promptPrefix), '', 'a non-string prompt value degrades to the empty default')
     assert.equal(deref(resolved.promptSuffix), '')

@@ -12,24 +12,27 @@ import type { ViewKit } from '../viewkit'
 import { ClearableInput } from './clearableInput'
 import { makeDetailNote } from './detailNote'
 import { makeRichText } from './richText'
-import { IconShare } from '../primitives'
+import { IconApi, IconShare } from '../primitives'
 import { Section } from './section'
 import { useRowWindow } from './useRowWindow'
+import type { CommandFill } from './useCommandLog'
 
 export interface CommandPanelProps {
   commands: Command[]
   /** Whole-log tallies (survive list trimming); absent = the retained list counts itself. */
   stats?: CommandStats
-  /** Set when the log trimmed: the list covers only the latest runs. */
+  /** Set when the log trimmed: the list may still be filling toward the log's start. */
   floor?: number
+  /** The history fill's status; absent = the served list is final. */
+  fill?: CommandFill
   workspace?: string
   /** The turn/step whose request first carried a run's result node, by node seq; absent = rows print no stamps. */
   stampOf?: (seq: number) => { turn: number; step: number } | null
   /** Reveal the run's result message in the Context Browser; absent = no reveal affordance. */
   onLocate?: (rec: Command) => void
-  /** A one-shot text lens the panel opens with (the stats card's command pick seeds the program's name). */
-  focusQuery?: string | null
-  onFocusQueryHandled?: () => void
+  /** A one-shot program lens the panel opens with (the stats card's command chip). */
+  focusProgram?: string | null
+  onFocusProgramHandled?: () => void
   /** On-demand content for one surface-node seq; absent = the detail serves no result block. */
   fetchContent?: ContentFetcher
   state?: DetailState
@@ -65,10 +68,10 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
   const WINDOW_MIN_ROWS = 100
 
   function statusGlyphOf(rec: Command): { glyph: string; cls: string; tip: string } {
-    if (rec.status === 'running') return { glyph: '◐', cls: 'run', tip: t('cmds.status.running') }
+    if (rec.status === 'running') return { glyph: '⏳', cls: 'run', tip: t('cmds.status.running') }
     if (rec.status === 'completed') return { glyph: '✓', cls: 'ok', tip: t('cmds.status.completed') }
     if (rec.status === 'failed') return { glyph: '✕', cls: 'fail', tip: t('cmds.status.failed') }
-    return { glyph: '⊘', cls: 'kill', tip: t(rec.stopped === true ? 'cmds.status.stopped' : 'cmds.status.killed') }
+    return { glyph: '🛑', cls: 'kill', tip: t(rec.stopped === true ? 'cmds.status.stopped' : 'cmds.status.killed') }
   }
 
   /** One section card carrying the browser's copy + find pair; the find lens marks matches inside the keyed body only. */
@@ -115,8 +118,10 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
       return highlightRuns(grammar === 'bash' ? highlightShell : highlightPwsh, grammar, text)
     }
     const { commands } = props
+    const fillStatus = props.fill?.status ?? 'idle'
+    const fillTotal = props.fill?.total
+    const retryFill = props.fill?.retry
     const [filter, setFilter] = useState<CommandFilter>('all')
-    const [failuresOnly, setFailuresOnly] = useState(false)
     const [sort, setSort] = useState<CommandSort>('latest')
     const [query, setQuery] = useState('')
     const [programPick, setProgramPick] = useState<string | null>(null)
@@ -146,15 +151,15 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     const q = query.trim().toLowerCase()
     const views = useMemo(() => viewsOf(commands, props.workspace), [commands, props.workspace])
     // The chip counts describe the search + picked-program scope (what picking a chip would show); the chip then
-    // narrows the list. The program ranking stays global, so none of the right-side filters move it.
-    const searched = useMemo(() => views.filter(view => matchesQuery(view.rec, q, view.program)), [views, q])
+    // narrows the list. The rail's ranking and attention facts stay session-wide, so no list control moves them.
+    const searched = useMemo(() => views.filter(view => matchesQuery(view.rec, q, view.programs)), [views, q])
     const picked = useMemo(
-      () => (programPick === null ? searched : searched.filter(view => view.program === programPick)),
+      () => (programPick === null ? searched : searched.filter(view => view.programs.includes(programPick))),
       [searched, programPick],
     )
     const scoped = useMemo(
-      () => picked.filter(view => matchesFilter(view.rec, filter) && (!failuresOnly || matchesFilter(view.rec, 'failed'))),
-      [picked, filter, failuresOnly],
+      () => picked.filter(view => matchesFilter(view.rec, filter)),
+      [picked, filter],
     )
     const shown = useMemo(
       () => scoped.slice().sort((a, b) => (sort === 'slowest' ? bySlowest(a.rec, b.rec) : byLatest(a.rec, b.rec))),
@@ -168,7 +173,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
       background: picked.filter(view => matchesFilter(view.rec, 'background')).length,
     }), [picked])
     const programs = useMemo(() => programsOf(views), [views])
-    const attention = useMemo(() => attentionOf(scoped), [scoped])
+    const attention = useMemo(() => attentionOf(views), [views])
     // A trimmed or refreshed log can drop a picked program; clearing the pick keeps the list from sticking empty.
     useEffect(() => {
       if (programPick === null || programs.some(p => p.name === programPick)) return
@@ -212,25 +217,37 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
       const first = previewTextOf(cmd, props.workspace)
       return first.length > 34 ? first.slice(0, 34) + '…' : first
     }
-    /** Replacement attention lenses reset the current filter, query, sort and program pick. */
-    const applyLens = (patch: { filter?: CommandFilter; query?: string; sort?: CommandSort; program?: string | null }): void => {
-      setFailuresOnly(false)
+    type LensPatch = { filter?: CommandFilter; query?: string; sort?: CommandSort; program?: string | null }
+    const lensActive = (patch: LensPatch): boolean =>
+      (patch.filter ?? 'all') === filter &&
+      (patch.query ?? '') === query &&
+      (patch.sort ?? 'latest') === sort &&
+      (patch.program ?? null) === programPick
+    /** A rail lens is exclusive: it clears every other facet before applying its own. Clicking the active lens again
+     *  clears it outright. */
+    const applyLens = (patch: LensPatch): void => {
       setProgramPick(patch.program ?? null)
       setFilter(patch.filter ?? 'all')
       setQuery(patch.query ?? '')
       setSort(patch.sort ?? 'latest')
     }
-    // The stats card's pick is one-shot: hand the slot back so the same program can fire again.
-    const focusQuery = props.focusQuery
-    useEffect(() => {
-      if (focusQuery === undefined || focusQuery === null) return
-      setFailuresOnly(false)
+    // The search box is the visible text lens: typing releases any program pick it was showing.
+    const changeQuery = (value: string): void => {
       setProgramPick(null)
-      setFilter('all')
-      setQuery(focusQuery)
-      setSort('latest')
-      props.onFocusQueryHandled?.()
-    }, [focusQuery, props.onFocusQueryHandled])
+      setQuery(value)
+    }
+    /** A program pick writes its name into the search box, so the box never disagrees with the rail's highlight. */
+    const pickProgram = (name: string | null): void => {
+      setProgramPick(name)
+      setQuery(name ?? '')
+    }
+    // The stats card's pick is one-shot: hand the slot back so the same program can fire again.
+    const focusProgram = props.focusProgram
+    useEffect(() => {
+      if (focusProgram === undefined || focusProgram === null) return
+      applyLens({ query: focusProgram, program: focusProgram })
+      props.onFocusProgramHandled?.()
+    }, [focusProgram, props.onFocusProgramHandled])
 
     interface AttentionRow {
       key: string
@@ -238,38 +255,33 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
       value: string
       n: string
       title?: string
+      active: boolean
       apply: () => void
     }
     const attentionRows: AttentionRow[] = []
+    const pushAttention = (row: Omit<AttentionRow, 'active' | 'apply'>, lens: LensPatch): void => {
+      const active = lensActive(lens)
+      attentionRows.push({ ...row, active, apply: () => { applyLens(active ? {} : lens) } })
+    }
     if (attention.slowest !== undefined) {
       const s = attention.slowest
-      attentionRows.push({ key: 'slowest', label: t('cmds.rail.slowest'), value: railPreview(s.cmd), n: fmtDuration(s.ms), title: s.cmd, apply: () => { applyLens({ sort: 'slowest' }) } })
+      // The box carries the run's first line (a whole multiline script would swamp it); the sort surfaces the run.
+      pushAttention({ key: 'slowest', label: t('cmds.rail.slowest'), value: railPreview(s.cmd), n: fmtDuration(s.ms), title: s.cmd }, { query: previewTextOf(s.cmd, props.workspace), sort: 'slowest' })
     }
     if (attention.failing !== undefined) {
       const f = attention.failing
-      attentionRows.push({
-        key: 'failing',
-        label: t('cmds.rail.failing'),
-        value: f.program,
-        n: '×' + fmt(f.count),
-        apply: () => {
-          setProgramPick(f.program)
-          setFailuresOnly(filter === 'slow' || filter === 'background')
-          if (filter === 'all') setFilter('failed')
-          setSort('latest')
-        },
-      })
+      // The pick lands on exactly the named program's failures; the text lens also shows the program in the box.
+      pushAttention({ key: 'failing', label: t('cmds.rail.failing'), value: f.program, n: '×' + fmt(f.count) }, { filter: 'failed', program: f.program, query: f.program })
     }
     if (attention.repeats !== undefined) {
       const r = attention.repeats
       // The full text searches exactly the repeated command (a prefix would catch look-alikes).
-      attentionRows.push({ key: 'repeats', label: t('cmds.rail.repeats'), value: railPreview(r.cmd), n: '×' + fmt(r.count), title: r.cmd, apply: () => { applyLens({ query: r.cmd }) } })
+      pushAttention({ key: 'repeats', label: t('cmds.rail.repeats'), value: railPreview(r.cmd), n: '×' + fmt(r.count), title: r.cmd }, { query: r.cmd })
     }
     if (attention.background !== undefined) {
       const bg = attention.background
-      attentionRows.push({ key: 'background', label: t('cmds.rail.bgRuns'), value: '', n: '×' + fmt(bg), apply: () => { applyLens({ filter: 'background' }) } })
+      pushAttention({ key: 'background', label: t('cmds.rail.bgRuns'), value: '', n: '×' + fmt(bg) }, { filter: 'background' })
     }
-    const totalPrograms = Math.max(1, programs.reduce((sum, p) => sum + p.n, 0))
     const topProgramN = Math.max(1, ...programs.map(p => p.n))
     const pq = progQuery.trim().toLowerCase()
     // A query keeps its input visible below the threshold: a trimmed or refreshed log can drop the ranking under
@@ -279,6 +291,29 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
 
     const loadingChannel = commands.length === 0 && props.state === 'loading'
     const failedChannel = commands.length === 0 && props.state === 'failed'
+    // The fill's status sits ahead of the list: below a long list it would never be seen. A completed fill drops the
+    // note — the list then covers the whole log.
+    const fillNote = ((): ReactNode => {
+      if (props.floor === undefined || commands.length === 0 || fillStatus === 'done') return null
+      if (fillStatus === 'loading') {
+        return (
+          <div className="lc-cmd-floor">
+            {fillTotal !== undefined
+              ? t('cmds.coverageLoading', { n: fmt(commands.length), total: fmt(fillTotal) })
+              : t('cmds.loadingEarlier')}
+          </div>
+        )
+      }
+      if (fillStatus === 'failed') {
+        return (
+          <div className="lc-cmd-floor">
+            {t('cmds.coverageFailed', { n: fmt(commands.length) })}
+            <button type="button" className="lc-cmd-floor-btn" onClick={retryFill}>{t('cmds.coverageRetry')}</button>
+          </div>
+        )
+      }
+      return <div className="lc-cmd-floor">{t('cmds.coverage', { n: fmt(commands.length) })}</div>
+    })()
     const showRail = !loadingChannel && !failedChannel
     const totalTime = commands.length === 0 ? '0' : fmtDuration(tally.ms)
     const rail = showRail ? (
@@ -297,21 +332,24 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
         </div>
         {attentionRows.length > 0 ? (
           <div className="lc-cmd-rail-sec lc-cmd-attn">
-            <div className="lc-cmd-rail-h">{t('cmds.rail.attention')}</div>
-            {attentionRows.map(row => (
-              <button
-                key={row.key}
-                type="button"
-                className={'lc-cmd-attn-row lc-cmd-attn-' + row.key + ' hover:bg-(--dsw-alias-interactive-bg-hover)'}
-                title={row.title}
-                onClick={row.apply}
-              >
-                <i className="lc-cmd-attn-dot" />
-                <span className="lc-cmd-attn-k">{row.label}</span>
-                <span className="lc-cmd-attn-v">{row.value}</span>
-                <span className="lc-cmd-attn-n">{row.n}</span>
-              </button>
-            ))}
+            <div className="lc-cmd-rail-h" title={t('cmds.rail.attentionTip')}>{t('cmds.rail.attention')}</div>
+            <div className="lc-cmd-attn-rows">
+              {attentionRows.map(row => (
+                <button
+                  key={row.key}
+                  type="button"
+                  className={'lc-cmd-attn-row lc-cmd-attn-' + row.key + (row.active ? ' lc-cmd-attn-on' : '')}
+                  title={row.title}
+                  aria-pressed={row.active}
+                  onClick={row.apply}
+                >
+                  <i className="lc-cmd-attn-dot" />
+                  <span className="lc-cmd-attn-k">{row.label}</span>
+                  <span className="lc-cmd-attn-v">{row.value}</span>
+                  <span className="lc-cmd-attn-n">{row.n}</span>
+                </button>
+              ))}
+            </div>
           </div>
         ) : null}
         {programs.length > 0 ? (
@@ -332,7 +370,6 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
             <div className="lc-cmd-progs-list" role="group" aria-label={t('cmds.rail.top', { n: programs.length })}>
               {shownPrograms.map((p) => {
                 const color = nameColorOf(p.name)
-                const share = Math.round(p.n / totalPrograms * 100)
                 return (
                   <button
                     key={p.name}
@@ -340,12 +377,14 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
                     className={'lc-cmd-prog' + (programPick === p.name ? ' lc-cmd-prog-on' : '')}
                     title={t(programPick === p.name ? 'cmds.rail.topTipOn' : 'cmds.rail.topTip', { name: p.name })}
                     aria-pressed={programPick === p.name}
-                    onClick={() => { setProgramPick(cur => (cur === p.name ? null : p.name)) }}
+                    onClick={() => { pickProgram(programPick === p.name ? null : p.name) }}
                   >
                     <i className="lc-cmd-prog-dot" style={{ background: color }} />
                     <span className="lc-cmd-prog-name">{p.name}</span>
                     <span className="lc-cmd-prog-n">{'×' + fmt(p.n)}</span>
-                    <span className="lc-cmd-prog-share">{share}%</span>
+                    <span className="lc-cmd-prog-runs">
+                      {t(p.runs === 1 ? 'cmds.rail.programRun' : 'cmds.rail.programRuns', { n: fmt(p.runs) })}
+                    </span>
                     {/* The underline bar is relative to the heaviest program (the Skills list's idiom). */}
                     <i className="lc-cmd-prog-bar" style={{ width: `calc(${Math.round(p.n / topProgramN * 100)}% - ${Math.round(p.n / topProgramN * 12)}px)`, background: color }} />
                   </button>
@@ -510,17 +549,17 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     return (
       <div className="lc-card lc-cmd-card lc-col flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">
-          <span className="lc-card-title-text">{t('cmds.title')}</span>
+          <span className="lc-card-title-text">
+            <IconApi size={14} />
+            {t('cmds.title')}
+          </span>
           <div className="lc-gran lc-cmd-chips @max-[380px]/lc-card:flex-wrap">
             {FILTERS.map(f => (
               <button
                 key={f}
                 type="button"
-                className={'lc-gran-btn lc-cmd-chip-' + f + (filter === f || (failuresOnly && f === 'failed') ? ' lc-gran-on' : '')}
-                onClick={() => {
-                  setFailuresOnly(false)
-                  setFilter(cur => (cur === f ? 'all' : f))
-                }}
+                className={'lc-gran-btn lc-cmd-chip-' + f + (filter === f ? ' lc-gran-on' : '')}
+                onClick={() => { setFilter(cur => (cur === f ? 'all' : f)) }}
               >
                 {t('cmds.filter.' + f)}
                 <b className="lc-fa-n">{fmt(counts[f])}</b>
@@ -537,7 +576,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
                 value={query}
                 placeholder={t('cmds.search')}
                 clearLabel={t('field.clear')}
-                onChange={setQuery}
+                onChange={changeQuery}
               />
               <span className="lc-gran lc-fa-sort" role="group" title={t('cmds.sortTip')}>
                 {SORTS.map(k => (
@@ -552,10 +591,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
                 ))}
               </span>
             </div>
-            {/* The trim floor sits ahead of the list: below a long list it would never be seen. */}
-            {props.floor !== undefined && commands.length > 0 ? (
-              <div className="lc-cmd-floor">{t('cmds.coverage', { n: fmt(commands.length) })}</div>
-            ) : null}
+            {fillNote}
             {loadingChannel ? (
               <DetailNote state="loading" className="lc-empty lc-lane" />
             ) : failedChannel ? (

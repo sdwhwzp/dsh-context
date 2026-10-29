@@ -707,3 +707,19 @@ async function actSelect(select: HTMLSelectElement, value: string): Promise<void
     select.dispatchEvent(new Event('change', { bubbles: true }))
   })
 }
+
+describe('OverviewPanel — progressive body', () => {
+  test('the grid waits behind its reserved slots until the lazy mount fires', async () => {
+    class IdleObserver {
+      observe(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('IntersectionObserver', IdleObserver)
+    const { m } = await openPanel(makeCtx())
+    assert.equal(queryAll(m.container, '.lc-ov-grid').length, 0, 'the body has not mounted')
+    assert.equal(queryAll(m.container, '.lc-ov-left > .lc-deferred-skeleton').length, 2, 'the left column reserves its two cards')
+    assert.equal(queryAll(m.container, '.lc-ov-right > .lc-deferred-skeleton').length, 1, 'the right column reserves its grid card')
+    assert.ok(queryAll(m.container, '.lc-ov-first .lc-stat-value').length > 0, 'the KPI band is already live')
+    await m.unmount()
+  })
+})

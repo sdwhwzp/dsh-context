@@ -1,5 +1,5 @@
 import type { ReactElement, ReactNode } from 'react'
-import { IconSettings } from '../primitives'
+import { IconPlugin, IconSettings } from '../primitives'
 import { siDeepseek, siGithub, type SimpleIcon } from 'simple-icons'
 import { useNewerVersion } from '../latestVersion'
 import { PLUGIN_NAME, PLUGIN_REPO, PLUGIN_REPO_SHORT, PLUGIN_VERSION } from '../meta'
@@ -33,7 +33,10 @@ export function makePluginInfo(kit: ViewKit, ctx: ClientCtx): () => ReactElement
     return (
       <div className="lc-card flex-1 min-w-[min(240px,100%)]">
         <div className="lc-card-title">
-          <span className="lc-card-title-text">{t('plugin.title')}</span>
+          <span className="lc-card-title-text">
+            <IconPlugin size={14} />
+            {t('plugin.title')}
+          </span>
           <a className="lc-card-sub lc-pi-hint hover:underline" href={PLUGIN_REPO} target="_blank" rel="noreferrer">
             {t('plugin.hint')}
           </a>

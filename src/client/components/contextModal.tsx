@@ -12,6 +12,7 @@ import type { ClientCtx, SessionStandardProps, SessionsFace } from '../services'
 import type { ContextSettings } from '../settings'
 import { contextBreakdownOf, contextPressureOf, conversationNodesOf, headersOf, imageLoaderOf, projectionOf, sessionAddressOf, workspaceOf } from '../services'
 import { makeContentFetcher, makeHeaderFetcher, useHistoryFace } from '../historyPage'
+import { useSessionDetailWarm } from '../prefetch'
 import { useTimelineSource } from '../timelineSource'
 import type { ViewKit } from '../viewkit'
 import { useConversationSurface } from './useConversationSurface'
@@ -25,6 +26,8 @@ import { makeLegend, makeStackedBar } from './stackedBar'
 export interface ContextModalProps extends SessionStandardProps {
   /** Bound selector hook over the per-session open flag (hooks compartment). */
   useContextModal?: (sel: (open: boolean) => boolean) => boolean
+  /** Set by the input-overlay registration: the always-mounted gate warms this session's detail. */
+  warm?: boolean
 }
 
 export function makeContextModal(
@@ -49,6 +52,10 @@ export function makeContextModal(
 
   /** Reads the open flag without mounting the reader: a closed modal must not subscribe to or fetch session data. */
   function ContextModalGate(props: ContextModalProps): ReactElement | null {
+    // One warm-up per session, from the always-mounted input overlay: not a listener per assistant message. Only the
+    // registration opts in, so a directly-mounted dialog keeps its closed-modal no-reader contract.
+    const warm = props.warm === true
+    useSessionDetailWarm(warm ? props.sessionId : undefined, warm ? props.useProjection : undefined)
     const open = typeof props.useContextModal === 'function' ? props.useContextModal(s => s) : false
     return open ? h(ContextModalBody, props) : null
   }

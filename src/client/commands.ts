@@ -2,7 +2,7 @@
  * reads (preview text, duration, filter/sort) the card maps over. */
 
 import type { CommandRecord, CommandStats, SurfaceNode } from '../shared/types'
-import { firstLineOf, headProgramOf, hideableCdPrefix, shapeOfCmd } from '../shared/commands'
+import { firstLineOf, headProgramOf, hideableCdPrefix, programsOfCommand, shapeOfCmd } from '../shared/commands'
 import type { CommandShape } from '../shared/commands'
 
 export type Command = CommandRecord
@@ -48,12 +48,16 @@ export function previewOf(rec: CommandRecord, workspace: string | undefined): st
 export interface CommandView {
   rec: CommandRecord
   program: string
+  programs: string[]
   preview: string
   shape: CommandShape
 }
 
 function viewOf(rec: CommandRecord, workspace: string | undefined): CommandView {
-  return { rec, program: programOf(rec), preview: previewOf(rec, workspace), shape: shapeOfCmd(rec.cmd) }
+  const programs = rec.tool === 'bash' || rec.tool === 'pwsh' ? programsOfCommand(rec.cmd, rec.tool) : []
+  const program = programs[0] ?? programOf(rec)
+  const allPrograms = programs.length > 0 ? programs : [program]
+  return { rec, program, programs: allPrograms, preview: previewOf(rec, workspace), shape: shapeOfCmd(rec.cmd) }
 }
 
 /** A run's result text for the detail's result block; nested tool-result blocks (a Code-Mode parent's dispatch
@@ -90,13 +94,14 @@ export function matchesFilter(rec: CommandRecord, filter: CommandFilter): boolea
   return true
 }
 
-export function matchesQuery(rec: CommandRecord, q: string, program: string = programOf(rec)): boolean {
+export function matchesQuery(rec: CommandRecord, q: string, program: string | readonly string[] = programOf(rec)): boolean {
   if (q === '') return true
   const needle = q.toLowerCase()
   if (rec.cmd.toLowerCase().includes(needle)) return true
   if (rec.description !== undefined && rec.description.toLowerCase().includes(needle)) return true
   if (rec.cwd !== undefined && rec.cwd.toLowerCase().includes(needle)) return true
-  return program.toLowerCase().includes(needle)
+  const programs = typeof program === 'string' ? [program] : program
+  return programs.some(name => name.toLowerCase().includes(needle))
 }
 
 export function byLatest(a: CommandRecord, b: CommandRecord): number {
@@ -122,7 +127,7 @@ export function tallyOfCommands(records: readonly CommandRecord[]): CommandStats
   return stats
 }
 
-/** A record's program identity for the rail: the shell head word (dialect-aware), the tool itself for code programs. */
+/** A record's primary program identity for search: the shell head word (dialect-aware), the tool itself for code programs. */
 export function programOf(rec: CommandRecord): string {
   if (rec.tool === 'bash' || rec.tool === 'pwsh') {
     const head = headProgramOf(rec.cmd, rec.tool)
@@ -134,14 +139,29 @@ export function programOf(rec: CommandRecord): string {
 export interface ProgramCount {
   name: string
   n: number
+  runs: number
 }
 
-/** The rail's program ranking: every program among the given views, most-run first with a stable name tie-break. */
+/** The rail's program ranking: every invocation plus each containing run, most frequent first with a stable name tie-break. */
 export function programsOf(views: readonly CommandView[]): ProgramCount[] {
-  const counts = new Map<string, number>()
-  for (const view of views) counts.set(view.program, (counts.get(view.program) ?? 0) + 1)
+  const counts = new Map<string, { n: number; runs: number }>()
+  for (const view of views) {
+    const seen = new Set<string>()
+    for (const name of view.programs) {
+      let count = counts.get(name)
+      if (count === undefined) {
+        count = { n: 0, runs: 0 }
+        counts.set(name, count)
+      }
+      count.n++
+      if (!seen.has(name)) {
+        count.runs++
+        seen.add(name)
+      }
+    }
+  }
   return [...counts.entries()]
-    .map(([name, n]) => ({ name, n }))
+    .map(([name, count]) => ({ name, ...count }))
     .sort((a, b) => (b.n - a.n) || (a.name < b.name ? -1 : 1))
 }
 
@@ -170,7 +190,7 @@ export function attentionOf(views: readonly CommandView[]): CommandAttention {
       slowest = { cmd: rec.cmd, ms: d }
     }
     if (rec.status === 'failed' || rec.status === 'killed') {
-      failByProgram.set(view.program, (failByProgram.get(view.program) ?? 0) + 1)
+      for (const program of new Set(view.programs)) failByProgram.set(program, (failByProgram.get(program) ?? 0) + 1)
     }
     if (rec.background === true) background++
     if (rec.status !== 'running') repeats.set(rec.cmd, (repeats.get(rec.cmd) ?? 0) + 1)

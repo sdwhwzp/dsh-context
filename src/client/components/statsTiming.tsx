@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import type { TimingSpan, TimingTotals } from '../../shared/types'
 import type { ViewKit } from '../viewkit'
+import { IconClock } from '../primitives'
 
 import { SliceList } from './sliceList'
 import type { SliceRow } from './sliceList'
@@ -128,7 +129,10 @@ export function makeStatsTiming(kit: ViewKit, Donut: (props: DonutProps) => Reac
     return (
       <div className="lc-card lc-col-donut flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">
-          <span className="lc-card-title-text">{t('timing.title')}</span>
+          <span className="lc-card-title-text">
+            <IconClock size={14} />
+            {t('timing.title')}
+          </span>
           {tps !== null && (
             <span className="lc-card-rate" title={t('timing.tpsTip')}>{t('timing.tps', { tps })}</span>
           )}

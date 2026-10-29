@@ -23,7 +23,7 @@ describe('CommandPanel — the summary rail', () => {
     ]
   }
 
-  test('with two failing programs, the Failing row lands on exactly its own program’s failures', async () => {
+  test('with two failing programs, the Failed row lands on exactly its own program’s failures', async () => {
     const commands: Command[] = [
       cmd(1, { cmd: 'vitest run a', status: 'failed', exit: 1 }),
       cmd(2, { cmd: 'vitest run b', status: 'failed', exit: 1 }),
@@ -32,66 +32,85 @@ describe('CommandPanel — the summary rail', () => {
     ]
     const m = await mount(h(Panel, { commands }))
     // vitest fails twice, eslint once: the rail names vitest.
-    const failing = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Failing'))
+    const failing = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Failed'))
     assert.ok(failing !== undefined)
     assert.ok(text(failing).includes('vitest'))
     await click(failing)
     const rows = queryAll(m.container, '.lc-cmd-row')
     assert.equal(rows.length, 2, 'only vitest’s failures show')
     assert.ok(rows.every(r => r.textContent.includes('vitest')))
+    assert.equal(query<HTMLInputElement>(m.container, 'input.lc-fa-search').value, 'vitest', 'the box carries the program')
     await m.unmount()
   })
 
-  test('the rail shows the summary, programs, and attention items, and each one drives the list lens', async () => {
+  test('the rail stays session-wide while its lenses drive the list and the filter box', async () => {
     const m = await mount(h(Panel, { commands: railCommands(), workspace: '/repo' }))
     const rail = text(query(m.container, '.lc-cmd-rail'))
     assert.ok(rail.includes('Summary'))
-    assert.ok(rail.includes('Programs · 2'), 'two distinct programs (git, pnpm)')
+    assert.equal(text(query(m.container, '.lc-cmd-kpi span')), 'runs')
+    assert.ok(rail.includes('Program · 2'), 'two distinct programs (git, pnpm)')
     assert.ok(rail.includes('Attention'))
     assert.ok(rail.includes('Slowest'))
-    assert.ok(rail.includes('Failing'))
-    assert.ok(rail.includes('Repeats'))
+    assert.ok(rail.includes('Failed'))
+    assert.ok(rail.includes('Repeated'))
     assert.ok(rail.includes('Background'))
-    const gitShare = queryAll(m.container, '.lc-cmd-prog').find(b => text(b).startsWith('git'))
-    assert.ok(gitShare !== undefined)
-    assert.ok(text(gitShare).includes('60%'))
+    const gitProgram = queryAll(m.container, '.lc-cmd-prog').find(b => text(b).startsWith('git'))
+    assert.ok(gitProgram !== undefined)
+    assert.equal(text(query(gitProgram, '.lc-cmd-prog-runs')), '· 3 runs')
     const rowTextsNow = () => queryAll(m.container, '.lc-cmd-row').map(r => text(r))
-    const slowestBtn = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Slowest'))
-    assert.ok(slowestBtn !== undefined)
+    const attentionRows = () => queryAll(m.container, '.lc-cmd-attn-row')
+    const attnBtn = (label: string) => {
+      const hit = attentionRows().find(b => text(b).includes(label))
+      if (hit === undefined) throw new Error(`attention row not found: ${label}`)
+      return hit
+    }
+    const box = () => query<HTMLInputElement>(m.container, 'input.lc-fa-search').value
+    assert.equal(attentionRows().length, 4, 'all four session facts are listed')
+
+    const slowestBtn = attnBtn('Slowest')
     await click(slowestBtn)
     assert.ok(rowTextsNow()[0].includes('vitest'))
-    const failingBtn = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Failing'))
-    assert.ok(failingBtn !== undefined)
+    assert.equal(box(), 'pnpm exec vitest run tests/client/components/commandPanel.spec.ts --reporter=verbose', 'the slowest lens writes the run’s first line')
+    assert.equal(slowestBtn.getAttribute('aria-pressed'), 'true', 'the active lens is marked')
+    assert.equal(attentionRows().length, 4, 'the attention list does not follow the lens')
+    await click(slowestBtn)
+    assert.equal(rowTextsNow().length, 5, 'a second click clears the lens')
+    assert.equal(box(), '')
+
+    const failingBtn = attnBtn('Failed')
     await click(failingBtn)
     assert.equal(rowTextsNow().length, 1)
     assert.ok(rowTextsNow()[0].includes('vitest'))
+    assert.equal(box(), 'pnpm', 'the failing lens writes its program')
     const latestChip = queryAll(m.container, '.lc-fa-sort .lc-gran-btn').find(b => text(b).startsWith('Latest'))
     assert.ok(latestChip?.className.includes('lc-gran-on'), 'the previous slowest sort is cleared')
     assert.equal(queryAll(m.container, '.lc-cmd-prog').length, 2, 'the ranking stays global')
     const failingPick = queryAll(m.container, '.lc-cmd-prog-on').find(b => text(b).startsWith('pnpm'))
     assert.ok(failingPick !== undefined, 'the failing program is marked')
-    assert.ok(!queryAll(m.container, '.lc-cmd-attn-row').some(b => text(b).includes('Repeats')))
-    await click(failingPick)
-    const allChipReset = queryAll(m.container, '.lc-cmd-chips .lc-gran-btn').find(b => text(b).startsWith('All'))
-    assert.ok(allChipReset !== undefined)
-    await click(allChipReset)
-    await typeSearch(m.container, '')
-    const repeatsBtn = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Repeats'))
-    assert.ok(repeatsBtn !== undefined)
+    assert.equal(attentionRows().length, 4, 'the attention list stays session-wide under its own lens')
+    await click(failingBtn)
+    assert.equal(rowTextsNow().length, 5, 'a second click on the active failing lens clears it')
+    assert.equal(box(), '')
+    assert.equal(queryAll(m.container, '.lc-cmd-prog-on').length, 0)
+
+    const repeatsBtn = attnBtn('Repeated')
     await click(repeatsBtn)
     const withRepeats = rowTextsNow()
     assert.equal(withRepeats.length, 2, 'both git status runs show')
     assert.ok(withRepeats.every(r => r.includes('git status')))
     const allChip = queryAll(m.container, '.lc-cmd-chips .lc-gran-btn').find(b => text(b).startsWith('All'))
     assert.ok(allChip?.className.includes('lc-gran-on'), 'the All chip is active again')
+    assert.equal(box(), 'cd /repo && git status', 'the repeats lens writes its command')
     assert.equal(queryAll(m.container, '.lc-cmd-prog').length, 2, 'the ranking stays global under the search lens')
-    assert.ok(!queryAll(m.container, '.lc-cmd-attn-row').some(b => text(b).includes('Background')), 'the rail drops the rows outside the lens')
+    assert.equal(attentionRows().length, 4, 'the attention rows never drop out of the rail')
+    assert.ok(attentionRows().some(b => text(b).includes('Background')), 'the background fact stays listed')
     await typeSearch(m.container, '')
+
     const gitBtn = queryAll(m.container, '.lc-cmd-prog').find(b => text(b).startsWith('git'))
     assert.ok(gitBtn !== undefined)
     await click(gitBtn)
-    assert.equal(rowTextsNow().length, 3)
-    assert.equal(query<HTMLInputElement>(m.container, '.lc-fa-search')?.value, '', 'the pick does not write the search box')
+    assert.equal(rowTextsNow().length, 3, 'the filtered record count equals the 3 runs label')
+    assert.equal(box(), 'git', 'the program pick writes its name')
     assert.equal(queryAll(m.container, '.lc-cmd-prog').length, 2, 'the ranking stays whole')
     assert.equal(queryAll(m.container, '.lc-cmd-prog-on').length, 1, 'the pick is marked')
     assert.equal(gitBtn.getAttribute('aria-pressed'), 'true')
@@ -99,13 +118,16 @@ describe('CommandPanel — the summary rail', () => {
     assert.ok(picked !== undefined)
     await click(picked)
     assert.equal(rowTextsNow().length, 5)
+    assert.equal(box(), '', 'a second click clears the box too')
     assert.equal(queryAll(m.container, '.lc-cmd-prog-on').length, 0)
-    const bgBtn = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Background'))
-    assert.ok(bgBtn !== undefined)
+    const bgBtn = attnBtn('Background')
     await click(bgBtn)
     assert.equal(rowTextsNow().length, 1)
     assert.ok(rowTextsNow()[0].includes('pnpm dev'))
-    assert.equal(query<HTMLInputElement>(m.container, '.lc-fa-search')?.value, '', 'the previous search is cleared')
+    assert.equal(box(), '', 'the background lens has no text keyword')
+    assert.equal(bgBtn.getAttribute('aria-pressed'), 'true')
+    await click(bgBtn)
+    assert.equal(rowTextsNow().length, 5, 'a second click clears the background lens')
     await m.unmount()
   })
 
@@ -192,37 +214,4 @@ describe('CommandPanel — the summary rail', () => {
     assert.equal(queryAll(m.container, '.lc-cmd-prog').length, 3)
     await m.unmount()
   })
-  test.each(['all', 'failed', 'slow', 'background'] as const)('the Failing shortcut preserves the search and %s scope', async (filter) => {
-    const commands: Command[] = [
-      cmd(1, { cmd: 'git status slow', status: 'failed', exit: 1, start: 0, end: 20_000, background: true }),
-      cmd(2, { cmd: 'git diff slow', status: 'failed', exit: 1, start: 0, end: 20_000, background: true }),
-      cmd(3, { cmd: 'git status fast', status: 'failed', exit: 1 }),
-      cmd(4, { cmd: 'git status completed', start: 0, end: 20_000, background: true }),
-      cmd(5, { cmd: 'eslint status', status: 'failed', exit: 1, start: 0, end: 20_000, background: true }),
-    ]
-    const m = await mount(h(Panel, { commands }))
-    try {
-      await typeSearch(m.container, 'status')
-      await click(query(m.container, '.lc-cmd-chip-' + filter))
-      const failing = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Failing'))
-      assert.ok(failing !== undefined)
-      const expected = filter === 'slow' || filter === 'background' ? 1 : 2
-      assert.ok(text(failing).includes('git×' + expected))
-      await click(failing)
-      const rows = queryAll(m.container, '.lc-cmd-row')
-      assert.equal(rows.length, expected, 'the destination matches the shortcut count')
-      assert.ok(rows.every(row => text(row).includes('git status')))
-      assert.equal(query<HTMLInputElement>(m.container, '.lc-fa-search').value, 'status')
-      assert.ok(query(m.container, '.lc-cmd-chip-failed').classList.contains('lc-gran-on'))
-      if (filter === 'slow' || filter === 'background') {
-        assert.ok(query(m.container, '.lc-cmd-chip-' + filter).classList.contains('lc-gran-on'), 'the preserved scope stays visible')
-      }
-      await click(query(m.container, '.lc-cmd-chip-all'))
-      assert.equal(queryAll(m.container, '.lc-cmd-row').length, 3, 'All clears both predicates within the selected program and search')
-    } finally {
-      await m.unmount()
-    }
-  })
-
-
 })

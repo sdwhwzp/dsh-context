@@ -79,3 +79,71 @@ describe('makeAgentHeads', () => {
     assert.equal(calls, 1, 'a broken session never hammers the route')
   })
 })
+
+import { act, createElement as h } from 'react'
+import { useSessionsSnapshot } from '../../src/client/agentHeads'
+import type { SessionsFaceLike } from '../../src/client/agentTree'
+import { mount } from './helpers/kit'
+
+describe('useSessionsSnapshot coalescing', () => {
+  test('one trailing notification per window while the snapshot read stays latest-wins', async () => {
+    vi.useFakeTimers()
+    let snapshot: unknown = { ids: ['a'] }
+    const listeners = new Set<() => void>()
+    const face: SessionsFaceLike = {
+      list: {
+        getSnapshot: () => snapshot,
+        subscribe: (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } },
+      },
+    }
+    const box: { current: unknown } = { current: null }
+    let renders = 0
+    function Probe(): null {
+      renders++
+      box.current = useSessionsSnapshot(face, 50)
+      return null
+    }
+    const m = await mount(h(Probe))
+    assert.deepEqual(box.current, { ids: ['a'] })
+    const before = renders
+    snapshot = { ids: ['a', 'b'] }
+    act(() => { for (const fn of [...listeners]) fn() })
+    assert.deepEqual(box.current, { ids: ['a'] }, 'the urgent render keeps the old snapshot')
+    snapshot = { ids: ['a', 'b', 'c'] }
+    act(() => { for (const fn of [...listeners]) fn() })
+    assert.equal(renders, before, 'notifications coalesce before the window')
+    await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+    assert.deepEqual(box.current, { ids: ['a', 'b', 'c'] }, 'the trailing read serves the latest snapshot')
+    await m.unmount()
+    vi.useRealTimers()
+  })
+
+  test('an uncoalesced face notifies immediately; unmount clears an armed window', async () => {
+    vi.useFakeTimers()
+    let snapshot: unknown = { ids: [] }
+    const listeners = new Set<() => void>()
+    const face: SessionsFaceLike = {
+      list: {
+        getSnapshot: () => snapshot,
+        subscribe: (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } },
+      },
+    }
+    const box: { current: unknown } = { current: null }
+    function Probe(props: { ms?: number }): null {
+      box.current = useSessionsSnapshot(face, props.ms)
+      return null
+    }
+    const m = await mount(h(Probe, null))
+    snapshot = { ids: ['x'] }
+    act(() => { for (const fn of [...listeners]) fn() })
+    assert.deepEqual(box.current, { ids: ['x'] })
+    await m.update(h(Probe, { ms: 100 }))
+    snapshot = { ids: ['y'] }
+    act(() => { for (const fn of [...listeners]) fn() })
+    assert.deepEqual(box.current, { ids: ['x'] }, 'the window holds')
+    await m.unmount()
+    await vi.advanceTimersByTimeAsync(200)
+    assert.equal(listeners.size, 0)
+    vi.useRealTimers()
+  })
+})

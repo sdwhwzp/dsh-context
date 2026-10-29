@@ -658,7 +658,11 @@ export function applyTimeline(state: TimelineState, event: TimelineEvent, bounds
         const pendingEntry = typeof srcId === 'string' && Object.hasOwn(state.callNames, srcId) ? state.callNames[srcId] : undefined
         const buffered = typeof srcId === 'string' ? state.pendingCodeOps?.[srcId] : undefined
         const bufferedCmds = typeof srcId === 'string' ? state.pendingCodeCmds?.[srcId] : undefined
-        const s = ensure(['surface', 'sums', 'archived', 'events', 'fileOps', 'timing', 'commands'])
+        // Only a Code-Mode batch flush or a command result touches the command log, so the growing array is cloned for
+        // those results alone.
+        const commandCall = pendingEntry !== undefined && commandTool(pendingEntry.name) !== null
+        const s = ensure(['surface', 'sums', 'archived', 'events', 'fileOps', 'timing',
+          ...((bufferedCmds?.length ?? 0) > 0 || commandCall ? ['commands' as const] : [])])
         bumpDetailRev(s)
         const node = applySurface(s, event, event.type, toolMsg)
         // An answered question prompt is a human input too; an unpaired/foreign result carries no tool name.

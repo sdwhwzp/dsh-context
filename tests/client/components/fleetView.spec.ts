@@ -64,8 +64,10 @@ describe('FleetView — the agent family on its own page', () => {
 
   test('a cold session names its retryable read instead of spinning', async () => {
     let reads = 0
+    let release!: () => void
     vi.stubGlobal('fetch', () => {
       reads += 1
+      if (reads === 1) return new Promise(res => { release = () => { res({ ok: false, status: 503 } as Response) } })
       return Promise.resolve({ ok: false, status: 503 } as Response)
     })
     const ctx = new TestClientCtx({ services: { sessions: selfOnly('sv-cold') } })
@@ -73,6 +75,8 @@ describe('FleetView — the agent family on its own page', () => {
     const m = await mount(h(View, { sessionId: 'sv-cold', useProjection: () => undefined }))
 
     assert.equal(query(m.container, '.lc-empty').textContent, DICT_EN['loading'], 'first paint names the read')
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+    await act(async () => { release() })
     await until(() => text(m.container).includes(DICT_EN['detail.loadFailed']), 'the failure never surfaced')
     const before = reads
     await click(query(m.container, '.lc-br-retry'))

@@ -4,6 +4,7 @@ import {
   aggregateDays,
   billedOf,
   createdDayOf,
+  DayAggregator,
   dayRangeWindow,
   kpisOf,
   timingSumOf,
@@ -441,5 +442,80 @@ describe('aggregateDays', () => {
     assert.equal(days['2026-09-15'].cost, null, 'a day without pricing records prices to nothing')
     assert.equal(days['2026-09-14'].cost, null, 'a model the book cannot price prices to nothing')
     assert.equal(aggregateDays([rows[0]], null, 'cny')['2026-09-16'].cost, null, 'a day with no book prices to null')
+  })
+})
+
+describe('DayAggregator', () => {
+  test('incremental updates match a fresh pass through adds, changes, removals, and a book switch', () => {
+    const book = { prices: { deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, index: priceIndexOf({ deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, {}) }
+    const fee: SessionCostUsage = { deepseek: { 'deepseek-v4': { peak: { uncached: 100, cacheRead: 50, cacheWrite: 0, output: 40 } } } }
+    const a = rowOf({ activity: { days: { '2026-09-16': { tokens: 5, requests: 1, cost: fee }, '2026-09-15': { tokens: 2, requests: 2 } } } })
+    const b = rowOf({ activity: { days: { '2026-09-16': { tokens: 7, requests: 3 } } } })
+    const agg = new DayAggregator()
+    const same = [a, b]
+    const first = agg.aggregate(same, book, 'usd')
+    assert.deepEqual(first, aggregateDays([a, b], book, 'usd'))
+    assert.equal(agg.aggregate(same, book, 'usd'), first, 'the same inputs return the same object')
+    const b2 = rowOf({ activity: { days: { '2026-09-16': { tokens: 9, requests: 4 } } } })
+    const next = agg.aggregate([a, b2], book, 'usd')
+    assert.deepEqual(next, aggregateDays([a, b2], book, 'usd'))
+    const removed = agg.aggregate([b2], book, 'usd')
+    assert.deepEqual(removed, aggregateDays([b2], book, 'usd'))
+    const noBook = agg.aggregate([b2], null, 'usd')
+    assert.deepEqual(noBook, aggregateDays([b2], null, 'usd'))
+    const cny = agg.aggregate([b2], null, 'cny')
+    assert.deepEqual(cny, aggregateDays([b2], null, 'cny'))
+  })
+})
+
+describe('DayAggregator — hostile cost shapes and partial removals', () => {
+  test('malformed cost branches drop and a partial removal keeps the surviving bucket', () => {
+    const book = { prices: { deepseek: { m: { hit: 0.1, miss: 1, write: 1, out: 2 } } }, index: priceIndexOf({ deepseek: { m: { hit: 0.1, miss: 1, write: 1, out: 2 } } }, {}) }
+    const junkCost = { bad: 'x', deepseek: { m: 'bad' } } as unknown as SessionCostUsage
+    const junk = rowOf({ activity: { days: { '2026-09-16': { tokens: 1, requests: 1, cost: junkCost } } } })
+    const agg = new DayAggregator()
+    assert.equal(agg.aggregate([junk], book, 'usd')['2026-09-16'].cost, null)
+    const feeA: SessionCostUsage = { deepseek: { a: { peak: { uncached: 100, cacheRead: 0, cacheWrite: 0, output: 0 } } } }
+    const feeB: SessionCostUsage = { deepseek: { b: { peak: { uncached: 100, cacheRead: 0, cacheWrite: 0, output: 0 } } } }
+    const one = rowOf({ activity: { days: { '2026-09-16': { tokens: 2, requests: 1, cost: feeA } } } })
+    const two = rowOf({ activity: { days: { '2026-09-16': { tokens: 3, requests: 1, cost: feeB } } } })
+    const both = agg.aggregate([one, two], book, 'usd')
+    assert.deepEqual(both, aggregateDays([one, two], book, 'usd'))
+    const removed = agg.aggregate([two], book, 'usd')
+    assert.deepEqual(removed, aggregateDays([two], book, 'usd'))
+    assert.deepEqual(agg.aggregate([rowOf()], book, 'usd'), {})
+  })
+})
+
+describe('DayAggregator — activity replacement and multi-period costs', () => {
+  test('a replaced row subtracts its old ledger and a surviving period keeps the model branch', () => {
+    const book = { prices: { deepseek: { m: { hit: 0.1, miss: 1, write: 1, out: 2 } } }, index: priceIndexOf({ deepseek: { m: { hit: 0.1, miss: 1, write: 1, out: 2 } } }, {}) }
+    const actA = { days: { '2026-09-16': { tokens: 2, requests: 1 } } }
+    const actB = { days: { '2026-09-16': { tokens: 5, requests: 2 } } }
+    const r1 = rowOf({ activity: actA })
+    const r2 = rowOf({ activity: actB })
+    const agg = new DayAggregator()
+    assert.deepEqual(agg.aggregate([r1], book, 'usd'), aggregateDays([r1], book, 'usd'))
+    assert.deepEqual(agg.aggregate([r2], book, 'usd'), aggregateDays([r2], book, 'usd'))
+    const peakAndOff: SessionCostUsage = { deepseek: { m: {
+      peak: { uncached: 100, cacheRead: 0, cacheWrite: 0, output: 0 },
+      off: { uncached: 50, cacheRead: 0, cacheWrite: 0, output: 0 },
+    } } }
+    const partial: SessionCostUsage = { deepseek: { m: { peak: { uncached: 10, cacheRead: 0, cacheWrite: 0, output: 0 } } } }
+    const full = rowOf({ activity: { days: { '2026-09-16': { tokens: 2, requests: 1, cost: peakAndOff } } } })
+    const half = rowOf({ activity: { days: { '2026-09-16': { tokens: 3, requests: 1, cost: partial } } } })
+    const both = agg.aggregate([full, half], book, 'usd')
+    assert.deepEqual(both, aggregateDays([full, half], book, 'usd'))
+    assert.deepEqual(agg.aggregate([half], book, 'usd'), aggregateDays([half], book, 'usd'))
+  })
+})
+
+describe('DayAggregator — a reused row object with a new ledger', () => {
+  test('the old ledger is subtracted before the new one is added', () => {
+    const mutable = rowOf({ activity: { days: { '2026-09-16': { tokens: 2, requests: 1 } } } })
+    const agg = new DayAggregator()
+    agg.aggregate([mutable], null, 'usd')
+    mutable.activity = { days: { '2026-09-16': { tokens: 5, requests: 2 } } }
+    assert.deepEqual(agg.aggregate([mutable], null, 'usd'), { '2026-09-16': { tokens: 5, requests: 2, sessions: 1, cost: null } })
   })
 })

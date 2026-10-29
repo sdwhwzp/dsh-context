@@ -1,12 +1,12 @@
 /** The Context Insights page: registered on the layout's keyed `main` slot, so its mount IS its open. The page is the
  * `lc-ov` query container — unlike the shipped first-level 960px frame, the column spans the pane; tips portal to `body`. */
 
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement } from 'react'
 import { estimateSessionCost, formatCost, type CostCurrency, type ModelBook } from '../cost'
 import { fmt } from '../format'
 import { useModelPrices } from '../modelPrices'
 import {
-  aggregateDays, coveredRowsOf, dayRangeWindow, filterRows, groupCountsOf, inGroup, kpisOf,
+  coveredRowsOf, DayAggregator, dayRangeWindow, filterRows, groupCountsOf, inGroup, kpisOf,
   pageOf, rangeWindowOf, refreshSessions, requestActivityBackfill, rowsOfSnapshot,
   rowLoadedSkill, sessionGroupsOf, sessionsSnapshotOf, skillLoadsOf, sortRows,
   UNGROUPED_KEY, workspacesSnapshotOf,
@@ -31,6 +31,7 @@ import { makeStatsTiming } from './statsTiming'
 import { makeOverviewCard } from './overviewCard'
 import { makeOverviewSkills } from './overviewSkills'
 import { makeUpdatePill } from './updatePill'
+import { useLazyMount } from './useLazyMount'
 import { IconSettings } from '../primitives'
 
 export interface OverviewPanelProps {
@@ -73,8 +74,8 @@ export function makeOverviewPanel(
 
   function OverviewBody(props: OverviewPanelProps): ReactElement | null {
     const { book } = useModelPrices()
-    const snapshot = sessionsSnapshotOf(props)
-    const wsSnapshot = workspacesSnapshotOf(props)
+    const snapshot = useDeferredValue(sessionsSnapshotOf(props))
+    const wsSnapshot = useDeferredValue(workspacesSnapshotOf(props))
     // The preset follows the served default until the reader picks one; a pick is written back as the new default where
     // settings are writable, and a late-arriving section still lands while none is picked.
     const configuredRange = useSyncExternalStore(subscribeSettings, () => settings.defaultOverviewRange())
@@ -91,6 +92,9 @@ export function makeOverviewPanel(
     const [metric, setMetric] = useState<HeatMetric>('tokens')
     const [page, setPage] = useState(0)
     const { zoneProps, bubble } = useHoverTip()
+    // The session grid and heat/skills column mount after the KPI band's first paint; the placeholder keeps their
+    // grid slots so nothing above moves when they fill in.
+    const [bodyRef, bodyMounted] = useLazyMount()
 
     const rows = useMemo(() => rowsOfSnapshot(snapshot, wsSnapshot), [snapshot, wsSnapshot])
     const groups = useMemo(() => sessionGroupsOf(wsSnapshot), [wsSnapshot])
@@ -148,7 +152,11 @@ export function makeOverviewPanel(
     const paged = pageOf(visible, page)
     const kpi = useMemo(() => kpisOf(ranged, book, currency, scope), [ranged, book, currency, scope])
     const teamTiming = kpi.timing
-    const days = useMemo(() => aggregateDays(covered, book, currency), [covered, book, currency])
+    const dayAggregator = useRef<DayAggregator | null>(null)
+    const days = useMemo(
+      () => (dayAggregator.current ??= new DayAggregator()).aggregate(covered, book, currency),
+      [covered, book, currency],
+    )
     const skillStats = useMemo(() => skillLoadsOf(ranged, { scope, day, sort: skillSort }), [ranged, scope, day, skillSort])
     /** A preset pick applies at once and becomes the stored default where the settings form is writable. */
     const pickPreset = (range: OverviewRange): void => {
@@ -246,140 +254,150 @@ export function makeOverviewPanel(
                   <OverviewTokens tokens={kpi.tokenParts} />
                   <StatsTiming timing={teamTiming} />
                 </div>
-                <div className="lc-ov-body">
-                  <div className="lc-ov-left">
-                    <div className="lc-card lc-ov-heat-card">
-                      <div className="lc-card-title">
-                        <span className="lc-card-title-text">{t('ov.heat.title')}</span>
-                        <span className="lc-heat-ctl">
-                          <span className="lc-card-sub">{t('ov.heat.sub')}</span>
-                          <div className="lc-gran" role="group" aria-label={t('ov.heat.metric')}>
-                            {METRICS.map(m => (
-                              <button
-                                key={m}
-                                type="button"
-                                className={'lc-gran-btn' + (metric === m ? ' lc-gran-on' : '')}
-                                onClick={() => { setMetric(m) }}
-                              >{t('ov.heat.metric.' + m)}</button>
-                            ))}
-                          </div>
-                        </span>
+                <div className="lc-ov-body" ref={bodyRef}>
+                  {bodyMounted ? (<>
+                    <div className="lc-ov-left">
+                      <div className="lc-card lc-ov-heat-card">
+                        <div className="lc-card-title">
+                          <span className="lc-card-title-text">{t('ov.heat.title')}</span>
+                          <span className="lc-heat-ctl">
+                            <span className="lc-card-sub">{t('ov.heat.sub')}</span>
+                            <div className="lc-gran" role="group" aria-label={t('ov.heat.metric')}>
+                              {METRICS.map(m => (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  className={'lc-gran-btn' + (metric === m ? ' lc-gran-on' : '')}
+                                  onClick={() => { setMetric(m) }}
+                                >{t('ov.heat.metric.' + m)}</button>
+                              ))}
+                            </div>
+                          </span>
+                        </div>
+                        <Heatmap days={days} metric={metric} selected={day} onSelect={setDay} today={todayKey()} />
                       </div>
-                      <Heatmap days={days} metric={metric} selected={day} onSelect={setDay} today={todayKey()} />
-                    </div>
-                    {/* Scope: the range group plus the heatmap's pinned day; the list's search and group chips are list-local. */}
-                    <OverviewSkills
-                      stats={skillStats}
-                      day={day}
-                      selected={skill}
-                      onSelect={setSkill}
-                      sort={skillSort}
-                      onSort={setSkillSort}
-                      catalog={catalog}
-                      now={nowForCards}
-                    />
-                  </div>
-
-                  <div className="lc-ov-right">
-                    <div className="lc-ov-list-head">
-                      <span className="lc-ov-list-title">{t('ov.list.title')}</span>
-                      <span className="lc-ov-list-count">{visible.length}</span>
-                      {day !== null && (
-                        <button type="button" className="lc-ov-day-chip" title={t('ov.list.dayClear')} onClick={() => { setDay(null) }}>
-                          {t('ov.list.dayFilter', { day })} ×
-                        </button>
-                      )}
-                      {skill !== null && (
-                        <button type="button" className="lc-ov-day-chip" title={t('ov.list.skillClear')} onClick={() => { setSkill(null) }}>
-                          {t('node.skillTag', { name: skill })} ×
-                        </button>
-                      )}
-                      <ClearableInput
-                        className="lc-ov-search"
-                        type="search"
-                        value={query}
-                        placeholder={t('ov.list.search')}
-                        clearLabel={t('field.clear')}
-                        onChange={setQuery}
+                      {/* Scope: the range group plus the heatmap's pinned day; the list's search and group chips are list-local. */}
+                      <OverviewSkills
+                        stats={skillStats}
+                        day={day}
+                        selected={skill}
+                        onSelect={setSkill}
+                        sort={skillSort}
+                        onSort={setSkillSort}
+                        catalog={catalog}
+                        now={nowForCards}
                       />
-                      <select
-                        className="lc-ov-cover"
-                        value={coverage}
-                        aria-label={t('ov.cover.label')}
-                        onChange={(ev) => { setCoverage(ev.target.value as OverviewCoverage) }}
-                      >
-                        {COVERAGE.map(c => (
-                          <option key={c} value={c}>{t('ov.cover.' + c)}</option>
-                        ))}
-                      </select>
-                      <div className="lc-gran" role="group" aria-label={t('ov.list.sortLabel')}>
-                        {SORTS.map(s => (
-                          <button
-                            key={s}
-                            type="button"
-                            className={'lc-gran-btn' + (sort === s ? ' lc-gran-on' : '')}
-                            onClick={() => { setSort(s) }}
-                          >{t('ov.list.sort.' + s)}</button>
-                        ))}
-                      </div>
                     </div>
 
-                    {chips.length > 0 && (
-                      <div className="lc-ov-groups" role="group" aria-label={t('ov.group.label')}>
-                        <button
-                          type="button"
-                          className={'lc-ov-chip' + (group === null ? ' lc-ov-chip-on' : '')}
-                          onClick={() => { setGroup(null) }}
-                        >{t('ov.range.all')}<span className="lc-ov-chip-n">{scoped.length}</span></button>
-                        {chips.map(c => (
-                          <button
-                            key={c.key}
-                            type="button"
-                            className={'lc-ov-chip' + (group === c.key ? ' lc-ov-chip-on' : '')}
-                            onClick={() => { setGroup(group === c.key ? null : c.key) }}
-                          >{c.key === UNGROUPED_KEY ? t('ov.group.ungrouped') : c.key}<span className="lc-ov-chip-n">{c.count}</span></button>
-                        ))}
-                      </div>
-                    )}
-
-                    {visible.length === 0 ? (
-                      <div className="lc-empty">{t(allRows.length === 0 ? 'ov.list.empty' : 'ov.list.noMatch')}</div>
-                    ) : (
-                      <>
-                        <div className="lc-ov-grid">
-                          {paged.items.map(row => (
-                            <OverviewCard
-                              key={row.id}
-                              row={row}
-                              {...(groups?.[row.id] !== undefined ? { group: groups[row.id] } : {})}
-                              costLabel={cardCostOf(row, book, currency)}
-                              now={nowForCards}
-                              onOpen={openOne}
-                            />
+                    <div className="lc-ov-right">
+                      <div className="lc-ov-list-head">
+                        <span className="lc-ov-list-title">{t('ov.list.title')}</span>
+                        <span className="lc-ov-list-count">{visible.length}</span>
+                        {day !== null && (
+                          <button type="button" className="lc-ov-day-chip" title={t('ov.list.dayClear')} onClick={() => { setDay(null) }}>
+                            {t('ov.list.dayFilter', { day })} ×
+                          </button>
+                        )}
+                        {skill !== null && (
+                          <button type="button" className="lc-ov-day-chip" title={t('ov.list.skillClear')} onClick={() => { setSkill(null) }}>
+                            {t('node.skillTag', { name: skill })} ×
+                          </button>
+                        )}
+                        <ClearableInput
+                          className="lc-ov-search"
+                          type="search"
+                          value={query}
+                          placeholder={t('ov.list.search')}
+                          clearLabel={t('field.clear')}
+                          onChange={setQuery}
+                        />
+                        <select
+                          className="lc-ov-cover"
+                          value={coverage}
+                          aria-label={t('ov.cover.label')}
+                          onChange={(ev) => { setCoverage(ev.target.value as OverviewCoverage) }}
+                        >
+                          {COVERAGE.map(c => (
+                            <option key={c} value={c}>{t('ov.cover.' + c)}</option>
+                          ))}
+                        </select>
+                        <div className="lc-gran" role="group" aria-label={t('ov.list.sortLabel')}>
+                          {SORTS.map(s => (
+                            <button
+                              key={s}
+                              type="button"
+                              className={'lc-gran-btn' + (sort === s ? ' lc-gran-on' : '')}
+                              onClick={() => { setSort(s) }}
+                            >{t('ov.list.sort.' + s)}</button>
                           ))}
                         </div>
-                        {paged.count > 1 && (
-                          <div className="lc-ov-pager" role="navigation" aria-label={t('ov.list.pager')}>
+                      </div>
+
+                      {chips.length > 0 && (
+                        <div className="lc-ov-groups" role="group" aria-label={t('ov.group.label')}>
+                          <button
+                            type="button"
+                            className={'lc-ov-chip' + (group === null ? ' lc-ov-chip-on' : '')}
+                            onClick={() => { setGroup(null) }}
+                          >{t('ov.range.all')}<span className="lc-ov-chip-n">{scoped.length}</span></button>
+                          {chips.map(c => (
                             <button
+                              key={c.key}
                               type="button"
-                              className="lc-ov-pager-btn"
-                              disabled={paged.index === 0}
-                              aria-label={t('ov.list.prev')}
-                              onClick={() => { setPage(paged.index - 1) }}
-                            >‹</button>
-                            <span className="lc-ov-pager-n">{t('ov.list.page', { n: paged.index + 1, total: paged.count })}</span>
-                            <button
-                              type="button"
-                              className="lc-ov-pager-btn"
-                              disabled={paged.index === paged.count - 1}
-                              aria-label={t('ov.list.next')}
-                              onClick={() => { setPage(paged.index + 1) }}
-                            >›</button>
+                              className={'lc-ov-chip' + (group === c.key ? ' lc-ov-chip-on' : '')}
+                              onClick={() => { setGroup(group === c.key ? null : c.key) }}
+                            >{c.key === UNGROUPED_KEY ? t('ov.group.ungrouped') : c.key}<span className="lc-ov-chip-n">{c.count}</span></button>
+                          ))}
+                        </div>
+                      )}
+
+                      {visible.length === 0 ? (
+                        <div className="lc-empty">{t(allRows.length === 0 ? 'ov.list.empty' : 'ov.list.noMatch')}</div>
+                      ) : (
+                        <>
+                          <div className="lc-ov-grid">
+                            {paged.items.map(row => (
+                              <OverviewCard
+                                key={row.id}
+                                row={row}
+                                {...(groups?.[row.id] !== undefined ? { group: groups[row.id] } : {})}
+                                costLabel={cardCostOf(row, book, currency)}
+                                now={nowForCards}
+                                onOpen={openOne}
+                              />
+                            ))}
                           </div>
-                        )}
-                      </>
-                    )}
-                  </div>
+                          {paged.count > 1 && (
+                            <div className="lc-ov-pager" role="navigation" aria-label={t('ov.list.pager')}>
+                              <button
+                                type="button"
+                                className="lc-ov-pager-btn"
+                                disabled={paged.index === 0}
+                                aria-label={t('ov.list.prev')}
+                                onClick={() => { setPage(paged.index - 1) }}
+                              >‹</button>
+                              <span className="lc-ov-pager-n">{t('ov.list.page', { n: paged.index + 1, total: paged.count })}</span>
+                              <button
+                                type="button"
+                                className="lc-ov-pager-btn"
+                                disabled={paged.index === paged.count - 1}
+                                aria-label={t('ov.list.next')}
+                                onClick={() => { setPage(paged.index + 1) }}
+                              >›</button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </>) : (<>
+                    <div className="lc-ov-left">
+                      <div className="lc-card lc-deferred-skeleton" style={{ minHeight: 230 }} aria-hidden="true" />
+                      <div className="lc-card lc-deferred-skeleton" style={{ minHeight: 230 }} aria-hidden="true" />
+                    </div>
+                    <div className="lc-ov-right">
+                      <div className="lc-card lc-deferred-skeleton" style={{ minHeight: 520 }} aria-hidden="true" />
+                    </div>
+                  </>)}
                 </div>
               </>
             )}

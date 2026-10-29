@@ -179,7 +179,7 @@ const WRAPPER_VALUE_LETTERS = new Map<string, ReadonlySet<string>>([
 ])
 
 /** Shell constructs that carry no program identity. */
-const BASH_HEADS = new Set(['[', '[[', 'for', 'if', 'while', 'until', 'case', 'do', 'then', 'else', 'elif', 'function', 'select', 'coproc'])
+const BASH_HEADS = new Set(['[', '[[', 'for', 'if', 'while', 'until', 'case', 'do', 'then', 'else', 'elif', 'function', 'select', 'coproc', 'done', 'fi', 'esac'])
 const BASH_DECLARATIONS = new Set(['export', 'local', 'declare', 'readonly', 'typeset'])
 const PWSH_HEADS = new Set(['if', 'elseif', 'else', 'for', 'foreach', 'while', 'do', 'switch', 'function', 'filter', 'param', 'begin', 'process', 'end', 'try', 'catch', 'finally', 'trap', 'return', 'throw', 'break', 'continue', 'using', 'class', 'enum'])
 
@@ -526,9 +526,133 @@ function normalizeProgram(word: string): string {
   return name.trim()
 }
 
-function bashProgram(cmd: string): string {
+interface CommandSegment {
+  text: string
+  separator: string
+}
+
+interface Heredoc {
+  delimiter: string
+  stripTabs: boolean
+}
+
+function skipHeredocs(text: string, from: number, pending: readonly Heredoc[]): number {
+  let at = from
+  for (const heredoc of pending) {
+    let closed = false
+    while (at < text.length) {
+      const newline = text.indexOf('\n', at)
+      const end = newline === -1 ? text.length : newline
+      let line = text.slice(at, end)
+      if (line.endsWith('\r')) line = line.slice(0, -1)
+      if (heredoc.stripTabs) line = line.replace(/^\t+/, '')
+      at = newline === -1 ? text.length : newline + 1
+      if (line === heredoc.delimiter) { closed = true; break }
+    }
+    if (!closed) return text.length
+  }
+  return at
+}
+
+/** Split only shell command positions; quoted text, nested groups and heredoc bodies stay opaque. */
+function commandSegments(cmd: string, dialect: CommandDialect): CommandSegment[] {
+  const out: CommandSegment[] = []
+  const heredocs: Heredoc[] = []
+  let start = 0
+  let i = 0
+  let round = 0
+  let curly = 0
+  const push = (end: number, separator: string, next: number): void => {
+    const text = cmd.slice(start, end)
+    if (text.trim() !== '') out.push({ text, separator })
+    start = next
+  }
+  while (i < cmd.length) {
+    const c = cmd[i]
+    if (dialect === 'bash' && c === '\\') { i += 2; continue }
+    if (dialect === 'pwsh' && c === '`') { i += 2; continue }
+    if (dialect === 'pwsh' && c === '<' && cmd[i + 1] === '#') {
+      const end = cmd.indexOf('#>', i + 2)
+      i = end === -1 ? cmd.length : end + 2
+      continue
+    }
+    if (dialect === 'pwsh' && c === '@' && (cmd[i + 1] === '"' || cmd[i + 1] === "'")) {
+      const quote = cmd[i + 1]
+      if (/^\r?\n/.test(cmd.slice(i + 2))) {
+        const close = '\n' + quote + '@'
+        const end = cmd.indexOf(close, i + 2)
+        i = end === -1 ? cmd.length : end + close.length
+        continue
+      }
+    }
+    if (c === '"' || c === "'") {
+      const quote = c
+      let j = i + 1
+      while (j < cmd.length) {
+        const current = cmd[j]
+        if (quote === '"' && j + 1 < cmd.length
+          && ((dialect === 'bash' && current === '\\' && /[\\$`"\n]/.test(cmd[j + 1])) || (dialect === 'pwsh' && current === '`'))) {
+          j += 2
+          continue
+        }
+        if (current === quote) {
+          if (dialect === 'pwsh' && cmd[j + 1] === quote) { j += 2; continue }
+          break
+        }
+        j++
+      }
+      i = j + 1
+      continue
+    }
+    if (c === '#' && (i === 0 || /[\s;&|]/.test(cmd[i - 1]))) {
+      const newline = cmd.indexOf('\n', i)
+      i = newline === -1 ? cmd.length : newline
+      continue
+    }
+    if (dialect === 'bash' && c === '<' && cmd[i + 1] === '<' && cmd[i + 2] !== '<') {
+      let at = i + 2
+      const stripTabs = cmd[at] === '-'
+      if (stripTabs) at++
+      while (cmd[at] === ' ' || cmd[at] === '\t') at++
+      const delimiter = readWord(cmd.slice(at))
+      if (delimiter !== null) {
+        heredocs.push({ delimiter: delimiter.word, stripTabs })
+        i = at + delimiter.end
+        continue
+      }
+    }
+    if (c === '(') round++
+    else if (c === ')' && round > 0) round--
+    else if (c === '{') curly++
+    else if (c === '}' && curly > 0) curly--
+    if (c === '\n') {
+      if (heredocs.length > 0) {
+        const next = skipHeredocs(cmd, i + 1, heredocs)
+        if (round === 0 && curly === 0) push(i, '\n', next)
+        heredocs.length = 0
+        i = next
+        continue
+      }
+      if (round === 0 && curly === 0) { push(i, '\n', i + 1); i += 1; continue }
+    } else if (round === 0 && curly === 0) {
+      let separator = ''
+      let width = 1
+      if (c === ';') separator = ';'
+      else if (c === '|') {
+        separator = cmd[i + 1] === '|' ? '||' : '|'
+        width = cmd[i + 1] === '|' || cmd[i + 1] === '&' ? 2 : 1
+      } else if (c === '&' && cmd[i + 1] === '&') { separator = '&&'; width = 2 }
+      else if (dialect === 'bash' && c === '&' && cmd[i - 1] !== '>' && cmd[i + 1] !== '>') separator = '&'
+      if (separator !== '') { push(i, separator, i + width); i += width; continue }
+    }
+    i++
+  }
+  push(cmd.length, '', cmd.length)
+  return out
+}
+
+function bashProgram(cmd: string, vars = new Map<string, string | null>()): string {
   if (cmd.trim() === '') return ''
-  const vars = new Map<string, string | null>()
   let rest = cmd.trimStart()
   for (let guard = 0; guard < 32 && rest !== ''; guard++) {
     rest = rest.replace(/^[\s;&|]+/, '')
@@ -574,9 +698,8 @@ function bashProgram(cmd: string): string {
   return normalizeProgram(word)
 }
 
-function pwshProgram(cmd: string): string {
+function pwshProgram(cmd: string, vars = new Map<string, string | null>()): string {
   if (cmd.trim() === '') return ''
-  const vars = new Map<string, string | null>()
   let rest = cmd.trimStart()
   for (let guard = 0; guard < 32 && rest !== ''; guard++) {
     rest = rest.replace(/^[\s;]+/, '')
@@ -639,14 +762,41 @@ function pwshProgram(cmd: string): string {
   return normalizeProgram(word)
 }
 
-/** The first real program of a command, for the summary rail's Programs ranking. Bash/zsh/Git Bash read POSIX
- * quoting, leading assignments (literal values resolve within the same command), declarations, launcher wrappers and
- * `cd …` navigation; PowerShell reads `&`/`.` call operators, `$var` assignments and quoted paths. Path heads normalize
- * to the basename (both separators, Windows extensions dropped); a head that cannot name a program (assignment-only,
+/** The first real program of a command, for a record's primary identity. Bash/zsh/Git Bash read POSIX quoting,
+ * leading assignments (literal values resolve within the same command), declarations, launcher wrappers and `cd …`
+ * navigation; PowerShell reads `&`/`.` call operators, `$var` assignments and quoted paths. Path heads normalize to
+ * the basename (both separators, Windows extensions dropped); a head that cannot name a program (assignment-only,
  * control structure, unresolved variable/command substitution) falls back to `shell`/`pwsh` rather than inventing one
  * from its arguments. Display-only — never throws. */
 export function headProgramOf(cmd: string, dialect: CommandDialect = 'bash'): string {
-  return dialect === 'pwsh' ? pwshProgram(cmd) : bashProgram(cmd)
+  return programOfText(cmd, dialect)
+}
+
+function programOfText(text: string, dialect: CommandDialect, vars = new Map<string, string | null>()): string {
+  return dialect === 'pwsh' ? pwshProgram(text, vars) : bashProgram(text, vars)
+}
+
+/** Every recognizable program invocation in command text, primary head first. Nested groups stay one shell construct;
+ * a loop or conditional body counts once, not per iteration; the fallback is counted at most once, from the primary
+ * head, rather than once per unresolved fragment. */
+export function programsOfCommand(cmd: string, dialect: CommandDialect = 'bash'): string[] {
+  if (cmd.trim() === '') return []
+  const fallback = dialect === 'pwsh' ? 'pwsh' : 'shell'
+  const head = headProgramOf(cmd, dialect)
+  const vars = new Map<string, string | null>()
+  const parsed: string[] = []
+  for (const segment of commandSegments(cmd, dialect)) {
+    const program = programOfText(segment.text, dialect, vars)
+    const navigation = dialect === 'bash' ? program === 'cd' : /^(?:cd|Set-Location|sl)$/i.test(program)
+    if (navigation && (segment.separator === '&&' || segment.separator === ';' || segment.separator === '\n')) continue
+    if (program !== fallback) parsed.push(program)
+  }
+  const out = [head]
+  if (head !== fallback) {
+    const first = parsed.indexOf(head)
+    if (first >= 0) parsed.splice(first, 1)
+  }
+  return out.concat(parsed)
 }
 
 export interface CommandShape {

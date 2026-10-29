@@ -1,6 +1,6 @@
 /* Imported FIRST of the plugin's sheets: later sheets re-tint the shared chrome at equal specificity, so this order is load-bearing. */
 /* The harness's light aliases flatten bg-base and layers 1–3 to white. These tiers tint only the canvas and
-   control tracks; cards and subpanels stay white, and fine edges carry the inner grouping. */
+   control tracks; cards and subpanels default to white, while Fleet tiles carry their own neutral tier. */
 body {
   --lc-subpanel-bg: var(--dsw-alias-bg-layer-2);
   --lc-control-track: var(--dsw-alias-bg-layer-2);

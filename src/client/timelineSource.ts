@@ -53,6 +53,12 @@ const EMPTY_SNAP: DetailSnap = { detail: null, failed: false, pending: false }
 
 const DETAIL_DEBOUNCE_MS = 300
 
+/** One frame for the head/skeleton to paint, then the first read starts without the trailing window. */
+const EAGER_DELAY_MS = 16
+
+/** One bounded catch-up read when the host serves a current revision just behind the pushed head. */
+const CATCH_UP_MS = 1_000
+
 /** One session's detail ledger; exported for tests, reached by the app through `detailStoreOf`. */
 export class DetailStore {
   private detail: ContextTimelineDetail | null = null
@@ -70,12 +76,21 @@ export class DetailStore {
   private failures = 0
   /** No view holds this store: it keeps its cached payload so a re-open renders instantly but arms no read. */
   private parked = false
+  /** Approximate live bytes of `detail`, so the page cache can hold a byte budget rather than a payload count. */
+  private bytes = 0
+  /** A warm-up read with no view attached: it must never arm an endless background retry. */
+  private background = false
+  private catchUp: ReturnType<typeof setTimeout> | null = null
+  /** The head target already given one catch-up read; reset by a newer head or a reset. */
+  private catchUpTarget = -1
   private readonly listeners = new Set<() => void>()
   private snap: DetailSnap = EMPTY_SNAP
 
   constructor(
     private readonly fetcher: (() => Promise<ContextTimelineDetail | null>) | undefined,
     private readonly baseDelay: number = DETAIL_DEBOUNCE_MS,
+    /** The production view reads its first frame at once; later revisions still coalesce on the trailing window. */
+    private readonly eagerFirst: boolean = false,
   ) {}
 
   readonly subscribe = (fn: () => void): (() => void) => {
@@ -98,14 +113,39 @@ export class DetailStore {
 
   /** Schedule the trailing-edge read when the head outruns the served detail; a DECREASE means the host refolded, so the ledger resets. */
   request(rev: number): void {
+    this.background = false
     if (rev < this.lastHeadRev) this.resetLedger()
+    // An explicit read (or a newer head) supersedes a pending catch-up.
+    if (rev >= this.lastHeadRev) {
+      this.clearCatchUp()
+      this.catchUpTarget = -1
+    }
     this.lastHeadRev = rev
     if (rev <= this.acceptedRev || rev <= this.wantedRev) return
     this.wantedRev = rev
     this.schedule()
   }
 
+  /** A background read for a session the reader has not opened yet: the tab/modal then lands on a warm payload. */
+  warm(rev = 0): void {
+    this.background = this.listeners.size === 0
+    if (rev > this.lastHeadRev) this.lastHeadRev = rev
+    if (rev > this.wantedRev) this.wantedRev = rev
+    if (this.inFlight) return
+    if (this.timer !== null) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+    this.parked = false
+    if (this.detail === null || rev > this.acceptedRev) void this.fire()
+  }
+
+  get byteSize(): number {
+    return this.bytes
+  }
+
   readonly retry = (): void => {
+    this.background = false
     this.failures = 0
     if (this.detail !== null) return
     if (this.timer !== null) {
@@ -116,10 +156,13 @@ export class DetailStore {
   }
 
   private resetLedger(): void {
+    this.clearCatchUp()
+    this.catchUpTarget = -1
     this.generation++
     this.acceptedRev = -1
     this.wantedRev = -1
     this.detail = null
+    this.bytes = 0
     this.failed = false
     // Drop the snapshot's own payload reference too: it is the second place a released detail could stay reachable from.
     this.snap = EMPTY_SNAP
@@ -135,6 +178,8 @@ export class DetailStore {
 
   /** Demote the store: drop its cached payload and pending work, once the page cache exceeds its bound. */
   release(): void {
+    this.clearCatchUp()
+    this.catchUpTarget = -1
     if (this.timer !== null) {
       clearTimeout(this.timer)
       this.timer = null
@@ -145,6 +190,7 @@ export class DetailStore {
 
   private park(): void {
     this.parked = true
+    this.clearCatchUp()
     if (this.timer !== null) {
       clearTimeout(this.timer)
       this.timer = null
@@ -152,9 +198,26 @@ export class DetailStore {
     this.emit()
   }
 
+  private clearCatchUp(): void {
+    if (this.catchUp !== null) {
+      clearTimeout(this.catchUp)
+      this.catchUp = null
+    }
+  }
+
   private schedule(): void {
     // Nobody reads a parked store's answer, so never arm one.
     if (this.parked || this.timer !== null) return
+    if (this.eagerFirst && this.detail === null && !this.failed) {
+      // Off the render/commit turn: the head's loading frame paints, then the first read starts without the old
+      // 300ms trailing window.
+      this.timer = setTimeout(() => {
+        this.timer = null
+        void this.fire()
+      }, EAGER_DELAY_MS)
+      this.emit()
+      return
+    }
     this.timer = setTimeout(() => {
       this.timer = null
       void this.fire()
@@ -173,6 +236,7 @@ export class DetailStore {
     }
     this.inFlight = true
     this.targetRev = this.wantedRev
+    const background = this.background
     const generation = this.generation
     this.emit()
     try {
@@ -181,7 +245,27 @@ export class DetailStore {
       if (d !== null) {
         if (d.rev >= this.acceptedRev || d.rev === this.targetRev) {
           this.detail = d
+          this.bytes = detailBytesOf(d)
           this.acceptedRev = d.rev
+        }
+        // A current revision behind the head is the host's truth; do not chase it every window. A genuinely stale
+        // answer (behind the accepted rev) keeps its target so the trailing read can converge.
+        if (d.rev >= this.acceptedRev && d.rev < this.targetRev) {
+          this.wantedRev = d.rev
+          // One bounded re-read lets an idle session catch up when the host lagged for a single cut; a newer head
+          // resets the one-shot, and a second short answer is accepted rather than polled.
+          if (this.listeners.size > 0 && this.catchUpTarget !== this.targetRev) {
+            this.catchUpTarget = this.targetRev
+            this.clearCatchUp()
+            const target = this.targetRev
+            this.catchUp = setTimeout(() => {
+              this.catchUp = null
+              if (this.detail === null || this.acceptedRev < target) {
+                this.wantedRev = target
+                void this.fire()
+              }
+            }, CATCH_UP_MS)
+          }
         }
         this.failures = 0
         this.failed = false
@@ -198,7 +282,10 @@ export class DetailStore {
       }
     } finally {
       this.inFlight = false
-      if (this.wantedRev > this.acceptedRev) this.schedule()
+      // A failed warm-up must not suppress the view's own first request: reopen the target so the tab retries.
+      if (this.failed && background && this.listeners.size === 0) this.wantedRev = this.acceptedRev
+      // A warm-up with no reader never loops in the background; a mounted view (or an explicit request) retries.
+      if (this.wantedRev > this.acceptedRev && (this.listeners.size > 0 || !background)) this.schedule()
       this.emit()
     }
   }
@@ -216,6 +303,22 @@ export class DetailStore {
  * page-lifetime map, so older idle stores are demoted and read again. */
 const DETAIL_STORES_MAX = 8
 
+/** A monster session's detail is ~1MB of JSON (~1.5MB live); the byte budget keeps eight small sessions while stopping
+ * eight large ones from pinning tens of MB. */
+const DETAIL_BYTES_MAX = 6 * 1024 * 1024
+
+/** Rough live heap per collection row; only the relative weight matters, and over-counting is the safe direction. */
+export function detailBytesOf(detail: ContextTimelineDetail): number {
+  return 2048
+    + detail.requests.length * 180
+    + detail.events.length * 120
+    + detail.nodes.length * 160
+    + detail.archive.length * 160
+    + (detail.fileOps?.length ?? 0) * 220
+    + (detail.commands?.length ?? 0) * 420
+    + (detail.spans?.length ?? 0) * 60
+}
+
 /** Cap on the page-lifetime store map itself: a payload-free store is small, but a page that touches hundreds of
  * sessions (a Fleet scan, the modal across a long list) would otherwise pin one fetcher closure and listener set
  * per id forever. */
@@ -230,17 +333,25 @@ function payloadHolders(): number {
   return held
 }
 
+function payloadBytes(): number {
+  let bytes = 0
+  for (const store of stores.values()) bytes += store.byteSize
+  return bytes
+}
+
 export function detailStoreOf(sessionId: string): DetailStore {
   const known = stores.get(sessionId)
-  const store = known ?? new DetailStore(makeDetailFetcher(sessionId))
+  const store = known ?? new DetailStore(makeDetailFetcher(sessionId), DETAIL_DEBOUNCE_MS, true)
   // Re-inserting moves the entry to the map's newest end, so demotion targets the least recently opened session.
   if (known !== undefined) stores.delete(sessionId)
   stores.set(sessionId, store)
   // A store without a payload is about to fetch one, so it counts as one more; an active store is never demoted.
   let excess = payloadHolders() - DETAIL_STORES_MAX + (store.hasPayload ? 0 : 1)
+  let bytes = payloadBytes()
   for (const candidate of stores.values()) {
-    if (excess <= 0) break
-    if (candidate.active || !candidate.hasPayload) continue
+    if (excess <= 0 && bytes <= DETAIL_BYTES_MAX) break
+    if (candidate === store || candidate.active || !candidate.hasPayload) continue
+    bytes -= candidate.byteSize
     candidate.release()
     excess--
   }
@@ -249,6 +360,7 @@ export function detailStoreOf(sessionId: string): DetailStore {
   if (stores.size > DETAIL_STORE_ENTRIES_MAX) {
     for (const id of stores.keys()) {
       if (stores.size <= DETAIL_STORE_ENTRIES_MAX) break
+      if (id === sessionId) continue
       const candidate = stores.get(id)
       if (candidate === undefined || candidate === store || candidate.active) continue
       stores.delete(id)
@@ -282,8 +394,9 @@ export function useTimelineSource(props: SessionStandardProps): TimelineSource {
   const slim = headRev !== null
   // No pushed value yet: the source opens the channel itself (rev 0) rather than waiting on a push.
   const cold = head === null
+  // No session address, no channel: never create a store (and never arm its inevitable failed read).
   const store = useMemo(
-    () => (slim || cold ? detailStoreOf(sessionId) : null),
+    () => (sessionId !== '' && (slim || cold) ? detailStoreOf(sessionId) : null),
     [sessionId, slim, cold],
   )
   const snap = useSyncExternalStore(

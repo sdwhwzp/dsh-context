@@ -2,6 +2,8 @@
 
 export const DETAIL_ROUTE = 'api/dsh-context/detail'
 
+export const COMMANDS_ROUTE = 'api/dsh-context/commands'
+
 export const BALANCE_ROUTE = 'api/dsh-context/balance'
 
 export const FLEET_ROUTE = 'api/dsh-context/fleet'

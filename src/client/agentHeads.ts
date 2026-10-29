@@ -51,13 +51,27 @@ export function makeAgentHeads(): AgentHeads {
   }
 }
 
-export function useSessionsSnapshot(face: SessionsFaceLike | null): unknown {
+export function useSessionsSnapshot(face: SessionsFaceLike | null, coalesceMs = 0): unknown {
   const subscribe = useCallback((fn: () => void) => {
     if (face === null) return () => {}
     /* v8 ignore next 2 -- unreachable: sessionsFaceOf proved list.subscribe before returning the face. */
     if (face.list === undefined) return () => {}
-    return face.list.subscribe(fn)
-  }, [face])
+    if (coalesceMs <= 0) return face.list.subscribe(fn)
+    // A running session pushes on every event: one trailing notification per window keeps the dependent derivation
+    // off the event-loop burst while the snapshot read itself stays latest-wins.
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const off = face.list.subscribe(() => {
+      if (timer !== null) return
+      timer = setTimeout(() => {
+        timer = null
+        fn()
+      }, coalesceMs)
+    })
+    return () => {
+      off()
+      if (timer !== null) clearTimeout(timer)
+    }
+  }, [face, coalesceMs])
   const getSnapshot = useCallback(() => {
     if (face === null) return null
     /* v8 ignore next 2 -- unreachable: sessionsFaceOf proved list before returning the face. */

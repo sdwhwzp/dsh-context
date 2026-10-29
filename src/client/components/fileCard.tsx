@@ -4,6 +4,7 @@ import type { FileActivity, FileEntry, FileOp, FileOpKind } from '../fileActivit
 import type { ContextSettings, DefaultFileSort } from '../settings'
 import type { DetailState } from '../timelineSource'
 import type { ViewKit } from '../viewkit'
+import { IconFolderOpen } from '../primitives'
 import { ClearableInput } from './clearableInput'
 import { makeDetailNote } from './detailNote'
 import { useRowWindow } from './useRowWindow'
@@ -207,7 +208,10 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
     return (
       <div className="lc-card lc-fa-card lc-col flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">
-          <span className="lc-card-title-text">{t('files.title')}</span>
+          <span className="lc-card-title-text">
+            <IconFolderOpen size={14} />
+            {t('files.title')}
+          </span>
           <span className="lc-fa-meta">
             <span>{t(shown.length === 1 ? 'files.file' : 'files.files', { n: shown.length })}</span>
             {shownTotals.added + shownTotals.removed > 0 ? (

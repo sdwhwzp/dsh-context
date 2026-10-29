@@ -19,6 +19,7 @@ import type { SessionSpend } from '../services'
 import { formatSpendCost, spendDisplayCurrency } from '../spendMoney'
 import { isDeepSeekProvider } from '../../shared/providers'
 import type { ViewKit } from '../viewkit'
+import { IconData } from '../primitives'
 
 interface PriceRow { key: string; face: PriceFace }
 interface PriceMissRow { key: string; provider: string; model: string; miss: PriceMiss }
@@ -72,7 +73,7 @@ export function makeSubagentCost(
 ): (sessionId: string | undefined) => SubagentStats {
   return function useSubagentCost(sessionId: string | undefined): SubagentStats {
     const face = useMemo(() => sessionsFaceOf(ctx), [])
-    const snapshot = useSessionsSnapshot(face)
+    const snapshot = useSessionsSnapshot(face, 250)
     const [landed, setLanded] = useState<ReadonlyMap<string, ContextTimeline>>(new Map())
     const fold = useMemo(
       () => subagentCostFoldOf(snapshot, sessionId, landed),
@@ -82,6 +83,7 @@ export function makeSubagentCost(
     useEffect(() => {
       for (const id of fold.cold) {
         void heads.headOf(id).then((head) => {
+          /* v8 ignore next 1 -- the cold list holds an id until its head lands, so one landing cannot replay. */
           if (head !== null) setLanded(prev => prev.get(id) === head ? prev : new Map(prev).set(id, head))
         }).catch(() => {})
       }
@@ -165,8 +167,12 @@ interface StatsContextProps {
   onTeamClick?: () => void
   /** The tool lane's chip pick: open the tool's results in the Context Browser. */
   onToolPick?: (tool: string) => void
+  /** The tool lane's folded tail: open every tool result in the Context Browser. */
+  onToolMore?: () => void
   /** The command lane's chip pick: filter that program in the Command Executions card. */
   onCommandPick?: (program: string) => void
+  /** The command lane's folded tail: reveal the Command Executions card. */
+  onCommandMore?: () => void
   /** The events tile's jump: reveal the Context Events card, narrowed to `kind` when one is given. */
   onEventsClick?: (kind: StatsEventKind | null) => void
   toolCalls?: number
@@ -196,12 +202,11 @@ const TOOL_SHADE = (rank: number): string =>
   `color-mix(in srgb, var(--color-teal-500) ${Math.max(38, 100 - rank * 21)}%, transparent)`
 const TOOL_REST = 'color-mix(in srgb, var(--color-neutral-500) 40%, transparent)'
 
-/** The tool lane's own gap, mirrored from `.lc-ledger-chips` in stats.css so the fit arithmetic matches the rendered box. */
+/** A lane's own chip gap, mirrored from `.lc-ledger-chips` in stats.css so the fit arithmetic matches the rendered box. */
 const CHIP_GAP = 3
 
-/** Widest leading run of chips that fits the row. `alwaysMore` reserves the tail chip even when nothing is hidden
- *  (the tool lane's colour key); otherwise every chip shows when it fits and only the overflow folds. */
-function useFittedChips(tally: readonly unknown[], alwaysMore: boolean) {
+/** Widest leading run of the tally that fits the row, leaving the "+N" chip its own width whenever it must show. */
+function useFittedChips(tally: readonly unknown[]) {
   const count = tally.length
   const rowRef = useRef<HTMLDivElement | null>(null)
   const gaugeRef = useRef<HTMLDivElement | null>(null)
@@ -222,27 +227,26 @@ function useFittedChips(tally: readonly unknown[], alwaysMore: boolean) {
       return
     }
     const widths = Array.from(gauge.children, el => el.getBoundingClientRect().width)
-    const chips = Array.from(chipGauge.children, el => el.getBoundingClientRect().width)
-    if (!alwaysMore) {
-      let total = 0
-      for (let i = 0; i < count; i++) total += widths[i] + (i === 0 ? 0 : CHIP_GAP)
-      if (total <= width) {
-        setShown(count)
-        return
-      }
+    let whole = 0
+    for (let i = 0; i < count; i++) whole += widths[i] + (i === 0 ? 0 : CHIP_GAP)
+    // A "+0" chip would say nothing, so a fully visible tally stays whole and keeps it out.
+    if (whole <= width) {
+      setShown(count)
+      return
     }
     // Widest set that fits WITH the chip it would carry, top down: measuring the live chip would feed the pass its own output.
+    const moreWidths = Array.from(chipGauge.children, el => el.getBoundingClientRect().width)
     let pills = 0
-    for (let n = Math.min(widths.length, chips.length - 1); n >= 0; n--) {
-      let total = chips[count - n] + n * CHIP_GAP
-      for (let i = 0; i < n; i++) total += widths[i]
-      if (total <= width) {
+    for (let n = count - 1; n >= 0; n--) {
+      let used = moreWidths[count - n - 1] + n * CHIP_GAP
+      for (let i = 0; i < n; i++) used += widths[i]
+      if (used <= width) {
         pills = n
         break
       }
     }
     setShown(prev => (prev === pills ? prev : pills))
-  }, [tally, alwaysMore])
+  }, [tally])
 
   // Re-weigh on a new tally; the ResizeObserver covers a pane drag, which changes no prop.
   useLayoutEffect(fit, [fit])
@@ -258,99 +262,72 @@ function useFittedChips(tally: readonly unknown[], alwaysMore: boolean) {
   return { shown, rowRef, gaugeRef, chipGaugeRef }
 }
 
-interface ToolChipsProps {
-  tools: readonly (readonly [string, number])[]
-  onPick?: (tool: string) => void
+interface ChipLaneProps {
+  items: readonly (readonly [string, number])[]
+  /** The lane's row class, which also places its cell in the card's grid. */
+  rowClass: string
+  color: (name: string, rank: number) => string
+  jumpTip: string
+  onPick?: (name: string) => void
+  /** The folded tail's own jump: the "+N" chip reveals the lane's full list somewhere in the view. */
+  onMore?: () => void
+  moreTip?: string
+  /** An empty lane shows a zero chip instead of "None yet", so a tool lane still reads as a figure. */
+  zeroWhenEmpty?: boolean
   t: Translate
   fmt: (n: number) => string
 }
 
-/** The tool lane's chip row: only the tally that fits renders (measured off a hidden gauge) and the tail folds into
- *  the "+N" chip, so the lane's height depends on the card's width alone and nothing is clipped. */
-function ToolChips(props: ToolChipsProps): ReactElement {
-  const { tools, onPick, t, fmt } = props
-  const { shown, rowRef, gaugeRef, chipGaugeRef } = useFittedChips(tools, true)
+/** One lane's single chip row: the leading run that fits renders (measured off a hidden gauge) and the tail folds
+ *  into the "+N" chip, so the lane's height depends on the card's width alone and nothing is clipped. */
+function ChipLane(props: ChipLaneProps): ReactElement {
+  const { items, rowClass, color, jumpTip, onPick, onMore, moreTip, zeroWhenEmpty, t, fmt } = props
+  const { shown, rowRef, gaugeRef, chipGaugeRef } = useFittedChips(items)
 
   const chip = (name: string, n: number, rank: number, hint = false): ReactElement => {
-    const wire = hint && onPick !== undefined ? pickWire(t('stats.toolJump'), () => { onPick(name) }) : undefined
+    const wire = hint && onPick !== undefined ? pickWire(t(jumpTip), () => { onPick(name) }) : undefined
     return (
       <span
         key={name}
         className={'lc-ledger-chip' + (wire !== undefined ? ' lc-ledger-chip-btn' : '')}
         {...(wire ?? { title: name })}
       >
-        <i style={{ background: TOOL_SHADE(rank) }} />
+        <i style={{ background: color(name, rank) }} />
         <span className="lc-ledger-chip-label">{name}</span>
         <b>{fmt(n)}</b>
       </span>
     )
   }
-
-  const shownTools = tools.slice(0, shown)
-  return (
-    <div className="lc-ledger-chips lc-ledger-out-chips" ref={rowRef}>
-      {shownTools.map(([name, n], i) => chip(name, n, i, onPick !== undefined))}
-      <span className="lc-ledger-chip lc-ledger-chip-more">
+  // The live "+N" chip jumps; the hidden gauges measure the same shape without wiring it.
+  const more = (hidden: number, key?: string, live = false): ReactElement => {
+    const wire = live && hidden > 0 && onMore !== undefined ? pickWire(moreTip, onMore) : undefined
+    return (
+      <span
+        key={key}
+        className={'lc-ledger-chip lc-ledger-chip-more' + (wire !== undefined ? ' lc-ledger-chip-btn' : '')}
+        {...(wire ?? {})}
+      >
         <i style={{ background: TOOL_REST }} />
-        <span className="lc-ledger-chip-label">{t('stats.toolsMore', { n: tools.length - shown })}</span>
-      </span>
-      <span className="lc-ledger-gauge" aria-hidden="true">
-        <div className="lc-ledger-chips" ref={gaugeRef}>{tools.map(([name, n], i) => chip(name, n, i))}</div>
-        <div className="lc-ledger-chips" ref={chipGaugeRef}>
-          {Array.from({ length: tools.length + 1 }, (_, k) => (
-            <span key={k} className="lc-ledger-chip lc-ledger-chip-more">
-              <i style={{ background: TOOL_REST }} />
-              <span className="lc-ledger-chip-label">{t('stats.toolsMore', { n: k })}</span>
-            </span>
-          ))}
-        </div>
-      </span>
-    </div>
-  )
-}
-
-interface CommandChipsProps {
-  commands: readonly (readonly [string, number])[]
-  onPick?: (program: string) => void
-  t: Translate
-  fmt: (n: number) => string
-}
-
-/** The command lane fills its single row: every program fits until the width runs out, then only the tail folds
- *  into the "+N" chip. Nothing is click-to-expand. */
-function CommandChips(props: CommandChipsProps): ReactElement {
-  const { commands, onPick, t, fmt } = props
-  const { shown, rowRef, gaugeRef, chipGaugeRef } = useFittedChips(commands, false)
-
-  const chip = (name: string, n: number, hint: boolean): ReactElement => {
-    const wire = hint && onPick !== undefined ? pickWire(t('stats.commandJump'), () => { onPick(name) }) : undefined
-    return (
-      <span
-        key={name}
-        className={'lc-ledger-chip' + (wire !== undefined ? ' lc-ledger-chip-btn' : '')}
-        {...(wire ?? { title: name })}
-      >
-        <i style={{ background: nameColorOf(name) }} />
-        <span className="lc-ledger-chip-label">{name}</span>
-        <b>{fmt(n)}</b>
+        <span className="lc-ledger-chip-label">{t('stats.toolsMore', { n: hidden })}</span>
       </span>
     )
   }
-  const more = (hidden: number, key?: string): ReactElement => (
-    <span key={key} className="lc-ledger-chip lc-ledger-chip-more">
-      <i style={{ background: TOOL_REST }} />
-      <span className="lc-ledger-chip-label">{t('stats.toolsMore', { n: hidden })}</span>
+  const none = (): ReactElement => (
+    <span className="lc-ledger-chip lc-ledger-chip-dim">
+      <span className="lc-ledger-chip-label">{t('stats.laneEmpty')}</span>
     </span>
   )
-
+  const empty = items.length === 0
+  const folds = items.length - shown
   return (
-    <div className="lc-ledger-chips lc-ledger-in-body2" ref={rowRef}>
-      {commands.slice(0, shown).map(([name, n]) => chip(name, n, true))}
-      {shown < commands.length ? more(commands.length - shown) : null}
+    <div className={'lc-ledger-chips ' + rowClass} ref={rowRef}>
+      {items.slice(0, shown).map(([name, n], i) => chip(name, n, i, onPick !== undefined))}
+      {empty && zeroWhenEmpty !== true ? none() : null}
+      {folds > 0 || (empty && zeroWhenEmpty === true) ? more(folds, undefined, true) : null}
       <span className="lc-ledger-gauge" aria-hidden="true">
-        <div className="lc-ledger-chips" ref={gaugeRef}>{commands.map(([name, n]) => chip(name, n, false))}</div>
+        <div className="lc-ledger-chips" ref={gaugeRef}>{items.map(([name, n], i) => chip(name, n, i))}</div>
         <div className="lc-ledger-chips" ref={chipGaugeRef}>
-          {Array.from({ length: commands.length + 1 }, (_, k) => more(k, String(k)))}
+          {Array.from({ length: items.length }, (_, k) => more(k + 1, String(k + 1)))}
         </div>
       </span>
     </div>
@@ -504,11 +481,6 @@ export function makeStatsContext(
         </span>
       )
     }
-    const emptyChip = (key: string): ReactElement => (
-      <span key={key} className="lc-ledger-chip lc-ledger-chip-dim">
-        <span className="lc-ledger-chip-label">{t('stats.laneEmpty')}</span>
-      </span>
-    )
     const costPids = new Set(rows.map(r => r.face.pid).filter(p => p !== ''))
     const costHref = priced === null && costPids.size === 1 ? 'https://models.dev/providers/' + [...costPids][0] + '/' : undefined
     const ownCost = estimateSessionCost(props.cost, book, currency)
@@ -539,7 +511,10 @@ export function makeStatsContext(
     return (
       <div className="lc-card flex-[3] min-w-[min(360px,100%)]">
         <div className="lc-card-title">
-          <span className="lc-card-title-text">{t('stats.title')}</span>
+          <span className="lc-card-title-text">
+            <IconData size={14} />
+            {t('stats.title')}
+          </span>
         </div>
         <div className="lc-stats">
           <div className="lc-ledger">
@@ -592,7 +567,18 @@ export function makeStatsContext(
               <span className="lc-ledger-label">{t('stats.toolCalls')}</span>
               <b className="lc-ledger-total">{fmt(toolTotal)}</b>
             </div>
-            <ToolChips tools={props.tools} onPick={props.onToolPick} t={t} fmt={fmt} />
+            <ChipLane
+              items={props.tools}
+              rowClass="lc-ledger-out-chips"
+              color={(_, rank) => TOOL_SHADE(rank)}
+              jumpTip="stats.toolJump"
+              onPick={props.onToolPick}
+              onMore={props.onToolMore}
+              moreTip={t('stats.toolsMoreTip')}
+              zeroWhenEmpty
+              t={t}
+              fmt={fmt}
+            />
             <div className="lc-ledger-head lc-ledger-in-head2">
               <span className="lc-ledger-label">{t('stats.commands')}</span>
               <b className="lc-ledger-total">{fmt(props.commands?.runs ?? 0)}</b>
@@ -638,9 +624,17 @@ export function makeStatsContext(
                 </>)}
               </div>
             </div>
-            {commandTop.length === 0
-              ? <div className="lc-ledger-chips lc-ledger-in-body2">{emptyChip('in')}</div>
-              : <CommandChips commands={commandTop} onPick={props.onCommandPick} t={t} fmt={fmt} />}
+            <ChipLane
+              items={commandTop}
+              rowClass="lc-ledger-in-body2"
+              color={nameColorOf}
+              jumpTip="stats.commandJump"
+              onPick={props.onCommandPick}
+              onMore={props.onCommandMore}
+              moreTip={t('stats.commandsMoreTip')}
+              t={t}
+              fmt={fmt}
+            />
             <div className="lc-ledger-chips lc-ledger-in-chips">
               {chip('inputs', t('stats.user'), props.humanInputs ?? 0, IO_COLOR.inputs, { jump: 'inputs', tip: t('stats.userTip') })}
               {chip('read', t('stats.fileRead'), props.files.reads, IO_COLOR.read, { jump: 'read', title: t('stats.filesJump') })}

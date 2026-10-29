@@ -32,6 +32,16 @@ export const IconChevronDown = resolveIcon('IconChevronDownOutlineMedium')
 export const IconChevronUp = resolveIcon('IconChevronUpOutlineMedium')
 export const IconSearch = resolveIcon('IconSearchOutlineRegular')
 export const IconShare = resolveIcon('IconShareOutlineRegular')
+export const IconData = resolveIcon('IconDataOutlineRegular')
+export const IconDatabase = resolveIcon('IconDatabaseOutlineRegular')
+export const IconClock = resolveIcon('IconClockOutlineRegular')
+export const IconGauge = resolveIcon('IconGaugeOutlineRegular')
+export const IconCompareSplit = resolveIcon('IconCompareSplitOutlineRegular')
+export const IconBrowse = resolveIcon('IconBrowseOutlineRegular')
+export const IconContextInjection = resolveIcon('IconContextInjectionOutlineRegular')
+export const IconFolderOpen = resolveIcon('IconFolderOpenOutlineRegular')
+export const IconApi = resolveIcon('IconApiOutlineRegular')
+export const IconPlugin = resolveIcon('IconPluginPinwheelOutlineRegular')
 
 /** The harness's file-type glyph: its props are its own (`path`/`kind`), not an icon's. */
 export interface FileGlyphProps {

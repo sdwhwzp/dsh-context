@@ -57,11 +57,11 @@ export function makeFleetView(
     }, [sessionId])
     const self = data !== null ? agentSelfOf(data, pressure, breakdown, usage) : undefined
     // The model arms only once the tab's timeline landed: while the loading/failure screen stands, no subscription or read fires.
-    const { forest, team: rowTeam, titles } = useFleetModel(ctx, heads, sessionId, self, data !== null)
+    const { forest, team: rowTeam, titles } = useFleetModel(ctx, heads, sessionId, self, data !== null, 120)
     // The freshest team value is the tab's OWN projection when the viewed session leads; a teammate falls back to the lead row's copy.
     const teamDirect = projectionOf(props, 'agentTeam', teamOf)
     const team = teamDirect ?? rowTeam
-    const details = useFleetDetails()
+    const details = useFleetDetails(undefined, { concurrency: 4, refreshDelayMs: 750 })
     const [hoverId, setHoverId] = useState<string | null>(null)
     const [pinnedId, setPinnedId] = useState<string | null>(null)
     // The stats card's roster pick: the resting member highlight the graph renders until a hover takes over.
@@ -216,6 +216,8 @@ export function makeFleetView(
         onOwnerFilter={setOwnerFilter}
         focusTaskId={focusTaskId}
         onFocusTask={setFocusTaskId}
+        pinnedId={pinnedId}
+        hoverId={hoverId}
         onPinMember={pinToggle}
         onHoverMember={setHoverId}
         rich={rich}

@@ -81,22 +81,21 @@ describe('StatsContext', () => {
   type StatsProps = Parameters<typeof StatsContext>[0]
 
   test('each lane folds its chip tail at the measured width and spells out every chip when wide', async () => {
-    const lanes: { selector: string; props: Partial<StatsProps>; narrow: string[]; wide: string[] }[] = [
+    const lanes: { selector: string; props: Partial<StatsProps>; cases: (readonly [number, string[]])[] }[] = [
       {
         selector: '.lc-ledger-out-chips',
         props: { tools: [['read', 8], ['bash', 3], ['grep', 2]] },
-        narrow: ['read8', 'bash3', '+1 more'],
-        wide: ['read8', 'bash3', 'grep2', '+0 more'],
+        // At 320 the three chips fit alone but not beside a "+N" chip: they all show, with no zero chip after them.
+        cases: [[260, ['read8', 'bash3', '+1 more']], [320, ['read8', 'bash3', 'grep2']], [900, ['read8', 'bash3', 'grep2']]],
       },
       {
         selector: '.lc-ledger-in-body2',
         props: { commands: { runs: 9, top: [['python3', 3], ['git', 2], ['grep', 2], ['node', 1], ['npm', 1]] } },
-        narrow: ['python33', 'git2', '+3 more'],
-        wide: ['python33', 'git2', 'grep2', 'node1', 'npm1'],
+        cases: [[260, ['python33', 'git2', '+3 more']], [900, ['python33', 'git2', 'grep2', 'node1', 'npm1']]],
       },
     ]
     for (const lane of lanes) {
-      for (const [rowWidth, expected] of [[260, lane.narrow], [900, lane.wide]] as const) {
+      for (const [rowWidth, expected] of lane.cases) {
         const restore = stubWidths(100, 40, rowWidth)
         try {
           const m = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [], locale: 'en', ...lane.props }))
@@ -107,6 +106,20 @@ describe('StatsContext', () => {
           restore()
         }
       }
+    }
+  })
+
+  test('a changed tally re-fits the row to the same run', async () => {
+    const restore = stubWidths(100, 40, 260)
+    try {
+      const m = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, locale: 'en', tools: [['read', 8], ['bash', 3], ['grep', 2]] }))
+      await flush()
+      assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read8', 'bash3', '+1 more'])
+      await m.update(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, locale: 'en', tools: [['read', 8], ['edit', 3], ['glob', 2]] }))
+      assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read8', 'edit3', '+1 more'])
+      await m.unmount()
+    } finally {
+      restore()
     }
   })
 
@@ -126,7 +139,7 @@ describe('StatsContext', () => {
     assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['23', '12', '626', '1.0M/$0.30'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), ['python3212'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-chips')), ['User?7', 'Read9', 'Write2', 'Search4', 'Image1'])
-    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read8', 'bash3', 'grep2', 'edit1', 'glob1', '+0 more'])
+    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read8', 'bash3', 'grep2', 'edit1', 'glob1'])
     const inertCmdChip = query(m.container, '.lc-ledger-in-body2 .lc-ledger-chip')
     assert.equal(inertCmdChip.getAttribute('role'), null, 'the command chip stays inert without the relay')
     assert.equal(inertCmdChip.getAttribute('title'), 'python3', 'the name rides the native title')
@@ -148,7 +161,8 @@ describe('StatsContext', () => {
     await flush()
     assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['0', '0', '0', '0/—'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-chips')), ['User?0', 'Read0', 'Write0'], 'search/image chips only when they happened')
-    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['+0 more'], 'the overflow chip always renders, so the lane reads as a figure')
+    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['+0 more'], 'an empty tool lane keeps the zero chip, so the lane still reads as a figure')
+    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-body2')), [DICT_EN['stats.laneEmpty']], 'an empty command lane keeps its own empty chip')
     assert.equal(queryAll(m.container, '.lc-ledger-in-body2 .lc-ledger-chip-more').length, 0, 'no command overflow control appears without extra programs')
     assert.equal(queryAll(m.container, '.lc-ledger-in-chips .lc-ledger-chip-dim').length, 3, 'every zero chip dims')
     assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 0?—/—'])
@@ -159,7 +173,7 @@ describe('StatsContext', () => {
     const tallied = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [['read', 8], ['bash', 3]], locale: 'en', }))
     await flush()
     assert.deepEqual(queryAll(tallied.container, '.lc-ledger-total').map(el => el.textContent)[1], '11')
-    assert.deepEqual(chipsOf(query(tallied.container, '.lc-ledger-out-chips')), ['read8', 'bash3', '+0 more'], 'two tools chip out, the overflow chip reads zero')
+    assert.deepEqual(chipsOf(query(tallied.container, '.lc-ledger-out-chips')), ['read8', 'bash3'], 'two tools chip out, with no zero chip after them')
     await tallied.unmount()
   })
 
@@ -253,7 +267,7 @@ describe('StatsContext', () => {
     assert.deepEqual(queryAll(m.container, '.lc-ledger-label').map(el => el.textContent), ['输入输出', '工具调用', '命令执行', '编队'])
     assert.deepEqual(queryAll(m.container, '.lc-ledger-total').map(el => el.textContent), ['3', '2', '0', '1.0M/¥2.00'])
     assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-in-chips')), ['用户?0', '读取2', '写入1'])
-    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read2', '其他 +0'])
+    assert.deepEqual(chipsOf(query(m.container, '.lc-ledger-out-chips')), ['read2'])
     const core = query(m.container, '.lc-core')
     assert.deepEqual(queryAll(core, '.lc-core-kv:not(.lc-core-kv-events)').map(el => (el.querySelector('b')?.textContent ?? '') + (el.querySelector('i')?.textContent ?? '')), ['1轮次', '1步数', '5技能加载', '4模型回复'])
     const costTip = costTipOf(m.container, 'team')

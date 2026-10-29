@@ -1,6 +1,6 @@
-import { createElement as h, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { createElement as h, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { Category, ContextEventRecord, RequestRecord, SurfaceNode } from '../../shared/types'
-import { CATS } from '../categories'
+import { TrendReserved } from './trendReserved'
 import { briefNodes, briefOf } from '../brief'
 import { headlineOf } from '../headline'
 import type { ContextViewProps } from '../services'
@@ -19,6 +19,7 @@ import type { Command } from '../commands'
 import type { ContextSettings } from '../settings'
 import { overviewThresholdOf } from '../settings'
 import type { ViewKit } from '../viewkit'
+import { IconCompareSplit, IconContextInjection } from '../primitives'
 import type { AgentHeads } from '../agentHeads'
 import { agentSelfOf, providerModelLabelOf } from '../agentTree'
 import { makeContextBrowser } from './browser'
@@ -30,6 +31,8 @@ import { makeEventList } from './events'
 import { makeFileCard } from './fileCard'
 import type { FileFilter } from './fileCard'
 import { makeCommandPanel } from './commandPanel'
+import { makeCommandPager } from '../commandPages'
+import { useCommandLog } from './useCommandLog'
 import { makePluginInfo } from './pluginInfo'
 import { makeUpgradeGate } from './upgradeGate'
 import { makeRequestDetail } from './requestDetail'
@@ -94,29 +97,6 @@ export function browserCapOf(cards: readonly { top: number; bottom: number }[]):
   if (first === undefined || last === undefined) return null
   const span = last.bottom - first.top
   return Number.isFinite(span) && span > 0 ? Math.ceil(span) : null
-}
-
-/** The trend card's reserved body, so the pending and loaded states measure the same boxes (trendChart.css, requestDetail.css). */
-function TrendReserved(props: { children: ReactNode; catLabel: (cat: Category | 'system' | 'tools') => string }): ReactElement {
-  return (
-    <div className="lc-trend-lane">
-      <div className="lc-trend-plot">{props.children}</div>
-      <div className="lc-detail">
-        <div className="lc-detail-head" />
-        <div className="lc-brief" />
-        <div className="lc-stacked-wrap"><div className="lc-stacked" /></div>
-        <div className="lc-legend">
-          {CATS.map(c => (
-            <span key={c.key} className="lc-chip">
-              <i style={{ background: c.color }} />
-              <span className="lc-chip-label">{props.catLabel(c.key)}</span>
-              <span className="lc-chip-nums" />
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
 }
 
 export function makeContextView(
@@ -289,6 +269,11 @@ export function makeContextView(
         : undefined),
       [ctx, sessionId, historyFace],
     )
+    // The command card's older-history reader; the inline generation has no route, so it stays unpassed there.
+    const fetchOlderCommands = useMemo(
+      () => (typeof sessionId === 'string' && sessionId !== '' ? makeCommandPager(sessionId) : undefined),
+      [sessionId],
+    )
 
     const rootRef = useRef<HTMLDivElement | null>(null)
     useConversationSurface(rootRef)
@@ -306,15 +291,17 @@ export function makeContextView(
       if (kind !== null) setPickedKinds([kind])
       setEventsFocus(n => n + 1)
     }, [])
-    // The command lane's one-shot pick: the program the Command Executions card opens its query lens with.
+    // The command lane's one-shot pick: the program the Command Executions card opens its rail lens with.
     const [commandFocus, setCommandFocus] = useState<string | null>(null)
     const clearCommandFocus = useCallback(() => { setCommandFocus(null) }, [])
+    // The command lane's folded tail only reveals the card: no program lens, just the card itself.
+    const [commandReveal, setCommandReveal] = useState(0)
 
     // Below-the-fold cards: keep the first commit to the cards the reader sees, then mount the event/file row in an
     // idle slice once it nears the conversation viewport; the two skeleton cards reserve the row height.
     const [belowFoldRef, belowFoldMounted] = useLazyMount(filterFocus !== null || eventsFocus > 0)
     // The command panel sits below the event/file row as its own full-width lazy block.
-    const [cmdsRef, cmdsMounted] = useLazyMount(commandFocus !== null)
+    const [cmdsRef, cmdsMounted] = useLazyMount(commandFocus !== null || commandReveal > 0)
     // The browser card is visible but heavy (assembled rows for the current step): paint its card-shaped skeleton in
     // the first commit, then fill it in the next idle slice so the open's commit stays small.
     const [browserRef, browserMounted] = useLazyMount()
@@ -377,10 +364,20 @@ export function makeContextView(
     const onTeamClick = useCallback((): void => {
       if (!activateViewTab(t('tab.fleet'))) openContextSidebar(ctx)
     }, [t])
-    // The tool lane's pick: the browser's tool-results row opens with the tool's name in its text lens.
+    // The tool lane's pick: the browser's tool-results row opens with the tool's name in its text lens. A `skill`
+    // load is filed under Skill Injections instead, so a tool with such a load opens that bucket.
     const onToolPick = useCallback((tool: string): void => {
-      setCatFocus({ cat: 'tool', query: tool })
+      const inSkill = data?.nodes.some(n => n.tool === tool && n.cat === 'skill') === true
+      setCatFocus(inSkill ? { cat: 'skill' } : { cat: 'tool', query: tool })
       revealCard(rootRef.current, '.lc-col-browser')
+    }, [data])
+    // The tool lane's folded tail: open the whole Tool Results bucket, so the reader lands on every result.
+    const onToolMore = useCallback((): void => {
+      setCatFocus({ cat: 'tool' })
+      revealCard(rootRef.current, '.lc-col-browser')
+    }, [])
+    const onCommandMore = useCallback((): void => {
+      setCommandReveal(n => n + 1)
     }, [])
     const focusMember = useFleetMemberFocus(typeof sessionId === 'string' ? sessionId : undefined)
 
@@ -465,6 +462,11 @@ export function makeContextView(
       if (commandFocus === null || !cmdsMounted) return
       revealCard(rootRef.current, '.lc-cmd-card')
     }, [commandFocus, cmdsMounted])
+
+    useEffect(() => {
+      if (commandReveal === 0 || !cmdsMounted) return
+      revealCard(rootRef.current, '.lc-cmd-card')
+    }, [commandReveal, cmdsMounted])
 
     // Chat → Context jump, leg 1: pick up the relay request once per mount, then subscribe — the sidebar landing
     // keeps this view mounted.
@@ -558,17 +560,24 @@ export function makeContextView(
       const records = data.commands
       return cachedByData(data, 'commands', () => commandsOf(records, data.archive))
     }, [data])
+    // The full command history behind the card and the stats lane: the served slice paints first, older pages fill in.
+    const commandLog = useCommandLog(
+      commandList,
+      data?.commandsFloor,
+      source.detailState === 'legacy' ? undefined : fetchOlderCommands,
+    )
+    const fullCommandList = commandLog.records
     const workspace = typeof ctx.get === 'function' ? workspaceOf(ctx, typeof sessionId === 'string' ? sessionId : undefined) : undefined
-    // The stats card's command lane: the whole-log run tally (host-served, else the retained list's own) and the
-    // retained log's top programs.
+    // The stats card's command lane: the whole-log run tally (host-served, else the full list's own) and its programs,
+    // ranked by invocation count like the command card's own rail.
     const commandBoard = useMemo(() => {
-      if (commandList.length === 0) return { runs: 0, top: [] as [string, number][] }
-      const stats = data?.commandStats ?? tallyOfCommands(commandList)
-      const top = programsOf(viewsOf(commandList, workspace)).map(p => [p.name, p.n] as [string, number])
+      if (fullCommandList.length === 0) return { runs: 0, top: [] as [string, number][] }
+      const stats = data?.commandStats ?? tallyOfCommands(fullCommandList)
+      const top = programsOf(viewsOf(fullCommandList, workspace)).map(p => [p.name, p.n] as [string, number])
       return { runs: stats.runs, top }
-    }, [commandList, data, workspace])
+    }, [fullCommandList, data, workspace])
     // The lane's chips only offer the jump when the card can serve it (the collection exists on this host).
-    const hasCommands = commandList.length > 0
+    const hasCommands = fullCommandList.length > 0
     // The capability is an async RPC answer, so file names stay inert until the probe settles.
     const [canOpenPaths, setCanOpenPaths] = useState(false)
     useEffect(() => {
@@ -742,7 +751,10 @@ export function makeContextView(
     const trendCard = (
       <div className="lc-card" data-lc-trend>
         <div className="lc-card-title">
-          <span className="lc-card-title-text">{t('trend.title')}</span>
+          <span className="lc-card-title-text">
+            <IconCompareSplit size={14} />
+            {t('trend.title')}
+          </span>
           <span className="lc-gran lc-trend-mods" role="group">
             <button
               type="button"
@@ -900,7 +912,9 @@ export function makeContextView(
               cost={data.cost} spend={spend} locale={activeLocale} sessionId={typeof sessionId === 'string' ? sessionId : undefined}
               onJump={onJump} onTeamClick={hasFamilyView ? onTeamClick : undefined}
               onToolPick={onToolPick}
+              onToolMore={onToolMore}
               onCommandPick={hasCommands ? setCommandFocus : undefined}
+              onCommandMore={hasCommands ? onCommandMore : undefined}
               onEventsClick={onEventsClick} />
             <PluginInfo />
           </div>
@@ -928,7 +942,10 @@ export function makeContextView(
           {belowFoldMounted ? (<>
             <div className="lc-card lc-events-card lc-col flex-1 min-w-[min(360px,100%)]">
               <div className="lc-card-title">
-                <span className="lc-card-title-text">{t('events.title')}</span>
+                <span className="lc-card-title-text">
+                  <IconContextInjection size={14} />
+                  {t('events.title')}
+                </span>
                 <div className="lc-kinds @max-[380px]/lc-card:flex-wrap">
                   {EVENT_KINDS.map((k) => {
                     const n = kindCounts[k]
@@ -967,9 +984,10 @@ export function makeContextView(
         <div className="lc-cols" ref={cmdsRef}>
           {cmdsMounted ? (
             /* Keyed like the trend faces: a session switch resets the panel's filter/query/expanded-row state. */
-            <CommandPanel key={sessionId} commands={commandList} stats={data.commandStats} floor={data.commandsFloor}
+            <CommandPanel key={sessionId} commands={fullCommandList} stats={data.commandStats} floor={data.commandsFloor}
+              fill={commandLog}
               workspace={workspace} stampOf={opStampOf} onLocate={locateCommand} fetchContent={fetchContent}
-              focusQuery={commandFocus} onFocusQueryHandled={clearCommandFocus}
+              focusProgram={commandFocus} onFocusProgramHandled={clearCommandFocus}
               state={source.detailState} onRetry={source.retryDetail} />
           ) : (
             <div className="lc-card lc-col flex-1 min-w-[min(360px,100%)] lc-deferred-skeleton" style={{ minHeight: 320 }} aria-hidden="true" />
@@ -994,7 +1012,23 @@ export function makeContextView(
     )
   }
 
+  /** The right Sidebar keeps a collapsed tab's body mounted (inert); skip the body entirely so neither the session
+   * projections nor the heavy cards stay live while nothing is on screen. The host hook is optional: without it the
+   * body's IntersectionObserver fallback still folds the cards away. */
+  function ContextViewGate(props: ContextViewProps): ReactElement {
+    if (props.host === 'sidebar') {
+      const useTabInfo = (props as ContextViewProps & {
+        useTabInfo?: () => { tab?: { visible?: boolean }; sidebar?: { expanded?: boolean } }
+      }).useTabInfo
+      if (typeof useTabInfo === 'function') {
+        const info = useTabInfo()
+        if (info.tab?.visible !== true) return h('div', { className: 'lc-root' })
+      }
+    }
+    return h(ContextViewBody, props)
+  }
+
   return function ContextView(props: ContextViewProps): ReactElement {
-    return h(ErrorBoundary, null, h(ContextViewBody, props))
+    return h(ErrorBoundary, null, h(ContextViewGate, props))
   }
 }

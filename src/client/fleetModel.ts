@@ -39,10 +39,11 @@ export function useFleetModel(
   sessionId: string | undefined,
   self: AgentSelfStats | undefined,
   active: boolean,
+  coalesceMs = 0,
 ): FleetModel {
   // Resolved lazily at mount: the outward sessions service belongs to the client runtime's composition.
   const face = useMemo(() => (active ? sessionsFaceOf(ctx) : null), [ctx, active])
-  const snapshot = useSessionsSnapshot(face)
+  const snapshot = useSessionsSnapshot(face, coalesceMs)
 
   // Discover the direct-child catalog once per session so catalog-derived children join the list rows.
   useEffect(() => {
@@ -95,33 +96,96 @@ const sharedCache = new FleetDetailCache()
 /** Full details carry whole reports; only the most recently opened cards keep their payload mounted. */
 const FULL_STATE_MAX = 8
 
-export function useFleetDetails(cache: FleetDetailCache = sharedCache): FleetDetailState {
+export interface FleetDetailOptions {
+  /** Maximum excerpt reads in flight; a family scan fills progressively instead of bursting the route. */
+  concurrency?: number
+  /** A landed card's newer stamp waits this long (trailing), so a running agent's pushes do not refetch per event. */
+  refreshDelayMs?: number
+}
+
+export function useFleetDetails(cache: FleetDetailCache = sharedCache, options: FleetDetailOptions = {}): FleetDetailState {
+  const maxInflight = options.concurrency ?? Number.POSITIVE_INFINITY
+  const refreshDelay = options.refreshDelayMs ?? 0
   const [landed, setLanded] = useState<ReadonlyMap<string, { detail: FleetDetail | null; updatedAt: number }>>(new Map())
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
   /** Requested stamps, for synchronous dedupe; the cache dedupes the network read too. */
   const requested = useRef(new Map<string, number>())
   const mounted = useRef(true)
-  useEffect(() => {
-    mounted.current = true
-    return () => { mounted.current = false }
-  }, [])
+  const active = useRef(0)
+  const queue = useRef<Array<{ id: string; stamp: number }>>([])
+  const refreshTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+
+  const drain = (): void => {
+    while (active.current < maxInflight && queue.current.length > 0) {
+      const task = queue.current.shift() as { id: string; stamp: number }
+      /* v8 ignore next 1 -- enqueue replaces a queued stamp, so a superseded queue entry cannot reach here. */
+      if (requested.current.get(task.id) !== task.stamp) continue
+      active.current++
+      void cache.fetch(task.id, task.stamp).then((detail) => {
+        // A newer read may have claimed the session while this one was in flight; only the latest stamp may land.
+        if (!mounted.current || requested.current.get(task.id) !== task.stamp) return
+        setLanded(prev => new Map(prev).set(task.id, { detail, updatedAt: task.stamp }))
+        setPending((prev) => {
+          const next = new Set(prev)
+          next.delete(task.id)
+          return next
+        })
+      }).catch(() => {
+        // A failed read is a settled absence: drop its pending mark so the card's note is not a permanent skeleton.
+        /* v8 ignore next 1 -- a rejected read is dropped only after unmount or a newer stamp, like the success arm. */
+        if (!mounted.current || requested.current.get(task.id) !== task.stamp) return
+        setPending((prev) => {
+          const next = new Set(prev)
+          next.delete(task.id)
+          return next
+        })
+      }).finally(() => {
+        active.current--
+        drain()
+      })
+    }
+  }
+
+  const enqueue = (id: string, stamp: number, silent = false): void => {
+    if (!silent) setPending(prev => prev.has(id) ? prev : new Set(prev).add(id))
+    const at = queue.current.findIndex(task => task.id === id)
+    if (at >= 0) {
+      queue.current[at] = { id, stamp }
+    } else {
+      queue.current.push({ id, stamp })
+    }
+    drain()
+  }
 
   const request = (id: string, updatedAt: number): void => {
     const known = requested.current.get(id)
     if (known !== undefined && known >= updatedAt) return
     requested.current.set(id, updatedAt)
-    setPending(prev => prev.has(id) ? prev : new Set(prev).add(id))
-    void cache.fetch(id, updatedAt).then((detail) => {
-      // A newer read may have claimed the session while this one was in flight; only the latest stamp may land.
-      if (!mounted.current || requested.current.get(id) !== updatedAt) return
-      setLanded(prev => new Map(prev).set(id, { detail, updatedAt }))
-      setPending((prev) => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-    })
+    if (refreshDelay > 0 && landed.has(id)) {
+      const armed = refreshTimers.current.get(id)
+      if (armed !== undefined) clearTimeout(armed)
+      refreshTimers.current.set(id, setTimeout(() => {
+        refreshTimers.current.delete(id)
+        /* v8 ignore next 1 -- the cleanup clears every armed timer on unmount. */
+        if (!mounted.current) return
+        const target = requested.current.get(id)
+        /* v8 ignore next 1 -- the timer is armed only after requested.set(id, stamp), so the target exists. */
+        if (target !== undefined) enqueue(id, target, true)
+      }, refreshDelay))
+      return
+    }
+    enqueue(id, updatedAt)
   }
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      queue.current = []
+      for (const timer of refreshTimers.current.values()) clearTimeout(timer)
+      refreshTimers.current.clear()
+    }
+  }, [])
 
   // Full reads ride their own state maps: an on-demand read must not make the excerpt's landed entries disagree. The
   // stamp map lets an opened card follow later activity — a newer excerpt stamp refetches the full text once.

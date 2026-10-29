@@ -1,5 +1,4 @@
-import { act } from 'react'
-import { createElement as h } from 'react'
+import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test, vi } from 'vitest'
 import { requestContextFocus, takeContextFocus } from '../../../src/client/viewFocus'
@@ -64,7 +63,11 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
   })
 
   test('the pending trend body reserves the loaded panel, so the detail fills the card instead of growing it', async () => {
-    const ctx = slimCtx(async () => ({ ok: true, value: slimDetail() }))
+    let release!: () => void
+    vi.stubGlobal('fetch', () => new Promise(res => {
+      release = () => { res({ ok: true, status: 200, json: async () => ({ ok: true, value: slimDetail() }) }) }
+    }))
+    const ctx = new TestClientCtx()
     const View = makeView(ctx)
     const m = await mount(h(View, { sessionId: 'sv-reserve', useProjection: projectionsFor(slimHead()) }))
 
@@ -77,6 +80,8 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
     assert.equal(queryAll(m.container, '.lc-trend-lane .lc-detail-metrics').length, 0,
       'no fabricated figures in the reserved panel')
 
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+    await act(async () => { release() })
     await until(() => queryAll(m.container, '.lc-bar').length === 3, 'the detail never landed')
     assert.equal(queryAll(m.container, '.lc-trend-lane').length, 0, 'the lane yields to the real panel')
     assert.equal(queryAll(m.container, '.lc-chartrow').length, 1, 'the chart took its place')
@@ -144,26 +149,25 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
   })
 
   test('the jump relay survives the split: held while the detail reads, resolves when it lands', async () => {
-    let resolveDetail!: (value: unknown) => void
-    const detail = new Promise<unknown>(resolve => { resolveDetail = resolve })
-    const ctx = slimCtx(() => detail)
+    let release!: () => void
+    vi.stubGlobal('fetch', () => new Promise(res => {
+      release = () => { res({ ok: true, status: 200, json: async () => ({ ok: true, value: slimDetail() }) }) }
+    }))
+    const ctx = new TestClientCtx()
     const View = makeView(ctx)
     // The jump is armed BEFORE the view mounts (the chat action relay): with the detail read still
     // pending, the pin must wait for it rather than clamp against an empty record list.
     requestContextFocus('sv-slim-jump', 4)
     const m = await mount(h(View, { sessionId: 'sv-slim-jump', useProjection: projectionsFor(slimHead()) }))
-    try {
-      assert.equal(queryAll(m.container, '.lc-bar-selected').length, 0, 'nothing pins before the detail')
-      await act(async () => { resolveDetail({ ok: true, value: slimDetail() }) })
-      await until(
-        () => queryAll(m.container, '.lc-bar[data-seq="4"]')[0]?.className.includes('lc-bar-selected') === true,
-        'the jump never resolved',
-      )
-      assert.equal(takeContextFocus('sv-slim-jump'), null)
-    } finally {
-      await m.unmount()
-      takeContextFocus('sv-slim-jump')
-    }
+    assert.equal(queryAll(m.container, '.lc-bar-selected').length, 0, 'nothing pins before the detail')
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+    await act(async () => { release() })
+    await until(
+      () => queryAll(m.container, '.lc-bar[data-seq="4"]')[0]?.className.includes('lc-bar-selected') === true,
+      'the jump never resolved',
+    )
+    assert.equal(takeContextFocus('sv-slim-jump'), null)
+    await m.unmount()
   })
 })
 

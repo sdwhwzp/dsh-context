@@ -123,7 +123,7 @@ interface FleetDetailEntry {
  * member the comms panels ever scanned for the page's whole life. A full read carries much larger texts, so its own
  * ledger stays tighter. */
 const FLEET_LEDGER_MAX = 64
-const FULL_LEDGER_MAX = 16
+const FULL_LEDGER_MAX = 4
 
 /** Reads dedupe per (id, `updatedAt`): a NEWER stamp refetches once, and a settled failure stays cached so a
  * broken session never hammers the route; the `full` ledger runs beside the excerpt one. */

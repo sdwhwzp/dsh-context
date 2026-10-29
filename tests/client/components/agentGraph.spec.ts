@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, test, vi } from 'vitest'
 import { makeAgentGraph } from '../../../src/client/components/agentGraph'
 import { DICT_EN } from '../../../src/client/i18n'
 import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
-import type { AgentSelfStats } from '../../../src/client/agentTree'
+import { familyHue, type AgentSelfStats } from '../../../src/client/agentTree'
 import { TestClientCtx, asClientCtx } from '../helpers/harness'
 import { blur, click, flush, focus, hover, makeKit, mount, query, queryAll, text, unhover, until, wheel } from '../helpers/kit'
 
@@ -449,11 +449,14 @@ describe('AgentGraph — the Fleet seat', () => {
     assert.ok(text(m.container).includes('2 members'))
     assert.ok(query(m.container, '[data-agent="worker"]').className.includes('lc-agent-pinned'))
     const worker = query(m.container, '[data-agent="worker"]')
+    assert.ok(worker.getAttribute('style')?.includes('--lc-member-hue'))
     assert.equal(text(query(worker, '.lc-agent-member')), 'architect')
     assert.equal(text(query(worker, '.lc-agent-duty')), 'worker-bee')
     const self = query(m.container, '.lc-agent-card.lc-agent-self')
+    assert.ok(self.getAttribute('style')?.includes('--lc-member-hue: var(--dsw-alias-brand-primary'))
     assert.equal(queryAll(self, '.lc-agent-duty').length, 0)
     const done = query(m.container, '[data-agent="done"]')
+    assert.ok(done.getAttribute('style')?.includes('--lc-member-hue'))
     assert.equal(text(query(done, '.lc-agent-label')), 'done')
     assert.equal(queryAll(done, '.lc-agent-duty').length, 0)
     assert.equal(queryAll(m.container, '.lc-inspector').length, 0, 'the Fleet seat paints the graph alone')
@@ -465,17 +468,32 @@ describe('AgentGraph — the Fleet seat', () => {
     await m2.unmount()
   })
 
+  test('a current teammate and the incoming link keep the roster hue', async () => {
+    const face = new FakeSessions(family())
+    const View = makeView(face)
+    const team = { ...TEAM, members: [...TEAM.members, { id: 'worker', name: 'architect', role: 'teammate' as const, phase: 'active' as const }] }
+    const m = await mount(h(View, { sessionId: 'worker', self: selfStats(), team, inspector: false }))
+    const worker = query(m.container, '[data-agent="worker"]')
+    assert.equal(worker.style.getPropertyValue('--lc-member-hue'), familyHue(1))
+    const targetHues = ['worker', 'done'].map(id => query(m.container, `[data-agent="${id}"]`).style.getPropertyValue('--lc-member-hue'))
+    assert.deepEqual(queryAll(m.container, 'path.lc-agents-link').map(el => el.getAttribute('stroke')), targetHues)
+    await m.unmount()
+  })
+
   test('select mode highlights instead of jumping, while open mode keeps the jump copy and the inert current card', async () => {
     const face = new FakeSessions(family())
     const View = makeView(face)
     const selected = new Array<string>()
-    const m = await mount(h(View, { sessionId: 'root', self: selfStats(), team: TEAM, inspector: false, onSelect: (id: string) => { selected.push(id) }, }))
+    const m = await mount(h(View, { sessionId: 'root', self: selfStats(), team: TEAM, pinnedId: 'worker', inspector: false, onSelect: (id: string) => { selected.push(id) }, }))
 
     assert.ok(text(m.container).includes(DICT_EN['agents.subSelect']))
     const self = query(m.container, '.lc-agent-card.lc-agent-self')
     assert.equal(self.getAttribute('role'), 'button')
+    assert.equal(self.getAttribute('aria-pressed'), 'false')
     await click(self)
     const worker = query(m.container, '[data-agent="worker"]')
+    assert.equal(worker.getAttribute('aria-pressed'), 'true')
+    assert.equal(query(m.container, '[data-agent="done"]').getAttribute('aria-pressed'), 'false')
     await click(worker)
     assert.deepEqual([...selected], ['root', 'worker'])
     assert.deepEqual(face.opened, [], 'a pick never jumps')
@@ -498,6 +516,7 @@ describe('AgentGraph — the Fleet seat', () => {
     const open = await mount(h(makeView(openFace), { sessionId: 'root', self: selfStats() }))
     assert.ok(text(open.container).includes(DICT_EN['agents.sub']))
     assert.equal(query(open.container, '.lc-agent-card.lc-agent-self').getAttribute('role'), null)
+    assert.equal(query(open.container, '[data-agent="worker"]').getAttribute('aria-pressed'), null)
     await click(query(open.container, '[data-agent="worker"]'))
     assert.deepEqual(openFace.opened, ['worker'])
     await open.unmount()

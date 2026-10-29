@@ -314,3 +314,27 @@ describe('coveredRowsOf', () => {
     assert.deepEqual(coveredRowsOf([], 'all'), [])
   })
 })
+
+describe('rowsOfSnapshot caching', () => {
+  test('unchanged rows keep their identity across snapshots; a changed row and its flags re-derive', () => {
+    const snap = snapshotOf([
+      ['a', { displayTitle: 'a', updatedAt: 1 }],
+      ['b', { displayTitle: 'b', updatedAt: 2 }],
+    ], 'a')
+    const first = rowsOfSnapshot(snap)!
+    const next = rowsOfSnapshot({
+      ...snap,
+      byId: { ...(snap.byId as object), b: { displayTitle: 'b', updatedAt: 3 } },
+      current: 'a',
+    })!
+    assert.equal(next[0], first[0], 'a is untouched')
+    assert.notEqual(next[1], first[1], 'b changed')
+    const moved = rowsOfSnapshot({ ...snap, current: 'b' })!
+    assert.notEqual(moved[0], first[0], 'the current flag is part of the cached variant')
+    assert.equal(moved[1].current, true)
+    assert.equal(first[1].current, false)
+    const arch = rowsOfSnapshot(snap, { archivedSessionIds: ['a'] })!
+    assert.notEqual(arch[0], first[0], 'the archived flag is part of the cached variant')
+    assert.equal(arch[0].archived, true)
+  })
+})

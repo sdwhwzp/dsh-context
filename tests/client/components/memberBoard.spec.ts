@@ -187,10 +187,13 @@ describe('MemberBoard — team cards', () => {
     const m = await mount(h(Controlled))
     assert.ok(text(m.container).includes(DICT_EN['fleet.team.failureShort']))
     const card = (): HTMLElement => queryAll(m.container, '.lc-member-card')[1]
+    assert.equal(card().getAttribute('aria-pressed'), 'true')
     await act(async () => { card().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
     await m.update(h(Controlled))
+    assert.equal(card().getAttribute('aria-pressed'), 'false')
     await act(async () => { card().dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })) })
     await m.update(h(Controlled))
+    assert.equal(card().getAttribute('aria-pressed'), 'true')
     await act(async () => { card().dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true })) })
     assert.deepEqual([...pins], ['w1', 'w1'])
     await m.unmount()
@@ -273,6 +276,7 @@ describe('MemberBoard — the other-agents cards', () => {
     const m2 = await mount(h(MemberBoard, propsOf({ pinnedId: 's1', onPin: id => { again.push(id) } })))
     const pinnedCard = otherCards(m2.container)[0]
     assert.ok(pinnedCard.className.includes('lc-member-pinned'))
+    assert.equal(pinnedCard.getAttribute('aria-pressed'), 'true')
     await click(pinnedCard)
     await act(async () => { pinnedCard.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })) })
     assert.deepEqual([...again], ['s1', 's1'])

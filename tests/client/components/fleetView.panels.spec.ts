@@ -151,9 +151,12 @@ describe('FleetView — the panels over one family', () => {
     const card = queryAll(m.container, '.lc-member-card')[1]
     await hover(card)
     assert.ok(query(m.container, '[data-agent="w1"]').className.includes('lc-agent-hover'))
+    assert.ok(query(m.container, '[data-task="task-1"]').className.includes('lc-team-task-hover'))
     await hover(query(m.container, '[data-agent="w1"]'))
     assert.ok(queryAll(m.container, '.lc-member-card')[1].className.includes('lc-member-hover'))
+    assert.ok(query(m.container, '[data-task="task-1"]').className.includes('lc-team-task-hover'))
     await click(card)
+    assert.ok(query(m.container, '[data-task="task-1"]').className.includes('lc-team-task-related'))
     await hover(queryAll(m.container, '.lc-member-card')[0])
     const node = query(m.container, '[data-agent="w1"]')
     assert.ok(node.className.includes('lc-agent-pinned'))
@@ -177,6 +180,7 @@ describe('FleetView — the panels over one family', () => {
 
     await click(query(m.container, '[data-agent="w1"]'))
     assert.ok(query(m.container, '[data-agent="w1"]').className.includes('lc-agent-pinned'))
+    assert.ok(query(m.container, '[data-task="task-1"]').className.includes('lc-team-task-related'))
     assert.ok(text(query(m.container, '.lc-tasks-filter')).includes('worker-bee'))
     assert.deepEqual([...opened], [], 'a pick never jumps')
 

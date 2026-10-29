@@ -18,18 +18,58 @@ This `sdwhwzp/dsh-context` fork follows the [DSH fork synchronization rules](../
   - Reference docs: https://deepseek-harness.github.io/deepseek-harness/en/reference/
   - Example plugins: GitHub topic `dsh-plugin` — https://github.com/topics/dsh-plugin
 
-## Coding
-- Make the minimal change that fully solves the problem, with the most efficient implementation.
-- User experience, features, and especially the data accuracy and integrity are the top priority. Never sacrifice them for code refactors, performance, or any other reason. Dive deep and run real tests to verify the correctness of every change.
-- Reuse the classes, utilities, styles, style tokens, events, presets, and lifecycles that DeepSeek Harness already provides.
-- Keep code and tests small, loosely coupled, and modular; avoid duplication. Reuse existing test suites, cases and assertions where possible. Drop and shrink any code or test that is outdated and no longer needed.
-- After updating tests, firstly run `pnpm exec vitest run tests/<area>/<name>.spec.ts -t "<test case name>"` (regex, use `"a|b"`) to iterate on the touched test cases.
-- Ensure every source code file or test code file has less than 1000 lines.
-- Comments: default to none. Never add one unless it records a non-obvious decision, constraint, or invariant the code cannot express — if you cannot name that reason, do not write it.
-- Never narrate what the code does, restate names or types, or explain the change you just made.
-- When touching code, delete or shrink comments that repeat the code, state the obvious, or are outdated; reducing the comment count is always welcome.
-- Write comments, documentation, PR descriptions, and commit messages in English.
-- Generate one-time temp files in the `.tmp` directory and clean them up right after use.
+## Coding Standard
+  
+  ### Priorities
+  
+  - User experience, data accuracy, and data integrity come first. Nothing outranks them.
+    - Never trade them away for refactors, performance, or convenience.
+    - Verify every change against reality with real tests. No assumptions.
+  
+  ### Data Integrity
+  
+  - No shallow caching: users see the complete session and the complete scope, never only the cached slice.
+    - Every statistic covers the full session and full scope, and reflects real content and real changes.
+    - Async, progressive loading is fine for first paint, but must never require extra user actions. Load or refresh more in the background automatically.
+  
+  ### Efficiency
+  
+  - Make the smallest change that fully solves the problem, with the most efficient implementation.
+    - Keep code and tests small, modular, and loosely coupled. No duplication.
+    - Reuse existing test suites, cases, and assertions. Delete tests and code that are outdated or no longer needed.
+    - Reuse what DeepSeek Harness already provides: classes, utilities, styles, style tokens, events, presets, lifecycles.
+  
+  ### Comments
+  
+  - Default to none.
+    - Write one only for a critical, non-obvious decision, constraint, or invariant the code cannot express. If you cannot name it, delete it.
+    - Never narrate what the code does, restate names or types, or explain your own change.
+    - While editing, delete or shrink comments that are obvious, redundant, or stale.
+  
+  ### Tests
+  
+  - Reuse existing specs, suites, cases, and assertions. Drop tests no longer needed.
+    - Iterate with the narrowest run first:
+      `pnpm exec vitest run tests/<area>/<name>.spec.ts -t "<case name>"` (regex, e.g. `"a|b"`).
+  
+  ### Optimization
+  - Prevent over-engineering
+  - Prevent memory leaking risks, dangling references, and unbounded growth of retained data, on either server and client side.
+  - Always re-consider better efficient performance and lower memory footprint, especially for long-running sessions and complicated scenarios.
+  
+  ### Language
+  
+  - English only: code, comments, tests, docs, PR descriptions, commit messages.
+  
+  ### Temporary Files
+  
+  - Create them only in `./.tmp`.
+    - Delete them immediately after use.
+  
+  ### File Size
+  
+  - Every source and test file stays under 1000 lines.
+
 
 ## Pre-commit checks
 
@@ -38,7 +78,7 @@ Complete ALL of these before ANY commit:
 - Close out the to-do list, ensuring every item is completed, cleaned up or explicitly closed.
 - Review the full diff independently: every change necessary, correct, and not over-engineered.
 - Clean up generated temporary files and temporary or unhelpful comments.
-- Load the [code-review](https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review) skill, run it to review all the changes.
+- Load the [code-review](https://github.com/mattpocock/skills/blob/main/skills/engineering/code-review/SKILL.md) skill, run it to review all the changes.
   - Independently verify or follow each of its suggestions after its multi-axis analysis done. 
   - Tell its subagents to skip typecheck, lint, and test coverage, which the main agent covers.
   - Pass its subagents the relevant filenames and line number ranges during the work.

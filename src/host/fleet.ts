@@ -245,97 +245,206 @@ function rosterMemberOf(data: Record<string, unknown>): FleetMemberInfo | null {
   return out
 }
 
-function lastReplyOf(events: readonly unknown[], max: number): { time: number; text: string; cut: boolean } | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const ev = asRecord(events[i])
-    if (ev === null || ev.type !== 'assistant/message') continue
-    const message = asRecord(asRecord(ev.data)?.message)
+interface FleetCaps {
+  promptMax: number
+  replyMax: number
+  messageMax: number
+  listMax: number
+}
+
+function capsOf(full: boolean): FleetCaps {
+  return full
+    ? { promptMax: FULL_TEXT_MAX, replyMax: FULL_TEXT_MAX, messageMax: FULL_MESSAGE_TEXT_MAX, listMax: FULL_MESSAGES_MAX }
+    : { promptMax: PROMPT_TEXT_MAX, replyMax: REPLY_TEXT_MAX, messageMax: MESSAGE_TEXT_MAX, listMax: MESSAGES_MAX }
+}
+
+/** The incremental fleet fold: every served excerpt is a function of this state, so a later read extends it instead of
+ * rescanning the whole log. Messages stay sorted newest-seq-first and bounded to `listMax`; `total` keeps the whole-log
+ * count. */
+export class FleetFold {
+  private descriptor: FleetDescriptor | undefined
+  private initialPrompt: string | undefined
+  private truncated = false
+  private total = 0
+  private readonly messages: FleetMessage[] = []
+  private readonly roster = new Map<string, FleetMemberInfo>()
+  private lastReply: { time: number; text: string } | null = null
+
+  constructor(private readonly caps: FleetCaps) {}
+
+  apply(events: readonly unknown[]): void {
+    for (const entry of events) this.applyEvent(entry)
+  }
+
+  private applyEvent(entry: unknown): void {
+    const ev = asRecord(entry)
+    if (ev === null) return
+    const type = ev.type
+    if (typeof type !== 'string') return
+    const seq = typeof ev.seq === 'number' && Number.isFinite(ev.seq) ? ev.seq : 0
+    const time = typeof ev.time === 'number' && Number.isFinite(ev.time) ? ev.time : 0
+    const data = asRecord(ev.data)
+    if (data === null) return
+    if (type === 'subagent/descriptor') {
+      const next = descriptorOf(data)
+      if (next !== null) this.descriptor = next
+      return
+    }
+    if (type === 'team/member') {
+      const member = rosterMemberOf(data)
+      if (member !== null) this.roster.set(member.name, member)
+      return
+    }
+    if (type === 'assistant/message') {
+      this.replyOf(seq, time, data)
+      return
+    }
+    if (type !== 'user/message') return
+    const message = messageOf(seq, time, data, this.caps.messageMax)
+    if (message !== null) {
+      this.total += 1
+      this.insert(message)
+      return
+    }
+    if (this.initialPrompt !== undefined || !isPlainPrompt(asRecord(data.source))) return
+    const text = textOfContent(data.content).replace(REMINDER_PREFIX, '')
+    if (text.trim() === '') return
+    const cut = clip(text, this.caps.promptMax)
+    this.initialPrompt = cut.text
+    if (cut.cut) this.truncated = true
+  }
+
+  private replyOf(seq: number, time: number, data: Record<string, unknown>): void {
+    const message = asRecord(data.message)
     const content = message?.content
-    if (!Array.isArray(content)) continue
+    if (!Array.isArray(content)) return
     let text = ''
     for (const block of content) {
       const b = asRecord(block)
       if (b?.type === 'text' && typeof b.text === 'string') text += b.text
     }
-    if (text.trim() === '') continue
-    const time = typeof ev.time === 'number' && Number.isFinite(ev.time) ? ev.time : 0
-    const cut = clip(text, max)
-    return { time, text: cut.text, cut: cut.cut }
+    if (text.trim() === '') return
+    const cut = clip(text, this.caps.replyMax)
+    this.lastReply = { time, text: cut.text }
+    if (cut.cut) this.truncated = true
   }
-  return null
+
+  private insert(message: FleetMessage): void {
+    let at = 0
+    while (at < this.messages.length && this.messages[at].seq >= message.seq) at++
+    this.messages.splice(at, 0, message)
+    if (this.messages.length > this.caps.listMax) {
+      this.messages.pop()
+      this.truncated = true
+    }
+    if (message.clipped === true) this.truncated = true
+  }
+
+  serve(): FleetDetail {
+    const messages = this.messages.slice()
+    return {
+      ...(this.descriptor !== undefined ? { descriptor: this.descriptor } : {}),
+      ...(this.initialPrompt !== undefined ? { initialPrompt: this.initialPrompt } : {}),
+      ...(this.lastReply !== null ? { lastReply: this.lastReply } : {}),
+      ...(this.roster.size > 0 ? { roster: [...this.roster.values()] } : {}),
+      messages,
+      ...(this.total > messages.length ? { messagesTotal: this.total } : {}),
+      truncated: this.truncated,
+    }
+  }
 }
 
 /** Total over hostile input: a malformed entry drops alone. `full` lifts the prompt/reply/message excerpt caps for one
  * opened card, keeping the hostile-payload bounds. */
 export function fleetDetailOfEvents(events: readonly unknown[], full = false): FleetDetail {
-  const promptMax = full ? FULL_TEXT_MAX : PROMPT_TEXT_MAX
-  const replyMax = full ? FULL_TEXT_MAX : REPLY_TEXT_MAX
-  const messageMax = full ? FULL_MESSAGE_TEXT_MAX : MESSAGE_TEXT_MAX
-  const listMax = full ? FULL_MESSAGES_MAX : MESSAGES_MAX
-  let descriptor: FleetDescriptor | undefined
-  let initialPrompt: string | undefined
-  let truncated = false
-  let total = 0
-  const messages: FleetMessage[] = []
-  const roster = new Map<string, FleetMemberInfo>()
-  for (const entry of events) {
-    const ev = asRecord(entry)
-    if (ev === null) continue
-    const type = ev.type
-    if (typeof type !== 'string') continue
-    const seq = typeof ev.seq === 'number' && Number.isFinite(ev.seq) ? ev.seq : 0
-    const time = typeof ev.time === 'number' && Number.isFinite(ev.time) ? ev.time : 0
-    const data = asRecord(ev.data)
-    if (data === null) continue
-    if (type === 'subagent/descriptor') {
-      // Last wins: a fork seed replays the ancestor's descriptor before the child's own.
-      const next = descriptorOf(data)
-      if (next !== null) descriptor = next
-      continue
-    }
-    if (type === 'team/member') {
-      // The whole roster row rewrites per lifecycle step; the latest record's facts stand.
-      const member = rosterMemberOf(data)
-      if (member !== null) roster.set(member.name, member)
-      continue
-    }
-    if (type !== 'user/message') continue
-    const message = messageOf(seq, time, data, messageMax)
-    if (message !== null) {
-      total += 1
-      if (message.clipped === true) truncated = true
-      messages.push(message)
-      continue
-    }
-    if (initialPrompt === undefined && isPlainPrompt(asRecord(data.source))) {
-      const text = textOfContent(data.content).replace(REMINDER_PREFIX, '')
-      if (text.trim() !== '') {
-        const cut = clip(text, promptMax)
-        initialPrompt = cut.text
-        if (cut.cut) truncated = true
-      }
-    }
+  const fold = new FleetFold(capsOf(full))
+  fold.apply(events)
+  return fold.serve()
+}
+
+/** One session's incremental excerpt fold; the durable revision or the live log's append-only prefix decides reuse. */
+interface FoldEntry {
+  live: boolean
+  persistence?: unknown
+  revision?: string
+  cursor: number
+  count: number
+  fold: FleetFold
+}
+
+/** Eight excerpts are a few hundred KB; a Fleet tab scans a family at a time. */
+const FOLD_CACHE_MAX = 8
+
+function revisionOf(observation: unknown): string | undefined {
+  const revision = (observation as { revision?: unknown } | null)?.revision
+  return typeof revision === 'string' && revision !== '' ? revision : undefined
+}
+
+interface ObservationLike {
+  source?: unknown
+  revision?: unknown
+  events?: unknown
+  [Symbol.dispose]?: unknown
+}
+
+/** A live log is append-only: reuse its fold only while the stored prefix still matches. Stored logs key on the durable
+ * revision, so a changed log can never extend the old fold. */
+function reusable(
+  entry: FoldEntry,
+  live: boolean,
+  revision: string | undefined,
+  persistence: unknown,
+  events: readonly unknown[],
+  cursor: number,
+): boolean {
+  if (live) {
+    if (!entry.live || events.length < entry.count) return false
+    return entry.count === 0 || ((events[entry.count - 1] as { seq?: unknown } | null)?.seq === entry.cursor)
   }
-  messages.sort((a, b) => b.seq - a.seq)
-  if (messages.length > listMax) {
-    messages.length = listMax
-    truncated = true
+  return !entry.live && entry.revision === revision && entry.persistence === persistence && entry.cursor <= cursor
+}
+
+function foldOf(
+  cache: Map<string, FoldEntry>,
+  sessionId: string,
+  events: readonly unknown[],
+  live: boolean,
+  revision: string | undefined,
+  persistence: unknown,
+  cursor: number,
+): FleetFold {
+  const entry = cache.get(sessionId)
+  if (entry !== undefined && reusable(entry, live, revision, persistence, events, cursor)) {
+    const from = live ? entry.count : events.length
+    if (from < events.length) entry.fold.apply(events.slice(from))
+    entry.count = events.length
+    entry.cursor = cursor
+    cache.delete(sessionId)
+    cache.set(sessionId, entry)
+    return entry.fold
   }
-  const reply = lastReplyOf(events, replyMax)
-  if (reply !== null && reply.cut) truncated = true
-  return {
-    ...(descriptor !== undefined ? { descriptor } : {}),
-    ...(initialPrompt !== undefined ? { initialPrompt } : {}),
-    ...(reply !== null ? { lastReply: { time: reply.time, text: reply.text } } : {}),
-    ...(roster.size > 0 ? { roster: [...roster.values()] } : {}),
-    messages,
-    ...(total > messages.length ? { messagesTotal: total } : {}),
-    truncated,
+  const fold = new FleetFold(capsOf(false))
+  fold.apply(events)
+  // A stored read with no durable revision has no comparable token: its log can have grown, so never cache it.
+  if (!live && revision === undefined) return fold
+  cache.set(sessionId, {
+    live,
+    ...(revision !== undefined ? { revision } : {}),
+    ...(persistence === undefined ? {} : { persistence }),
+    cursor,
+    count: events.length,
+    fold,
+  })
+  for (const oldest of cache.keys()) {
+    if (cache.size <= FOLD_CACHE_MAX) break
+    cache.delete(oldest)
   }
+  return fold
 }
 
 /** Serve whenever `connection` is composed; `sessionQuery` is re-read per request so a late-arriving service arms. */
 export function watchFleetChannel(ctx: Context, coldReads: ColdReadGate = makeColdReadGate()): void {
+  const cache = new Map<string, FoldEntry>()
   ctx.inject(['connection'], (c) => {
     const handler = async (request: Request, principal?: unknown): Promise<Response> => {
       let sessionId: unknown
@@ -357,14 +466,25 @@ export function watchFleetChannel(ctx: Context, coldReads: ColdReadGate = makeCo
           ? query.observeSession.bind(query)
           : undefined
         if (observe === undefined) return reply({ ok: true, value: null })
+        const persistence = c.get('sessionPersistence') as unknown
         const value = await coldReads.admit(async () => {
-          const observation = await observe(sessionId, { projectionMode: 'none' })
-          const events = (observation as { events?: unknown } | null)?.events
+          const observation = await observe(sessionId, { projectionMode: 'none' }) as ObservationLike | null
+          const events = observation?.events
           if (!Array.isArray(events)) return null
           try {
-            return fleetDetailOfEvents(events, full)
+            if (full) return fleetDetailOfEvents(events, true)
+            const isLive = observation?.source === 'live'
+            return foldOf(
+              cache,
+              sessionId,
+              events,
+              isLive,
+              isLive ? undefined : revisionOf(observation),
+              persistence,
+              cursorOfEvents(events),
+            ).serve()
           } finally {
-            const dispose = (observation as { [Symbol.dispose]?: unknown } | null)?.[Symbol.dispose]
+            const dispose = observation?.[Symbol.dispose]
             if (typeof dispose === 'function') dispose.call(observation)
           }
         })
@@ -375,4 +495,12 @@ export function watchFleetChannel(ctx: Context, coldReads: ColdReadGate = makeCo
     }
     registerPostRoute(c, c.get('connection') as ConnectionHostFace | undefined, FLEET_ROUTE, handler, 'dsh-context: fleet route')
   })
+}
+
+function cursorOfEvents(events: readonly unknown[]): number {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const seq = (events[i] as { seq?: unknown } | null)?.seq
+    if (typeof seq === 'number' && Number.isFinite(seq)) return seq
+  }
+  return -1
 }

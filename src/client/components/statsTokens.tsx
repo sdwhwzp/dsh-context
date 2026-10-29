@@ -4,6 +4,7 @@ import { billedParts } from '../categories'
 import { cacheHitPercent } from '../format'
 import { numOf } from '../services'
 import type { ViewKit } from '../viewkit'
+import { IconDatabase } from '../primitives'
 
 import { SliceList } from './sliceList'
 import type { DonutProps } from './donut'
@@ -52,7 +53,10 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
     return (
       <div className="lc-card lc-col-donut flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">
-          <span className="lc-card-title-text">{t('tokens.title')}</span>
+          <span className="lc-card-title-text">
+            <IconDatabase size={14} />
+            {t('tokens.title')}
+          </span>
           {hit !== null && (
             <span className="lc-card-rate" title={t('stats.cacheHitTip')}>{t('stats.cacheHit')} {hit}%</span>
           )}

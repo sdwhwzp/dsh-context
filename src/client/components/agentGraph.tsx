@@ -14,16 +14,19 @@ import { openSessionVia, type ClientCtx } from '../services'
 import type { ViewKit } from '../viewkit'
 import type { FleetDetail } from '../../shared/types'
 import { useFleetModel } from '../fleetModel'
-import { teammateNameOf, type FleetTeam } from '../fleetTeam'
+import { teammateNameOf, teamMemberOf, type FleetTeam } from '../fleetTeam'
 import type { AgentForest, AgentNode, AgentSelfStats } from '../agentTree'
 import {
+  BRAND_HUE,
   barSegments,
+  familyHue,
   fmtDurationCompact,
   layoutForest,
   lineageOf,
   pressureColorOf,
 } from '../agentTree'
 import { AgentInspector } from './agentInspector'
+import { memberStyle } from './memberBoard'
 
 export interface AgentGraphProps {
   sessionId?: string
@@ -67,6 +70,7 @@ export function makeAgentGraph(
     const internal = useFleetModel(ctx, heads, sessionId, props.self, props.forest === undefined)
     const forest = props.forest !== undefined ? props.forest : internal.forest
     const team = props.team !== undefined ? props.team : internal.team
+    const members = team?.members ?? []
 
     const [internalHover, setInternalHover] = useState<string | null>(null)
     const [showAll, setShowAll] = useState(false)
@@ -124,6 +128,13 @@ export function makeAgentGraph(
     // clips; an expanded stage keeps the toggle reachable even when a resize brings the layout under the fold.
     const overflowsStage = showAll || (tallFamily && layout.height > stageHeight)
     const byId = new Map(forest.nodes.map(n => [n.id, n]))
+    const hueOf = (node: AgentNode): string => {
+      const member = teamMemberOf(team, node.id)
+      return member?.role === 'lead' ? BRAND_HUE
+        : member !== null ? familyHue(members.indexOf(member))
+          : node.isCurrent ? BRAND_HUE : familyHue(node.family)
+    }
+    const hues = new Map(forest.nodes.map(node => [node.id, hueOf(node)]))
     /** v8 ignore next 1 -- agentForestOf anchors the forest at the current session, so a current node always exists. */
     const current = forest.nodes.find(n => n.isCurrent) ?? forest.nodes[0]
     const pinnedId = props.pinnedId ?? null
@@ -239,19 +250,20 @@ export function makeAgentGraph(
                   {layout.links.map((link) => {
                     const d = linkPath(link.x1, link.y1, link.x2, link.y2)
                     const on = lit !== null && lit.has(link.to)
+                    const color = hues.get(link.to)
                     return (
                       <g key={link.to} className={on ? 'lc-agents-on' : undefined}>
                         <path
                           className={'lc-agents-link stroke-[1.5px]' + (link.running ? ' lc-agents-link-live' : '')}
                           d={d}
-                          stroke={link.color}
+                          stroke={color}
                           fill="none"
                         />
                         {link.running
-                          ? <path className="lc-agents-flow animate-lc-agent-flow fill-none stroke-2" d={d} stroke={link.color} />
+                          ? <path className="lc-agents-flow animate-lc-agent-flow fill-none stroke-2" d={d} stroke={color} />
                           : null}
-                        <circle className="lc-agents-joint" cx={link.x1} cy={link.y1} r={2} fill={link.color} />
-                        <circle className="lc-agents-joint" cx={link.x2} cy={link.y2} r={3} fill={link.color} />
+                        <circle className="lc-agents-joint" cx={link.x1} cy={link.y1} r={2} fill={color} />
+                        <circle className="lc-agents-joint" cx={link.x2} cy={link.y2} r={3} fill={color} />
                       </g>
                     )
                   })}
@@ -267,6 +279,7 @@ export function makeAgentGraph(
                       x={point.x}
                       y={point.y}
                       width={layout.cardW}
+                      hue={hueOf(node)}
                       index={index}
                       hovered={focusId === node.id}
                       on={lit !== null && lit.has(node.id)}
@@ -315,6 +328,7 @@ interface CardProps {
   x: number
   y: number
   width: number
+  hue: string
   /** DFS order — the entrance stagger slot. */
   index: number
   hovered: boolean
@@ -353,8 +367,6 @@ function AgentCard(props: CardProps): ReactElement {
   const selectable = props.onSelect !== undefined
   const cls = 'lc-agent-card animate-lc-agent-in motion-reduce:animate-none'
     + (node.isCurrent ? ' lc-agent-self' : '')
-    // lc-agent-hover shares the card's own :hover rule, so the boards' linked hover lifts the card exactly like
-    // pointing at it (and stays the specs' state anchor). lc-agent-on marks the hovered card's lineage — focus dim spares it.
     + (props.hovered ? ' lc-agent-hover' : '')
     + (props.on ? ' lc-agent-on' : '')
     + (props.pinned ? ' lc-agent-pinned' : '')
@@ -362,10 +374,11 @@ function AgentCard(props: CardProps): ReactElement {
   return (
     <div
       className={cls}
-      style={{ left: x - width / 2, top: y, width, '--lc-i': Math.min(props.index, STAGGER_CAP) } as CSSProperties}
+      style={{ left: x - width / 2, top: y, width, ...memberStyle(props.hue), '--lc-i': Math.min(props.index, STAGGER_CAP) } as CSSProperties}
       data-agent={node.id}
       role={selectable || !node.isCurrent ? 'button' : undefined}
       tabIndex={selectable || !node.isCurrent ? 0 : undefined}
+      aria-pressed={selectable ? props.pinned : undefined}
       onClick={() => {
         if (props.onSelect !== undefined) props.onSelect(node.id)
         else props.onOpen(node.id)

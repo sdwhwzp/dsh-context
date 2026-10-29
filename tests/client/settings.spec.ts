@@ -46,7 +46,7 @@ describe('createContextSettings defaults', () => {
       fileSort: 'lines',
       insightsEntry: 'show',
       durationCurve: 'show',
-      overviewAutoSteps: '200',
+      overviewAutoSteps: '100',
       overviewRange: '30d',
       fleetTab: 'show',
       promptPrefix: '',
@@ -252,7 +252,7 @@ describe('attach', () => {
         fileSort: 'lines',
         insightsEntry: 'show',
         durationCurve: 'show',
-        overviewAutoSteps: '200',
+        overviewAutoSteps: '100',
         overviewRange: '30d',
         fleetTab: 'show',
         promptPrefix: '',
@@ -277,7 +277,7 @@ describe('attach', () => {
     assert.equal(s.defaultFileSort(), 'lines')
     assert.equal(s.insightsEntry(), 'show')
     assert.equal(s.defaultDurationCurve(), 'show')
-    assert.equal(s.overviewAutoSteps(), '200')
+    assert.equal(s.overviewAutoSteps(), '100')
     assert.equal(s.defaultOverviewRange(), '30d')
     assert.equal(s.fleetTab(), 'show')
     assert.equal(s.store.getSnapshot().promptPrefix, '', 'a non-string prompt value degrades to the empty default')
@@ -289,7 +289,7 @@ describe('attach', () => {
       ['defaultPlacement', 'tab', 42, 'all', () => s.defaultPlacement()],
       ['insightsEntry', 'hide', 'visible', 'show', () => s.insightsEntry()],
       ['defaultDurationCurve', 'hide', 'always', 'show', () => s.defaultDurationCurve()],
-      ['overviewAutoSteps', '100', '50', '200', () => s.overviewAutoSteps()],
+      ['overviewAutoSteps', '200', '50', '100', () => s.overviewAutoSteps()],
       ['defaultOverviewRange', '7d', 'quarter', '30d', () => s.defaultOverviewRange()],
     ]
     let s = createContextSettings()
@@ -395,7 +395,7 @@ describe('attach', () => {
       fileSort: 'lines',
       insightsEntry: 'show',
       durationCurve: 'show',
-      overviewAutoSteps: '200',
+      overviewAutoSteps: '100',
       overviewRange: '30d',
       fleetTab: 'show',
       promptPrefix: '',

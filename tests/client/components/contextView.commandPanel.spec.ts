@@ -98,24 +98,30 @@ describe('ContextView — command panel', () => {
       counts: { turns: 1, steps: 2, injects: 0, compactions: 0, prunes: 0 },
       detailRev: 2,
     })
-    vi.stubGlobal('fetch', async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {}
+      if ('beforeSeq' in body) {
+        return { ok: true, status: 200, json: async () => ({ ok: true, value: { commands: [], atStart: true, total: 1 } }) }
+      }
+      return {
         ok: true,
-        value: {
-          rev: 2,
-          requests: rich.requests,
-          events: rich.events,
-          nodes: rich.nodes,
-          droppedNodes: rich.droppedNodes,
-          archive: rich.archive,
-          commands: rich.commands,
-          commandsFloor: 1,
-          commandStats: { runs: 42, failed: 2, ms: 9100, bg: 0 },
-        },
-      }),
-    }))
+        status: 200,
+        json: async () => ({
+          ok: true,
+          value: {
+            rev: 2,
+            requests: rich.requests,
+            events: rich.events,
+            nodes: rich.nodes,
+            droppedNodes: rich.droppedNodes,
+            archive: rich.archive,
+            commands: rich.commands,
+            commandsFloor: 1,
+            commandStats: { runs: 42, failed: 2, ms: 9100, bg: 0 },
+          },
+        }),
+      }
+    })
     const View = makeView(new TestClientCtx())
     const m = await mount(h(View, { sessionId: 'sv-cmds-split', useProjection: projectionsFor(head) }))
     try {
@@ -124,7 +130,8 @@ describe('ContextView — command panel', () => {
       assert.ok(card !== undefined)
       const kpi = query(card, '.lc-cmd-kpi b')
       assert.ok(kpi !== undefined && text(kpi) === '42', 'the whole-log tally rides the detail')
-      assert.ok(text(card).includes('Covering the latest 1 runs'), 'the floor note rides the detail')
+      await until(() => queryAll(card, '.lc-cmd-floor').length === 0, 'the history fill never completed')
+      assert.ok(!text(card).includes('Covering'), 'a completed fill drops the floor note')
     } finally {
       await m.unmount()
     }

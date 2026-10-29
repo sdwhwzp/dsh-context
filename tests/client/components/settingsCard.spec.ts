@@ -14,7 +14,7 @@ function hookFor(state: SettingsState) {
 }
 
 function stateOf(partial: Partial<SettingsState> = {}): SettingsState {
-  return { status: 'ready', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'count', insightsEntry: 'show', durationCurve: 'show', overviewAutoSteps: '200', overviewRange: '30d', fleetTab: 'show', promptPrefix: '', promptSuffix: '', writable: true, ...partial }
+  return { status: 'ready', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'count', insightsEntry: 'show', durationCurve: 'show', overviewAutoSteps: '100', overviewRange: '30d', fleetTab: 'show', promptPrefix: '', promptSuffix: '', writable: true, ...partial }
 }
 
 /** Menu items portaled into document.body while a select is open. */
@@ -115,7 +115,7 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
     assert.ok(text(m.container).includes(DICT_EN['settings.durationCurve']))
     assert.ok(text(selects[6]).includes(DICT_EN['showHide.show']))
     assert.ok(text(m.container).includes(DICT_EN['settings.overviewAuto']))
-    assert.ok(text(selects[7]).includes(stepsLabel(200)))
+    assert.ok(text(selects[7]).includes(stepsLabel(100)))
     assert.ok(text(m.container).includes(DICT_EN['settings.deltaBase']))
     assert.ok(text(selects[8]).includes(DICT_EN['browser.base.step']))
     assert.ok(text(m.container).includes(DICT_EN['settings.toolSort']))

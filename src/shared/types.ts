@@ -324,6 +324,15 @@ export interface ContextTimelineDetail {
 
 export type CommandStatus = 'running' | 'completed' | 'failed' | 'killed'
 
+/** One paged read of the complete command log behind the command card's incremental history fill. */
+export interface CommandPage {
+  commands: CommandRecord[]
+  /** The page reached the log's oldest record. */
+  atStart: boolean
+  /** The complete log's record count at this read, for the fill's progress note. */
+  total: number
+}
+
 /** One shell/code execution, folded from `tool/call` (creation) paired with `tool/result` and — on hosts that log them —
  * `job/registered` / `job/settled` (precise timing and outcome). Without job events the timing/exit are envelope-derived
  * (`derived: true`). Nested Code-Mode dispatches carry `parent` (their run_code result's seq, the locate target).

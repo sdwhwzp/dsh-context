@@ -5,6 +5,7 @@ import { DICT_EN, DICT_ZH } from './i18n'
 import { registerContextCommand } from './command'
 import { makeContextModal } from './components/contextModal'
 import { makeOverviewPanel } from './components/overviewPanel'
+import { resetSessionWarm } from './prefetch'
 import { makePluginConfigCard } from './components/settingsCard'
 import { watchInsightPage } from './insightPage'
 import { modalStoreOf } from './modalStore'
@@ -58,6 +59,8 @@ function apply(ctx: ClientCtx): void {
   const t = ctx.locale.bind(NS)
 
   const kit = makeViewKit(t, ctx.locale)
+  // A plugin unload clears any warm-up timer that outlived its session overlay.
+  ctx.effect(() => resetSessionWarm, 'dsh-context: warm-up timers')
   // History faces ride the DECLARED inject: an undeclared read of the traced proxy throws (historyPage.ts).
   watchHistoryFaces(ctx)
   const settings = createContextSettings()
@@ -101,7 +104,7 @@ function apply(ctx: ClientCtx): void {
         id: 'context-modal',
         order: 10,
         locale: NS,
-        inject: (sessionId = '') => ({ hooks: { contextModal: modalStoreOf(sessionId) } }) },
+        inject: (sessionId = '') => ({ hooks: { contextModal: modalStoreOf(sessionId) }, warm: true }) },
       props => h(ContextModal, props),
     )
   })

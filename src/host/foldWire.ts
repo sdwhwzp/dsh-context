@@ -7,7 +7,7 @@ import type { FoldBounds } from './config'
 import type { CommandStateRecord, TimelineState } from './foldState'
 
 /** The served command record: the fold's pairing key (`call`) never crosses the wire. */
-function serveCommand(rec: CommandStateRecord): CommandRecord {
+export function serveCommand(rec: CommandStateRecord): CommandRecord {
   const copy: CommandStateRecord = { ...rec }
   delete copy.call
   return copy

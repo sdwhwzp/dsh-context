@@ -326,7 +326,7 @@ describe('ContextModal', () => {
 
 describe('ContextModal — the split generation', () => {
   test('the modal shares the detail route: the browser lands the collections on open; a subagent body reads under its parent address', async () => {
-    vi.stubGlobal('fetch', async () => ({
+    const response = {
       ok: true,
       status: 200,
       json: async () => ({
@@ -340,7 +340,14 @@ describe('ContextModal — the split generation', () => {
           archive: [],
         },
       }),
-    }))
+    }
+    let release!: () => void
+    let reads = 0
+    vi.stubGlobal('fetch', () => {
+      reads++
+      if (reads === 1) return new Promise(res => { release = () => res(response) })
+      return Promise.resolve(response)
+    })
     const ctx = new TestClientCtx({ services: { sessions: new TestSessions() } })
     const ContextModal = makeContextModal(asClientCtx(ctx), kit, settings)
     const head = timeline({
@@ -351,6 +358,8 @@ describe('ContextModal — the split generation', () => {
     const m = await mount(h(ContextModal, { sessionId: 'sm-slim', useContextModal: OPEN, useProjection: (key: string) => (key === 'contextTimeline' ? head : undefined), }))
     assert.ok(text(document.body).includes(DICT_EN['overview.title']))
     assert.ok(text(document.body).includes(DICT_EN['detail.loading']))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+    await act(async () => { release() })
     await until(() => !text(document.body).includes(DICT_EN['detail.loading']), 'the modal detail never landed')
     assert.equal(queryAll(document.body, '.lc-br-pick option').length, 2, 'live + the one served step')
     assert.ok(text(document.body).includes('1 Item'), 'the assistant section counts the served node')
@@ -442,5 +451,30 @@ describe('ContextModal — the split generation', () => {
     assert.deepEqual(calls, [{ sessionId: 'sm-race', throughSeq: 1, beforeSeq: 2 }])
     await m.unmount()
     ctx.dispose()
+  })
+})
+
+describe('ContextModal — opt-in session warm-up', () => {
+  test('the registration opt-in warms the split head once per session, not the closed dialog body', async () => {
+    vi.useFakeTimers()
+    const reads: string[] = []
+    vi.stubGlobal('fetch', async (_url: unknown, init?: { body?: string }) => {
+      reads.push(JSON.parse(init?.body ?? '{}').sessionId as string)
+      return { ok: true, status: 200, json: async () => ({ ok: true, value: {
+        rev: 2, requests: [], events: [], nodes: [], droppedNodes: 0, archive: [],
+        head: timeline({ detailRev: 2 }),
+      } }) }
+    })
+    const ctx = new TestClientCtx({ services: { sessions: new TestSessions() } })
+    const ContextModal = makeContextModal(asClientCtx(ctx), kit, settings)
+    const m = await mount(h(ContextModal, {
+      sessionId: 'sm-warm', warm: true, useContextModal: () => false,
+      useProjection: () => timeline({ detailRev: 2 }),
+    }))
+    assert.equal(m.container.childElementCount, 0)
+    await act(async () => { await vi.advanceTimersByTimeAsync(900) })
+    assert.deepEqual(reads, ['sm-warm'])
+    await m.unmount()
+    vi.useRealTimers()
   })
 })

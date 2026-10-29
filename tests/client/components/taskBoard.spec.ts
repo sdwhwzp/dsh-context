@@ -244,6 +244,36 @@ describe('TaskBoard — the owner-grouped board', () => {
     await clearing.unmount()
   })
 
+  test('controlled hover and pin mark matching task rows without changing their expansion', async () => {
+    const m = await mount(h(TaskBoard, propsOf({ hoverId: 'w1', pinnedId: 's1' })))
+    const worker = query(m.container, '[data-task="task-1"]')
+    const scout = query(m.container, '[data-task="s1"]')
+    const other = query(m.container, '[data-task="s2"]')
+    assert.ok(worker.className.includes('lc-team-task-hover'))
+    assert.ok(!worker.className.includes('lc-team-task-related'))
+    assert.ok(scout.className.includes('lc-team-task-related'))
+    assert.ok(!scout.className.includes('lc-team-task-hover'))
+    assert.ok(!other.className.includes('lc-team-task-hover'))
+    assert.ok(!other.className.includes('lc-team-task-related'))
+    assert.equal(worker.getAttribute('aria-expanded'), 'false')
+    assert.ok(worker.getAttribute('style')?.includes('--lc-member-hue'))
+    assert.ok(scout.getAttribute('style')?.includes('--lc-member-hue'))
+    await m.unmount()
+  })
+
+  test('expanded rows keep a distinct open state alongside the owner selection', async () => {
+    const m = await mount(h(TaskBoard, propsOf({ pinnedId: 'w1' })))
+    const row = query(m.container, '[data-task="task-1"]')
+    await click(row)
+    assert.ok(row.className.includes('lc-team-task-open'))
+    assert.ok(row.className.includes('lc-team-task-related'))
+    assert.ok(query(row, '.lc-team-task-chevron') !== null)
+    await click(row)
+    assert.ok(!row.className.includes('lc-team-task-open'))
+    assert.ok(row.className.includes('lc-team-task-related'))
+    await m.unmount()
+  })
+
   test('the pending pool reads ready-first; the dependency line carries the blocker’s own dot', async () => {
     const m = await mount(h(TaskBoard, propsOf({ ownerFilter: null })))
     const worker = queryAll(m.container, '.lc-tasks-group')[0]

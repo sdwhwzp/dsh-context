@@ -9,6 +9,7 @@ import { createToolAttribution } from './attribution'
 import { watchBalanceChannel } from './balance'
 import { watchActivityBackfill } from './backfill'
 import { makeColdReadGate } from './coldRead'
+import { watchCommandPageChannel } from './commandPages'
 import { Config, resolveBounds } from './config'
 import { watchDetailChannel } from './detail'
 import { createFallbackActivityDefinition, createFallbackHeadersDefinition, createFallbackTimelineDefinition } from './fallback'
@@ -49,6 +50,7 @@ export function apply(ctx: Context, config: Config): void {
   watchStepIdentity(ctx)
   // The unit's view reads the gate per serve: slim wire while the detail channel is live, inline otherwise.
   const gate = watchDetailChannel(ctx, resolveBounds(config), coldReads)
+  watchCommandPageChannel(ctx, resolveBounds(config), coldReads)
   ctx.sessionProjections.register(createContextTimelineDefinition(config, () => gate.live))
   ctx.sessionProjections.register(createContextHeadersDefinition(name => attribution.ownerOf(name)))
   ctx.sessionProjections.register(createContextActivityDefinition())

@@ -82,8 +82,11 @@ describe('viewsOf — one derivation per record', () => {
     const views = viewsOf([
       cmd(1, { cmd: "cd /repo && python3 - <<'PY'\nprint(1)\nPY" }),
       cmd(2, { tool: 'run_code', cmd: 'await x()', status: 'running' }),
+      cmd(3, { cmd: '   ' }),
+      cmd(4, { tool: 'pwsh', cmd: '   ' }),
     ], '/repo')
-    assert.deepEqual(views.map(v => v.program), ['python3', 'run_code'])
+    assert.deepEqual(views.map(v => v.program), ['python3', 'run_code', 'shell', 'pwsh'])
+    assert.deepEqual(views.map(v => v.programs), [['python3'], ['run_code'], ['shell'], ['pwsh']])
     assert.equal(views[0].preview, "python3 - <<'PY'")
     assert.deepEqual(views[0].shape, { lines: 3, heredoc: true, inline: false })
     assert.deepEqual(views[1].shape, { lines: 1, heredoc: false, inline: false })
@@ -118,6 +121,8 @@ describe('filters, search, and sort', () => {
     const rec = cmd(1, { cmd: 'git status' })
     assert.equal(matchesQuery(rec, 'my-program', 'my-program'), true, 'a supplied program is the one searched')
     assert.equal(matchesQuery(rec, 'my-program'), false)
+    assert.equal(matchesQuery(cmd(1, { cmd: 'git status && my\\ cmd' }), 'my cmd', ['git', 'my cmd']), true, 'any contained program matches')
+    assert.equal(matchesQuery(cmd(1, { cmd: 'git status' }), 'my cmd', ['git']), false)
   })
 
   test('latest is time-descending with a seq tie-break; slowest puts duration-less runs last', () => {
@@ -161,11 +166,39 @@ describe('the rail derivations', () => {
       cmd(6, { cmd: 'git log' }),
     ]
     assert.deepEqual(programsOf(viewsOf(records, undefined)), [
-      { name: 'git', n: 3 },
-      { name: 'grep', n: 1 },
-      { name: 'pnpm', n: 1 },
-      { name: 'run_code', n: 1 },
+      { name: 'git', n: 3, runs: 3 },
+      { name: 'grep', n: 1, runs: 1 },
+      { name: 'pnpm', n: 1, runs: 1 },
+      { name: 'run_code', n: 1, runs: 1 },
     ])
+  })
+
+  test('programsOf counts every invocation and each containing run once', () => {
+    const views = viewsOf([
+      cmd(1, { cmd: 'grep foo a | grep -v bar && grep -c baz b' }),
+      cmd(2, { cmd: 'echo hi && cat package.json' }),
+      cmd(3, { cmd: 'cat README.md' }),
+    ], undefined)
+    assert.deepEqual(views.map(v => v.program), ['grep', 'echo', 'cat'])
+    assert.deepEqual(programsOf(views), [
+      { name: 'grep', n: 3, runs: 1 },
+      { name: 'cat', n: 2, runs: 2 },
+      { name: 'echo', n: 1, runs: 1 },
+    ])
+    assert.deepEqual(programsOf(viewsOf([
+      cmd(1, { cmd: 'git status && git diff' }),
+      cmd(2, { cmd: 'git log' }),
+      cmd(3, { cmd: 'git status' }),
+      cmd(4, { cmd: 'git branch' }),
+    ], undefined)), [{ name: 'git', n: 5, runs: 4 }])
+  })
+
+  test('attentionOf counts each failed run once per contained program', () => {
+    const attention = attentionOf(viewsOf([
+      cmd(1, { cmd: 'git status && cat missing', status: 'failed' }),
+      cmd(2, { cmd: 'cat one && cat two', status: 'failed' }),
+    ], undefined))
+    assert.deepEqual(attention.failing, { program: 'cat', count: 2 })
   })
 
   test('attentionOf ranks slowest, most-failed, repeats, and background; ties keep the first pick; nothing notable stays empty', () => {

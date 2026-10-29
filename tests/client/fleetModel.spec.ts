@@ -128,16 +128,16 @@ describe('useFleetModel', () => {
   })
 })
 
-describe('useFleetDetails', () => {
-  function probeDetails(cache: FleetDetailCache): { box: { current: FleetDetailState | null }; Probe: () => null } {
-    const box: { current: FleetDetailState | null } = { current: null }
-    function Probe(): null {
-      box.current = useFleetDetails(cache)
-      return null
-    }
-    return { box, Probe }
+function probeDetails(cache: FleetDetailCache, options?: { concurrency?: number; refreshDelayMs?: number }): { box: { current: FleetDetailState | null }; Probe: () => null } {
+  const box: { current: FleetDetailState | null } = { current: null }
+  function Probe(): null {
+    box.current = useFleetDetails(cache, options)
+    return null
   }
+  return { box, Probe }
+}
 
+describe('useFleetDetails', () => {
   function detailCache(serve: (id: string) => FleetDetail | null): FleetDetailCache {
     const cache = new FleetDetailCache()
     vi.spyOn(cache, 'fetch').mockImplementation((id: string) => Promise.resolve(serve(id)))
@@ -326,4 +326,122 @@ describe('useFleetDetails', () => {
     await m.unmount()
   })
 
+})
+
+describe('useFleetDetails scheduling', () => {
+  test('a bounded concurrency queue fills in order and drains pending exactly once', async () => {
+    const cache = new FleetDetailCache()
+    const releases: Array<{ id: string; release: (d: FleetDetail | null) => void }> = []
+    vi.spyOn(cache, 'fetch').mockImplementation((id: string) => new Promise((resolve) => {
+      releases.push({ id, release: resolve })
+    }))
+    const { box, Probe } = probeDetails(cache, { concurrency: 1 })
+    const m = await mount(h(Probe))
+    const state = box.current as FleetDetailState
+    act(() => {
+      state.request('a', 1)
+      state.request('b', 1)
+    })
+    assert.equal(box.current?.pending.size, 2)
+    assert.deepEqual(releases.map(r => r.id), ['a'])
+    await act(async () => { releases[0].release({ messages: [], truncated: false }) })
+    assert.deepEqual(releases.map(r => r.id), ['a', 'b'])
+    assert.equal(box.current?.pending.has('a'), false)
+    assert.equal(box.current?.pending.has('b'), true)
+    await act(async () => { releases[1].release({ messages: [], truncated: false }) })
+    assert.equal(box.current?.pending.size, 0)
+    assert.equal(box.current?.landed.size, 2)
+    await m.unmount()
+  })
+
+  test('a landed card debounces its refresh and keeps the old detail visible meanwhile', async () => {
+    vi.useFakeTimers()
+    const reads: number[] = []
+    const cache = new FleetDetailCache()
+    vi.spyOn(cache, 'fetch').mockImplementation((_id: string, stamp: number) => {
+      reads.push(stamp)
+      return Promise.resolve({ messages: [], truncated: false })
+    })
+    const { box, Probe } = probeDetails(cache, { refreshDelayMs: 50 })
+    const m = await mount(h(Probe))
+    const state = box.current as FleetDetailState
+    act(() => { state.request('a', 1) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    assert.equal(box.current?.landed.get('a')?.updatedAt, 1)
+    act(() => { (box.current as FleetDetailState).request('a', 2) })
+    assert.equal(box.current?.pending.has('a'), false, 'a refresh never blanks a landed card')
+    assert.deepEqual(reads, [1])
+    await act(async () => { await vi.advanceTimersByTimeAsync(40) })
+    assert.deepEqual(reads, [1], 'the window holds')
+    await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+    assert.deepEqual(reads, [1, 2])
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    assert.equal(box.current?.landed.get('a')?.updatedAt, 2)
+    await m.unmount()
+    vi.useRealTimers()
+  })
+})
+
+describe('useFleetDetails — failure and queue replacement', () => {
+  test('a rejected read settles its pending mark without landing', async () => {
+    const cache = new FleetDetailCache()
+    vi.spyOn(cache, 'fetch').mockRejectedValue(new Error('offline'))
+    const { box, Probe } = probeDetails(cache)
+    const m = await mount(h(Probe))
+    act(() => { (box.current as FleetDetailState).request('a', 1) })
+    await act(async () => {})
+    assert.equal(box.current?.pending.size, 0)
+    assert.equal(box.current?.landed.size, 0)
+    await m.unmount()
+  })
+
+  test('a queued id keeps only its newest stamp while the slot is busy', async () => {
+    const cache = new FleetDetailCache()
+    const releases: Array<{ id: string; stamp: number; release: (d: FleetDetail | null) => void }> = []
+    vi.spyOn(cache, 'fetch').mockImplementation((id: string, stamp: number) => new Promise((resolve) => {
+      releases.push({ id, stamp, release: resolve })
+    }))
+    const { box, Probe } = probeDetails(cache, { concurrency: 1 })
+    const m = await mount(h(Probe))
+    act(() => {
+      ;(box.current as FleetDetailState).request('a', 1)
+      ;(box.current as FleetDetailState).request('b', 1)
+      ;(box.current as FleetDetailState).request('b', 2)
+    })
+    assert.deepEqual(releases.map(r => `${r.id}@${r.stamp}`), ['a@1'])
+    await act(async () => { releases[0].release(null) })
+    assert.deepEqual(releases.map(r => `${r.id}@${r.stamp}`), ['a@1', 'b@2'])
+    await act(async () => { releases[1].release(null) })
+    assert.equal(box.current?.landed.get('b')?.updatedAt, 2)
+    await m.unmount()
+  })
+})
+
+describe('useFleetDetails — refresh window edges', () => {
+  test('a newer stamp resets the armed window, and unmount cancels it', async () => {
+    vi.useFakeTimers()
+    const reads: number[] = []
+    const cache = new FleetDetailCache()
+    vi.spyOn(cache, 'fetch').mockImplementation((_id: string, stamp: number) => {
+      reads.push(stamp)
+      return Promise.resolve({ messages: [], truncated: false })
+    })
+    const { box, Probe } = probeDetails(cache, { refreshDelayMs: 50 })
+    const m = await mount(h(Probe))
+    act(() => { (box.current as FleetDetailState).request('a', 1) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    act(() => { (box.current as FleetDetailState).request('a', 2) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(30) })
+    act(() => { (box.current as FleetDetailState).request('a', 3) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(40) })
+    assert.deepEqual(reads, [1], 'the first window was reset by the newer stamp')
+    await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+    assert.deepEqual(reads, [1, 3])
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    act(() => { (box.current as FleetDetailState).request('a', 4) })
+    await m.unmount()
+    await vi.advanceTimersByTimeAsync(100)
+    assert.deepEqual(reads, [1, 3], 'an unmounted card never fires its pending refresh')
+    vi.useRealTimers()
+  })
 })

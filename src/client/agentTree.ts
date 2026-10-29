@@ -81,11 +81,16 @@ const CARD_GUTTER = 12
 const LEVEL_H = AGENT_CARD_H + 64
 const PAD_Y = 48
 
+/** Session-list rows are immutable snapshots, so one derivation per row object serves every panel and every push. */
+const rowCache = new WeakMap<object, AgentRow>()
+
 export function agentRowOf(value: unknown): AgentRow | null {
   const rec = asRecord(value)
   if (rec === null) return null
+  const cached = rowCache.get(rec)
+  if (cached !== undefined) return cached
   const projections = asRecord(rec.projectionValues)
-  return {
+  const row: AgentRow = {
     ...(typeof rec.displayTitle === 'string' ? { displayTitle: rec.displayTitle } : {}),
     ...(typeof rec.title === 'string' ? { title: rec.title } : {}),
     ...(typeof rec.parentId === 'string' ? { parentId: rec.parentId } : {}),
@@ -95,6 +100,8 @@ export function agentRowOf(value: unknown): AgentRow | null {
     updatedAt: numOf(rec.updatedAt),
     ...(projections !== null ? { projections } : {}),
   }
+  rowCache.set(rec, row)
+  return row
 }
 
 /** A family edge is a subagent child only: a fork seed carries `parentId` but no `origin`, so it roots its own family. */
@@ -338,24 +345,36 @@ export function agentForestOf(
 /** Display titles for every row in a sessions snapshot, so a party outside the viewed family still has a readable name.
  * A teammate session's generated title can be its injected `<system-reminder>` briefing; its subagent descriptor label is
  * the clean fallback. */
-export function sessionTitlesOf(snapshot: unknown): Map<string, string> {
-  const byId = asRecord(asRecord(snapshot)?.byId)
-  const titles = new Map<string, string>()
-  if (byId === null) return titles
+const titleCache = new WeakMap<object, string | null>()
+
+function titleOfRow(value: unknown): string | null {
+  const rec = asRecord(value)
+  if (rec === null) return null
+  const cached = titleCache.get(rec)
+  if (cached !== undefined) return cached
+  const row = agentRowOf(value)
   const clean = (text: string | undefined): string | undefined => {
     if (text === undefined || text.trim() === '') return undefined
     return text.includes('<system-reminder>') ? undefined : text
   }
+  // The descriptor label is read only when no clean title exists, so a corrupt descriptor cannot hide a title.
+  const label = (): string | undefined => {
+    const subagent = asRecord(asRecord(rec.projectionValues)?.subagent)
+    return typeof subagent?.label === 'string' && subagent.label !== '' ? subagent.label : undefined
+  }
+  const name = clean(row?.displayTitle) ?? clean(row?.title) ?? label() ?? null
+  titleCache.set(rec, name)
+  return name
+}
+
+export function sessionTitlesOf(snapshot: unknown): Map<string, string> {
+  const byId = asRecord(asRecord(snapshot)?.byId)
+  const titles = new Map<string, string>()
+  if (byId === null) return titles
   for (const id of Object.keys(byId)) {
     try {
-      const value = byId[id]
-      const row = agentRowOf(value)
-      let name = clean(row?.displayTitle) ?? clean(row?.title)
-      if (name === undefined) {
-        const subagent = asRecord(asRecord(asRecord(value)?.projectionValues)?.subagent)
-        name = typeof subagent?.label === 'string' && subagent.label !== '' ? subagent.label : undefined
-      }
-      if (name !== undefined) titles.set(id, name)
+      const name = titleOfRow(byId[id])
+      if (name !== null) titles.set(id, name)
     } catch {
       // A corrupt session descriptor cannot hide other parties' names.
     }

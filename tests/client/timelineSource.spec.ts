@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { describe, test, vi, afterEach, beforeEach } from 'vitest'
 import {
   DetailStore,
+  detailBytesOf,
   detailOf,
   detailStoreOf,
   makeDetailFetcher,
@@ -622,11 +623,13 @@ describe('useTimelineSource', () => {
     vi.useFakeTimers()
     const response = (value: ContextTimelineDetail) => ({ ok: true, json: async () => ({ ok: true, value }) })
     let resolve!: (value: ReturnType<typeof response>) => void
+    let resolveSecond!: (value: ReturnType<typeof response>) => void
     let calls = 0
     const first = new Promise<ReturnType<typeof response>>(res => { resolve = res })
+    const second = new Promise<ReturnType<typeof response>>(res => { resolveSecond = res })
     vi.stubGlobal('fetch', () => {
       calls++
-      return calls === 1 ? first : Promise.resolve(response(detail(2)))
+      return calls === 1 ? first : second
     })
     const m = await mount(h(SourceProbe, { sessionId: 's1', value: slimHead(5) }))
     try {
@@ -642,6 +645,11 @@ describe('useTimelineSource', () => {
       assert.equal(probeRead(m.container, 'steps'), '0', 'no rows from the discarded generation')
       await act(async () => { await vi.advanceTimersByTimeAsync(300) })
       assert.equal(calls, 2)
+      assert.equal(probeRead(m.container, 'state'), 'loading')
+      await act(async () => {
+        resolveSecond(response(detail(2)))
+        await vi.advanceTimersByTimeAsync(0)
+      })
       assert.equal(probeRead(m.container, 'state'), 'ready')
       assert.equal(detailStoreOf('s1').getSnapshot().detail?.rev, 2)
     } finally {
@@ -678,9 +686,14 @@ describe('useTimelineSource', () => {
   })
 
   test('the cold start: no pushed value opens the channel itself and renders from the read', async () => {
-    stubDetailFetch(() => ({ body: { ok: true, value: detail(2, { head: slimHead(2) }) } }))
+    let resolveRead!: () => void
+    vi.stubGlobal('fetch', () => new Promise(res => {
+      resolveRead = () => { res({ ok: true, status: 200, json: async () => ({ ok: true, value: detail(2, { head: slimHead(2) }) }) }) }
+    }))
     const m = await mount(h(SourceProbe, { sessionId: 's1', value: undefined }))
     assert.equal(probeRead(m.container, 'state'), 'loading')
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+    await act(async () => { resolveRead() })
     await until(() => probeRead(m.container, 'state') === 'ready', 'the cold read never landed')
     assert.equal(probeRead(m.container, 'model'), 'm', 'the read head renders')
     assert.equal(probeRead(m.container, 'rev'), '2')
@@ -737,30 +750,43 @@ describe('useTimelineSource', () => {
       await until(() => probeRead(m.container, 'state') === 'failed', `the ${label} cold start never surfaced its failure`)
       await m.unmount()
     }
-    stubDetailFetch(() => ({ body: { ok: true, value: detail(1, { head: slimHead(1) }) } }))
+    let emptyCalls = 0
+    stubDetailFetch(() => {
+      emptyCalls++
+      return { body: { ok: true, value: detail(1, { head: slimHead(1) }) } }
+    })
     const m = await mount(h(SourceProbe, { sessionId: '', value: undefined }))
-    await until(() => probeRead(m.container, 'state') === 'failed', 'the empty-id cold start never surfaced')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    assert.equal(probeRead(m.container, 'state'), 'loading', 'no session address keeps the waiting screen')
+    assert.equal(emptyCalls, 0, 'no session address opens no channel')
     await m.unmount()
   })
 
   test('the split generation: counters render off the head immediately, the detail lands through the channel', async () => {
-    stubDetailFetch(() => ({
-      body: {
+    let resolveRead!: () => void
+    vi.stubGlobal('fetch', () => new Promise(res => {
+      resolveRead = () => { res({
         ok: true,
-        value: detail(3, {
-          surfaceFloor: 2,
-          archiveFloor: 5,
-          fileOps: [{ seq: 2, path: 'a.ts', kind: 'read', tool: 'read', err: false, added: 0, removed: 0 }],
-          fileOpsFloor: 4,
-          spans: [{ kind: 'ttft', start: 0, end: 100 }, { kind: 'other', start: 100, end: 1_400 }],
+        status: 200,
+        json: async () => ({
+          ok: true,
+          value: detail(3, {
+            surfaceFloor: 2,
+            archiveFloor: 5,
+            fileOps: [{ seq: 2, path: 'a.ts', kind: 'read', tool: 'read', err: false, added: 0, removed: 0 }],
+            fileOpsFloor: 4,
+            spans: [{ kind: 'ttft', start: 0, end: 100 }, { kind: 'other', start: 100, end: 1_400 }],
+          }),
         }),
-      },
+      }) }
     }))
     const m = await mount(h(SourceProbe, { sessionId: 's1', value: slimHead(3) }))
     assert.equal(probeRead(m.container, 'state'), 'loading')
     assert.equal(probeRead(m.container, 'turns'), '1', 'the head counters render before the detail lands')
     assert.equal(probeRead(m.container, 'steps'), '0', 'the collections wait for the channel')
     assert.equal(probeRead(m.container, 'floors'), 'x/x', 'no floors before the detail')
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+    await act(async () => { resolveRead() })
     await until(() => probeRead(m.container, 'state') === 'ready', 'the detail never landed')
     assert.equal(probeRead(m.container, 'steps'), '1', 'the merged requests serve')
     assert.equal(probeRead(m.container, 'rev'), '3')
@@ -807,5 +833,228 @@ describe('useTimelineSource', () => {
     const m = await mount(h(SourceProbe, { sessionId: 's1', value: slimHead(1) }))
     await until(() => probeRead(m.container, 'state') === 'failed', 'absence never surfaced')
     await m.unmount()
+  })
+})
+
+describe('DetailStore — eager first read, warm-up, and the byte budget', () => {
+  test('the first read starts a frame after request; later revisions keep the trailing window', async () => {
+    vi.useFakeTimers()
+    const { fetcher, calls } = {
+      calls: [] as number[],
+      fetcher: async () => { calls.push(Date.now()); return detail(calls.length) },
+    }
+    const store = new DetailStore(fetcher, 300, true)
+    store.subscribe(() => {})
+    store.request(1)
+    assert.equal(store.getSnapshot().pending, true)
+    await vi.advanceTimersByTimeAsync(15)
+    assert.equal(calls.length, 0, 'the head frame paints before the read')
+    await vi.advanceTimersByTimeAsync(1)
+    assert.equal(calls.length, 1)
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(store.getSnapshot().detail?.rev, 1)
+    store.request(2)
+    await vi.advanceTimersByTimeAsync(20)
+    assert.equal(calls.length, 1, 'a landed store debounces later revisions')
+    await vi.advanceTimersByTimeAsync(300)
+    assert.equal(calls.length, 2)
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(store.getSnapshot().detail?.rev, 2)
+    vi.useRealTimers()
+  })
+
+  test('warm without subscribers reads at once, refreshes a newer revision, and reports its live weight', async () => {
+    let calls = 0
+    const store = new DetailStore(async () => { calls++; return detail(calls, { nodes: Array.from({ length: 100 }, (_, i) => ({ seq: i, cat: 'user', tokens: 1 })) }) }, 300, true)
+    store.warm(1)
+    await until(() => store.getSnapshot().detail?.rev === 1, 'the warm read never landed')
+    assert.equal(calls, 1)
+    assert.ok(store.byteSize >= detailBytesOf(detail(1)))
+    assert.equal(store.active, false, 'a warm-up arms no subscriber')
+    store.warm(1)
+    await new Promise(resolve => setTimeout(resolve, 5))
+    assert.equal(calls, 1, 'a covered revision does not reread')
+    store.warm(3)
+    await until(() => store.getSnapshot().detail?.rev === 2, 'the newer warm read never landed')
+    assert.equal(calls, 2)
+  })
+
+  test('a monster detail is demoted against the page byte budget before the smallest cached detail', async () => {
+    vi.useFakeTimers()
+    const huge = detail(1, { nodes: Array.from({ length: 3_000 }, (_, i) => ({ seq: i, cat: 'user', tokens: 1 })) })
+    vi.stubGlobal('fetch', async (_url: unknown, init?: { body?: string }) => {
+      const id = JSON.parse(init?.body ?? '{}').sessionId as string
+      return { ok: true, status: 200, json: async () => ({ ok: true, value: id.startsWith('huge') ? huge : detail(1, { nodes: [{ seq: 1, cat: 'user', tokens: 1 }] }) }) }
+    })
+    const small = detailStoreOf('small')
+    const offSmall = small.subscribe(() => {})
+    small.request(1)
+    await vi.advanceTimersByTimeAsync(20)
+    assert.equal(small.hasPayload, true)
+    const hugeStores: DetailStore[] = []
+    for (let i = 0; i < 10; i++) {
+      const store = detailStoreOf('huge-' + i)
+      const off = store.subscribe(() => {})
+      store.request(1)
+      await vi.advanceTimersByTimeAsync(20)
+      off()
+      hugeStores.push(store)
+    }
+    assert.equal(small.hasPayload, true, 'the small payload survives the budget')
+    assert.ok(hugeStores.filter(store => store.hasPayload).length < hugeStores.length, 'the burst is trimmed')
+    offSmall()
+    vi.useRealTimers()
+  })
+
+  test('detailBytesOf weighs every served collection', () => {
+    const base = detailBytesOf(detail(1))
+    assert.ok(detailBytesOf(detail(1, { requests: [1, 2, 3] })) > base)
+    assert.ok(detailBytesOf(detail(1, { fileOps: [{ seq: 1, path: 'a', kind: 'read', tool: 'read', err: false, added: 0, removed: 0 }] })) > base)
+    assert.ok(detailBytesOf(detail(1, { commands: [{ seq: 1, time: 1, tool: 'bash', cmd: 'ls', start: 1, status: 'completed', err: false }] })) > base)
+    assert.ok(detailBytesOf(detail(1, { spans: [{ kind: 'ttft', start: 0, end: 1 }] })) > base)
+  })
+})
+
+describe('DetailStore — warm over an armed window', () => {
+  test('warm cancels a pending trailing window and reads at once', async () => {
+    vi.useFakeTimers()
+    let calls = 0
+    const store = new DetailStore(async () => { calls++; return detail(1) }, 300, false)
+    store.subscribe(() => {})
+    store.request(1)
+    assert.equal(store.getSnapshot().pending, true)
+    store.warm(1)
+    assert.equal(store.getSnapshot().pending, true)
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(calls, 1, 'warm started the read without waiting for the 300ms window')
+    await vi.advanceTimersByTimeAsync(300)
+    assert.equal(calls, 1, 'the cancelled window never fires a second read')
+    vi.useRealTimers()
+  })
+})
+
+describe('DetailStore — warm while a read is in flight', () => {
+  test('an in-flight warm does not stack a second read', async () => {
+    let calls = 0
+    let release!: (d: ContextTimelineDetail | null) => void
+    const store = new DetailStore(() => {
+      calls++
+      return new Promise<ContextTimelineDetail | null>((resolve) => { release = resolve })
+    }, 300, true)
+    store.warm(1)
+    await until(() => calls === 1, 'the first warm read never started')
+    store.warm(2)
+    assert.equal(calls, 1)
+    release(detail(1))
+    await until(() => store.getSnapshot().detail?.rev === 1, 'the first read never landed')
+    assert.equal(calls, 1, 'warm during the flight stacked nothing')
+  })
+})
+
+describe('DetailStore — a served revision behind the head', () => {
+  test('a current lower revision lands once and waits for the next head push instead of polling', async () => {
+    let calls = 0
+    const store = new DetailStore(async () => { calls++; return detail(1) }, 0, false)
+    store.subscribe(() => {})
+    store.request(2)
+    await until(() => store.getSnapshot().detail?.rev === 1, 'the lower revision never landed')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(calls, 1, 'no trailing poll chases the same head revision')
+    store.request(2)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    assert.equal(calls, 2, 'a later request for the same head retries once')
+  })
+
+  test('a failed warm-up with no reader never retries in the background', async () => {
+    vi.useFakeTimers()
+    let calls = 0
+    const store = new DetailStore(async () => { calls++; throw new Error('offline') }, 10, true)
+    store.warm(1)
+    await vi.advanceTimersByTimeAsync(1000)
+    assert.equal(calls, 1)
+    vi.useRealTimers()
+  })
+})
+
+describe('DetailStore — a failed warm-up leaves the view a clean retry', () => {
+  test('a background failure resets the target so the mounted view reads again', async () => {
+    let calls = 0
+    const store = new DetailStore(async () => { calls++; return calls === 1 ? Promise.reject(new Error('offline')) : Promise.resolve(detail(1)) }, 0, true)
+    store.warm(1)
+    await until(() => store.getSnapshot().failed, 'the warm failure never surfaced')
+    const off = store.subscribe(() => {})
+    store.request(1)
+    await until(() => store.getSnapshot().detail?.rev === 1, 'the view never refetched after the warm failure')
+    assert.equal(calls, 2)
+    off()
+  })
+})
+
+describe('DetailStore — one bounded catch-up', () => {
+  test('a current revision behind the head gets exactly one delayed re-read', async () => {
+    vi.useFakeTimers()
+    let calls = 0
+    const store = new DetailStore(async () => { calls++; return detail(1) }, 0, false)
+    store.subscribe(() => {})
+    store.request(2)
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(store.getSnapshot().detail?.rev, 1)
+    assert.equal(calls, 1)
+    await vi.advanceTimersByTimeAsync(999)
+    assert.equal(calls, 1)
+    await vi.advanceTimersByTimeAsync(1)
+    assert.equal(store.getSnapshot().detail?.rev, 1)
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(calls, 2, 'the catch-up read ran once')
+    await vi.advanceTimersByTimeAsync(5_000)
+    assert.equal(calls, 2, 'a second short answer is not polled')
+    vi.useRealTimers()
+  })
+
+  test('a newer head resets the one-shot and a catch-up that reaches the target stops', async () => {
+    vi.useFakeTimers()
+    let calls = 0
+    const store = new DetailStore(async () => { calls++; return detail(calls === 1 ? 1 : 3) }, 0, false)
+    store.subscribe(() => {})
+    store.request(2)
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(store.getSnapshot().detail?.rev, 1)
+    store.request(3)
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(store.getSnapshot().detail?.rev, 3, 'the new head target is served')
+    await vi.advanceTimersByTimeAsync(2_000)
+    assert.equal(calls, 2)
+    vi.useRealTimers()
+  })
+})
+
+describe('DetailStore — catch-up and store-map edges', () => {
+  test('a catch-up timer that finds the target already served does not read again', async () => {
+    vi.useFakeTimers()
+    let calls = 0
+    const store = new DetailStore(async () => { calls++; return detail(calls === 1 ? 1 : 2) }, 0, false)
+    store.subscribe(() => {})
+    store.request(2)
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(store.getSnapshot().detail?.rev, 1)
+    store.warm(2)
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(store.getSnapshot().detail?.rev, 2)
+    await vi.advanceTimersByTimeAsync(2_000)
+    assert.equal(calls, 2, 'the armed catch-up found the target already served')
+    vi.useRealTimers()
+  })
+
+  test('the store-map trim never drops the store it is returning', () => {
+    resetTimelineDetailStores()
+    const offs: Array<() => void> = []
+    for (let i = 0; i < 64; i++) {
+      const store = detailStoreOf('active-' + i)
+      offs.push(store.subscribe(() => {}))
+    }
+    const current = detailStoreOf('returned')
+    assert.equal(detailStoreOf('returned'), current)
+    for (const off of offs) off()
+    resetTimelineDetailStores()
   })
 })

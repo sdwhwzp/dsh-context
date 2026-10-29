@@ -9,7 +9,7 @@ import { cacheHitPercent } from './format'
 import { estimateSessionCost, mergeCostUsage } from './cost'
 import type { CostCurrency, ModelBook } from './cost'
 import { agentRowOf, familyChildrenOf, type AgentRow } from './agentTree'
-import { activityOf, asRecord, costFullyQuantified, timelineOf, type ClientCtx, type SessionsFace } from './services'
+import { activityOf, asRecord, costFullyQuantified, numOf, timelineOf, type ClientCtx, type SessionsFace } from './services'
 import type { ActivityDay, ContextActivity, ContextTimeline, DefaultOverviewRange, SessionCostUsage, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
 
 export interface OverviewRow {
@@ -147,6 +147,64 @@ export function currentSessionOf(state: Record<string, unknown>, byId: Record<st
 }
 
 /** Null = an unusable snapshot (distinct from a real empty list); blank rows drop out; one throwing row costs just itself. */
+interface BaseRow {
+  id: string
+  title: string
+  cwd?: string
+  updatedAt: number
+  running: boolean
+  timeline: ContextTimeline | null
+  activity: ContextActivity | null
+}
+
+/** Session-list rows are immutable snapshots: one sanitized base (and one childless variant per flag pair) per row
+ * object keeps a single session's push from re-deriving every row. */
+const baseCache = new WeakMap<object, BaseRow>()
+
+function baseRowOf(rec: Record<string, unknown>, id: string): BaseRow {
+  const cached = baseCache.get(rec)
+  if (cached !== undefined && cached.id === id) return cached
+  const displayTitle = typeof rec.displayTitle === 'string' && rec.displayTitle !== '' ? rec.displayTitle : undefined
+  const title = typeof rec.title === 'string' && rec.title !== '' ? rec.title : undefined
+  const cwd = typeof rec.cwd === 'string' && rec.cwd !== '' ? rec.cwd : undefined
+  const values = asRecord(rec.projectionValues)
+  const row: BaseRow = {
+    id,
+    title: displayTitle ?? title ?? id,
+    ...(cwd !== undefined ? { cwd } : {}),
+    updatedAt: typeof rec.updatedAt === 'number' && Number.isFinite(rec.updatedAt) ? rec.updatedAt : 0,
+    running: rec.running === true,
+    timeline: timelineOf(values?.contextTimeline),
+    activity: activityOf(values?.contextActivity),
+  }
+  baseCache.set(rec, row)
+  return row
+}
+
+const variantCache = new WeakMap<BaseRow, Map<number, OverviewRow>>()
+
+function childlessRowOf(base: BaseRow, current: boolean, archived: boolean): OverviewRow {
+  const flags = (current ? 1 : 0) | (archived ? 2 : 0)
+  let variants = variantCache.get(base)
+  if (variants === undefined) {
+    variants = new Map()
+    variantCache.set(base, variants)
+  }
+  const hit = variants.get(flags)
+  if (hit !== undefined) return hit
+  const cost = base.timeline?.cost
+  const row: OverviewRow = {
+    ...base,
+    current,
+    archived,
+    family: [base.timeline],
+    familyActivity: [base.activity],
+    familyCost: cost !== undefined && costFullyQuantified(cost) ? cost : mergeCostUsage(cost),
+  }
+  variants.set(flags, row)
+  return row
+}
+
 export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): OverviewRow[] | null {
   const state = asRecord(snapshot)
   if (state === null) return null
@@ -155,7 +213,7 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
   const archived = archivedSetOf(workspaces)
   const byId = asRecord(state.byId) ?? {}
   const current = currentSessionOf(state, byId)
-  const rows: OverviewRow[] = []
+  const bases: BaseRow[] = []
   for (const id of ids) {
     try {
       const row = asRecord(byId[id])
@@ -163,23 +221,7 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
       if (row.blank === true) continue
       // Subagent-origin sessions cannot be addressed by a plain open() (the host demands the parent address), so they never list.
       if (row.origin === 'subagent') continue
-      const displayTitle = typeof row.displayTitle === 'string' && row.displayTitle !== '' ? row.displayTitle : undefined
-      const title = typeof row.title === 'string' && row.title !== '' ? row.title : undefined
-      const cwd = typeof row.cwd === 'string' && row.cwd !== '' ? row.cwd : undefined
-      const values = asRecord(row.projectionValues)
-      rows.push({
-        id,
-        title: displayTitle ?? title ?? id,
-        ...(cwd !== undefined ? { cwd } : {}),
-        updatedAt: typeof row.updatedAt === 'number' && Number.isFinite(row.updatedAt) ? row.updatedAt : 0,
-        running: row.running === true,
-        current: id === current,
-        archived: archived.has(id),
-        timeline: timelineOf(values?.contextTimeline),
-        activity: activityOf(values?.contextActivity),
-        family: [],
-        familyCost: null,
-      })
+      bases.push(baseRowOf(row, id))
     } catch {
       // A hostile row (throwing accessor) drops whole; the list keeps working.
     }
@@ -193,17 +235,22 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
     } catch { /* the hostile row links nobody */ }
   }
   const childrenOf = familyChildrenOf(sessionRows)
-  for (const row of rows) {
-    const kids = childrenOf.get(row.id) ?? []
+  const rows: OverviewRow[] = []
+  for (const base of bases) {
+    const kids = childrenOf.get(base.id) ?? []
     // The childless family (the overwhelmingly common session) IS its own sole member: the merge walks would copy the
     // whole ledger and cost tree to reproduce it, so the sanitized parts serve directly — the cost aliased only when
     // it is already in the merged shape, re-merged otherwise (a sparse bucket must zero-fill like a merge output).
     if (kids.length === 0) {
-      const cost = row.timeline?.cost
-      row.family = [row.timeline]
-      row.familyActivity = [row.activity]
-      row.familyCost = cost !== undefined && costFullyQuantified(cost) ? cost : mergeCostUsage(cost)
+      rows.push(childlessRowOf(base, base.id === current, archived.has(base.id)))
       continue
+    }
+    const row: OverviewRow = {
+      ...base,
+      current: base.id === current,
+      archived: archived.has(base.id),
+      family: [],
+      familyCost: null,
     }
     const timelines: (ContextTimeline | null)[] = [row.timeline]
     const activities: (ContextActivity | null)[] = [row.activity]
@@ -220,6 +267,7 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
     row.familyActivity = activities
     row.familyCost = mergeCostUsage(...timelines.map(t => t?.cost))
     row.activity = mergeActivity(activities)
+    rows.push(row)
   }
   return rows
 }
@@ -725,39 +773,143 @@ export function aggregateDays(
   book: ModelBook | null | undefined,
   currency: CostCurrency,
 ): Record<string, DayTotals> {
-  const merged: Record<string, { tokens: number; requests: number; sessions: number; fees: SessionCostUsage[] }> = {}
-  const byKey: Record<string, { tokens: number; requests: number; sessions: number; fees: SessionCostUsage[] } | undefined> = merged
-  for (const row of rows) {
-    if (row.activity === null) continue
-    for (const key of Object.keys(row.activity.days)) {
-      const entry = row.activity.days[key]
-      if (entry.tokens <= 0 && entry.requests <= 0) continue
-      const prev = byKey[key]
-      if (prev === undefined) {
-        merged[key] = {
-          tokens: entry.tokens,
-          requests: entry.requests,
-          sessions: 1,
-          fees: entry.cost !== undefined ? [entry.cost] : [],
+  return new DayAggregator().aggregate(rows, book, currency)
+}
+
+interface MutableDay {
+  tokens: number
+  requests: number
+  sessions: number
+  cost: SessionCostUsage
+}
+
+function emptyCost(): SessionCostUsage {
+  return {}
+}
+
+/** Add or subtract one row's cost buckets into an accumulator; malformed branches drop like `mergeCostUsage`. */
+function addCost(target: SessionCostUsage, source: SessionCostUsage, sign: 1 | -1): void {
+  for (const provider of Object.keys(source)) {
+    const models = asRecord(source[provider])
+    if (models === null || Array.isArray(models)) continue
+    const branch = target[provider] ?? (target[provider] = {})
+    for (const model of Object.keys(models)) {
+      const periods = asRecord(models[model])
+      if (periods === null || Array.isArray(periods)) continue
+      const targetPeriods = branch[model] ?? (branch[model] = {})
+      for (const period of ['peak', 'off'] as const) {
+        const bucket = asRecord(periods[period])
+        if (bucket === null || Array.isArray(bucket)) continue
+        const prev = targetPeriods[period] ?? { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
+        const next = {
+          uncached: prev.uncached + sign * numOf(bucket.uncached),
+          cacheRead: prev.cacheRead + sign * numOf(bucket.cacheRead),
+          cacheWrite: prev.cacheWrite + sign * numOf(bucket.cacheWrite),
+          output: prev.output + sign * numOf(bucket.output),
         }
-      } else {
-        prev.tokens += entry.tokens
-        prev.requests += entry.requests
-        prev.sessions++
-        if (entry.cost !== undefined) prev.fees.push(entry.cost)
+        // A removed row's nonzero bucket that leaves no volume must disappear: a fresh merge never records it.
+        const carried = numOf(bucket.uncached) + numOf(bucket.cacheRead) + numOf(bucket.cacheWrite) + numOf(bucket.output) > 0
+        if (sign < 0 && carried && next.uncached === 0 && next.cacheRead === 0 && next.cacheWrite === 0 && next.output === 0) {
+          Reflect.deleteProperty(targetPeriods, period)
+          if (Object.keys(targetPeriods).length === 0) Reflect.deleteProperty(branch, model)
+          if (Object.keys(branch).length === 0) Reflect.deleteProperty(target, provider)
+        } else {
+          targetPeriods[period] = next
+        }
       }
     }
   }
-  const days: Record<string, DayTotals> = {}
-  for (const [key, day] of Object.entries(merged)) {
-    days[key] = {
-      tokens: day.tokens,
-      requests: day.requests,
-      sessions: day.sessions,
-      cost: estimateSessionCost(mergeCostUsage(...day.fees), book, currency),
+}
+
+/** Incremental day aggregation: a mounted panel keeps one instance, so a single session's push only folds that row's
+ * days instead of re-walking every session's ledger. */
+export class DayAggregator {
+  private readonly rows = new Map<OverviewRow, ContextActivity | null>()
+  private readonly days = new Map<string, MutableDay>()
+  private readonly values = new Map<string, DayTotals>()
+  private lastRows: readonly OverviewRow[] | null = null
+  private lastBook: ModelBook | null | undefined
+  private lastCurrency: CostCurrency | undefined
+  private last: Record<string, DayTotals> | null = null
+
+  aggregate(
+    rows: readonly OverviewRow[],
+    book: ModelBook | null | undefined,
+    currency: CostCurrency,
+  ): Record<string, DayTotals> {
+    if (rows === this.lastRows && book === this.lastBook && currency === this.lastCurrency && this.last !== null) {
+      return this.last
+    }
+    const seen = new Set<OverviewRow>()
+    let changed = false
+    for (const row of rows) {
+      seen.add(row)
+      const prev = this.rows.get(row)
+      if (prev === row.activity) continue
+      if (prev !== undefined) this.addActivity(prev, -1)
+      this.addActivity(row.activity, 1)
+      this.rows.set(row, row.activity)
+      changed = true
+    }
+    for (const [row, activity] of this.rows) {
+      if (seen.has(row)) continue
+      this.rows.delete(row)
+      this.addActivity(activity, -1)
+      changed = true
+    }
+    if (book !== this.lastBook || currency !== this.lastCurrency) {
+      this.values.clear()
+      this.lastBook = book
+      this.lastCurrency = currency
+      changed = true
+    }
+    if (!changed && this.last !== null) {
+      this.lastRows = rows
+      return this.last
+    }
+    const out: Record<string, DayTotals> = {}
+    for (const [key, day] of this.days) {
+      if (day.tokens <= 0 && day.requests <= 0) {
+        this.days.delete(key)
+        this.values.delete(key)
+        continue
+      }
+      let value = this.values.get(key)
+      if (value === undefined) {
+        value = {
+          tokens: day.tokens,
+          requests: day.requests,
+          sessions: day.sessions,
+          cost: estimateSessionCost(day.cost, book, currency),
+        }
+        this.values.set(key, value)
+      }
+      out[key] = value
+    }
+    this.lastRows = rows
+    this.last = out
+    return out
+  }
+
+  private addActivity(activity: ContextActivity | null, sign: 1 | -1): void {
+    if (activity === null) return
+    for (const key of Object.keys(activity.days)) {
+      const entry = activity.days[key]
+      if (entry.tokens <= 0 && entry.requests <= 0) continue
+      let day = this.days.get(key)
+      if (day === undefined) {
+        /* v8 ignore next 1 -- a subtracted day was created by an earlier add; a pruned day has no later row. */
+        if (sign < 0) continue
+        day = { tokens: 0, requests: 0, sessions: 0, cost: emptyCost() }
+        this.days.set(key, day)
+      }
+      day.tokens += sign * entry.tokens
+      day.requests += sign * entry.requests
+      day.sessions += sign
+      if (entry.cost !== undefined) addCost(day.cost, entry.cost, sign)
+      this.values.delete(key)
     }
   }
-  return days
 }
 
 /** Re-pull the session-list baseline so host-side projection backfills (host/backfill.ts) reach a long-connected browser. */

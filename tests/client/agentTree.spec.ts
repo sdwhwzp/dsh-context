@@ -947,3 +947,13 @@ describe('sessionTitlesOf', () => {
     ])
   })
 })
+
+describe('agentRowOf caching', () => {
+  test('one immutable row object derives once; a new object derives anew', () => {
+    const row = { displayTitle: 'A', running: true, updatedAt: 4 }
+    assert.equal(agentRowOf(row), agentRowOf(row))
+    const next = { ...row, running: false }
+    assert.notEqual(agentRowOf(next), agentRowOf(next) === null ? null : agentRowOf(row))
+    assert.equal(agentRowOf(next)?.running, false)
+  })
+})

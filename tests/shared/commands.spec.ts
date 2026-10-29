@@ -10,6 +10,7 @@ import {
   hideableCdPrefix,
   markersOfText,
   outcomeOfMarkers,
+  programsOfCommand,
   shapeOfCmd,
   signalOfJobDetail,
 } from '../../src/shared/commands'
@@ -394,5 +395,67 @@ describe('display shaping', () => {
     assert.equal(headProgramOf('$x = 1 # comment', 'pwsh'), 'pwsh')
     assert.equal(headProgramOf('<# block #>\nGet-Item x', 'pwsh'), 'Get-Item')
     assert.equal(headProgramOf('<# block', 'pwsh'), 'pwsh')
+  })
+
+  test('programsOfCommand counts Bash invocations, repeats and scaffolding without reading literal text', () => {
+    assert.deepEqual(programsOfCommand('grep -n foo a | grep -v bar && grep -c baz b'), ['grep', 'grep', 'grep'])
+    assert.deepEqual(programsOfCommand('git status && git diff || git log; git status\ngit branch'), ['git', 'git', 'git', 'git', 'git'])
+    assert.deepEqual(programsOfCommand('echo "grep | grep" # grep fake\ngrep real'), ['echo', 'grep'])
+    assert.deepEqual(programsOfCommand("cat <<'EOF'\ngrep fake; grep fake\nEOF\ngrep real"), ['cat', 'grep'])
+    assert.deepEqual(programsOfCommand('TOOL=git; $TOOL status && $TOOL diff'), ['git', 'git'])
+    assert.deepEqual(programsOfCommand('cd /repo && git status && git diff'), ['git', 'git'])
+    assert.deepEqual(programsOfCommand('[[ -f x ]] && pnpm test'), ['shell', 'pnpm'])
+    assert.deepEqual(programsOfCommand('git status && FOO=bar'), ['git'])
+    assert.deepEqual(programsOfCommand(''), [])
+  })
+
+  test('programsOfCommand counts PowerShell pipelines, call operators and literal assignments', () => {
+    assert.deepEqual(
+      programsOfCommand('Get-ChildItem | Select-Object Name; Get-ChildItem -File', 'pwsh'),
+      ['Get-ChildItem', 'Select-Object', 'Get-ChildItem'],
+    )
+    assert.deepEqual(programsOfCommand('$exe = "git"; & $exe status; & $exe diff', 'pwsh'), ['git', 'git'])
+    assert.deepEqual(
+      programsOfCommand('& "C:\\Tools\\git.exe" status && & "C:\\Tools\\git.exe" diff', 'pwsh'),
+      ['git', 'git'],
+    )
+    assert.deepEqual(programsOfCommand('"Get-Item | Select-Object"; Get-Item x', 'pwsh'), ['pwsh', 'Get-Item'])
+    assert.deepEqual(programsOfCommand('', 'pwsh'), [])
+  })
+
+  test('programsOfCommand respects Bash escapes, nesting, redirections and navigation separators', () => {
+    assert.deepEqual(programsOfCommand('echo a\\;b; echo c'), ['echo', 'echo'])
+    assert.deepEqual(programsOfCommand('echo one & echo two |& cat'), ['echo', 'echo', 'cat'])
+    assert.deepEqual(programsOfCommand('echo one 2>&1 | cat'), ['echo', 'cat'])
+    assert.deepEqual(programsOfCommand('echo one &>log && cat'), ['echo', 'cat'])
+    assert.deepEqual(programsOfCommand('(echo one; echo two) && cat'), ['shell', 'cat'])
+    assert.deepEqual(programsOfCommand('{ echo one\necho two; } && cat'), ['shell', 'cat'])
+    assert.deepEqual(programsOfCommand(') ; } ; echo'), ['shell', 'echo'])
+    assert.deepEqual(programsOfCommand('echo "a\\";b"; cat'), ['echo', 'cat'])
+    assert.deepEqual(programsOfCommand('# only'), ['shell'])
+    assert.deepEqual(programsOfCommand(';;;'), ['shell'])
+    assert.deepEqual(programsOfCommand('cd /x;'), ['cd'])
+    assert.deepEqual(programsOfCommand('cd /x\ngit'), ['git'])
+    assert.deepEqual(programsOfCommand('cd /x || git'), ['cd', 'git'])
+  })
+
+  test('programsOfCommand skips heredoc bodies, including indented CRLF and nested or partial forms', () => {
+    assert.deepEqual(programsOfCommand('cat <<- \tEOF\r\n\tgrep fake\r\n\tEOF\r\ngrep real'), ['cat', 'grep'])
+    assert.deepEqual(programsOfCommand('cat <<EOF\ngrep fake'), ['cat'])
+    assert.deepEqual(programsOfCommand('cat <<\ngrep'), ['cat', 'grep'])
+    assert.deepEqual(programsOfCommand('(cat <<EOF\nbody\nEOF\n) && grep'), ['shell', 'grep'])
+  })
+
+  test('programsOfCommand respects PowerShell escapes, comments, here-strings and navigation', () => {
+    assert.deepEqual(programsOfCommand('Get-Item foo`; Write-Output', 'pwsh'), ['Get-Item'])
+    assert.deepEqual(programsOfCommand('<# block; #>\nGet-Item', 'pwsh'), ['Get-Item'])
+    assert.deepEqual(programsOfCommand('<# block', 'pwsh'), ['pwsh'])
+    assert.deepEqual(programsOfCommand('$text = @"\nGet-Item; Get-Item\n"@\nGet-Item x', 'pwsh'), ['Get-Item'])
+    assert.deepEqual(programsOfCommand("$text = @'\nGet-Item", 'pwsh'), ['pwsh'])
+    assert.deepEqual(programsOfCommand("@'x'; Get-Item", 'pwsh'), ['pwsh', 'Get-Item'])
+    assert.deepEqual(programsOfCommand('$x = "a`"b"; & $x; Get-Item', 'pwsh'), ['a"b', 'Get-Item'])
+    assert.deepEqual(programsOfCommand("'a'';b'; Get-Item", 'pwsh'), ['pwsh', 'Get-Item'])
+    assert.deepEqual(programsOfCommand('cd C:\\repo; Get-Item', 'pwsh'), ['Get-Item'])
+    assert.deepEqual(programsOfCommand('Set-Location C:\\repo;', 'pwsh'), ['Set-Location'])
   })
 })

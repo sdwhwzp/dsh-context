@@ -173,7 +173,7 @@ Context 浏览器在窄面板和 `/context` 对话框中，将类别计数与 To
 
 ![Command Executions](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/command-executions.png)
 
-每次 Shell 和代码执行的状态、墙钟耗时与步骤定位，附带会话摘要、值得注意的快捷入口和程序分布。程序分布始终保持全局，搜索与状态筛选只收窄右侧列表；点击程序即可下钻并高亮该行，分布不会因筛选而收缩。Failing 快捷入口保留当前搜索词与 Slow/Background 筛选，只显示指定程序在该范围内的失败记录。
+每次 Shell 和代码执行的状态、墙钟耗时与步骤定位，附带会话摘要、值得注意的快捷入口和程序分布。值得注意的事项与程序分布始终保持全局，只有搜索与状态筛选在收窄右侧列表。左侧每次点击都会把对应视角写入过滤框：点击程序会填入名称并高亮该行，再次点击则同时清除两者——过滤框始终反映当前生效的筛选。
 
 ## 🚢 Fleet 标签页
 

@@ -8,6 +8,7 @@ import type { DnaItem } from '../dna'
 import type { ContentFetcher, ConversationNodeLike, HeaderFetcher } from '../services'
 import type { ContextSettings, DefaultDeltaBase, DefaultToolSort } from '../settings'
 import type { ViewKit } from '../viewkit'
+import { IconBrowse } from '../primitives'
 import type { DetailState } from '../timelineSource'
 import { makeDetailNote } from './detailNote'
 import { makeNodeText } from './nodes'
@@ -801,7 +802,10 @@ export function makeContextBrowser(
       <div className="lc-card lc-br" ref={rootRef}>
         <div className="lc-br-head">
           <div className="lc-card-title">
-            <span className="lc-card-title-text">{t('browser.title')}</span>
+            <span className="lc-card-title-text">
+              <IconBrowse size={14} />
+              {t('browser.title')}
+            </span>
             <span className="lc-gran lc-br-dna-ctl" role="group" title={t('browser.dnaTip')}>
               <button
                 type="button"

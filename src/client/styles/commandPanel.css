@@ -1,6 +1,6 @@
 /* The command panel: a 1:2 summary-rail + list split. Rows never wrap (the preview ellipsizes), so heights stay
    uniform at any width and `content-visibility: auto` skips offscreen paint. The card caps its height and the list
-   scrolls inside — an uncapped 400-row wall would keep growing the page and fight the conversation scroll's
+   scrolls inside — an uncapped wall of rows would keep growing the page and fight the conversation scroll's
    bottom anchor (every streamed command re-asserted the bottom mid-drag). */
 .lc-cmd-card { display: flex; flex-direction: column; }
 .lc-cmd-card .lc-card-title { align-content: center; flex: none; }
@@ -15,6 +15,7 @@
 .lc-cmd-chip-background, .lc-cmd-chip-background:hover { color: var(--color-teal-500); }
 .lc-cmd-chip-background.lc-gran-on, .lc-cmd-chip-background.lc-gran-on:hover { background: color-mix(in srgb, var(--color-teal-500) 14%, transparent); color: var(--color-teal-500); }
 .lc-cmd-floor { margin: 0 0 6px; font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.lc-cmd-floor-btn { border: 0; background: transparent; padding: 0 0 0 6px; font: inherit; font-size: 11px; color: var(--dsw-alias-state-business-primary); text-decoration: underline; cursor: pointer; }
 
 /* ── The two-column body ── */
 .lc-cmd-body { max-height: 500px; display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr); gap: 16px; flex: 1; min-height: 0; }
@@ -28,9 +29,9 @@
 .lc-cmd-rail-sec { min-width: 0; flex: none; }
 .lc-cmd-rail-h { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary); margin-bottom: 8px; padding-bottom: 5px; border-bottom: var(--lc-line-strong, 1px solid var(--dsw-alias-border-l2)); }
 
-/* Summary KPIs: the numbers carry the color, one dimension each. */
+/* Summary KPIs: the numbers carry the color, one dimension each, on the same cell track as the Context Stats cells. */
 .lc-cmd-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
-.lc-cmd-kpi { min-width: 0; padding: 5px 8px; border-radius: 7px; background: var(--dsw-alias-interactive-bg-hover); }
+.lc-cmd-kpi { min-width: 0; padding: 5px 8px; border-radius: 7px; background: var(--lc-control-track); }
 .lc-cmd-kpi b { display: block; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lc-cmd-kpi span { font-size: 10px; color: var(--dsw-alias-label-secondary); }
 .lc-cmd-kpi-fail b { color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 80%, var(--dsw-alias-label-primary)); }
@@ -38,18 +39,21 @@
 .lc-cmd-kpi-bg b { color: color-mix(in srgb, var(--color-teal-500) 60%, var(--dsw-alias-label-primary)); }
 
 /* Attention: the command text stays neutral; each row's tone lives in its dot and metric. */
-.lc-cmd-attn-row { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 11px; padding: 3px 6px; border-radius: 5px; cursor: pointer; text-align: left; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
+.lc-cmd-attn-rows { display: flex; flex-direction: column; gap: 3px; }
+.lc-cmd-attn-row { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: var(--lc-control-track); color: var(--dsw-alias-label-primary); font: inherit; font-size: 11px; padding: 4px 6px; border-radius: 6px; cursor: pointer; text-align: left; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
+.lc-cmd-attn-row:hover { background: var(--dsw-alias-interactive-bg-active); }
 .lc-cmd-attn-slowest { --lc-attn-tone: var(--dsw-alias-state-warn-primary); }
 .lc-cmd-attn-failing { --lc-attn-tone: var(--dsw-alias-state-error-primary); }
 .lc-cmd-attn-repeats { --lc-attn-tone: var(--color-purple-500); }
 .lc-cmd-attn-background { --lc-attn-tone: var(--color-teal-500); }
+.lc-cmd-attn-row.lc-cmd-attn-on, .lc-cmd-attn-row.lc-cmd-attn-on:hover { background: color-mix(in srgb, var(--lc-attn-tone) 12%, var(--lc-control-track)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lc-attn-tone) 45%, transparent); }
 .lc-cmd-attn-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--lc-attn-tone); }
 /* One width for every label (English "Background" is the longest) so the command values line up. */
 .lc-cmd-attn-k { flex: none; width: 70px; font-size: 10.5px; font-weight: 600; color: var(--dsw-alias-label-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lc-cmd-attn-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dsw-alias-mono-font-family, ui-monospace, monospace); font-size: 10.5px; }
 .lc-cmd-attn-n { flex: none; font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--lc-attn-tone) 60%, var(--dsw-alias-label-primary)); }
 
-/* Programs: the Skills-list idiom — stable name-hash dot, mono name, ×N, share %, and a proportional underline bar. */
+/* Programs: the Skills-list idiom — stable name-hash dot, mono name, invocation and run counts, proportional underline. */
 .lc-cmd-progs { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .lc-cmd-progs-h { justify-content: space-between; flex: none; }
 .lc-cmd-prog-search { font: inherit; font-size: 11px; color: var(--dsw-alias-label-primary); padding: 2px 6px; font-weight: 400; }
@@ -63,7 +67,7 @@
 .lc-cmd-prog-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; align-self: center; }
 .lc-cmd-prog-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dsw-alias-mono-font-family, ui-monospace, monospace); font-size: 11px; color: var(--dsw-alias-label-primary); }
 .lc-cmd-prog-n { flex: none; font-variant-numeric: tabular-nums; font-size: 11px; color: var(--dsw-alias-label-primary); }
-.lc-cmd-prog-share { flex: none; min-width: 30px; text-align: right; font-size: 10px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
+.lc-cmd-prog-runs { flex: none; min-width: 30px; text-align: right; white-space: nowrap; font-size: 10px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
 .lc-cmd-prog-bar { position: absolute; left: 6px; bottom: 1px; height: 2px; border-radius: 1px; opacity: 0.45; pointer-events: none; }
 .lc-cmd-prog-none { font-size: 11px; color: var(--dsw-alias-label-secondary); padding: 4px 6px; }
 
@@ -75,7 +79,6 @@
 body:not([data-ds-dark-theme]) .lc-cmd-item.lc-cmd-item-on { background: transparent; }
 body:not([data-ds-dark-theme]) .lc-cmd-item-on > .lc-cmd-row { background: var(--dsw-alias-interactive-bg-active); }
 body:not([data-ds-dark-theme]) .lc-cmd-item-on > .lc-cmd-row:hover { background: var(--dsw-alias-interactive-bg-active); }
-body:not([data-ds-dark-theme]) .lc-cmd-kpi { background: var(--lc-subpanel-bg); border: var(--lc-line-fine); }
 /* A fixed row height keeps the windowed list's spacers exact: badges, tool tags and CJK line boxes vary the natural
    content height by a few pixels. */
 .lc-cmd-row { content-visibility: auto; height: 28px; box-sizing: border-box; display: flex; align-items: center; gap: 7px; width: 100%; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; padding: 6px 8px; cursor: pointer; text-align: left; border-radius: 7px; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }

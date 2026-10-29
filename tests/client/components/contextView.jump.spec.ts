@@ -208,10 +208,11 @@ describe('ContextView — the stats board\'s pill jumps', () => {
 })
 
 describe('ContextView — the stats board\'s lower-lane jumps', () => {
-  /** Four programs on the bash tool: python3 twice (top), git, node and npm once. */
+  /** Four programs on the bash tool: python3 tops by INVOCATIONS (three, two of them in one record), then git, node, npm. */
   function commandTimeline(): ReturnType<typeof timeline> {
     return timeline({
       commands: [
+        { seq: 10, time: T0, tool: 'bash', cmd: 'python3 a.py && python3 b.py', start: T0, end: T0 + 100, status: 'completed', err: false },
         { seq: 11, time: T0, tool: 'bash', cmd: 'python3 build.py', start: T0, end: T0 + 100, status: 'completed', err: false },
         { seq: 12, time: T0 + 1000, tool: 'bash', cmd: 'git status --short', start: T0 + 1000, end: T0 + 1100, status: 'completed', err: false },
         { seq: 13, time: T0 + 2000, tool: 'bash', cmd: 'node --version', start: T0 + 2000, end: T0 + 2100, status: 'completed', err: false },
@@ -229,11 +230,12 @@ describe('ContextView — the stats board\'s lower-lane jumps', () => {
       assert.ok(queryAll(m.container, '.lc-ledger-in-body2 .lc-ledger-chip').some(el => text(el).startsWith('npm')), 'the whole program tally reaches the stats board')
       const chip = queryAll(m.container, '.lc-ledger-in-body2 .lc-ledger-chip').find(el => text(el).startsWith('python3'))
       assert.ok(chip !== undefined)
+      assert.equal(text(chip), 'python33', 'the lane counts INVOCATIONS, including repeats within one record')
       await click(chip)
       await flush()
       const card = query(m.container, '.lc-cmd-card')
       assert.equal(query<HTMLInputElement>(card, 'input.lc-fa-search').value, 'python3', 'the seeded lens shows in the box')
-      assert.equal(queryAll(card, '.lc-cmd-row').length, 1, 'the lens narrows to the program')
+      assert.equal(queryAll(card, '.lc-cmd-row').length, 2, 'the lens narrows to the records running the program')
       assert.equal(scroller.scrollTop, 600, 'the command card scrolled to the scrollport top')
       await m.unmount()
     } finally {
@@ -241,26 +243,78 @@ describe('ContextView — the stats board\'s lower-lane jumps', () => {
     }
   })
 
-  test('a tool chip opens the tool-results category with the tool lens seeded', async () => {
-    const scroller = overflowingScroller(1200)
-    const gBCR = stubRevealRects(scroller, el => (el.classList.contains('lc-col-browser') ? 450 : 0))
+  test('the folded "+N" tails jump: tools open every result, commands reveal the card without a lens', async () => {
+    const data = timeline({
+      commands: ['git status', 'pnpm test', 'node x.js', 'grep -n x src', 'tail -5 log']
+        .map((cmd, i) => ({ seq: 20 + i, time: T0 + i, tool: 'bash', cmd, start: T0, end: T0 + 10, status: 'completed' as const, err: false })),
+      nodes: ['read', 'edit', 'bash', 'grep', 'write']
+        .map((tool, i) => ({ seq: 30 + i, cat: 'tool' as const, tokens: 5, tool })),
+    })
+    const scroller = overflowingScroller(1400)
+    const rect = (w: number, top: number): DOMRect => ({ width: w, height: 0, top, left: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect)
+    // Layout for the fit AND for each reveal: a 260px lane folds to two chips plus the "+N" tail.
+    const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.hasAttribute('data-conversation-scroll')) return rect(0, 100)
+      if (this.classList.contains('lc-ledger-chips')) return rect(260, 0)
+      if (this.classList.contains('lc-ledger-chip')) return rect(this.classList.contains('lc-ledger-chip-more') ? 40 : 100, 0)
+      const top = this.classList.contains('lc-col-browser') ? 450 : this.classList.contains('lc-cmd-card') ? 700 : 0
+      return rect(0, top - scroller.scrollTop)
+    })
     try {
       const View = makeView(new TestClientCtx())
-      const m = await mountInScroller(h(View, { sessionId: 'sv-tooljump', useProjection: projectionsFor(richTimeline()) }), scroller)
-      const chip = queryAll(m.container, '.lc-ledger-out-chips .lc-ledger-chip').find(el => text(el).startsWith('bash'))
-      assert.ok(chip !== undefined)
-      await click(chip)
+      const m = await mountInScroller(h(View, { sessionId: 'sv-morejump', useProjection: projectionsFor(data) }), scroller)
+      const toolMore = query(m.container, '.lc-ledger-out-chips .lc-ledger-chip-more')
+      const cmdMore = query(m.container, '.lc-ledger-in-body2 .lc-ledger-chip-more')
+      assert.equal(toolMore.getAttribute('title'), DICT_EN['stats.toolsMoreTip'])
+      assert.equal(toolMore.getAttribute('role'), 'button')
+      assert.equal(cmdMore.getAttribute('title'), DICT_EN['stats.commandsMoreTip'])
+      await click(toolMore)
       await flush()
       const open = queryAll(m.container, '.lc-br-cat-row.lc-br-cat-open')
       assert.equal(open.length, 1)
-      assert.ok(text(open[0]).includes(DICT_EN['cat.tool']), 'the tool-results category opens')
-      const lens = open[0].parentElement?.querySelector<HTMLInputElement>('.lc-br-tool-search')
-      assert.ok(lens !== null && lens !== undefined)
-      assert.equal(lens.value, 'bash', 'the lens carries the tool name')
-      assert.equal(scroller.scrollTop, 350, 'the browser card scrolled to the scrollport top')
+      assert.ok(text(open[0]).includes(DICT_EN['cat.tool']), 'every tool result opens')
+      assert.equal(scroller.scrollTop, 350, 'the browser card scrolled into view')
+      await click(cmdMore)
+      await flush()
+      const card = query(m.container, '.lc-cmd-card')
+      assert.equal(query<HTMLInputElement>(card, 'input.lc-fa-search').value, '', 'no program lens is seeded')
+      assert.equal(scroller.scrollTop, 600, 'the command card scrolled into view')
       await m.unmount()
     } finally {
       gBCR.mockRestore()
+    }
+  })
+
+  test('a tool chip opens the bucket its results are filed in, seeding the name only in Tool Results', async () => {
+    const base = richTimeline()
+    // The fold files a `skill` load's result under the skill bucket (src/host/fold.ts's tool-result arm).
+    const skill = { seq: 7, cat: 'skill' as const, tool: 'skill', skill: 'code-review', tokens: 30, text: 'Skill instructions' }
+    const cases = [
+      { tool: 'bash', data: base, cat: DICT_EN['cat.tool'], lens: 'bash' },
+      { tool: 'skill', data: richTimeline({ nodes: [...base.nodes, skill] }), cat: DICT_EN['cat.skill'], lens: '' },
+    ]
+    for (const c of cases) {
+      const scroller = overflowingScroller(1200)
+      const gBCR = stubRevealRects(scroller, el => (el.classList.contains('lc-col-browser') ? 450 : 0))
+      try {
+        const View = makeView(new TestClientCtx())
+        const m = await mountInScroller(h(View, { sessionId: 'sv-tooljump-' + c.tool, useProjection: projectionsFor(c.data) }), scroller)
+        const chip = queryAll(m.container, '.lc-ledger-out-chips .lc-ledger-chip').find(el => text(el).startsWith(c.tool))
+        assert.ok(chip !== undefined)
+        await click(chip)
+        await flush()
+        const open = queryAll(m.container, '.lc-br-cat-row.lc-br-cat-open')
+        assert.equal(open.length, 1)
+        assert.ok(text(open[0]).includes(c.cat), 'the bucket holding the results opens')
+        const lens = open[0].parentElement?.querySelector<HTMLInputElement>('.lc-br-tool-search')
+        assert.ok(lens !== null && lens !== undefined)
+        assert.equal(lens.value, c.lens)
+        assert.equal(queryAll(m.container, '.lc-br-elem-row').length, 1, 'the tool result is listed, never an empty lens')
+        assert.equal(scroller.scrollTop, 350, 'the browser card scrolled to the scrollport top')
+        await m.unmount()
+      } finally {
+        gBCR.mockRestore()
+      }
     }
   })
 

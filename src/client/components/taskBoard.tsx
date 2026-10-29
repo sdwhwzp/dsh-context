@@ -11,6 +11,7 @@ import { Section } from './section'
 import { memberStyle, runMetaOf } from './memberBoard'
 import type { RichKit } from './richText'
 import type { ViewKit } from '../viewkit'
+import { IconChevronDown } from '../primitives'
 
 export interface TaskBoardProps {
   /** Null when the team never composed — subagent delegations still board. */
@@ -26,6 +27,8 @@ export interface TaskBoardProps {
   onOwnerFilter: (key: string | null) => void
   focusTaskId: string | null
   onFocusTask: (id: string | null) => void
+  pinnedId?: string | null
+  hoverId?: string | null
   onPinMember: (id: string | null) => void
   onHoverMember: (id: string | null) => void
   rich: RichKit
@@ -286,6 +289,16 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
     if (id !== undefined) props.onPinMember(id)
   }
 
+  const rowClass = (row: WorkRow): string => {
+    const ownerId = ownerSessionId(row)
+    return 'lc-team-task'
+      + (props.focusTaskId === row.key ? ' lc-team-task-focus' : '')
+      + (chain?.has(row.key) === true ? ' lc-team-task-chain' : '')
+      + (openTasks.has(row.key) ? ' lc-team-task-open' : '')
+      + (ownerId !== undefined && ownerId === props.hoverId ? ' lc-team-task-hover' : '')
+      + (ownerId !== undefined && ownerId === props.pinnedId ? ' lc-team-task-related' : '')
+  }
+
   const hoverOwner = (row: WorkRow | null): void => {
     if (row === null) {
       props.onHoverMember(null)
@@ -380,7 +393,8 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
     return (
       <li
         key={row.key}
-        className={'lc-team-task' + (props.focusTaskId === row.key ? ' lc-team-task-focus' : '')}
+        className={rowClass(row)}
+        style={memberStyle(hue)}
         data-task={row.key}
         role="button"
         tabIndex={0}
@@ -398,6 +412,7 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
           <StateDot state={row.dot} size={9} />
           <b className="lc-team-task-subject lc-team-task-subject-clamp" title={`${row.subject} · ${node.id}`}>{row.subject}</b>
           <span className="lc-agents-badge">{t(`fleet.task.${row.status}`)}</span>
+          <span className="lc-team-task-chevron"><IconChevronDown size={11} /></span>
         </div>
         {open ? (
           renderOpenSections(row, hue, brief)
@@ -421,11 +436,8 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
     return (
       <li
         key={row.key}
-        className={
-          'lc-team-task'
-          + (props.focusTaskId === task.id ? ' lc-team-task-focus' : '')
-          + (chain?.has(task.id) === true ? ' lc-team-task-chain' : '')
-        }
+        className={rowClass(row)}
+        style={hue !== '' ? memberStyle(hue) : undefined}
         data-task={task.id}
         role="button"
         tabIndex={0}
@@ -455,6 +467,7 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
               {task.ownerName}
             </button>
           ) : <span className="lc-agents-badge">{t('fleet.taskUnowned')}</span>}
+          <span className="lc-team-task-chevron"><IconChevronDown size={11} /></span>
         </div>
         {open ? (
           renderOpenSections(row, hue, task.description === '' ? undefined : task.description)

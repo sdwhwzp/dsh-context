@@ -35,8 +35,8 @@ export interface MemberBoardProps {
   fmt: ViewKit['fmt']
 }
 
-/** One card's hue: the lead carries the brand color, every other card a golden-angled hue —
- * teammates by roster order, other agents by their level-1 family (the graph's link hue). */
+/** One agent's hue shared by network, member and task cards: the lead carries the brand color, every other card a
+ * golden-angled hue — teammates by roster order, other agents by their level-1 family (the graph's link hue). */
 export function memberStyle(hue: string): CSSProperties {
   return { '--lc-member-hue': hue } as CSSProperties
 }
@@ -231,6 +231,7 @@ export function MemberBoard(props: MemberBoardProps): ReactElement {
                   style={memberStyle(member.role === 'lead' ? BRAND_HUE : familyHue(team.members.indexOf(member)))}
                   role="button"
                   tabIndex={0}
+                  aria-pressed={props.pinnedId === member.id}
                   onClick={() => { props.onPin(member.id) }}
                   onKeyDown={(ev) => {
                     if (ev.key !== 'Enter' && ev.key !== ' ') return
@@ -322,6 +323,7 @@ export function MemberBoard(props: MemberBoardProps): ReactElement {
                   style={memberStyle(familyHue(node.family))}
                   role="button"
                   tabIndex={0}
+                  aria-pressed={props.pinnedId === node.id}
                   onClick={() => { props.onPin(node.id) }}
                   onKeyDown={(ev) => {
                     if (ev.key !== 'Enter' && ev.key !== ' ') return

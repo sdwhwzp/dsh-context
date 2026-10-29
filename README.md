@@ -182,7 +182,7 @@ One row per touched file — read, written, or searched — aggregated up to whi
 
 ![Command Executions](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/command-executions.png)
 
-Every shell and code run with its status, wall time, and step stamp, plus a session summary, attention shortcuts, and a program ranking. The ranking stays global while the search and status chips narrow the list; clicking a program drills into it and marks the row — the ranking never collapses under its own filter. The Failing shortcut keeps the current search and Slow/Background scope while narrowing to the named program's failures.
+Every shell and code run with its status, wall time, and step stamp, plus a session summary, attention shortcuts, and a program ranking. The attention facts and the ranking stay session-wide while the search and status chips narrow the list. Every rail click writes its lens into the search box — a program click fills in and highlights the program, and clicking it again clears both — so the box always shows what is filtering the list.
 
 ## 🚢 The Fleet tab
 

@@ -315,8 +315,7 @@ export const SLOT_SEAMS = [
   'conversation.input.overlay',
 ] as const
 
-/** The ui-primitives icon seams the client bundle renders: a missing name is `undefined` at the browser's
- * runtime — React error #130. `src/client/primitives.ts` resolves each by name; every one must exist per tag. */
+/** Missing icon exports render nothing, so every name must be checked per tag rather than silently losing its glyph. */
 export const ICON_SEAMS = [
   'IconBranchOutlineRegular',
   'IconPlusOutlineRegular',
@@ -327,6 +326,16 @@ export const ICON_SEAMS = [
   'IconChevronDownOutlineMedium',
   'IconChevronUpOutlineMedium',
   'IconSearchOutlineRegular',
+  'IconDataOutlineRegular',
+  'IconDatabaseOutlineRegular',
+  'IconClockOutlineRegular',
+  'IconGaugeOutlineRegular',
+  'IconCompareSplitOutlineRegular',
+  'IconBrowseOutlineRegular',
+  'IconContextInjectionOutlineRegular',
+  'IconFolderOpenOutlineRegular',
+  'IconApiOutlineRegular',
+  'IconPluginPinwheelOutlineRegular',
   'FileTypeIcon',
 ] as const
 
