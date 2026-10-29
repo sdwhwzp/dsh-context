@@ -1,4 +1,3 @@
-/** The Chinese (Simplified) dictionary — the key-set source of truth every other locale must carry in full. */
 export const DICT_ZH = {
   'tab.context': '上下文',
   'tab.fleet': '编队',
@@ -87,6 +86,7 @@ export const DICT_ZH = {
   'timing.text': '模型回复',
   'timing.toolArgs': '工具参数',
   'timing.tools': '工具执行',
+  'timing.toolsBusyTip': '至少有一个工具在运行的时长。各次调用时长合计 {total}：并行调用会重叠，步骤窗口外与等待用户的运行不计入。',
   'timing.other': '其他开销',
   'timing.callTimes': '{n}次',
   'timing.toolTimes': '{n}次',
@@ -94,7 +94,7 @@ export const DICT_ZH = {
   'timing.empty': '暂无耗时数据 · 对话开始后这里会显示时长分布',
   'timing.tps': '输出速度 {tps} tok/s',
   'timing.tpsTip': '输出速度（TPS）：累计解码输出 tokens ÷ 累计解码时长，与 DeepSeek Harness 会话统计同口径。',
-  'timing.strip': '耗时时间轴：各段按发生次序紧凑铺排，宽度为耗时占比，刻度为零、四分位与全程',
+  'timing.strip': '耗时时间轴：各段按发生次序紧凑铺排，宽度为活跃耗时占比，刻度为零、四分位与全程',
   'tokens.title': 'Token 统计',
   'tokens.total': '总用量',
   'tokens.thinking': '模型思考',
@@ -171,7 +171,6 @@ export const DICT_ZH = {
   'brief.replyTip': '这一步模型返回的内容（文本回复或工具调用）；此步发起的调用，其结果会出现在下一柱的「输入」行',
   'events.title': '上下文事件',
   'events.empty': '暂无上下文事件（压缩、注入、模型切换会出现在这里）',
-  // Locale-neutral position stamps, matching the browser rows' own `browser.stepAt`.
   'events.at': 'T{t} S{s}',
   'events.range': 'T{t} S{a}→{b}',
   'events.rangeTo': 'T{a} S{as} → T{b} S{bs}',
@@ -583,7 +582,6 @@ export const DICT_ZH = {
   'block.content': '内容',
   'block.result': '结果',
   'block.summary': '摘要',
-  // The zh measure word never inflects, so the singular/plural forms are identical.
   'block.line': '{n} 行',
   'block.lines': '{n} 行',
   'call.ok': '正常',

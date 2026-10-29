@@ -62,7 +62,6 @@ describe('watchActivityBackfill', () => {
     const route = arm(ctx, state, {
       sessionProjectionCache: {
         cachedSnapshot: (header: { id: string }, keys?: unknown) => {
-          // The projection cache's `cachedSnapshot(meta, keys?)`: the lifecycle identity rides the header alone.
           assert.ok(Array.isArray(keys), 'the probe passes the keys as the second argument')
           if (header.id === 'b') return { asOfSeq: 0, values: { contextActivity: { days: {} }, contextTimeline: { ok: true } } }
           if (header.id === 'stale') return { asOfSeq: 0, values: { contextActivity: { days: {} } } }
@@ -169,12 +168,12 @@ describe('watchActivityBackfill', () => {
   test('sessions missing their row get one cold read each; served, live, and malformed ones skip', async () => {
     const ctx = new Context()
     const state = fakeState([
-      { header: { id: 'e' } },                    // invisible (no cwd)
-      { header: { id: '' } },                     // malformed id
-      { header: 7 },                              // malformed header
-      null,                                       // malformed record
-      { header: { id: 'b', cwd: '/repo/b' } },    // already served
-      { header: { id: 'd', cwd: '/repo/d' } },    // live
+      { header: { id: 'e' } },
+      { header: { id: '' } },
+      { header: 7 },
+      null,
+      { header: { id: 'b', cwd: '/repo/b' } },
+      { header: { id: 'd', cwd: '/repo/d' } },
       { header: { id: 'a', cwd: '/repo/a' } },
       { header: { id: 'c', cwd: '/repo/c' } },
     ])
@@ -183,7 +182,6 @@ describe('watchActivityBackfill', () => {
     const route = arm(ctx, state)
     const dispose = watchActivityBackfill(ctx)
     await trigger(route)
-    // The skip-guard records come first, so every guard branch runs before the two folds complete the signal.
     await until(() => (state.coldSnapshots.length >= 2 ? true : undefined), 'two cold folds')
     await settle(60)
     dispose()
@@ -201,8 +199,6 @@ describe('watchActivityBackfill', () => {
       { header: { id: 'good', cwd: '/repo/good' } },
     ])
     state.failReads.set('bad', new Error('no such session bad'))
-    // One refusal per face of the seam's translation: the translated name real dsh delivers and the untranslated
-    // format-edge name — both classify alike, one summary for the pair.
     state.failReads.set('legacy-1', unsupportedFormatError('SessionFormatUnsupportedError'))
     state.failReads.set('legacy-2', unsupportedFormatError('SessionFormatUnsupportedMigrationError'))
     state.failReads.set('hostile', {
@@ -350,7 +346,6 @@ describe('watchActivityBackfill', () => {
     const disposeLive = watchActivityBackfill(liveCtx)
     await trigger(liveRoute)
     await until(() => (listed > 0 ? true : undefined), 'the corpus was queried')
-    // The rejection lands and is logged while NOT aborted (the dispose follows).
     await settle()
     disposeLive()
     assert.ok(liveLines.some(l => l.level === 'warn' && /stopped early/.test(l.text)), 'an unarmed rejection warns')
@@ -389,7 +384,6 @@ describe('watchActivityBackfill', () => {
     const lines = captureLogs(ctx)
     let admitted = 0
     const dispose = watchActivityBackfill(ctx, {
-      // The first read runs; every later one is skipped (the heap-pressure answer).
       admit: <T>(read: () => Promise<T>): Promise<T | undefined> => {
         admitted++
         return admitted === 1 ? read() : Promise.resolve(undefined)

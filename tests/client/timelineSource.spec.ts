@@ -241,7 +241,6 @@ describe('DetailStore', () => {
     await vi.advanceTimersByTimeAsync(1000)
     assert.equal(calls.length, 1, 'the parked retry is dropped')
     store.subscribe(() => {})
-    // The SAME head rev must read again: the failed read already marked it "wanted".
     store.request(1)
     await vi.advanceTimersByTimeAsync(10)
     assert.equal(calls.length, 2, 'the resumed store reads instead of sticking on the note')
@@ -498,7 +497,6 @@ describe('detailStoreOf', () => {
     stubDetailFetch(() => ({ body: { ok: true, value: detail(1) } }))
     const held = detailStoreOf('held')
     const off = held.subscribe(() => {})
-    // 80 idle stores, each read once then parked: the map caps and the held one survives every trim.
     for (let i = 0; i < 80; i++) await visitStore(`idle-${i}`)
     assert.equal(detailStoreOf('held'), held, 'the active store keeps its identity (no forked ledger)')
     off()

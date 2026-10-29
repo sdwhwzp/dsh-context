@@ -6,7 +6,6 @@ import { resolveBounds } from '../../src/host/config'
 import { codeDispatch, toolCall, toolResult } from './helpers/events'
 import { assertStatesPlainJson, driveTimeline, timelineDef } from './helpers/projection'
 
-/** The read window meta the read tool persists on its result. */
 function readMeta(path: string, offset: number, lines: number): unknown {
   return { path, offset, lines: Array.from({ length: lines }, (_, i) => ({ number: offset + i })), totalLines: 99 }
 }
@@ -56,7 +55,6 @@ describe('the file-op log — call/result pairing', () => {
     state = def.apply(state, toolCall(2, {
       callId: 's1', name: 'str_replace_editor', arguments: JSON.stringify({ command: 'view', path: 'a.ts', view_range: [1, 3] }),
     }))
-    // The args serialization is gated on tools that can row an op; str_replace_editor's op derives from the arguments.
     assert.equal(state.callNames.b1?.name, 'bash')
     assert.ok(!('argsRaw' in (state.callNames.b1 ?? {})), 'a non-file call saves no raw arguments')
     assert.equal(state.callNames.s1?.argsRaw, JSON.stringify({ command: 'view', path: 'a.ts', view_range: [1, 3] }))
@@ -72,8 +70,6 @@ describe('the file-op log — call/result pairing', () => {
     ])
     assert.deepEqual(state.fileOps, [], 'no arguments — no target')
     assert.equal(state.callNames.c1, undefined, 'the pending entry consumed at the result')
-    // The durable vocabulary strings the arguments; an object form (foreign producer) is normalized through the
-    // same JSON.stringify guard.
     const objectArgs = driveTimeline([
       { type: 'tool/call', seq: 1, time: 1, data: { callId: 'c1', name: 'read', arguments: { file_path: 'a.ts' } } } as unknown as TimelineEvent,
       toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'ok' }] }),
@@ -86,8 +82,6 @@ describe('the file-op log — call/result pairing', () => {
       toolCall(1, { callId: 'c1', name: 'read', arguments: JSON.stringify({ file_path: 'a.ts' }) }),
       toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'no' }], error: true }),
       toolCall(3, { callId: 'c2', name: 'read', arguments: JSON.stringify({ file_path: 'b.ts' }) }),
-      // A hostile envelope-only mark (the retired pre-V4 spelling): admission forbids `data.error` without the
-      // message mark, so a row carrying it alone reads as non-error.
       {
         type: 'tool/result', seq: 4, time: 4,
         data: {
@@ -132,7 +126,7 @@ describe('the file-op log — Code Mode (PTC) sub-dispatches', () => {
       toolCall(1, { callId: 'rc1', name: 'run_code', arguments: '{}' }),
       codeDispatch(2, { rootCallId: 'rc1', name: 'bash', arguments: { command: 'ls' } }),
       { type: 'tool/ptc-dispatch', seq: 3, time: 3, data: null } as unknown as TimelineEvent,
-      codeDispatch(4, { name: 'read' }), // no rootCallId
+      codeDispatch(4, { name: 'read' }),
       toolResult(5, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
     ])
     assert.equal(state.pendingCodeOps, undefined)
@@ -178,7 +172,7 @@ describe('the file-op log — retention, schema, and the served payload', () => 
       toolCall(1, { callId: 'c1', name: 'read', arguments: JSON.stringify({ file_path: 'a.ts' }) }),
       toolResult(2, { callId: 'c1', content: [{ type: 'text', text: 'ok' }], meta: readMeta('a.ts', 1, 2) }),
     ])
-    def.stateSchema.parse(structuredClone(state)) // throws on drift
+    def.stateSchema.parse(structuredClone(state))
     const detail = buildTimelineDetail(state, resolveBounds({}))
     assert.equal(detail.fileOps?.length, 1)
     assert.notEqual(detail.fileOps?.[0], state.fileOps[0], 'the served op never aliases the state')

@@ -14,7 +14,6 @@ interface MarkdownChrome {
 
 const Markdown = MarkdownText as (props: { text: string; labels?: MarkdownChrome }) => ReactElement
 
-/** Whole-text JSON payload as the tree's data, else null: a `{`/`[` lead can only yield an object/array or throw. */
 export function jsonOf(text: string): object | unknown[] | null {
   const s = text.trim()
   if (s[0] !== '{' && s[0] !== '[') return null
@@ -25,7 +24,6 @@ export function jsonOf(text: string): object | unknown[] | null {
   }
 }
 
-/** Cap on auto-opened second-level nodes: past it the expansion storm outweighs the overview. */
 const JSON_EXPAND_MAX = 100
 
 export interface RichKit {
@@ -39,14 +37,11 @@ export interface RichKit {
 export interface RichFind {
   button: ReactElement
   bar: ReactElement | null
-  /** Body-wrapper key: a text change remounts the body so React never diffs injected marks. */
   bodyKey: string
   bodyRef: RefObject<HTMLDivElement>
 }
 
 const FIND_DEBOUNCE_MS = 150
-/** Cap on rendered matches: a one-character query must not flood the DOM (the counter shows '+' past it). A match
- * spanning several text nodes costs one mark per node, so the cap bounds marks at the cap times the body's depth. */
 const FIND_MAX_MATCHES = 500
 
 interface FindMarks {
@@ -62,11 +57,6 @@ function textNodesOf(root: HTMLElement): Text[] {
   return nodes
 }
 
-/** Wraps case-insensitive matches in `<mark>`; restore returns the split nodes so React's references survive. The body's
- *  text nodes join into ONE haystack, so a match crosses token runs and element boundaries alike. It gets one mark per
- *  text node it covers, and the offsets keep addressing the original characters while the marks are built: a split only
- *  shortens the split node's head, and the matches are placed right to left, so every later split sits to the right of
- *  the match being placed. Every mark holds a node created by a split, never an original one, so restore drops them all. */
 function markMatches(root: HTMLElement, query: string, active: number): FindMarks {
   const needle = query.toLowerCase()
   const nodes = textNodesOf(root)
@@ -126,7 +116,6 @@ function markMatches(root: HTMLElement, query: string, active: number): FindMark
 export function makeRichText(kit: ViewKit): RichKit {
   const { t } = kit
 
-  // Mode follows the payload: a JSON body opens on the tree and `md` isn't offered; a stale pick falls back to the payload default.
   function useRichMode(text: string): [RichMode, (mode: RichMode) => void, boolean] {
     const json = useMemo(() => jsonOf(text) !== null, [text])
     const [pick, setPick] = useState<RichMode | null>(null)
@@ -153,7 +142,6 @@ export function makeRichText(kit: ViewKit): RichKit {
     )
   }
 
-  // One block per source line: the number is a counter-fed ::before glued to its line across soft wraps, and never reaches the clipboard.
   function RawText(props: { text: string }): ReactElement {
     const lines = useMemo(() => {
       const parts = props.text.split('\n')
@@ -168,7 +156,6 @@ export function makeRichText(kit: ViewKit): RichKit {
     )
   }
 
-  // Copies the raw source, never rendered markdown; matches the harness's own code-block control.
   function RichCopy(props: { text: string }): ReactElement {
     const [copied, setCopied] = useState(false)
     const onCopy = useCallback(() => {
@@ -193,24 +180,21 @@ export function makeRichText(kit: ViewKit): RichKit {
     )
   }
 
-  // Two levels open by default: JsonTree has no depth prop, so first-level expanders are clicked through its own path;
-  // the toggle claims focus, so the previously focused element is restored afterwards.
   function JsonBody(props: { data: object | unknown[]; labels: JsonTreeLabels }): ReactElement {
     const ref = useRef<HTMLDivElement>(null)
     useLayoutEffect(() => {
       const root = ref.current
-      /* v8 ignore next 2 -- the ref seats with the render this layout effect follows */
+      /* v8 ignore next 2 */
       if (root === null) return
       const previous = document.activeElement as HTMLElement | null
       let clicked = 0
       for (const el of root.querySelectorAll('[role=tree] > [role=treeitem] > [data-json-expander]')) {
         if (clicked >= JSON_EXPAND_MAX) break
-        // Idempotent on a data swap that keeps an entry's key: its node stays mounted and expanded.
         if (el.getAttribute('aria-expanded') !== 'false') continue
         ;(el as HTMLElement).click()
         clicked += 1
       }
-      /* v8 ignore next 1 -- jsdom always seats body as activeElement; null only before document ready */
+      /* v8 ignore next 1 */
       if (clicked > 0) previous?.focus({ preventScroll: true })
     }, [props.data])
     return (
@@ -221,7 +205,6 @@ export function makeRichText(kit: ViewKit): RichKit {
   }
 
   function RichText(props: { text: string; mode: RichMode }): ReactElement {
-    // Reference-stable per locale: `labels` is a MarkdownText dependency, so a fresh object re-parses every render.
     const mdLabels = useMemo<MarkdownChrome>(() => ({
       code: { copyLabel: t('rich.md.copy'), copiedLabel: t('rich.md.copied') },
       footnotes: t('rich.md.footnotes'),
@@ -242,14 +225,12 @@ export function makeRichText(kit: ViewKit): RichKit {
     if (props.mode === 'json' && json !== null) {
       return <JsonBody data={json} labels={jsonLabels} />
     }
-    // A stale `json` pick whose text no longer parses degrades to markdown.
     if (props.mode !== 'raw') {
       return <div className="lc-ts-desc-md"><Markdown text={props.text} labels={mdLabels} /></div>
     }
     return <RawText text={props.text} />
   }
 
-  // Scoped to one section's body; the mark effect keys on text AND mode so the lens follows a body swap.
   function useRichFind(text: string, mode: RichMode): RichFind {
     const [open, setOpen] = useState(false)
     const [query, setQuery] = useState('')

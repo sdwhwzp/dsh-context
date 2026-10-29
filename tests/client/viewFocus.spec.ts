@@ -35,7 +35,6 @@ describe('context focus subscription', () => {
   test('a listener unsubscribing another mid-notify skips it (later records do not re-run it)', () => {
     let late = 0
     let offLate: () => void = () => {}
-    // Insertion order matters: the remover runs first and detaches the victim before Set iteration reaches it.
     const offRemover = subscribeContextFocus(() => { offLate() })
     offLate = subscribeContextFocus(() => { late++ })
     requestContextFocus('sv-mid', 1)

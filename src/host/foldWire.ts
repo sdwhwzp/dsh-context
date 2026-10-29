@@ -1,31 +1,22 @@
-/** The fold's served values — the slim wire head, the on-demand detail payload, and the inline view. Every field is a copy, so a served
- * value never aliases persisted state. */
-
 import type { CommandRecord, ContextTimelineDetail, Snapshot, ToolTimingTotals } from '../shared/types'
 import { copyCostUsage } from './foldMetering'
 import type { FoldBounds } from './config'
 import type { CommandStateRecord, TimelineState } from './foldState'
 
-/** The served command record: the fold's pairing key (`call`) never crosses the wire. */
 export function serveCommand(rec: CommandStateRecord): CommandRecord {
   const copy: CommandStateRecord = { ...rec }
   delete copy.call
   return copy
 }
 
-/** Served value fields are COPIES — the served value must never alias persisted state. Optional scalars use conditional spread, because
- * one `undefined`-valued property can fail the whole lossless-JSON push. */
 function headFieldsOf(state: TimelineState): Snapshot {
   const surfaceTotal = state.sums.user + state.sums.inject + state.sums.skill + state.sums.assistant + state.sums.tool
-  // One walk for both surface tallies: this builds on every push.
   let images = 0
   let toolCalls = 0
   for (const node of state.surface) {
     if (node.imgs !== undefined) images += node.imgs
-    // A skill-tool load reclassifies its node into `skill` but keeps its tool identity, so it still counts.
     if (node.cat === 'tool' || (node.cat === 'skill' && node.tool !== undefined)) toolCalls++
   }
-  // Provider-anchored occupancy is NOT folded here: the Client reads token-meter's own `contextPressure` key.
   const result: Snapshot = {
     ok: true,
     ...(state.model !== undefined ? { model: state.model } : {}),
@@ -47,7 +38,6 @@ function headFieldsOf(state: TimelineState): Snapshot {
       total: surfaceTotal + state.systemTokens + state.toolsTokens,
     },
     images,
-    // Calls still in flight (no result yet) and results compacted or pruned out of the surface are both excluded.
     toolCalls,
     humanInputs: state.humanInputs ?? 0,
     answers: state.answers ?? 0,
@@ -70,14 +60,12 @@ function headFieldsOf(state: TimelineState): Snapshot {
     for (const k in state.timing.tools) tools[k] = { ...state.timing.tools[k] }
     result.timing = { ...state.timing, tools }
   }
-  // The browser resolves the prompt in force at any step from these and fetches its TEXT on demand from the event.
   if (state.systems !== undefined && state.systems.length > 0) {
     result.systems = state.systems.map(n => ({ ...n }))
   }
   return result
 }
 
-/** Shared verbatim by the inline wire view (channel-less hosts) and the on-demand detail payload (host/detail.ts). */
 function detailCollectionsOf(state: TimelineState, bounds: FoldBounds): Omit<ContextTimelineDetail, 'rev'> {
   const result: Omit<ContextTimelineDetail, 'rev'> = {
     requests: state.requests.map(r => ({ ...r })),
@@ -92,16 +80,12 @@ function detailCollectionsOf(state: TimelineState, bounds: FoldBounds): Omit<Con
     ...(state.commandStats !== undefined ? { commandStats: { ...state.commandStats } } : {}),
     spans: state.spans.map(s => ({ ...s })),
   }
-  // Injections land on the surface FIRST, so a plain tail would drop their identity while their tokens keep counting;
-  // skill content behaves the same — pin both categories into the served list. The overflow slice precedes the tail by
-  // position, so the concatenation stays seq-ordered.
   const overflowCount = Math.max(0, state.surface.length - bounds.maxNodes)
   const overflow = state.surface.slice(0, overflowCount)
   const tail = state.surface.slice(overflowCount)
   const pinned = overflow.filter(n => n.cat === 'inject' || n.cat === 'skill')
   result.nodes = pinned.length > 0 ? [...pinned, ...tail] : tail
   result.droppedNodes = overflowCount - pinned.length
-  // Both floors let the client mark a picked step's reconstruction approximate instead of silently under-showing it.
   if (result.droppedNodes > 0) {
     let floor = 0
     for (const n of overflow) if (n.cat !== 'inject' && n.cat !== 'skill') floor = Math.max(floor, n.seq)
@@ -109,8 +93,6 @@ function detailCollectionsOf(state: TimelineState, bounds: FoldBounds): Omit<Con
   }
   if (state.archiveFloor !== undefined) result.archiveFloor = state.archiveFloor
 
-  // Attach each event to the requests around it: `turn`/`step` name the first request logged after the event,
-  // `fromTurn`/`fromStep` the request before it. Both lists stay seq-sorted, so one pointer walk suffices.
   const requests = result.requests
   const events = result.events
   let ri = 0
@@ -132,13 +114,11 @@ function detailCollectionsOf(state: TimelineState, bounds: FoldBounds): Omit<Con
 
 export function buildTimelineHead(state: TimelineState): Snapshot {
   const result = headFieldsOf(state)
-  // Over the RETAINED records, the same set the detail serves.
   const turns = new Set<number>()
   for (const r of state.requests) turns.add(r.turn ?? 0)
   let injects = 0
   let compactions = 0
   let prunes = 0
-  // Distinct names among the skill-tagged inject events; the catalog digest rides an untagged event, so it never lands here.
   const skills = new Set<string>()
   for (const e of state.events) {
     if (e.kind === 'inject') injects++
@@ -155,12 +135,10 @@ export function buildTimelineHead(state: TimelineState): Snapshot {
   return result
 }
 
-/** The heavy collections, the slim head at the SAME cut, and the revision marker the head carries. */
 export function buildTimelineDetail(state: TimelineState, bounds: FoldBounds): ContextTimelineDetail {
   return { rev: state.detailRev ?? 0, head: buildTimelineHead(state), ...detailCollectionsOf(state, bounds) }
 }
 
-/** The INLINE projection wire view for channel-less hosts: the head scalars with the detail collections in place. */
 export function buildTimelineView(state: TimelineState, bounds: FoldBounds): Snapshot {
   return { ...headFieldsOf(state), ...detailCollectionsOf(state, bounds) }
 }

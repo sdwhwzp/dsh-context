@@ -1,5 +1,3 @@
-/** A settled-without-data detail read must render a note, never an empty state. */
-
 import { type ReactElement } from 'react'
 import type { ViewKit } from '../viewkit'
 

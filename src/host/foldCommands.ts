@@ -5,14 +5,11 @@ import { exitOfJobDetail, markersOfText, outcomeOfMarkers, signalOfJobDetail } f
 import type { CommandArgs } from '../shared/commands'
 import type { CommandStateRecord, TimelineState } from './foldState'
 
-/** A command record is found by the callId the fold armed it with (stripped before serving); a fresh call's record sits
- * at the newest end, so the scan walks backwards. */
 export function findCommandIndex(commands: readonly CommandStateRecord[], callId: string): number {
   for (let i = commands.length - 1; i >= 0; i--) if (commands[i].call === callId) return i
   return -1
 }
 
-/** The text blocks of a result payload in order; the shell renderers put their markers in the single trailing text. */
 export function resultTextsOf(blocks: unknown): string[] {
   if (!Array.isArray(blocks)) return []
   const texts: string[] = []
@@ -24,24 +21,19 @@ export function resultTextsOf(blocks: unknown): string[] {
   return texts
 }
 
-/** The whole-log tally: every settled run contributes exactly once. */
 export function tallyRun(st: TimelineState, rec: CommandStateRecord): void {
   const stats = { ...(st.commandStats ?? { runs: 0, failed: 0, ms: 0, bg: 0 }) }
   stats.runs += 1
   if (rec.status === 'failed' || rec.status === 'killed') stats.failed += 1
-  /* v8 ignore next 1 -- every settle path stamps `end` before the running → terminal transition reaches here. */
+  /* v8 ignore next 1 */
   if (rec.end !== undefined) stats.ms += Math.max(0, rec.end - rec.start)
   st.commandStats = stats
 }
 
-/** A background dispatch counts when it is KNOWN (the run_in_background argument at creation, or the hand-off ack) —
- * a never-settling background run would otherwise never join the tally. Callers bump only on the false → true edge. */
 export function bumpBg(st: TimelineState): void {
   st.commandStats = { ...(st.commandStats ?? { runs: 0, failed: 0, ms: 0, bg: 0 }), bg: (st.commandStats?.bg ?? 0) + 1 }
 }
 
-/** Replace the record at `index` (the array must already be this event's clone); the running → terminal transition
- * tallies the run. */
 export function setCommand(st: TimelineState, index: number, next: CommandStateRecord): void {
   if (st.commands[index].status === 'running' && next.status !== 'running') tallyRun(st, next)
   st.commands[index] = next
@@ -115,7 +107,6 @@ export function commandRecordOf(input: {
   }
 }
 
-/** A job event's creating tool call id, when it carries one. */
 export function jobCallIdOf(data: Record<string, unknown> | undefined): string | undefined {
   const toolCall = data?.toolCall
   if (toolCall === null || typeof toolCall !== 'object') return undefined
@@ -123,8 +114,6 @@ export function jobCallIdOf(data: Record<string, unknown> | undefined): string |
   return typeof callId === 'string' ? callId : undefined
 }
 
-/** A settled job's outcome as a record patch: precise end, mapped status (a nonzero command exit rides `completed`
- * with the code in the detail — the shell tools never call it `failed`), and the detail's exit/signal. */
 export function jobOutcomePatch(
   prev: CommandStateRecord,
   status: 'completed' | 'killed' | 'failed',
@@ -141,13 +130,10 @@ export function jobOutcomePatch(
     ...(signal !== undefined ? { signal } : {}),
   }
   delete next.derived
-  // The job outcome is precise: any earlier envelope-inferred exit yields to it, whether or not the detail carries a code.
   delete next.exitInferred
   return next
 }
 
-/** Apply `patch` to a buffered nested record by its subCallId (a nested run's job events can land while the record
- * still waits for the run_code root's result). Replaces, never mutates; returns whether one matched. */
 export function patchBufferedCommand(
   st: TimelineState,
   pending: Record<string, CommandStateRecord[]>,

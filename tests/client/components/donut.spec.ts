@@ -5,7 +5,6 @@ import { Donut } from '../../../src/client/components/donut'
 import type { DonutSegment } from '../../../src/client/components/donut'
 import { hover, mount, query, queryAll, unhover } from '../helpers/kit'
 
-/** A parent that really holds the hover key, so hovering re-renders the ring. */
 function HoverHarness(props: { segments: DonutSegment[] }) {
   const [hoverKey, setHoverKey] = useState<string | null>(null)
   return h(Donut, { segments: props.segments, centerTop: 'x', hoverKey, onHoverKey: setHoverKey })
@@ -46,14 +45,12 @@ describe('Donut', () => {
     }))
     const circles = queryAll(m.container, 'circle')
     assert.equal(circles.length, 1)
-    // Inline style because var() cannot live in a stroke attribute; jsdom normalizes it to rgb().
     assert.equal(circles[0].style.stroke, 'rgb(255, 255, 255)')
     await m.unmount()
   })
 })
 
 describe('Donut slice divider', () => {
-  /** An arc's painted length, in dasharray units (1 unit ≈ 1% of the ring). */
   const lenOf = (el: Element): number => Number((el.getAttribute('stroke-dasharray') ?? '').split(' ')[0])
 
   test('a lone slice keeps a full ring, and a sliver is cut a quarter per end', async () => {

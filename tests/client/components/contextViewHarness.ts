@@ -11,7 +11,6 @@ import type { ContextTimeline } from '../../../src/shared/types'
 import { TestClientCtx, asClientCtx } from '../helpers/harness'
 import { makeKit, mount, query, queryAll, text } from '../helpers/kit'
 
-// Keep pluginInfo's npm-registry probe inert ('0.0.0-dev' short-circuits it anyway).
 vi.stubGlobal('fetch', () => Promise.resolve({ ok: false } as Response))
 
 const kit = makeKit()
@@ -19,8 +18,6 @@ const kit = makeKit()
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
-  // The cold-start share is page-lifetime per session: drop it so one test's cold read never leaks its
-  // failed/ready state into a later test that reuses the same session id.
   resetTimelineDetailStores()
 })
 
@@ -39,7 +36,6 @@ export function timeline(over: Record<string, unknown> = {}): ContextTimeline {
 
 export const T0 = 1700000000000
 
-/** Two steps of one turn plus a turn-less trailing step, with their nodes. */
 export function richTimeline(over: Record<string, unknown> = {}): ContextTimeline {
   return timeline({
     model: 'deepseek-v4-flash',
@@ -78,7 +74,6 @@ export function makeView(ctx: TestClientCtx, settings = createContextSettings())
   return makeContextView(asClientCtx(ctx), kit, settings, makeAgentHeads())
 }
 
-/** Settings bound to a ready Host form carrying `value`, so specs can pin mount-time defaults. */
 export function settingsWith(value: Record<string, unknown>) {
   const settings = createContextSettings()
   settings.attach({
@@ -95,14 +90,12 @@ export function buttonByText(container: ParentNode, label: string): HTMLElement 
   return hit
 }
 
-/** A bare shared-scrollport stand-in for views that probe `[data-conversation-scroll]`. */
 export function makeScroller(): HTMLElement {
   const scroller = document.createElement('div')
   scroller.setAttribute('data-conversation-scroll', '')
   return scroller
 }
 
-/** A scrollport the reveal probes can see as operative (jsdom lays out nothing): fixed overflow metrics. */
 export function overflowingScroller(scrollHeight: number, clientHeight = 300): HTMLElement {
   const scroller = makeScroller()
   scroller.style.overflowY = 'auto'
@@ -111,15 +104,12 @@ export function overflowingScroller(scrollHeight: number, clientHeight = 300): H
   return scroller
 }
 
-/** The event row carrying `label`, and its label link (the card lists newest-first). */
 export function eventLink(container: ParentNode, label: string): HTMLElement {
   const row = queryAll(container, '.lc-event').find(r => text(r).includes(label))
   assert.ok(row !== undefined, `no event row labelled ${label}`)
   return query(row, '.lc-event-jump')
 }
 
-/** jsdom lays out nothing: fixed viewport tops for the reveal probes — the scrollport at 100, every other element
- *  from `topOf` (default 0), shifted by the scroll the reveal itself applies so later probes see the moved page. */
 export function stubRevealRects(scroller: HTMLElement, topOf: (el: Element) => number = () => 0) {
   return vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
     const inScroller = !this.hasAttribute('data-conversation-scroll')
@@ -128,7 +118,6 @@ export function stubRevealRects(scroller: HTMLElement, topOf: (el: Element) => n
   })
 }
 
-/** Mount inside a `[data-conversation-scroll]` scroller so the view's shared-scrollport probes find it. */
 export async function mountInScroller(el: ReactElement, scroller: HTMLElement) {
   const inner = document.createElement('div')
   scroller.appendChild(inner)
@@ -153,7 +142,6 @@ export async function mountInScroller(el: ReactElement, scroller: HTMLElement) {
   }
 }
 
-/** Full projection over two steps of one turn plus a turn-less step. */
 export async function mountRich(sessionId: string) {
   const View = makeView(new TestClientCtx())
   const m = await mount(h(View, {

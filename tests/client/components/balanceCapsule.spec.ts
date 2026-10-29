@@ -21,7 +21,6 @@ function stubRoute(body: unknown): void {
   vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => body }))
 }
 
-/** Seed the figure a previous open would have left in storage. */
 function remember(balance: unknown): void {
   globalThis.localStorage.setItem('dsh-context:platform-balance', JSON.stringify(balance))
 }
@@ -73,8 +72,6 @@ describe('BalanceCapsule', () => {
     assert.equal(pill?.getAttribute('rel'), 'noreferrer')
     assert.equal(query(m.container, '.lc-ov-balance-label')?.textContent, 'DeepSeek balance')
     assert.equal(query(m.container, '.lc-ov-balance-value')?.textContent, '$12.50')
-    // The breakdown rides data-* attributes for the page's hover tip (no native `title`): only the
-    // non-zero parts bubble, topped-up before granted, and the tip drops below the pill.
     assert.equal(pill?.getAttribute('title'), null)
     assert.equal(pill?.getAttribute('data-lc-tip'), 'Topped-up balance: $10.00\nGranted balance: $2.50')
     assert.equal(pill?.getAttribute('data-lc-tip-side'), 'bottom')

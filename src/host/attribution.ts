@@ -1,10 +1,4 @@
 /// <reference types="node" />
-/**
- * Live tool→plugin attribution: cordis fires the `internal/get` waterfall on every service read, so the reading
- * fiber's NAME identifies the plugin about to `register()`. Only the name is kept — a retained context would pin its
- * whole agent past disposal. Best-effort: an `await` can separate the read from the register, and the stack fallback
- * needs a resolvable `package.json`.
- */
 
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, normalize } from 'node:path'
@@ -35,7 +29,6 @@ export function packageNameFrom(file: string): string | undefined {
           return name
         }
       } catch {
-        // Malformed or unreadable package.json — keep walking up.
       }
     }
     const parent = dirname(dir)
@@ -48,10 +41,8 @@ export function packageNameFrom(file: string): string | undefined {
 
 const FRAME_POSITION = /:\d+:\d+$/
 
-/** Symbol cordis registers (`Symbol.for`) on its traced proxies; reading it yields the wrapped target. */
 const CORDIS_ORIGINAL = Symbol.for('cordis.original')
 
-/** Peel cordis's per-read traced proxy down to the instance it wraps, so identity-keyed bookkeeping sees one object. */
 function rawInstanceOf(tools: unknown): unknown {
   const raw = (tools as { [key: symbol]: unknown } | undefined | null)?.[CORDIS_ORIGINAL]
   return raw ?? tools
@@ -101,12 +92,10 @@ interface ToolServiceLike {
   }
 }
 
-/** Rides the calling fiber's lifetime and is disposed with the plugin. */
 export function createToolAttribution(ctx: Context): ToolAttribution {
   const live = new Map<string, string>()
   const wrapped = new WeakSet()
   const self = ctx.fiber.name
-  // Only the reader's fiber NAME: a retained context would pin its whole agent past disposal.
   let lastReader: string | undefined
   const patched: (() => void)[] = []
 
@@ -115,7 +104,6 @@ export function createToolAttribution(ctx: Context): ToolAttribution {
     const register = (tools as { register?: unknown }).register
     if (typeof register !== 'function') return
     wrapped.add(tools)
-    // A reload re-installs the hook on a still-wrapped instance: peel the previous wrapper so they never stack.
     const original = (register as { attributedOriginal?: unknown }).attributedOriginal ?? register
     if (typeof original !== 'function') return
     const instance = tools as { register: (this: unknown, definition?: { name?: unknown }) => unknown }
@@ -150,32 +138,24 @@ export function createToolAttribution(ctx: Context): ToolAttribution {
   ctx.on('internal/get', (reader, name, _error, next) => {
     if (name !== 'tools') return next() as unknown
     const tools = next() as unknown
-    // Patch the stable instance but return the caller's own proxy: its this-binding carries the reading context's scoped registration
-    // semantics.
     lastReader = reader.fiber.name
     wrapInstance(rawInstanceOf(tools))
     return tools
   })
 
-  // Unloading peels this incarnation's wrappers; a closure finding a newer incarnation's wrapper does nothing.
   ctx.effect(() => () => {
     for (const restore of patched.splice(0)) restore()
   }, 'tools.register attribution')
 
-  // An instance provided before this plugin started is still wrapped for later registrations; the tools it already
-  // holds are unobservable, so the boot snapshot tags them UNKNOWN_TOOL_SOURCE instead of nothing.
   const toolsService = rawInstanceOf(ctx.get('tools', false)) as ToolServiceLike | undefined
   wrapInstance(toolsService)
   const boot = new Set<string>()
   try {
     const toolEntries = toolsService?.layers?.global?.tools
-    // Method-style call: `entries()` reads `this.data`, so the receiver must be preserved; any shape surprise
-    // leaves the boot snapshot empty (attribution must never break startup).
     if (toolEntries !== undefined && typeof toolEntries.entries === 'function') {
       for (const [name] of toolEntries.entries()) boot.add(name)
     }
   } catch {
-    // Unsupported tool-service internals — degrade to no boot snapshot.
   }
   return {
     ownerOf: name =>

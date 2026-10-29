@@ -1,10 +1,6 @@
-/** The op-log generation's host fold derives one record per op; older hosts serve no `fileOps`, so the
- * legacy path derives ops from the served nodes. `before` is the exclusive upper seq bound. */
-
 import type { FileOpRecord, RequestRecord, SurfaceNode } from '../shared/types'
 import { opsOfCall, parseCallArgs } from '../shared/fileOps'
 import { leafNameOf } from '../shared/attachment'
-// The harness's browser-safe file-address layer, inlined by the bundle to produce `dsh-resource://file/…`.
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import type { ConversationNodeLike } from './services'
 
@@ -21,11 +17,9 @@ export interface FileEntry {
   added: number
   removed: number
   ops: FileOp[]
-  /** Set when `path` is a pathless search's PATTERN, not a file path — display must not relativize it. */
   pattern?: true
 }
 
-/** The surface node that carries an op: a nested Code-Mode op lives on its parent `run_code` result. */
 export function surfaceSeqOf(op: FileOp): number {
   return op.parent ?? op.seq
 }
@@ -124,7 +118,6 @@ function dirGlyph(base: string): FileGlyph {
 function fileGlyph(base: string): FileGlyph {
   const name = base.toLowerCase()
   const dot = name.lastIndexOf('.')
-  // A dot at position 0 is a dotfile, not an extension — `.env` below reads by name.
   const ext = dot > 0 ? name.slice(dot + 1) : ''
   if (name.endsWith('.lock') || LOCK_NAMES.includes(name)) return { glyph: '🔒', tip: 'files.glyph.lock' }
   if (TEST_NAME.test(name)) return { glyph: '🧪', tip: 'files.glyph.tests' }
@@ -156,14 +149,12 @@ export function glyphOf(path: string, form: FileForm): FileGlyph {
 
 const DRIVE_PATH = /^[a-zA-Z]:[\\/]/
 
-/** Absolute paths stay verbatim; a relative one resolves against the workspace root, else undefined. */
 export function absPathOf(path: string, workspace: string | undefined): string | undefined {
   if (path.startsWith('/') || DRIVE_PATH.test(path)) return path
   if (workspace === undefined || workspace === '' || path.startsWith('.')) return undefined
   return workspace.replace(/\/+$/, '') + '/' + path.replace(/^\/+/, '')
 }
 
-/** The session-scoped `dsh-resource://file/…` address, built by the harness's own `fileAddressFor`. */
 export function previewAddressOf(
   path: string,
   form: FileForm,
@@ -175,18 +166,15 @@ export function previewAddressOf(
   try {
     return fileAddressFor(sessionId, workspace, path)
   } catch {
-    // A lone surrogate in an untrusted log path fails URI encoding: not previewable, never a thrown render.
     return undefined
   }
 }
 
-/** The display form of a relative remainder: leading `./` drops, but an all-`./` degenerate shows as itself. */
 function bareOf(remainder: string): string {
   const bare = remainder.replace(/^(?:\.\/)+/, '')
   return bare !== '' ? bare : remainder
 }
 
-/** Inside the workspace the path shortens to the bare workspace-relative form; other forms stay verbatim. */
 export function displayPathOf(path: string, workspace: string | undefined): string {
   const root = workspace !== undefined && workspace.length > 1 ? workspace.replace(/\/+$/, '') : undefined
   if (root !== undefined) {
@@ -197,7 +185,6 @@ export function displayPathOf(path: string, workspace: string | undefined): stri
   return bareOf(path)
 }
 
-/** Kind and line-change totals over a set of entries — the card's tallies for any lens. */
 export function totalsOf(entries: readonly FileEntry[]): FileActivity['totals'] {
   const totals: FileActivity['totals'] = {
     read: { files: 0, ops: 0 },
@@ -257,7 +244,6 @@ function aggregateOps(ops: readonly FileOp[], before: number | null): FileActivi
   return { entries, totals: totalsOf(entries) }
 }
 
-/** Op-log generation's read; `gone` is joined from the detail's archive at render time. */
 export function activityOfOps(ops: readonly FileOpRecord[], archive: readonly SurfaceNode[], before: number | null): FileActivity {
   const goneBySeq = new Map<number, number>()
   for (const n of archive) if (n.gone !== undefined) goneBySeq.set(n.seq, n.gone)
@@ -299,10 +285,8 @@ function programOf(conv: ConversationNodeLike | undefined): string | undefined {
   return typeof description === 'string' && description !== '' ? description : undefined
 }
 
-/** Depth guard for nested Code-Mode trees: the SDK bindings exclude `run_code` itself, so a real tree is one level deep. */
 const SUBCALL_MAX_DEPTH = 8
 
-/** The legacy nested walk: each settled sub-dispatch resolving to a file target books one op on the parent. */
 function foldSubCalls(
   blocks: readonly unknown[],
   parent: SurfaceNode,
@@ -332,7 +316,6 @@ function foldSubCalls(
   }
 }
 
-/** The INLINE generation's derivation from served nodes joined with the conversation window (window-bound). */
 export function activityOf(
   nodes: SurfaceNode[],
   convOf: (seq: number) => ConversationNodeLike | undefined,
@@ -360,14 +343,11 @@ export function activityOf(
         foldSubCalls(subCalls, n, programOf(conv), ops, new Set<object>(), 1)
       }
     } catch {
-      // Malformed join data can never matter.
     }
   }
   return aggregateOps(ops, null)
 }
 
-/** The browser step whose surface SHOWS the result node: the first request dispatched after it while it
- * was still alive. Sorted here because the wire's append order is not guaranteed (restored rows re-order). */
 export function locateStepOf(requests: RequestRecord[], seq: number, gone: number | undefined): number | 'live' | null {
   const sorted = requests.slice().sort((a, b) => a.seq - b.seq)
   for (const r of sorted) {

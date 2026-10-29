@@ -1,5 +1,3 @@
-/** Model-id normalization and maker hints shared by the price book and its resolver. */
-
 const GATEWAY_PREFIXES = [
   'accounts/fireworks/models/',
   'accounts/fireworks/routers/',
@@ -42,24 +40,20 @@ const FAMILY_VENDORS: ReadonlyArray<readonly [prefix: string, vendor: string]> =
   ['qwen', 'alibaba'],
 ]
 
-/** The lowercased id used for exact, suffix, and normalized lookups. */
 export function lowerModelId(id: string): string {
   return id.trim().toLowerCase()
 }
 
-/** The last path segment: `anthropic/claude-sonnet-5` → `claude-sonnet-5`. */
 export function bareModelOf(id: string): string {
   const slash = id.lastIndexOf('/')
   return slash >= 0 ? id.slice(slash + 1) : id
 }
 
-/** The first path segment, when the id has one: `google-vertex/gemini-4-argon` → `google-vertex`. */
 export function orgOf(id: string): string | undefined {
   const slash = id.indexOf('/')
   return slash > 0 ? id.slice(0, slash).toLowerCase() : undefined
 }
 
-/** The canonical lab of a `lab/model` canonical id. */
 export function labOf(canonical: string): string | undefined {
   const slash = canonical.indexOf('/')
   return slash > 0 ? canonical.slice(0, slash).toLowerCase() : undefined
@@ -80,7 +74,6 @@ function stripPrefixes(input: string, prefixes: readonly string[]): string {
   return out
 }
 
-/** Collapse lookup-equivalent spellings; exact matching still runs before this. */
 export function normalizeModelId(id: string): string {
   let out = stripPrefixes(lowerModelId(id), GATEWAY_PREFIXES)
   out = stripPrefixes(out, RESOURCE_PREFIXES)
@@ -104,7 +97,6 @@ export function normalizeModelId(id: string): string {
   return out
 }
 
-/** Every `-`/`/` suffix tail, used for short spellings such as `k3` under `kimi-k3`. */
 export function suffixKeys(key: string): string[] {
   const parts = key.split(/[/-]+/).filter(part => part.length > 0)
   const tails: string[] = []
@@ -112,12 +104,10 @@ export function suffixKeys(key: string): string[] {
   return tails
 }
 
-/** Coding/token plans list subscription entitlements, not per-token prices; their zero rate is not a price. */
 export function isSubscriptionPlanProvider(pid: string): boolean {
   return /(?:^|-)(?:coding|code|token)-plan(?:-|$)/.test(pid.toLowerCase())
 }
 
-/** The maker family named by the model id, used only when canonical metadata is absent. */
 export function familyVendorOf(model: string): string | undefined {
   const bare = normalizeModelId(bareModelOf(model))
   return FAMILY_VENDORS.find(([prefix]) => bare.startsWith(prefix))?.[1]

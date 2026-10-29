@@ -77,8 +77,6 @@ describe('registry contract — the semantics every supported line shares', () =
     assert.equal(headers.headers[0].tools[0].name, 'bash')
     assertStatesPlainJson(driveTimeline(canonicalLog()))
 
-    // One log instance: the envelope builders' clock is monotonic, so a second call would mint fresh
-    // times and the restore comparison would drift.
     const log = fullLog()
     const slim = bootSession(log, true)
     const slimTimeline = slim.driver.snapshot(slim.session).values.contextTimeline as {
@@ -129,7 +127,7 @@ describe('registry contract — the semantics every supported line shares', () =
     assert.ok(rows !== undefined, 'checkpoint rows are losslessly JSON-serializable')
     for (const key of ['contextTimeline', 'contextHeaders']) {
       const row = rows[key] as { ver: number; seq: number }
-      assert.equal(row.ver, key === 'contextTimeline' ? 35 : 1)
+      assert.equal(row.ver, key === 'contextTimeline' ? 36 : 1)
       assert.equal(row.seq, 12)
     }
   })
@@ -148,8 +146,6 @@ describe('registry contract — the semantics every supported line shares', () =
   })
 
   test('issue #44 recovery and rollback: a version mismatch discards the row and the refold re-tracks every step', () => {
-    // A pre-fix checkpoint row (stateVersion 12) carries a raw nonconforming gateway figure while the durable log
-    // holds every step; the bump makes the row unusable, so the cold read refolds from init over the FULL log.
     const log = [
       ...fullLog(),
       assistantMessage(13, { turn: 1, step: 2, usage: { inputTokens: -80, cacheReadTokens: 150.7, outputTokens: 22.4 } }),
@@ -163,7 +159,6 @@ describe('registry contract — the semantics every supported line shares', () =
         ver: 12,
         seq: 15,
         val: {
-          // The poisoned v12 shape: the newest record carries the raw gateway figure that failed the integer gates.
           surface: [],
           sums: { user: 0, inject: 0, assistant: 0, tool: 0 },
           systemTokens: 0,
@@ -178,7 +173,6 @@ describe('registry contract — the semantics every supported line shares', () =
     const viewed = driver.viewCheckpoint(stale)
     assert.equal(viewed.contextTimeline, undefined)
     assert.ok(viewed.contextHeaders !== undefined, 'the untouched row still serves')
-    // A schema violation anywhere would throw out of restore here (it parses each wire value through the real viewSchema).
     const restored = driver.restore(stale, log, 0, session.header)
     const timeline = restored.values.contextTimeline as { requests: { seq: number; prompt?: number; cacheRead?: number; output?: number }[] }
     assert.deepEqual(timeline.requests.map(r => r.seq), [6, 10, 13, 14, 15])
@@ -187,8 +181,6 @@ describe('registry contract — the semantics every supported line shares', () =
       [[151, 151, 22], [undefined, undefined, undefined], [12, undefined, undefined]],
     )
 
-    // Reverse upgrade: v13-written rows read by a plugin still pinned at v12. The state SHAPE never changed
-    // (only value normalization), so the version mismatch discards the rows and refolds from the log.
     const currentLog = fullLog()
     const current = bootSession(currentLog)
     const rows = current.driver.checkpoint(current.session)
@@ -207,7 +199,6 @@ describe('registry contract — the semantics every supported line shares', () =
     const seen: string[] = []
     driver.onChanged((_s, key) => seen.push(key))
     const before = driver.snapshot(session)
-    // A durable event family the fold ignores (registry still drives it through apply).
     const foreign = { seq: 13, time: 1, type: 'todo/write', data: {} } as unknown as TimelineEvent
     session.events[13] = foreign
     session.seq = 14
@@ -235,7 +226,6 @@ describe('registry contract — the semantics every supported line shares', () =
     assert.throws(() => driver.register({ ...def, key: 'x' as never, stateVersion: -1 }), RegistryViolationError)
     assert.throws(() => driver.register({ ...def, key: 'y' as never, stateVersion: 1.5 }), RegistryViolationError)
     driver.register(def)
-    // Same key at the SAME stateVersion shares the registration (preset ref-counting).
     assert.doesNotThrow(() => driver.register(createContextTimelineDefinition({}, () => false)))
     assert.throws(() => driver.register({ ...def, stateVersion: def.stateVersion + 1 }), RegistryViolationError)
     const disposable = new RegistryDriver()

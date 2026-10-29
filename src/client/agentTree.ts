@@ -2,7 +2,7 @@ import type { PartsPart } from './categories'
 import type { ContextBreakdown, ContextPressure, ContextTimeline, SessionCostUsage, TokenUsage } from '../shared/types'
 import { mergeCostUsage } from './cost'
 import { headlineOf, occupancyPercent, type Headline } from './headline'
-import { asRecord, contextBreakdownOf, contextPressureOf, numOf, timelineOf, tokenUsageOf } from './services'
+import { asRecord, contextBreakdownOf, contextPressureOf, numOf, timelineOf, tokenUsageOf, activeMsOf } from './services'
 
 export interface SessionsFaceLike {
   list?: {
@@ -23,7 +23,6 @@ export interface AgentRow {
   projections?: Record<string, unknown>
 }
 
-/** The subagent domain's `subagent` identity projection (descriptor mode + durable label). */
 export interface AgentIdentity {
   mode: 'one-shot' | 'continuable'
   label?: string
@@ -45,7 +44,6 @@ export interface AgentSelfStats {
   billed: number | null
   requests: number
   costUsage?: SessionCostUsage | null
-  /** The current session's whole-step time (`data.timing.wallMs`); a parent never carries `subagentTiming`. */
   durationMs?: number | null
 }
 
@@ -54,34 +52,27 @@ export interface AgentNode extends AgentStats {
   label: string
   parentId?: string
   depth: number
-  /** Which level-1 subtree this node belongs to (root = -1) — drives the family link hue. */
   family: number
   isCurrent: boolean
   running: boolean
   completed: boolean
   subagent: boolean
-  /** The list row's change stamp — the fleet-detail cache's freshness key. */
   updatedAt: number
 }
 
 export interface AgentForest {
-  /** DFS pre-order (parents ahead of their children). */
   nodes: AgentNode[]
   edges: { from: string; to: string }[]
   solo: boolean
 }
 
-/** Fixed card height, mirrored by `.lc-agent-card`'s `height` in agentGraph.css so links meet the card edge. */
 export const AGENT_CARD_H = 116
-/** One cell per node, the card filling it minus `CARD_GUTTER`, so no card clips a neighbor or the stage edge. */
 const SLOT_MAX = 276
 const SLOT_MIN = 190
 const CARD_GUTTER = 12
-/** Card height plus a dedicated 64px link channel, tall enough for the S-curves to read as separate strands. */
 const LEVEL_H = AGENT_CARD_H + 64
 const PAD_Y = 48
 
-/** Session-list rows are immutable snapshots, so one derivation per row object serves every panel and every push. */
 const rowCache = new WeakMap<object, AgentRow>()
 
 export function agentRowOf(value: unknown): AgentRow | null {
@@ -104,18 +95,15 @@ export function agentRowOf(value: unknown): AgentRow | null {
   return row
 }
 
-/** A family edge is a subagent child only: a fork seed carries `parentId` but no `origin`, so it roots its own family. */
 export function familyParentOf(row: AgentRow | undefined): string | undefined {
   return row !== undefined && row.origin === 'subagent' ? row.parentId : undefined
 }
 
-/** The pair must come from one source — the live envelope or the declared descriptor. */
 export function modelLabelOf(model: string | undefined, effort: string | undefined): string | undefined {
   if (model === undefined) return undefined
   return effort === undefined ? model : `${model} (${effort})`
 }
 
-/** `provider · model (effort)`; empty or absent parts drop without a lone separator. */
 export function providerModelLabelOf(
   provider: string | undefined,
   model: string | undefined,
@@ -146,12 +134,10 @@ export function agentDurationOf(value: unknown): number | null {
   return total > 0 ? total : null
 }
 
-/** The harness's own done signal: the last closed turn after the child's descriptor finished normally. */
 export function agentTurnCompletedOf(value: unknown): boolean {
   return asRecord(value)?.lastTurnCompleted === true
 }
 
-/** Fold a row's projection values into stats, preferring the plugin's own `contextTimeline`. */
 export function agentStatsOf(values: Record<string, unknown> | undefined): AgentStats {
   const timeline = timelineOf(values?.contextTimeline)
   const pressure = contextPressureOf(values?.contextPressure)
@@ -178,7 +164,6 @@ export function agentStatsOf(values: Record<string, unknown> | undefined): Agent
   }
   return {
     head,
-    // The split-generation wire head carries the tally precomputed; the inline generation's rows count their served records.
     requests: timeline !== null ? (timeline.counts?.steps ?? timeline.requests.length) : 0,
     billed: billedOf(usage),
     costUsage: timeline?.cost ?? null,
@@ -195,7 +180,6 @@ function billedOf(usage: TokenUsage | null): number | null {
     : null
 }
 
-/** The current session's live stats off the VIEW's projections; a top-level session carries no `subagentTiming`. */
 export function agentSelfOf(
   timeline: ContextTimeline,
   pressure: ContextPressure | null,
@@ -207,11 +191,10 @@ export function agentSelfOf(
     billed: billedOf(usage),
     requests: timeline.counts?.steps ?? timeline.requests.length,
     costUsage: timeline.cost ?? null,
-    durationMs: timeline.timing != null && timeline.timing.wallMs > 0 ? timeline.timing.wallMs : null,
+    durationMs: timeline.timing != null && timeline.timing.wallMs > 0 ? activeMsOf(timeline.timing) : null,
   }
 }
 
-/** Spawn-order ranks from the parent's `subagentCatalog`; absent, empty, or hostile values yield null. */
 export function catalogOrderOf(values: Record<string, unknown> | undefined): Map<string, number> | null {
   const cat = values?.subagentCatalog
   if (!Array.isArray(cat)) return null
@@ -241,8 +224,6 @@ export function familyChildrenOf(rows: ReadonlyMap<string, AgentRow>): Map<strin
   return childrenOf
 }
 
-/** Build the family from the topmost known ancestor's whole subtree; `fetched` heads fill cold relatives.
- * Null when the snapshot/current id is unusable; blank rows are excluded. */
 export function agentForestOf(
   snapshot: unknown,
   currentId: string | undefined,
@@ -255,14 +236,12 @@ export function agentForestOf(
   const rows = new Map<string, AgentRow>()
   for (const key of Object.keys(byId)) {
     const row = agentRowOf(byId[key])
-    // Blank placeholder sessions (never engaged) are not agents; the current session always stays.
     if (row !== null && (!row.blank || key === currentId)) rows.set(key, row)
   }
   if (!rows.has(currentId)) {
     rows.set(currentId, { running: false, blank: false, updatedAt: 0 })
   }
 
-  // Topmost known ancestor; a lineage cycle anchors at the first repeated id.
   let root = currentId
   const chain = new Set<string>([currentId])
   for (;;) {
@@ -272,19 +251,16 @@ export function agentForestOf(
     root = parent
   }
   const rootRow = rows.get(root)
-  /* v8 ignore next 2 -- root is currentId (inserted above) or a parent verified with rows.has, so its row always exists. */
+  /* v8 ignore next 2 */
   if (rootRow === undefined) return null
 
   const childrenOf = familyChildrenOf(rows)
   for (const [pid, kids] of childrenOf) {
-    // Sibling order follows the parent's subagent catalog when cached; uncataloged children fall after
-    // cataloged ones, and catalog-less parents keep the heuristic.
     const order = catalogOrderOf(rows.get(pid)?.projections)
     kids.sort((a, b) => {
       const ra = order?.get(a.id)
       const rb = order?.get(b.id)
       if (ra !== undefined || rb !== undefined) {
-        // Catalog ranks are unique per parent, so two ranked ids never tie here.
         if (ra === undefined) return 1
         if (rb === undefined) return -1
         return ra - rb
@@ -324,7 +300,6 @@ export function agentForestOf(
       family,
       isCurrent: id === currentId,
       running: row.running,
-      // Done by the harness popup's rule: a stopped agent whose last closed subagent turn finished normally.
       completed: !row.running
         && (agentTurnCompletedOf(values?.subagentTiming) || (!subagent && stats.requests > 0)),
       subagent,
@@ -342,9 +317,6 @@ export function agentForestOf(
   return { nodes, edges, solo: nodes.length === 1 }
 }
 
-/** Display titles for every row in a sessions snapshot, so a party outside the viewed family still has a readable name.
- * A teammate session's generated title can be its injected `<system-reminder>` briefing; its subagent descriptor label is
- * the clean fallback. */
 const titleCache = new WeakMap<object, string | null>()
 
 function titleOfRow(value: unknown): string | null {
@@ -384,12 +356,10 @@ export function sessionTitlesOf(snapshot: unknown): Map<string, string> {
 
 export interface SubagentCostFold {
   usage: SessionCostUsage | null
-  /** Descendants with no timeline row and no landed head — the slim-head fetch targets. */
   cold: string[]
   count: number
 }
 
-/** Merge the SUBAGENT subtree cost: warm `contextTimeline` costs first, fetched heads for rows without one. */
 export function subagentCostFoldOf(
   snapshot: unknown,
   currentId: string | undefined,
@@ -415,8 +385,6 @@ export function subagentCostFoldOf(
       const head = landed?.get(kid.id)
       const values = kid.row.projections
       if (values?.contextTimeline === undefined) {
-        // A cold relative's usage rides its fetched head; until one lands the id stays a fetch target.
-        // A landed head is final either way — a failed fetch also stops the refetch.
         if (head === undefined) cold.push(kid.id)
         else if (head.cost !== undefined) parts.push(head.cost)
       } else {
@@ -454,9 +422,7 @@ export interface AgentLayout {
   links: AgentLink[]
 }
 
-/** Tidy top-down layout: siblings claim leaf slots, parents center; an overflowing level wraps into bands. */
 export function layoutForest(forest: AgentForest, stageWidth = 0): AgentLayout {
-  // Nodes are DFS pre-order, so plain iteration appends children in visit order.
   const childrenOf = new Map<string, AgentNode[]>()
   for (const n of forest.nodes) {
     if (n.parentId === undefined) continue
@@ -486,13 +452,12 @@ export function layoutForest(forest: AgentForest, stageWidth = 0): AgentLayout {
     slotOf.set(node.id, slot)
     return slot
   }
-  /** v8 ignore next 1 -- a forest always holds at least the (possibly synthesized) current node. */
+  /* v8 ignore next 1 */
   if (forest.nodes.length > 0) place(forest.nodes[0])
 
   const perLevel = stageWidth > 0 ? Math.max(1, Math.floor(stageWidth / SLOT_MIN)) : 0
 
   if (perLevel > 0 && leafSlots > perLevel) {
-    // Wrapped bands interleave by kinship, so sibling groups never split unless one group exceeds the band.
     const bandSlot = Math.min(SLOT_MAX, stageWidth / perLevel)
     const width = perLevel * bandSlot
     const points: AgentPoint[] = []
@@ -521,7 +486,7 @@ export function layoutForest(forest: AgentForest, stageWidth = 0): AgentLayout {
       }
       flush()
     }
-    /* v8 ignore next 1 -- a forest always holds at least the current node. */
+    /* v8 ignore next 1 */
     if (forest.nodes.length > 0) emitBand([forest.nodes[0]], 0)
     return {
       width,
@@ -532,11 +497,10 @@ export function layoutForest(forest: AgentForest, stageWidth = 0): AgentLayout {
     }
   }
 
-  // Adaptive pitch; 0 = unmeasured stage (the natural maximum).
   const slot = stageWidth > 0 && leafSlots > 1 ? Math.min(SLOT_MAX, stageWidth / leafSlots) : SLOT_MAX
   const points: AgentPoint[] = forest.nodes.map(node => ({
     id: node.id,
-    /** v8 ignore next 1 -- place() visits every node: the forest is exactly the root's subtree by construction. */
+    /* v8 ignore next 1 */
     x: (slotOf.get(node.id) ?? 0) * slot + slot / 2,
     y: PAD_Y + node.depth * LEVEL_H,
     depth: node.depth,
@@ -551,12 +515,10 @@ export function layoutForest(forest: AgentForest, stageWidth = 0): AgentLayout {
   }
 }
 
-/** Family hue by level-1 subtree index: the golden angle keeps consecutive families separated. */
 export function familyHue(index: number): string {
   return `hsl(${Math.round(index * 137.508) % 360} 58% 52%)`
 }
 
-/** The lead/current agent's hue: the shell's brand color, shared by the graph, boards, and comms avatars. */
 export const BRAND_HUE = 'var(--dsw-alias-brand-primary, var(--color-blue-500))'
 
 function linksOf(forest: AgentForest, points: AgentPoint[]): AgentLink[] {
@@ -567,14 +529,13 @@ function linksOf(forest: AgentForest, points: AgentPoint[]): AgentLink[] {
   for (const edge of forest.edges) {
     const from = pointOf.get(edge.from)
     const to = pointOf.get(edge.to)
-    /** v8 ignore next 2 -- edges are emitted only for visited parent/child pairs, so both points always exist. */
+    /* v8 ignore next 2 */
     if (from === undefined || to === undefined) continue
     links.push({
       to: edge.to,
       running: runningIds.has(edge.to),
-      /* v8 ignore next 1 -- edges only connect visited nodes. */
+      /* v8 ignore next 1 */
       color: familyHue(nodeOf.get(edge.to)?.family ?? 0),
-      // Out of the parent's bottom edge, into the child's top; a wrapped band's curve passes BEHIND the rows between.
       x1: from.x,
       y1: from.y + AGENT_CARD_H,
       x2: to.x,
@@ -584,7 +545,6 @@ function linksOf(forest: AgentForest, points: AgentPoint[]): AgentLink[] {
   return links
 }
 
-/** The hovered node's lineage: ancestor chain plus whole subtree — the links that light up under focus. */
 export function lineageOf(forest: AgentForest, id: string | null): Set<string> | null {
   if (id === null) return null
   const byId = new Map(forest.nodes.map(n => [n.id, n]))
@@ -604,7 +564,6 @@ export function lineageOf(forest: AgentForest, id: string | null): Set<string> |
     cur = cur.parentId !== undefined ? byId.get(cur.parentId) : undefined
   }
   const queue = [id]
-  // A single-parent tree cannot lead back into the already-lit ancestor chain.
   for (let i = 0; i < queue.length; i++) {
     for (const kid of childrenOf.get(queue[i]) ?? []) {
       lit.add(kid)
@@ -628,7 +587,6 @@ export function pressureColorOf(pct: number | null): string {
   return 'var(--color-green-500)'
 }
 
-/** The composer ring's semantics flattened: parts fill the bar scaled to occupancy, a neutral remainder closes it. */
 export function barSegments(parts: PartsPart[], pct: number | null, fallbackColor: string): BarSeg[] {
   const occ = pct === null ? 1 : Math.min(100, Math.max(0, pct)) / 100
   let total = 0
@@ -661,7 +619,6 @@ export function sessionsFaceOf(ctx: { get(name: string): unknown }): SessionsFac
   return rec
 }
 
-/** Compact duration, distinct from `format.ts`'s `fmtDuration` (decimal seconds do not fit the caption column). */
 export function fmtDurationCompact(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return '—'
   const s = Math.round(ms / 1000)

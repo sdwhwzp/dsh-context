@@ -47,8 +47,6 @@ export function typeOf(p: ParamSchema): string {
   return 'unknown'
 }
 
-/** Parameter schemas nest under `parameters`, `input_schema`, or `inputSchema` (producer-dependent), or bare when
- * `type === 'object'`. */
 export function paramsOf(schema: unknown): ParamSchema | null {
   if (schema === null || typeof schema !== 'object') return null
   const s = schema as Record<string, unknown>

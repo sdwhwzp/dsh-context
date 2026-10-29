@@ -1,5 +1,3 @@
-// OverviewPanel: mounting it IS opening it (the shell unmounts on panel switch), so no open flag exists.
-
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, test, vi } from 'vitest'
@@ -18,7 +16,6 @@ const PROVIDERS = {
 const NOW = Date.now()
 const TODAY = dayKeyOf(NOW) ?? ''
 const YESTERDAY = dayKeyOf(NOW - 86_400_000) ?? ''
-/** Local midnight of NOW — the "today" range's floor, so today's session stays inside it whatever hour the spec runs. */
 const MIDNIGHT = new Date(new Date(NOW).setHours(0, 0, 0, 0)).getTime()
 
 function timeline(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -33,7 +30,7 @@ function timeline(over: Record<string, unknown> = {}): Record<string, unknown> {
     archive: [],
     counts: { turns: 3, steps: 5, injects: 1, compactions: 0, prunes: 0 },
     cost: { deepseek: { 'deepseek-v4-flash': { peak: { uncached: 1000, cacheRead: 500, cacheWrite: 0, output: 250 } } } },
-    timing: { wallMs: 90_000, ttftMs: 1_000, genMs: 30_000, calls: 4, toolsMs: 20_000, toolCalls: 7 },
+    timing: { wallMs: 90_000, ttftMs: 1_000, genMs: 30_000, calls: 4, toolsMs: 20_000, toolBusyMs: 15_000, toolCalls: 7 },
     ...over,
   }
 }
@@ -71,8 +68,6 @@ function sessionsSnapshot(): { ids: string[]; byId: Record<string, Record<string
         updatedAt: NOW - 10 * 86_400_000,
         projectionValues: {
           contextTimeline: timeline({ current: { system: 10, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 10 }, cost: undefined }),
-          // b's windowed ledger (60s wall, 3 tool runs / 5s) deliberately differs from its lifetime head (90s,
-          // 7 runs / 20s): only a band reading the same heads as the timing card can print the card's figures.
           contextActivity: { days: { [YESTERDAY]: { tokens: 25, requests: 1, turns: 1, toolCalls: 3, toolsMs: 5_000, wallMs: 60_000 } } },
         },
       },
@@ -142,7 +137,6 @@ async function openPanel(
     ...props,
   }
   const m = await mount(h(Panel, allProps))
-  // The price book's first fetch resolves a microtask or two behind the mount; a second act window keeps its notify inside act.
   await flush()
   return { m, Panel }
 }
@@ -159,8 +153,6 @@ beforeEach(() => {
   resetModelPrices()
   setModelPricesLoader(() => Promise.resolve(PROVIDERS))
   backfillPosts.length = 0
-  // The heading's balance capsule POSTs its own route on mount (client/balance.ts);
-  // only the warm-up trigger is this spec's subject.
   vi.stubGlobal('fetch', async (url: string | URL) => {
     const route = String(url)
     if (route.endsWith('/backfill')) backfillPosts.push(route)
@@ -193,7 +185,7 @@ describe('OverviewPanel', () => {
     assert.equal(values[3], '33.33%')
     assert.equal(values[4], '14')
     assert.equal(values[5], '3m0s')
-    assert.ok(text(m.container).includes('tool runs 40.0s'), 'the tool calls cell qualifies with the summed run time')
+    assert.ok(text(m.container).includes('tool runs 30.0s'), 'the tool calls cell qualifies with the busy union the timing card prints')
     assert.ok(text(m.container).includes('8 model calls'), 'the active-time cell qualifies with the family lifetime calls the timing card reads')
     const subs = queryAll(m.container, '.lc-stat-sub').map(el => el.textContent)
     assert.deepEqual(subs.slice(2, 4), ['1 of 2 sessions priced', 'across 1 sessions'])
@@ -320,17 +312,17 @@ describe('OverviewPanel', () => {
     const span = () => queryAll(m.container, '.lc-dp-half').map(el => el.textContent)
     const thirty = new Date(NOW - 30 * 86_400_000)
     assert.deepEqual(span(), [dayKeyOf(thirty.getTime()), TODAY], '30d shows the thirty days it covers')
-    await click(rangeButtons[3]) // All
+    await click(rangeButtons[3])
     assert.deepEqual(span(), ['Start date', 'End date'], 'an unbounded scope has no span to print')
     assert.equal(queryAll(m.container, '.lc-ov-grid > .lc-ov-session').length, 3, 'the stale session joins')
     assert.equal(queryAll(m.container, '.lc-stat-value')[0].textContent, '3')
-    await click(rangeButtons[0]) // Today
+    await click(rangeButtons[0])
     assert.deepEqual(span(), [TODAY, TODAY], "today's own day on both ends")
     assert.equal(queryAll(m.container, '.lc-ov-grid > .lc-ov-session').length, 1, "only today's session stays")
-    await click(rangeButtons[1]) // Last 7 days
+    await click(rangeButtons[1])
     assert.deepEqual(span(), [dayKeyOf(NOW - 7 * 86_400_000), TODAY])
     assert.equal(queryAll(m.container, '.lc-ov-grid > .lc-ov-session').length, 2, 'the yesterday-active session joins the prompt-fresh one')
-    await click(rangeButtons[2]) // back to 30d
+    await click(rangeButtons[2])
     assert.equal(queryAll(m.container, '.lc-ov-grid > .lc-ov-session').length, 2)
     await m.unmount()
 
@@ -421,7 +413,6 @@ describe('OverviewPanel', () => {
 
   test('the plugin-optional current row anchors the skill catalog; the card pins the skill’s loaders; the chip and row release it', async () => {
     const ctx = makeCtx()
-    // `current` is this plugin's optional extension over the host's SessionListState, not host state.
     const snap = { ...sessionsSnapshot(), current: 'a' }
     const aDays = (snap.byId.a.projectionValues as { contextActivity: { days: Record<string, Record<string, unknown>> } }).contextActivity.days
     aDays[TODAY] = { ...aDays[TODAY], skills: { tdd: { n: 2, last: NOW - 1000 } } }
@@ -438,7 +429,7 @@ describe('OverviewPanel', () => {
       return { ok: true, json: async () => ({}) }
     })
     const { m } = await openPanel(ctx, { useSessions: useHookOf(snap) })
-    await flush() // the catalog read lands
+    await flush()
     assert.deepEqual(skillPosts, [{ cwd: '/repo/alpha', sessionId: 'a' }], 'the catalog read anchors on the current session')
     const skillRow = query<HTMLButtonElement>(m.container, 'button.lc-ov-skill')
     assert.ok(text(skillRow).includes('tdd'))
@@ -487,11 +478,11 @@ describe('OverviewPanel', () => {
     await actType(input, '')
     const sortButtons = queryAll<HTMLButtonElement>(m.container, '.lc-ov-list-head .lc-gran-btn')
     assert.equal(sortButtons.length, 3)
-    await click(sortButtons[1]) // Tokens
+    await click(sortButtons[1])
     assert.ok(text(queryAll(m.container, '.lc-ov-grid > .lc-ov-session')[0]).includes('alpha session'))
-    await click(sortButtons[2]) // Context
+    await click(sortButtons[2])
     assert.ok(text(queryAll(m.container, '.lc-ov-grid > .lc-ov-session')[0]).includes('alpha session'))
-    await click(sortButtons[0]) // Recent
+    await click(sortButtons[0])
     assert.equal(document.activeElement, input, 're-renders leave the focused input alone')
     await m.unmount()
   })
@@ -516,7 +507,7 @@ describe('OverviewPanel', () => {
     await click(queryAll<HTMLButtonElement>(m.container, '.lc-ov-chip')[0])
     assert.equal(queryAll(m.container, '.lc-ov-grid > .lc-ov-session').length, 2)
 
-    await click(queryAll<HTMLButtonElement>(m.container, '.lc-ov-chip')[1]) // workspace-one
+    await click(queryAll<HTMLButtonElement>(m.container, '.lc-ov-chip')[1])
     await actType(query<HTMLInputElement>(m.container, 'input.lc-ov-search'), 'zzz')
     const phantom = queryAll<HTMLButtonElement>(m.container, '.lc-ov-chip')
     assert.deepEqual(phantom.map(c => c.textContent), ['All0', 'workspace-one0'])
@@ -612,7 +603,7 @@ describe('OverviewPanel', () => {
     assert.ok(text(m.container).includes('Token 统计'), 'the aggregate stats row rides the zh dictionary too')
     assert.ok(text(m.container).includes('系统提示词'), 'the Context tab\'s composition categories render in zh')
     assert.equal(query<HTMLButtonElement>(m.container, '.lc-ov-settings').title, '打开插件设置', 'the settings chip rides the zh dictionary too')
-    await flush() // the price book lands
+    await flush()
     const values = queryAll(m.container, '.lc-stat-value').map(el => el.textContent)
     assert.ok(values[2].startsWith('¥'), 'CNY under the zh locale')
     await m.unmount()
@@ -627,7 +618,7 @@ describe('OverviewPanel', () => {
     const fallback = makeOverviewPanel(bare as never, makeKit(), settingsWith())
     const mf = await mount(h(fallback, { useSessions: useHookOf(sessionsSnapshot()), useWorkspaces: useHookOf(workspacesSnapshotValue), }))
     await flush()
-    await flush() // the price book lands
+    await flush()
     assert.ok(queryAll(mf.container, '.lc-stat-value').map(el => el.textContent)[2].startsWith('$'), 'USD when the locale face cannot report an active locale')
     await mf.unmount()
   })
@@ -690,7 +681,6 @@ describe('OverviewPanel', () => {
 
 })
 
-/** Type into an input through the React change path (native setter + input event, act-wrapped). */
 async function actType(input: HTMLInputElement, value: string): Promise<void> {
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
@@ -699,7 +689,6 @@ async function actType(input: HTMLInputElement, value: string): Promise<void> {
   })
 }
 
-/** Pick a coverage option through the React change path (native setter + change event, act-wrapped). */
 async function actSelect(select: HTMLSelectElement, value: string): Promise<void> {
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set

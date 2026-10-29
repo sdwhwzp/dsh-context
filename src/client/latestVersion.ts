@@ -33,7 +33,6 @@ export function fetchLatestVersion(): Promise<string | null> {
   return cached.promise
 }
 
-/** Numeric semver compare; the pre-release suffix is dropped (1.2.0-rc.1 == 1.2.0). */
 export function isNewerVersion(latest: string, current: string): boolean {
   const parse = (v: string): number[] =>
     v.replace(/^v/, '').split('-', 1)[0].split('.').map(n => parseInt(n, 10) || 0)

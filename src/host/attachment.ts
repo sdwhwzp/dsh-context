@@ -1,6 +1,3 @@
-/** The attachment-preview route: the previewable host path for one attachment the session's own log cites — a stored file's named alias,
- * or a published hard link for a digest-named image. No bytes travel, and an id resolves only while the session's own log cites it. */
-
 import { copyFile, link, mkdir } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -41,7 +38,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-/** Depth cap: real citation sites nest ≤3 deep; the cap bounds hostile payloads. */
 const WALK_MAX_DEPTH = 8
 
 function attachmentIn(value: unknown, id: string, depth: number): AttachmentRef | null {
@@ -63,19 +59,16 @@ function attachmentIn(value: unknown, id: string, depth: number): AttachmentRef 
   return null
 }
 
-/** The first logged block citing the attachment anywhere in the payload; a hostile payload drops out instead of throwing. */
 export function referencedAttachmentOf(events: readonly unknown[], attachmentId: string): AttachmentRef | null {
   for (const entry of events) {
     try {
       const hit = attachmentIn(entry, attachmentId, 0)
       if (hit !== null) return hit
-    } catch { /* a hostile payload names nothing */ }
+    } catch {}
   }
   return null
 }
 
-/** The name one image previews under: the preview viewer dispatches by suffix, so a display name counts only when its suffix is one a
- * viewer claims; the verified media type names the rest. */
 export function imagePreviewNameOf(ref: AttachmentRef): string | null {
   const leaf = leafNameOf(ref.name ?? '')
   if (leaf !== '' && isImageName(leaf)) return leaf
@@ -83,7 +76,6 @@ export function imagePreviewNameOf(ref: AttachmentRef): string | null {
   return extension === undefined ? null : `attachment.${extension}`
 }
 
-/** The preview cache beside the store's `<home>/attachments/v1`; null when the object path is not that shape. */
 function previewAliasDirOf(objectPath: string): string | null {
   const root = dirname(dirname(dirname(objectPath)))
   if (basename(root) !== 'v1' || basename(dirname(root)) !== 'attachments') return null
@@ -96,13 +88,10 @@ function filePathOf(store: AttachmentStoreFace | undefined, ref: AttachmentRef):
     const path = store.fileHostPath({ attachmentId: ref.attachmentId, name: ref.name ?? '', bytes: ref.bytes ?? 0 })
     return typeof path === 'string' && path !== '' ? path : null
   } catch {
-    // A malformed reference (bad digest, unsanitized name) is no path, never a throw.
     return null
   }
 }
 
-/** Publish (or reuse) the named hard link an image previews through: an existing link is the same immutable object, so it is the answer;
- * a link-less host falls back to a copy, and any failure resolves null. */
 async function imageAliasOf(store: AttachmentStoreFace | undefined, ref: AttachmentRef): Promise<string | null> {
   if (typeof store?.imageHostPath !== 'function') return null
   let objectPath: string | undefined
@@ -141,8 +130,6 @@ async function previewPathOf(store: AttachmentStoreFace | undefined, ref: Attach
   return ref.kind === 'file' ? filePathOf(store, ref) : await imageAliasOf(store, ref)
 }
 
-/** Serve whenever `connection` is composed; `sessionQuery` and the attachment store are re-read per request, so a late-arriving service
- * still arms. */
 export function watchAttachmentChannel(ctx: Context, coldReads: ColdReadGate = makeColdReadGate()): void {
   ctx.inject(['connection'], (c) => {
     const handler = async (request: Request, principal?: unknown): Promise<Response> => {

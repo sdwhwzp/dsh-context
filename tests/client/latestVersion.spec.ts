@@ -91,7 +91,6 @@ describe('isNewerVersion', () => {
   })
 })
 
-/** Mount the hook through a throwaway component; `version` emulates the tsdown define. An empty settled value stands for null. */
 async function renderUseNewerVersion(version?: string): Promise<{ settled: () => string; unmount: () => Promise<void> }> {
   vi.resetModules()
   if (version === undefined) delete (globalThis as Record<string, unknown>).__DSH_CTX_VERSION__

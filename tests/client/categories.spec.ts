@@ -117,7 +117,6 @@ describe('billedParts', () => {
   test('the assistant bucket splits by content ratios, and the same ratios split the generated output', () => {
     const cur = current({ system: 100, assistant: 100, assistantReasoning: 60, assistantCallTokens: 40, total: 200 })
     const parts = billedParts(cur, null, { uncachedInputTokens: 200, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 }, { reasoning: 20, calls: 60 })
-    // Prompt: 60 reasoning / 40 tool calls out of assistant content 100. Output: 20 reasoning / 30 tool calls.
     assert.deepEqual(values(parts), { system: 100, tools: 0, user: 0, inject: 0, skill: 0, toolCalls: 70, answers: 0, thinking: 80 })
     assert.deepEqual(parts.map(p => p.value).reduce((a, b) => a + b, 0), 250, 'the parts still total the chat line')
   })
@@ -125,7 +124,6 @@ describe('billedParts', () => {
   test('reply text splits out of the assistant bucket and output, and a text-only session never lands a token on Tool Calls', () => {
     const cur = current({ assistant: 100, assistantReasoning: 60, assistantAnswerTokens: 20, total: 100 })
     const parts = billedParts(cur, null, { uncachedInputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 }, { reasoning: 20, answers: 10 })
-    // The 20-token assistant framing rides the 60:20 reasoning:reply ratio; the reply-only output goes wholly to Answers.
     assert.deepEqual(values(parts), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, toolCalls: 0, answers: 55, thinking: 95 })
     assert.deepEqual(parts.map(p => p.value).reduce((a, b) => a + b, 0), 150, 'the parts still total the chat line')
   })
@@ -144,14 +142,12 @@ describe('billedParts', () => {
       { uncachedInputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
       { reasoning: 10, answers: 999 },
     )
-    // Answers clamp to the 20 the reasoning left in the assistant and the 0 the thinking left in output.
     assert.deepEqual(values(answered), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, toolCalls: 0, answers: 20, thinking: 90 })
   })
 
   test('generated reasoning and answers need no live subset, and a zero billed input still splits the output remainder', () => {
     const cur = current({ assistant: 200, total: 200 })
     const parts = billedParts(cur, null, { uncachedInputTokens: 200, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 }, { reasoning: 20 })
-    // No content signal anywhere: the assistant share keeps its historic Tool Calls home, and the reasoning-only output is all thinking.
     assert.deepEqual(values(parts), { system: 0, tools: 0, user: 0, inject: 0, skill: 0, toolCalls: 200, answers: 0, thinking: 50 })
     const noInput = billedParts(
       current({ assistant: 100, total: 100 }),

@@ -12,14 +12,10 @@ const FileCard = makeFileCard(kit, createContextSettings())
 const PITCH = 41
 const GAP = 2
 const T0 = 1700000000000
-/** Some rows wrap to two lines: windowing must fall back to the full list then. */
 let wrapRows = false
 let originals: [string, PropertyDescriptor | undefined][] = []
 
-/** jsdom lays nothing out: give the list a 500×320 box and the rows a fixed 41px pitch so the card's own
- *  windowing path runs for real: measure → window → scroll. */
 beforeAll(() => {
-  // No-op ResizeObserver: the list is measured on mount anyway.
   vi.stubGlobal('ResizeObserver', class {
     observe = (): void => {}
     disconnect = (): void => {}
@@ -100,14 +96,13 @@ describe('FileCard row windowing', () => {
     const pads = queryAll<HTMLElement>(m.container, '.lc-row-pad')
     assert.equal(pads.length, 1)
     assert.ok(Number.parseFloat(pads[0].style.height) > 0)
-    assert.equal(list.clientHeight, 320) // the list keeps its box; the full height lives in the pads
+    assert.equal(list.clientHeight, 320)
     list.scrollTop = 900
     await settle(40)
     await fireScroll(list)
     await until(() => queryAll<HTMLElement>(m.container, '.lc-row-pad').length === 2, 'a top pad appears after scrolling')
     const afterScroll = queryAll(m.container, '.lc-fa-item').length
     assert.ok(afterScroll < 60 && afterScroll >= 8)
-    // Pads carry the skipped rows' pitch minus the flex gap between pad and row.
     const [topPad, bottomPad] = queryAll<HTMLElement>(m.container, '.lc-row-pad')
     assert.equal(topPad.style.height, `${13 * PITCH - GAP}px`)
     assert.equal(bottomPad.style.height, `${21 * PITCH - GAP}px`)

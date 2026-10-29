@@ -5,7 +5,6 @@ import { applyActivity, contextActivitySchema, createContextActivityDefinition }
 import { isBeijingPeak } from '../../src/host/fold'
 import { dayKeyOf } from '../../src/shared/days'
 
-/** Local noon of a day offset from 2026-01-01 — deterministic in every timezone. */
 function at(daysFromNewYear: number): number {
   return new Date(2026, 0, 1 + daysFromNewYear, 12).getTime()
 }
@@ -87,7 +86,6 @@ describe('applyActivity: event filtering', () => {
   })
 
   test('a tagged fork/seed marker resets the ledger; the untagged resume marker keeps it', () => {
-    // A seeded fork's inherited prefix: one settlement the parent already booked, plus the step slot its open tail left armed.
     let state = applyActivity({ days: {} }, assistantMessage(at(0), { inputTokens: 10 }))
     state = applyActivity(state, { type: 'step/start', seq: 2, time: at(0), data: {} } as never)
     const seeded = state
@@ -279,19 +277,19 @@ describe('applyActivity: skill loads', () => {
   test('non-load messages and hostile payloads return the state unchanged', () => {
     const state = applyActivity({ days: {} }, assistantMessage(at(0), { inputTokens: 1 }))
     const cases: SessionEvent[] = [
-      skillInvocation(at(0), undefined), // no source
+      skillInvocation(at(0), undefined),
       skillInvocation(at(0), null),
-      skillInvocation(at(0), 'skill-invocation'), // non-object source
-      skillInvocation(at(0), { kind: 'plugin', name: 'tdd' }), // another kind
-      skillInvocation(at(0), { kind: 'skill-invocation' }), // name absent
-      skillInvocation(at(0), { kind: 'skill-invocation', name: 7 }), // non-string name
-      skillInvocation(at(0), { kind: 'skill-invocation', name: '' }), // empty name
-      { type: 'user/message', seq: 1, time: at(0), data: null } as never, // no data
-      { type: 'user/message', seq: 1, time: Number.NaN, data: { source: INVOCATION } } as never, // unreadable time
-      skillResult(at(0), '<skill_content name="tdd">…</skill_content>'), // no call id at all
-      { type: 'tool/result', seq: 1, time: at(0), data: null } as never, // no data
-      { type: 'tool/result', seq: 1, time: at(0), data: { message: null } } as never, // no message
-      { type: 'tool/result', seq: 1, time: at(0), data: { message: { toolCallId: 7 } } } as never, // unreadable ids
+      skillInvocation(at(0), 'skill-invocation'),
+      skillInvocation(at(0), { kind: 'plugin', name: 'tdd' }),
+      skillInvocation(at(0), { kind: 'skill-invocation' }),
+      skillInvocation(at(0), { kind: 'skill-invocation', name: 7 }),
+      skillInvocation(at(0), { kind: 'skill-invocation', name: '' }),
+      { type: 'user/message', seq: 1, time: at(0), data: null } as never,
+      { type: 'user/message', seq: 1, time: Number.NaN, data: { source: INVOCATION } } as never,
+      skillResult(at(0), '<skill_content name="tdd">…</skill_content>'),
+      { type: 'tool/result', seq: 1, time: at(0), data: null } as never,
+      { type: 'tool/result', seq: 1, time: at(0), data: { message: null } } as never,
+      { type: 'tool/result', seq: 1, time: at(0), data: { message: { toolCallId: 7 } } } as never,
       { type: 'tool/result', seq: 1, time: at(0), data: { message: { toolCallId: '' } } } as never,
       { type: 'tool/result', seq: 1, time: at(0), data: { message: { source: { callId: 9 } } } } as never,
       { type: 'tool/result', seq: 1, time: at(0), data: { message: { source: 'x' } } } as never,
@@ -327,7 +325,6 @@ describe('applyActivity: skill loads', () => {
 
 })
 
-/** A `request/header` carrying the route in force (the fold's only model/provider source). */
 function requestHeader(model: unknown, provider: unknown): SessionEvent {
   return {
     type: 'request/header',
@@ -345,7 +342,6 @@ function stepEnd(time: number): SessionEvent {
   return { type: 'step/end', seq: 1, time, data: {} } as never
 }
 
-/** Deterministic UTC instants: Thursday 02:00 (a peak window) and Saturday 12:00 (off-peak). */
 const PEAK_UTC = Date.UTC(2026, 0, 1, 2)
 const OFF_UTC = Date.UTC(2026, 0, 3, 12)
 
@@ -530,8 +526,6 @@ describe('contextActivity unit: the schemas over the pricing record', () => {
     const served = view.days[day]
     const persisted = state.days[day]
     assert.ok(persisted.cost !== undefined && persisted.skills !== undefined, 'the fixture carries both records')
-    // `cost` is four levels deep and `skills` two; a shallow day copy would leave both pointing at persisted
-    // state, so a mutating registry, cache writer, or wire payload would write straight into the fold's record.
     assert.notEqual(served.cost, persisted.cost)
     assert.notEqual(served.cost?.['deepseek-official'], persisted.cost?.['deepseek-official'])
     assert.notEqual(served.cost?.['deepseek-official']?.['deepseek-v4'], persisted.cost?.['deepseek-official']?.['deepseek-v4'])

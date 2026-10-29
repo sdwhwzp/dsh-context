@@ -4,10 +4,8 @@ export interface PartsPart {
   key: string
   color: string
   value: number
-  /** Heuristic count shown by the legend and tooltips (defaults to value). */
   raw?: number
   label?: string
-  /** Shared-hover group: a hover key equal to a part's group lights it. */
   group?: string
 }
 
@@ -23,7 +21,6 @@ export const CATS: { key: Category | 'system' | 'tools'; color: string }[] = [
 
 export const CAT_COLOR = Object.fromEntries(CATS.map(c => [c.key, c.color])) as Record<Category | 'system' | 'tools', string>
 
-/** The message-fold categories in canonical order — `CATS` without the singular `system`/`tools` bands. */
 export const MESSAGE_CATS: readonly (Category | 'system' | 'tools')[] = ['user', 'inject', 'skill', 'assistant', 'tool']
 
 export function partsOf(breakdown: Snapshot['current'] | RequestRecord): PartsPart[] {
@@ -32,7 +29,6 @@ export function partsOf(breakdown: Snapshot['current'] | RequestRecord): PartsPa
   })
 }
 
-/** Pie-consistent raw parts from the OFFICIAL `contextBreakdown` when delivered, else the fold's own sums. */
 export function officialParts(
   current: Snapshot['current'],
   breakdown: ContextBreakdown | null,
@@ -51,7 +47,6 @@ export function officialParts(
       assigned += count
       if (current[cat as Category] > current[largest]) largest = cat as Category
     }
-    // Rounding residue lands on the largest category; the clamp keeps a tiny bucket from going negative.
     shares[largest] = Math.max(0, shares[largest] + messages - assigned)
   } else {
     for (const cat of MESSAGE_CATS) shares[cat] = 0
@@ -59,8 +54,7 @@ export function officialParts(
   return CATS.map(c => ({
     key: c.key,
     color: c.color,
-    /** v8 ignore next 1 -- `shares` is initialized with system/tools and both
-     * foldSurface arms assign every MESSAGE_CATS key, so each key is always defined; the fallback is defensive. */
+    /* v8 ignore next 1 */
     value: shares[c.key] ?? 0,
   }))
 }
@@ -86,10 +80,8 @@ export function anchoredParts(parts: PartsPart[], target: number | null): PartsP
   })
 }
 
-/** The timing card's reasoning hue, so both thinking surfaces read as one category. */
 const THINKING_COLOR = 'var(--color-violet-500)'
 
-/** The timing card's reply hue, so both answers surfaces read as one category. */
 const ANSWERS_COLOR = 'var(--color-pink-500)'
 
 const countOf = (value: number | undefined): number =>
@@ -98,7 +90,6 @@ const countOf = (value: number | undefined): number =>
 /** The billed ring's canonical order: the Token card and the overview aggregate share it, so Answers always closes. */
 export const RING_ORDER: readonly string[] = ['system', 'tools', 'user', 'inject', 'skill', 'modelContent', 'toolCalls', 'thinking', 'answers']
 
-/** The generated assistant content, as the fold's own block prices. */
 export interface GeneratedTokens {
   reasoning?: number
   answers?: number
@@ -107,9 +98,6 @@ export interface GeneratedTokens {
   unsplit?: boolean
 }
 
-/** The Token card's billed split: shares follow the assistant's content ratios on both the prompt and generated sides, so
- * framing never lands on Tool Calls and the parts total the chat line's count. A row without the split fields (an older
- * host, or foreign data) keeps the historic Tool Calls home. */
 export function billedParts(
   current: Snapshot['current'],
   breakdown: ContextBreakdown | null,

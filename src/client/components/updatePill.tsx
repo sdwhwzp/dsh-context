@@ -1,5 +1,3 @@
-/** Update capsule for a newer registry version; renders nothing without one, so the heading row never reflows. */
-
 import type { ReactElement } from 'react'
 import { useNewerVersion } from '../latestVersion'
 import { PLUGIN_REPO } from '../meta'

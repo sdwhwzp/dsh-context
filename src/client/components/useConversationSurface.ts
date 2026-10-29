@@ -7,8 +7,6 @@ interface SurfaceMark {
   readonly attr: string
 }
 
-/** Marks the shared conversation scroller while a plugin surface owns the pane. CSS keys its composer/width-handle hides
- * off these attributes: `:has(.lc-root)` had to rescan a long transcript on every mutation and cost seconds per switch. */
 const SURFACES: Record<ConversationSurfaceKind, SurfaceMark> = {
   pane: { marks: new WeakMap(), attr: 'data-lc-surface' },
   modal: { marks: new WeakMap(), attr: 'data-lc-modal' },

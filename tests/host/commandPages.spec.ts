@@ -21,7 +21,6 @@ interface CtxSpec {
   sessionPersistence?: unknown
 }
 
-/** The host ctx double: `inject` fires once its dependency list is present, and the effect disposers are collected. */
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: Captured; disposers: (() => void)[] } {
   const captured: Captured = {}
   const disposers: (() => void)[] = []
@@ -69,7 +68,6 @@ function bashResult(seq: number, callId: string, text: string): TimelineEvent {
   return toolResult(seq, { callId, content: [{ type: 'text', text }] })
 }
 
-/** n commands, each call/result pair on contiguous seqs: calls at odd seqs, results at even ones. */
 function logOf(n: number): TimelineEvent[] {
   const events: TimelineEvent[] = []
   for (let i = 0; i < n; i++) {
@@ -214,7 +212,6 @@ describe('the command page route', () => {
     const page = await call(lease.captured, { sessionId: 's1' }) as PageValue
     assert.equal(page.ok, true)
     assert.equal(disposed, 1, 'the observation lease disposed')
-    // An observation without the dispose face still serves.
     const bare = routeWith(() => Promise.resolve({ source: 'live', cursor: 1, events: logOf(1) }))
     assert.equal(((await call(bare.captured, { sessionId: 's1' })) as PageValue).ok, true)
 

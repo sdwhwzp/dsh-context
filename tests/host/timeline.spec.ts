@@ -43,7 +43,7 @@ describe('createContextTimelineDefinition', () => {
   test('carries the pinned projection contract; the wire and state schemas accept a real fold', () => {
     const def = createContextTimelineDefinition({}, () => false)
     assert.equal(def.key, 'contextTimeline')
-    assert.equal(def.stateVersion, 35, 'pinned: the reasoning, answers and tool-call running totals cannot backfill from later events')
+    assert.equal(def.stateVersion, 36, 'pinned: the idle carve and per-step heartbeats cannot backfill from later events')
     const drive = driveTimeline(realLog())
     assert.equal(def.wire.viewSchema.safeParse(drive.view).success, true, 'a real folded view validates')
     const view = drive.view
@@ -56,7 +56,7 @@ describe('createContextTimelineDefinition', () => {
     assert.ok(view.requests.length > 0)
     assert.ok(view.events.length > 0)
     for (const state of drive.states) {
-      def.stateSchema.parse(structuredClone(state)) // throws on drift
+      def.stateSchema.parse(structuredClone(state))
     }
     assert.equal(def.wire.viewSchema.safeParse(def.wire.view(drive.state)).success, true)
   })

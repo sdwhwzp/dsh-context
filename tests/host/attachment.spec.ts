@@ -18,7 +18,6 @@ interface CtxSpec {
   attachments?: unknown
 }
 
-/** The fleet route spec's host ctx double: cordis inject semantics over a service map. */
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?: RouteFetch }; disposers: (() => void)[] } {
   const captured: { path?: string; fetch?: RouteFetch } = {}
   const disposers: (() => void)[] = []
@@ -143,7 +142,6 @@ describe('referencedAttachmentOf', () => {
   })
 
   test('the walk is bounded and total over a hostile log; an id the log never cites resolves null', () => {
-    // Deeper than the cap: the block is out of reach, so nothing resolves.
     let deep: Record<string, unknown> = { type: 'file', attachment: { attachmentId: 'sha256:deep', name: 'x.md', bytes: 1 } }
     for (let i = 0; i < 10; i++) deep = { nest: deep }
     assert.equal(referencedAttachmentOf([{ type: 'user/message', data: deep }], 'sha256:deep'), null)
@@ -248,13 +246,11 @@ describe('watchAttachmentChannel resolution', () => {
 
   test('every unlocatable file shape resolves a typed null', async () => {
     const cases: { attachments: unknown; id: string }[] = [
-      // No store composed, a store without the verb, and a store answering nothing path-shaped.
       { attachments: undefined, id: 'sha256:f1' },
       { attachments: {}, id: 'sha256:f1' },
       { attachments: { fileHostPath: () => undefined }, id: 'sha256:f1' },
       { attachments: { fileHostPath: () => '' }, id: 'sha256:f1' },
       { attachments: { fileHostPath: () => 42 }, id: 'sha256:f1' },
-      // A hostile reference (bad digest, unsanitized name) throws inside the store.
       {
         attachments: {
           fileHostPath: () => {
@@ -304,7 +300,6 @@ describe('watchAttachmentChannel image aliases', () => {
     for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
   })
 
-  /** A real store layout: `<home>/attachments/v1/objects/<xx>/<digest>` holding the image bytes. */
   function storeOf(bytes: string): { home: string; objectPath: string; store: { imageHostPath: () => string } } {
     const home = mkdtempSync(join(tmpdir(), 'dsh-context-att-'))
     homes.push(home)
@@ -322,7 +317,6 @@ describe('watchAttachmentChannel image aliases', () => {
     const path = (r.value as { path: string }).path
     assert.equal(path, join(home, 'cache', 'dsh-context', 'previews', 'ab', basename(objectPath), 'result-image.jpg'))
     assert.equal(readFileSync(path, 'utf8'), 'image-bytes', 'the link shares the stored bytes')
-    // A second read reuses the link instead of failing on EEXIST.
     const again = await call(captured, { sessionId: 's1', attachmentId: 'sha256:i1' })
     assert.deepEqual(again.value, { path })
   })
@@ -353,7 +347,6 @@ describe('watchAttachmentChannel image aliases', () => {
       },
       { store: { imageHostPath: () => '' }, id: 'sha256:i1' },
       { store: { imageHostPath: () => 42 }, id: 'sha256:i1' },
-      // The cited image carries no media type and no usable suffix.
       { store: { imageHostPath: () => '/x/attachments/v1/objects/ab/digest' }, id: 'sha256:i2' },
     ]
     for (const c of cases) {

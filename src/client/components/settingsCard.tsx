@@ -61,14 +61,12 @@ interface PromptTextRowProps {
   onCommit: (text: string) => void
 }
 
-/** Local draft committed on blur (and on unmount without a prior blur), so typing never writes the wire per keystroke. */
 function PromptTextRow(props: PromptTextRowProps): ReactElement {
   const [draft, setDraft] = useState(props.value)
   const [focused, setFocused] = useState(false)
   const areaRef = useRef<HTMLTextAreaElement>(null)
   const latest = useRef({ draft: props.value, value: props.value, commit: props.onCommit })
   latest.current = { draft, value: props.value, commit: props.onCommit }
-  // Follow the served value only while the row is idle: a host push must never clobber in-progress typing.
   if (!focused && draft !== props.value) setDraft(props.value)
   useEffect(() => () => {
     const { draft: text, value, commit } = latest.current
@@ -122,7 +120,6 @@ function ShowHideRow(props: { t: Translate; label: string; value: string; disabl
   )
 }
 
-/** The harness projects no group chrome into `plugins.bundle.config`, so the card draws its own group head. */
 function Group(props: { title: string; children: ReactNode }): ReactElement {
   return (
     <div className="lc-settings-group" role="group" aria-label={props.title}>
@@ -260,7 +257,6 @@ function PreferenceRows(props: { t: Translate; state: SettingsState; set?: Setti
   )
 }
 
-/** The Plugins page owns the page/section chrome, so rows render flat; unserved or absent degrades to nothing. */
 export function makePluginConfigCard(kit: ViewKit): (props: SettingsCardProps) => ReactElement | null {
   const { t } = kit
   return function PluginConfigCard(props: SettingsCardProps): ReactElement | null {

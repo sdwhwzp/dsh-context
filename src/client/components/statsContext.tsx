@@ -43,14 +43,12 @@ function pricesOf(usage: SessionCostUsage | undefined, book: ModelBook | null): 
   return { rows, misses }
 }
 
-/** Inline counter derivation; the host's split-generation counts match it by construction (fold.ts buildTimelineHead). */
 export function countsOfRecords(requests: readonly RequestRecord[], events: readonly ContextEventRecord[]): TimelineCounts {
   const turns = new Set<number>()
   for (const req of requests) turns.add(req.turn ?? 0)
   let injects = 0
   let compactions = 0
   let prunes = 0
-  // Loaded skills: distinct names among skill-tagged injects — the host fold's tag set (`sub: 'skill'`).
   const skills = new Set<string>()
   for (const ev of events) {
     if (ev.kind === 'inject') injects++
@@ -61,7 +59,6 @@ export function countsOfRecords(requests: readonly RequestRecord[], events: read
   return { turns: turns.size, steps: requests.length, injects, compactions, prunes, skills: skills.size }
 }
 
-/** null usage = nothing reported (no subagents, no usage, or no sessions face on this harness). */
 export interface SubagentStats {
   usage: SessionCostUsage | null
   count: number
@@ -79,11 +76,10 @@ export function makeSubagentCost(
       () => subagentCostFoldOf(snapshot, sessionId, landed),
       [snapshot, sessionId, landed],
     )
-    // Same value → same state: the identity bail-out keeps a settled replay on every snapshot tick from looping.
     useEffect(() => {
       for (const id of fold.cold) {
         void heads.headOf(id).then((head) => {
-          /* v8 ignore next 1 -- the cold list holds an id until its head lands, so one landing cannot replay. */
+          /* v8 ignore next 1 */
           if (head !== null) setLanded(prev => prev.get(id) === head ? prev : new Map(prev).set(id, head))
         }).catch(() => {})
       }
@@ -100,8 +96,6 @@ const EVENT_PILLS: readonly { kind: StatsEventKind; tally: 'injects' | 'compacti
   { kind: 'prune', tally: 'prunes', cls: 'lc-kind-prune' },
 ]
 
-/** The LIVE surface folded with the host's own predicate (fold.ts `toolCalls`), so the pills sum to the head's
- * `toolCalls` figure by construction, minus any result the fold stamped no name on. */
 export function toolTallyOf(nodes: readonly SurfaceNode[]): [string, number][] {
   const tally = new Map<string, number>()
   for (const n of nodes) {
@@ -136,7 +130,6 @@ interface JumpWire {
   onKeyDown: (ev: KeyboardEvent) => void
 }
 
-/** One keyboard-and-click wire for every jumpable chip: Enter/Space fires, any other key passes through. */
 function pickWire(title: string | undefined, fire: () => void): JumpWire {
   return {
     role: 'button',
@@ -151,7 +144,6 @@ function pickWire(title: string | undefined, fire: () => void): JumpWire {
   }
 }
 
-/** A row-level jump fires only when the click missed an inner control (a link, button, or wired span). */
 function rowJump(fire: () => void): (ev: MouseEvent) => void {
   return (ev) => {
     if ((ev.target as HTMLElement).closest('a, button, [role="button"]') !== null) return
@@ -165,20 +157,14 @@ interface StatsContextProps {
   answers?: number
   onJump?: (jump: StatsJump) => void
   onTeamClick?: () => void
-  /** The tool lane's chip pick: open the tool's results in the Context Browser. */
   onToolPick?: (tool: string) => void
-  /** The tool lane's folded tail: open every tool result in the Context Browser. */
   onToolMore?: () => void
-  /** The command lane's chip pick: filter that program in the Command Executions card. */
   onCommandPick?: (program: string) => void
-  /** The command lane's folded tail: reveal the Command Executions card. */
   onCommandMore?: () => void
-  /** The events tile's jump: reveal the Context Events card, narrowed to `kind` when one is given. */
   onEventsClick?: (kind: StatsEventKind | null) => void
   toolCalls?: number
   files: { reads: number; writes: number; searches: number; images: number }
   tools: readonly (readonly [string, number])[]
-  /** The execution log's headline runs and its top programs; absent (or empty) on hosts before the collection. */
   commands?: { runs: number; top: readonly (readonly [string, number])[] }
   cost?: SessionCostUsage
   /** Authorized session-family quote supplied by dsh-spend. */
@@ -187,8 +173,6 @@ interface StatsContextProps {
   sessionId?: string
 }
 
-/** The I/O lane's identity colors: file kinds carry the File Activity card's own chip colors (a jump keeps its
- *  color across cards), human inputs the user category's green, image reads the output pink. */
 const IO_COLOR: Record<'inputs' | 'read' | 'write' | 'search' | 'image', string> = {
   inputs: 'var(--color-green-500)',
   read: 'var(--dsw-alias-brand-primary)',
@@ -197,15 +181,12 @@ const IO_COLOR: Record<'inputs' | 'read' | 'write' | 'search' | 'image', string>
   image: 'var(--color-pink-500)',
 }
 
-/** Tool chips shade by rank in the tool category's teal; the unnamed rest reads neutral. */
 const TOOL_SHADE = (rank: number): string =>
   `color-mix(in srgb, var(--color-teal-500) ${Math.max(38, 100 - rank * 21)}%, transparent)`
 const TOOL_REST = 'color-mix(in srgb, var(--color-neutral-500) 40%, transparent)'
 
-/** A lane's own chip gap, mirrored from `.lc-ledger-chips` in stats.css so the fit arithmetic matches the rendered box. */
 const CHIP_GAP = 3
 
-/** Widest leading run of the tally that fits the row, leaving the "+N" chip its own width whenever it must show. */
 function useFittedChips(tally: readonly unknown[]) {
   const count = tally.length
   const rowRef = useRef<HTMLDivElement | null>(null)
@@ -218,10 +199,9 @@ function useFittedChips(tally: readonly unknown[]) {
     const row = rowRef.current
     const gauge = gaugeRef.current
     const chipGauge = chipGaugeRef.current
-    /* v8 ignore next 3 -- the gauges always render, so their refs are set whenever the row is. */
+    /* v8 ignore next 3 */
     if (row === null || gauge === null || chipGauge === null) return
     const width = row.getBoundingClientRect().width
-    // Nothing measurable (a hidden pane, jsdom, a top-only rect stub): show the whole tally rather than guessing a subset.
     if (!(width > 0)) {
       setShown(count)
       return
@@ -229,12 +209,10 @@ function useFittedChips(tally: readonly unknown[]) {
     const widths = Array.from(gauge.children, el => el.getBoundingClientRect().width)
     let whole = 0
     for (let i = 0; i < count; i++) whole += widths[i] + (i === 0 ? 0 : CHIP_GAP)
-    // A "+0" chip would say nothing, so a fully visible tally stays whole and keeps it out.
     if (whole <= width) {
       setShown(count)
       return
     }
-    // Widest set that fits WITH the chip it would carry, top down: measuring the live chip would feed the pass its own output.
     const moreWidths = Array.from(chipGauge.children, el => el.getBoundingClientRect().width)
     let pills = 0
     for (let n = count - 1; n >= 0; n--) {
@@ -248,9 +226,8 @@ function useFittedChips(tally: readonly unknown[]) {
     setShown(prev => (prev === pills ? prev : pills))
   }, [tally])
 
-  // Re-weigh on a new tally; the ResizeObserver covers a pane drag, which changes no prop.
   useLayoutEffect(fit, [fit])
-  /* v8 ignore start -- jsdom exposes no ResizeObserver. */
+  /* v8 ignore start */
   useEffect(() => {
     const row = rowRef.current
     if (row === null || typeof ResizeObserver !== 'function') return
@@ -264,22 +241,17 @@ function useFittedChips(tally: readonly unknown[]) {
 
 interface ChipLaneProps {
   items: readonly (readonly [string, number])[]
-  /** The lane's row class, which also places its cell in the card's grid. */
   rowClass: string
   color: (name: string, rank: number) => string
   jumpTip: string
   onPick?: (name: string) => void
-  /** The folded tail's own jump: the "+N" chip reveals the lane's full list somewhere in the view. */
   onMore?: () => void
   moreTip?: string
-  /** An empty lane shows a zero chip instead of "None yet", so a tool lane still reads as a figure. */
   zeroWhenEmpty?: boolean
   t: Translate
   fmt: (n: number) => string
 }
 
-/** One lane's single chip row: the leading run that fits renders (measured off a hidden gauge) and the tail folds
- *  into the "+N" chip, so the lane's height depends on the card's width alone and nothing is clipped. */
 function ChipLane(props: ChipLaneProps): ReactElement {
   const { items, rowClass, color, jumpTip, onPick, onMore, moreTip, zeroWhenEmpty, t, fmt } = props
   const { shown, rowRef, gaugeRef, chipGaugeRef } = useFittedChips(items)
@@ -298,7 +270,6 @@ function ChipLane(props: ChipLaneProps): ReactElement {
       </span>
     )
   }
-  // The live "+N" chip jumps; the hidden gauges measure the same shape without wiring it.
   const more = (hidden: number, key?: string, live = false): ReactElement => {
     const wire = live && hidden > 0 && onMore !== undefined ? pickWire(moreTip, onMore) : undefined
     return (
@@ -440,7 +411,6 @@ export function makeStatsContext(
       return pickWire(hint ? t(JUMP_TIPS[key]) : undefined, () => { relay(key) })
     }
     const ioTotal = (props.humanInputs ?? 0) + props.files.reads + props.files.writes + props.files.searches + props.files.images
-    // The head's live tally; the tally's own sum is the fallback on hosts too old to carry it.
     const toolTotal = props.toolCalls ?? props.tools.reduce((sum, [, n]) => sum + n, 0)
     const commandTop = props.commands?.top ?? []
     const chip = (
@@ -450,7 +420,6 @@ export function makeStatsContext(
       color: string,
       opts: { title?: string; tip?: ReactNode; jump: StatsJump },
     ): ReactElement => {
-      // A chip with its own ? bubble keeps the native title off: one hover target, one hint.
       const wire = jumpWire(opts.jump, opts.tip === undefined)
       return (
         <span
@@ -503,8 +472,6 @@ export function makeStatsContext(
         ? <span key={key} className="lc-strip-cell lc-ledger-cost-row lc-stat-tipped group/tip">{content}</span>
         : <button key={key} type="button" className="lc-strip-cell lc-ledger-cost-row lc-ledger-cost-row-btn lc-stat-tipped group/tip" onClick={openTeam}>{content}</button>
     )
-    // The tile body is one mouse jump too (null = the card's current lens); the pills inside rule out a nested
-    // button, so the label carries the keyboard wire while the pills keep their own narrowing jumps.
     const openEvents = props.onEventsClick
     const eventsJump = openEvents === undefined ? undefined : (): void => { openEvents(null) }
     const onEventsTile = eventsJump === undefined ? undefined : rowJump(eventsJump)

@@ -70,7 +70,6 @@
 .lc-board-section-head { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 650; letter-spacing: 0.02em; color: var(--dsw-alias-label-secondary); margin: 10px 0 6px; padding-bottom: 4px; border-bottom: var(--lc-line-dashed, 1px dashed var(--dsw-alias-border-l2)); }
 .lc-members-note { margin: 2px 0 6px; font-size: 11px; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); }
 
-/* The 200px floor keeps the two-column read: two unified cards fit the boards column down to a narrow pane. */
 .lc-members-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr)); gap: 8px; }
 .lc-member-card {
   display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px;
@@ -108,24 +107,18 @@
 .lc-tasks-filter { cursor: pointer; color: var(--dsw-alias-state-business-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 32%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 8%, transparent); }
 .lc-tasks-group { margin-top: 10px; }
 .lc-tasks-group:first-of-type { margin-top: 4px; }
-/* The head is the task list's sticky band: the old 6px group gap is folded into its 11px bottom padding so its
-   background covers rows scrolling underneath; taskBoard aligns the opened row below its measured 35px box and the body's
-   scroll-padding uses the same 35px for native reveals. */
 .lc-tasks-group-head { position: sticky; top: 0; z-index: 2; background: var(--dsw-alias-bg-layer-1); display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 650; letter-spacing: 0.02em; padding-bottom: 11px; border-bottom: 2px solid var(--dsw-alias-border-l2); margin-bottom: 0; }
 .lc-tasks-group-in_progress .lc-tasks-group-head { color: var(--dsw-alias-brand-primary, var(--color-blue-500)); border-bottom-color: color-mix(in srgb, var(--dsw-alias-brand-primary, var(--color-blue-500)) 45%, transparent); }
 .lc-tasks-group-pending .lc-tasks-group-head { color: var(--color-amber-500); border-bottom-color: color-mix(in srgb, var(--color-amber-500) 45%, transparent); }
 .lc-tasks-group-completed .lc-tasks-group-head { color: var(--dsw-alias-state-success-primary, var(--color-green-500)); border-bottom-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, var(--color-green-500)) 45%, transparent); }
 .lc-tasks-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 
-/* The task card folds at a default height and grows with the network card: the cap is max(default, graph height −
-   members card − its 7px margin) from fleetView's observer, so both columns' bottoms meet; the toolbar pins while the rows scroll. */
+.lc-col-boards { display: flex; flex-direction: column; }
+
 .lc-tasks { position: relative; display: flex; flex-direction: column; overflow: hidden; max-height: max(560px, calc(var(--lc-graph-h, 0px) - var(--lc-members-h, 0px) - 7px)); }
 .lc-tasks-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scroll-padding-top: 35px; }
-/* Task rows are opaque cards, so the cut-off hint is a sticky overlay fade at the region's visible bottom;
-   comms rows are transparent and read the edge-attached fades below. */
 .lc-tasks-body::after { content: ''; position: sticky; bottom: 0; display: block; height: 44px; margin-top: -44px; pointer-events: none; background: linear-gradient(rgba(0, 0, 0, 0), color-mix(in srgb, var(--dsw-alias-bg-layer-1) 92%, transparent)); }
 
-/* The comms hub is the card's own bounded scroll: channel cards and the toolbar stay put while the timeline scrolls. */
 .lc-comms {
   display: flex; flex-direction: column; gap: 7px;
 }
@@ -390,8 +383,6 @@
 .lc-team-task-subject-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .lc-team-task-owner { border: 0; background: transparent; padding: 0; font: inherit; font-size: 11px; font-weight: 600; color: var(--dsw-alias-state-business-primary); cursor: pointer; }
 .lc-team-task-desc { margin-top: 5px; font-size: 11.5px; line-height: 1.45; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-/* The collapsed description renders through the detail sections' Markdown body, flattened into the row: no section
-   padding or inner scroll (the clamp does the folding); pre-wrap is reset because markdown whitespace is the renderer's business. */
 .lc-team-task-desc .lc-ts-desc-md { padding: 0; max-height: none; overflow: visible; white-space: normal; }
 .lc-team-task .lc-ts-card { margin-top: 7px; background: var(--dsw-alias-bg-layer-1); }
 .lc-team-task-box-agent { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 7px 10px; font-size: 11.5px; }
@@ -415,7 +406,6 @@
 .lc-inspector-reply { font-size: 11.5px; line-height: 1.45; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .lc-inspector-reply-time { margin-left: 6px; font-weight: 400; font-variant-numeric: tabular-nums; }
 
-/* Narrow panes: the progress row takes its own line and the track flexes, instead of sharing a line with the chips. */
 @container lc-card (max-width: 420px) {
   .lc-summary-progress { flex: 1 1 100%; margin-left: 0; }
   .lc-tasks-progress-track { flex: 1 1 auto; width: auto; }

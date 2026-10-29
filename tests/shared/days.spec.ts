@@ -13,7 +13,6 @@ import {
 
 describe('dayKeyOf', () => {
   test('keys a local instant as YYYY-MM-DD with zero padding, midnight to the new day', () => {
-    // Local noon is deterministic in every timezone.
     assert.equal(dayKeyOf(new Date(2026, 8, 16, 12).getTime()), '2026-09-16')
     assert.equal(dayKeyOf(new Date(2026, 0, 5, 12).getTime()), '2026-01-05')
     assert.equal(dayKeyOf(new Date(2026, 11, 25, 12).getTime()), '2026-12-25')
@@ -63,7 +62,6 @@ describe('sundayOfWeek', () => {
 
 describe('startOfDayKey / endOfDayKey', () => {
   test('a picked range spans the whole local day; malformed keys yield null', () => {
-    // Endpoints, not a duration: a DST-short day is 23 hours long, so the difference is not a fixed number of milliseconds.
     assert.equal(startOfDayKey('2026-09-16'), new Date(2026, 8, 16, 0, 0, 0, 0).getTime())
     assert.equal(endOfDayKey('2026-09-16'), new Date(2026, 8, 16, 23, 59, 59, 999).getTime())
     assert.equal(startOfDayKey('2026-03-08'), new Date(2026, 2, 8, 0, 0, 0, 0).getTime(), 'a DST-short day still opens on its own midnight')
@@ -121,7 +119,6 @@ describe('monthGridOf', () => {
   test('malformed months and a month that leaves the key range yield null', () => {
     assert.equal(monthGridOf('2026-13'), null)
     assert.equal(monthGridOf('junk'), null)
-    // The last representable month still grids; stepping past it (shiftMonthKey) is what yields null.
     assert.ok(monthGridOf('9999-12') !== null)
   })
 })

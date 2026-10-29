@@ -92,7 +92,6 @@ export function fleetDetailOf(value: unknown): FleetDetail | null {
   }
 }
 
-/** Failures reject so the caller arms its retry; `full` asks for the unclipped prompt/reply. */
 export function makeFleetDetailFetcher(
   sessionId: string,
   full = false,
@@ -119,14 +118,9 @@ interface FleetDetailEntry {
   pending: Promise<FleetDetail | null>
 }
 
-/** Page-scope ledger bounds: one FleetDetail holds up to 80 clipped messages, so an unbounded map would pin every
- * member the comms panels ever scanned for the page's whole life. A full read carries much larger texts, so its own
- * ledger stays tighter. */
 const FLEET_LEDGER_MAX = 64
 const FULL_LEDGER_MAX = 4
 
-/** Reads dedupe per (id, `updatedAt`): a NEWER stamp refetches once, and a settled failure stays cached so a
- * broken session never hammers the route; the `full` ledger runs beside the excerpt one. */
 export class FleetDetailCache {
   private readonly entries = new Map<string, FleetDetailEntry>()
   private readonly fullEntries = new Map<string, FleetDetailEntry>()
@@ -148,17 +142,13 @@ export class FleetDetailCache {
   }
 }
 
-/** One merged comms row: a message lifted from session `to`'s log, attributed to `from`. */
 export interface CommsRow extends FleetMessage {
-  /** seq is per-session, so the key pairs it with the log owner and instant. */
   key: string
   to: string
 }
 
-/** The runtime's settled-notice vocabulary (dsh's settlementSummary), for localized rendering. */
 export type SettledVariant = 'finished' | 'finishedFinal' | 'stopped' | 'outOfRoom' | 'declined' | 'failed'
 
-/** Classify a `subagent-settled` notice's English summary; null = an unrecognized (future) phrasing. */
 export function settledVariantOf(text: string): SettledVariant | null {
   const summary = text.trim()
   if (summary.endsWith('finished and will do no further work unless you send it more.')) return 'finished'

@@ -20,7 +20,6 @@ describe('estimateImageTokens', () => {
   })
 
   test('every valid size lands inside the documented cap band', () => {
-    // The documented band is 117–384; the 8:1 clamp prices slightly under it (128×16 → 113), so pin the observed floor.
     for (let w = 16; w <= 4096; w *= 2) {
       for (let h = 16; h <= 4096; h *= 2) {
         const tokens = estimateImageTokens(w, h)
@@ -30,12 +29,10 @@ describe('estimateImageTokens', () => {
   })
 
   test('a tall strip beyond the ~190:1 grid threshold solves on the collapsed-width arm', () => {
-    // The padded grid overflows the budget and the ratio exceeds the threshold, so the solve collapses width (gridW < 1 arm).
     assert.equal(estimateImageTokens(50, 12000), 381)
   })
 
   test('a first-solve overflow walks the budget down until the grid fits', () => {
-    // Parity terms can push the solved grid over budget; the loop decrements until it fits (found by fuzz: 360×3243).
     assert.equal(estimateImageTokens(360, 3243), 281)
   })
 
@@ -49,7 +46,6 @@ describe('estimateImageTokens', () => {
   })
 
   test('astronomical (finite) dimensions fail to converge and return null instead of throwing', () => {
-    // w×h overflows to Infinity: the fixed-point iteration never stabilizes, so the 9-iteration cap narrows to null.
     assert.equal(estimateImageTokens(Number.MAX_VALUE, Number.MAX_VALUE), null)
   })
 })

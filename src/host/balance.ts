@@ -1,7 +1,3 @@
-/** The DeepSeek open-platform balance route: the API key never rides to the browser, so the host reads `GET /user/balance` from the
- * platform ROOT and serves only redacted figures. Any missing fact answers a typed `null`, and identical in-flight reads share one
- * outbound fetch. */
-
 import { asRecord } from './record'
 import type { Context } from '@deepseek-ai/cordis'
 import type { PlatformBalance, PlatformBalanceEntry } from '../shared/types'
@@ -9,10 +5,8 @@ import { type ConnectionHostFace, registerPostRoute } from './connection'
 
 export const BALANCE_ROUTE = '/api/dsh-context/balance'
 
-/** The API-key provider route key: the `deepseek-account` route holds no key and never serves the balance. */
 const DEEPSEEK_PROVIDER = 'deepseek-official'
 
-/** Stock entry ids of the platform's own settings rows, including the two web rows carrying the same credential. */
 const DEEPSEEK_SETTINGS_IDS = ['llm-deepseek', 'web-deepseek-api', 'web-search-deepseek']
 
 const PUBLIC_BASE_URL = 'https://api.deepseek.com'
@@ -23,7 +17,6 @@ interface SettingsHostFace {
   describe?(options?: { redactSecrets?: boolean }): unknown
 }
 
-/** The provider directory names the DeepSeek row, so a renamed entry still answers. */
 interface LlmHostFace {
   listConfigurableProviders?(): unknown
 }
@@ -44,7 +37,6 @@ interface DeepSeekRow {
   baseURL?: string
 }
 
-/** Candidate settings ids in fold order: the row the provider directory names, then the stock ids. */
 function deepseekSettingsIds(ctx: Context): string[] {
   const ids: string[] = []
   const llm = ctx.get('llm') as LlmHostFace | undefined
@@ -64,21 +56,17 @@ function deepseekSettingsIds(ctx: Context): string[] {
         }
       }
     } catch {
-      // The directory is optional: the stock ids below still answer.
     }
   }
   for (const id of DEEPSEEK_SETTINGS_IDS) if (!ids.includes(id)) ids.push(id)
   return ids
 }
 
-/** Fold the DeepSeek platform rows from the redacted Config-form `describe()` projection: the credential ref and endpoint override live
- * at the section root, and a hostile row drops whole while valid siblings serve. */
 function deepseekRowsOf(ctx: Context): DeepSeekRow[] {
   const settings = ctx.get('settings') as SettingsHostFace | undefined
   if (typeof settings?.describe !== 'function') return []
   let rows: unknown
   try {
-    // Read redacted: a row's literal key is a secret this fold has no use for.
     rows = settings.describe({ redactSecrets: true })
   } catch {
     return []
@@ -112,7 +100,6 @@ function deepseekRowsOf(ctx: Context): DeepSeekRow[] {
   return deepseekRows
 }
 
-/** Only the ORIGIN counts: the account route sits at the API root while row endpoints carry paths. */
 function platformRootOf(baseURL: string | undefined): string {
   if (baseURL === undefined) return PUBLIC_BASE_URL
   try {
@@ -124,7 +111,6 @@ function platformRootOf(baseURL: string | undefined): string {
   }
 }
 
-/** The first DeepSeek row whose credential resolves serves; `null` when any fact is missing. */
 async function resolveFacts(ctx: Context): Promise<DeepSeekFacts | null> {
   const credentials = ctx.get('credentials') as CredentialsHostFace | undefined
   const resolve = typeof credentials?.resolve === 'function' ? credentials.resolve.bind(credentials) : undefined
@@ -146,15 +132,12 @@ async function resolveFacts(ctx: Context): Promise<DeepSeekFacts | null> {
   return null
 }
 
-/** The total is the two re-proved parts summed, so the viewer's arithmetic is the authority; an entry failing the shape drops whole, and
- * a payload with no valid entry is no balance at all. */
 export function balanceOfPayload(value: unknown): PlatformBalance | null {
   const data = asRecord(value)
   if (data === null) return null
   const infos = Array.isArray(data.balance_infos) ? data.balance_infos : []
   const balances: PlatformBalanceEntry[] = []
   for (const info of infos) {
-    // A hostile entry may throw on property access; it drops whole.
     try {
       const entry = asRecord(info)
       if (entry === null) continue
@@ -189,8 +172,6 @@ export function resetBalance(): void {
   inFlight = null
 }
 
-/** One platform read shared by identical reads already in flight; nothing is remembered, since the balance moves with every billed
- * request. Every failure path — transport, timeout, non-ok status, malformed payload — resolves `null`. */
 async function readBalance(facts: DeepSeekFacts): Promise<PlatformBalance | null> {
   if (inFlight !== null) return inFlight
   inFlight = (async () => {
@@ -202,7 +183,6 @@ async function readBalance(facts: DeepSeekFacts): Promise<PlatformBalance | null
       })
       if (response.ok) value = balanceOfPayload(await response.json())
     } catch {
-      // Any failure serves null — the capsule stays hidden.
     }
     return value
   })()
@@ -210,12 +190,10 @@ async function readBalance(facts: DeepSeekFacts): Promise<PlatformBalance | null
   try {
     return await settled
   } finally {
-    // Clear the shared slot so the next read fetches fresh figures.
     inFlight = null
   }
 }
 
-/** The registration rides the injected fiber, so unloading withdraws it. */
 export function watchBalanceChannel(ctx: Context): void {
   ctx.inject(['connection'], (c) => {
 

@@ -10,18 +10,12 @@ import type { ViewKit } from '../viewkit'
 
 export interface RequestDetailProps {
   request: RequestRecord | null
-  /** The previous record (null on the first bar); its PRESENCE switches the panel to the signed delta. */
   prev?: RequestRecord | null
   marker?: ContextEventRecord | null
-  /** Step identity (see brief.ts); null renders the empty reserved lane. */
   brief?: StepBrief | null
-  /** Snapshot join for call-argument enrichment; absent join = names only, never an error. */
   convOf?: (seq: number) => ConversationNodeLike | undefined
-  /** Per-turn step totals; absent = a 1-step turn. */
   stepsOf?: (turn: number | undefined) => number
-  /** Reveal a brief row's node in the browser; absent = rows render inert. */
   onLocate?: (node: SurfaceNode, isResponse: boolean) => void
-  /** Category hover shared with the overview/browser; chips report hovers back, the bar never does. */
   hoverKey?: string | null
   onHoverKey?: (key: string | null) => void
 }
@@ -33,7 +27,6 @@ export function makeRequestDetail(
 ): ComponentType<RequestDetailProps> {
   const { t, fmt, fmtTime, eventLabel, eventAt } = kit
 
-  /** The tag carries the styled bubble, the content span the native title — the two never stack. */
   function BriefRow(props: {
     tag: string
     tagTip: string
@@ -62,7 +55,6 @@ export function makeRequestDetail(
     )
   }
 
-  /** A hostile `cat` degrades into the user tail — a plain text row, never a throw. */
   function chipParts(n: SurfaceNode, conv: ConversationNodeLike | undefined): { tag: string | null; text: string } {
     if (n.cat === 'tool') {
       const summary = callSummaryOf(conv)
@@ -70,14 +62,12 @@ export function makeRequestDetail(
       return { tag: null, text: summary ?? t('node.toolResult') }
     }
     if (n.cat === 'skill') {
-      // A load/invocation tags its NAME, the catalog digest its form label; a text-less row previews the call summary.
       return {
         tag: n.skill !== undefined ? t('node.skillTag', { name: n.skill }) : t('form.' + (n.form ?? 'context')),
         text: n.text ?? callSummaryOf(conv) ?? '',
       }
     }
     if (n.cat === 'assistant') {
-      // The fold keeps `calls` only for TEXT-LESS replies; a reply with both recovers its breadcrumb via the join.
       const names = n.calls !== undefined && n.calls.length > 0 ? n.calls : callNamesOf(conv)
       const own = n.text !== undefined && n.text !== '' ? n.text : blockSummaryOf(conv) ?? ''
       return {
@@ -102,7 +92,6 @@ export function makeRequestDetail(
     return tag !== null ? (text !== '' ? tag + ' · ' + text : tag) : text
   }
 
-  /** Always renders a fixed three-row lane so scrubbing the chart never changes the panel's height. */
   function BriefSection(props: {
     brief: StepBrief | null | undefined
     convOf?: (seq: number) => ConversationNodeLike | undefined
@@ -111,11 +100,9 @@ export function makeRequestDetail(
     const { opener, inputs, response } = props.brief ?? { inputs: [] }
     const convOf = props.convOf ?? (() => undefined)
     const hint = props.onLocate !== undefined ? ' — ' + t('brief.locate') : ''
-    // Chip click locates its own node; stopPropagation keeps the row's locate from also firing.
     const locateChip = props.onLocate === undefined ? undefined : (n: SurfaceNode) =>
       (e?: MouseEvent) => { e?.stopPropagation(); props.onLocate?.(n, false) }
     const MAX_CHIPS = 3
-    /** Reply chip is grown and inert; the row button locates it. */
     const nodeChip = (n: SurfaceNode, onClick?: (e?: MouseEvent) => void, grow = false): ReactElement => {
       const { tag, text } = chipParts(n, convOf(n.seq))
       return (
@@ -161,10 +148,7 @@ export function makeRequestDetail(
     )
   }
 
-  // Memoized at the factory level: the parent hands reference-stable props across hover/select renders (see contextView),
-  // so the panel skips reconciliation when the active bar did not move.
   return memo(function RequestDetail(props: RequestDetailProps): ReactElement | null {
-    // The memo must not block a locale switch: the tick re-renders on it even when the props are reference-stable.
     kit.useLocaleTick()
     const req = props.request
     if (!req) return null
@@ -172,14 +156,12 @@ export function makeRequestDetail(
     const head = isTurn
       ? t('detail.turn', {
         t: req.turn ?? 0,
-        /** v8 ignore next -- isTurn already guarantees stepCount !== undefined; the fallback is defensive. */
+        /* v8 ignore next */
         n: req.stepCount ?? 0,
       })
       : t('detail.step', { t: req.turn ?? 0, s: req.step ?? 0, n: props.stepsOf?.(req.turn) ?? 1 })
-    // A boundary-event bar also shows WHERE it happened: the gap between the requests before and after.
     const marker = props.marker ?? null
     const markerAt = marker !== null ? eventAt(marker) : null
-    // Delta mode: per-category signed change vs the previous record; provider usage chips drop out (per-request figures).
     const delta = props.prev !== undefined
     const prev = props.prev ?? null
     const deltas = CATS.map(c => delta ? (req[c.key] || 0) - (prev !== null ? prev[c.key] || 0 : 0) : 0)
@@ -190,7 +172,6 @@ export function makeRequestDetail(
     const parts = delta
       ? CATS.map((c, i) => ({ key: c.key, color: c.color, value: Math.abs(deltas[i]) }))
       : partsOf(req)
-    // Delta chips print the signed change; the bar's own parts keep only magnitudes.
     const legendParts = delta ? parts.map((p, i) => ({ ...p, raw: deltas[i] })) : parts
     return (
       <div className="lc-detail">
@@ -202,8 +183,6 @@ export function makeRequestDetail(
           {isTurn ? <span className="lc-detail-tag">{t('detail.lastStep')}</span> : null}
           {delta ? <span className="lc-detail-tag">{t('gran.delta')}</span> : null}
           <span className="lc-detail-time">{fmtTime(req.time)}</span>
-          {/* One neutral pill per provider figure; the cache pill drops out on hosts that don't fold `cacheRead`.
-              The chips share a row of their own (`flex-basis: 100%`) so the header height stays constant. */}
           <span className="lc-detail-metrics">
             {delta ? (
               <span className={'lc-detail-metric' + (net > 0 ? ' lc-detail-metric-up' : net < 0 ? ' lc-detail-metric-down' : '')}>

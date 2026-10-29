@@ -31,7 +31,6 @@ describe('CommandPanel — the summary rail', () => {
       cmd(4, { cmd: 'git status' }),
     ]
     const m = await mount(h(Panel, { commands }))
-    // vitest fails twice, eslint once: the rail names vitest.
     const failing = queryAll(m.container, '.lc-cmd-attn-row').find(b => text(b).includes('Failed'))
     assert.ok(failing !== undefined)
     assert.ok(text(failing).includes('vitest'))
@@ -159,7 +158,6 @@ describe('CommandPanel — the summary rail', () => {
         cmd(103, { cmd: 'grep very-slow', start: 0, end: 90_000 }),
       ],
     }))
-    // Seven programs clear the search threshold.
     const search = query<HTMLInputElement>(m.container, '.lc-cmd-prog-search')
     assert.ok(search !== undefined)
     assert.equal(queryAll(m.container, '.lc-cmd-prog').length, 7, 'all programs listed, not just a top cut')

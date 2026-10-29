@@ -1,12 +1,7 @@
-/** The local-day key (`YYYY-MM-DD`) both halves bucket by; lexicographic order on it IS chronological order (the retention cap and week
- * math ride that). */
-
 export const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
 
 export const MONTH_KEY_RE = /^\d{4}-\d{2}$/
 
-/** The local day key of an epoch-ms instant; null outside the finite/representable range, so untrusted log data cannot produce a garbage
- * key. */
 export function dayKeyOf(time: number): string | null {
   if (!Number.isFinite(time)) return null
   const d = new Date(time)
@@ -15,7 +10,6 @@ export function dayKeyOf(time: number): string | null {
   return `${String(y).padStart(4, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-/** A day key's local midnight Date; null when malformed or when its fields would roll over (2026-02-30). */
 function dateOfDayKey(key: string): Date | null {
   if (!DAY_KEY_RE.test(key)) return null
   const y = Number(key.slice(0, 4))
@@ -26,8 +20,6 @@ function dateOfDayKey(key: string): Date | null {
   return date
 }
 
-/** Advance a day key by `delta` local days; date-field arithmetic keeps DST-short/long days exact (an epoch-ms add would drift across the
- * boundary). */
 export function shiftDayKey(key: string, delta: number): string | null {
   const date = dateOfDayKey(key)
   if (date === null) return null
@@ -52,7 +44,6 @@ export function startOfDayKey(key: string): number | null {
   return date.getTime()
 }
 
-/** A day key's last local millisecond — the inclusive end of a picked range, so the whole day is in. */
 export function endOfDayKey(key: string): number | null {
   const date = dateOfDayKey(key)
   if (date === null) return null

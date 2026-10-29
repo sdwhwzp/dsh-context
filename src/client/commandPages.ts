@@ -1,6 +1,3 @@
-/** The command card's incremental history fill: page reads of the complete command log (the projection serves only the
- * newest slice) and the page's boundary proof. Every paged record is re-proved before it joins the list. */
-
 import type { CommandRecord, CommandStatus, CommandPage } from '../shared/types'
 import { COMMANDS_ROUTE } from './apiRoutes'
 import { asRecord } from './services'
@@ -18,8 +15,6 @@ function stringOf(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
-/** One paged record, or null when its core fields fail the shape. Optional fields of the wrong type drop out rather
- * than reach a renderer; an unreadable entry is skipped, never cast. */
 function commandOf(value: unknown): CommandRecord | null {
   const rec = asRecord(value)
   if (rec === null) return null
@@ -60,8 +55,6 @@ export function commandPageOf(value: unknown): CommandPage | null {
 
 export type CommandPageFetcher = (beforeSeq: number) => Promise<CommandPage | null>
 
-/** A per-session page reader; null (the route's designed no-data answer) keeps the caller on its partial list. The
- * page size stays a host policy: an absent `limit` lets the host apply its own. */
 export function makeCommandPager(
   sessionId: string,
   limit?: number,

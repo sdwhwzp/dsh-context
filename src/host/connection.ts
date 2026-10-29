@@ -1,6 +1,3 @@
-/** The host `connection` service seam every plugin fetch route registers through; one home for the face and the bind-at-extraction guard
- * (an unbound hand-off loses `this` on the real face). */
-
 export interface ConnectionHostFace {
   fetch?: {
     register?(route: {
@@ -22,11 +19,6 @@ interface EffectScope {
   effect(effect: () => () => void, hint?: string): unknown
 }
 
-/**
- * Register one plugin fetch route: every route is a POST behind the same `/api` fence, so the shape, the
- * bind-at-extraction guard and the refuse-quietly catch live here. Returns false when the face is absent or the
- * registry refuses.
- */
 export function registerPostRoute(
   c: EffectScope,
   connection: ConnectionHostFace | undefined,

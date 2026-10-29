@@ -115,8 +115,6 @@ describe('watchSidebarContextTab — the optional registration', () => {
   })
 
   test('the real Context view through this seat keeps the Agent Network card inline', async () => {
-    // The center Context tab hands that card to the Fleet tab; only the real view through the real seat proves it.
-    // One stable snapshot object: the card subscribes through useSyncExternalStore, which loops on a fresh one per read.
     const snapshot = { byId: { 's-1': { displayTitle: 'Main Agent', running: false, blank: false, updatedAt: 1 } } }
     const ctx = new TestClientCtx({
       services: {
@@ -158,7 +156,6 @@ describe('watchSidebarContextTab — the optional registration', () => {
     const ctx = new TestClientCtx()
     const tabs = registry()
     ctx.setService('sidebarRightTabs', tabs)
-    // The title seat throws after the body seat registered: type and body must be rolled back, never half-registered.
     let calls = 0
     ;(ctx as unknown as { slots: unknown }).slots = {
       inject: (_name: string, callback: () => unknown) => {

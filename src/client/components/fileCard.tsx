@@ -14,16 +14,11 @@ export type FileFilter = 'all' | FileOpKind | 'image'
 export interface FileCardProps {
   activity: FileActivity
   workspace?: string
-  /** One-shot kind request from the stats board's file pills: the chip band follows it, and the request is handed
-   *  back via `onFilterFocusHandled` so the same kind can jump again. Absent = the chips stay the card's own state. */
   filterFocus?: FileFilter | null
   onFilterFocusHandled?: () => void
-  /** Returns whether the preview column took the file; a refusal falls through to the system opener; absent = no column. */
   onPreview?: (entry: FileEntry) => boolean
   onOpen?: (absPath: string) => void
   onLocate?: (op: FileOp) => void
-  /** The turn/step whose request first carried an op's result node (the Context Browser's own stamp), by node seq;
-   *  absent = op rows print no stamps. */
   stampOf?: (seq: number) => { turn: number; step: number } | null
   state?: DetailState
   onRetry?: () => void
@@ -41,7 +36,6 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
     return e.searches > 0
   }
 
-  /** Signed line pair, harness diff semantics: growth on the success token, shrinkage on the error token. */
   function DeltaPair(props: { added: number; removed: number }): ReactElement {
     return (
       <span className="lc-fa-delta">
@@ -51,28 +45,18 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
     )
   }
 
-  // Memoized at the factory level: the parent's activity/onLocate props are reference-stable across hover/select
-  // renders (see contextView), so the card skips reconciliation whenever its own inputs did not move.
   return memo(function FileCard(props: FileCardProps): ReactElement {
-    // The memo must not block a locale switch: the tick re-renders on it even when the props are reference-stable.
     kit.useLocaleTick()
     const { activity } = props
     const [filter, setFilter] = useState<FileFilter>('all')
-    // Mount-time default; in-card toggling stays mount-local and never writes back.
     const [sort, setSort] = useState<DefaultFileSort>(() => settings.defaultFileSort())
     const [query, setQuery] = useState('')
     const [openPath, setOpenPath] = useState<string | null>(null)
-    // The list lane is a fixed-height virtual scroller while no row is expanded and the card is wide enough for
-    // single-line rows (narrow cards wrap, so their heights are not uniform and the list renders in full).
     const listRef = useRef<HTMLDivElement | null>(null)
     const [listWide, setListWide] = useState(false)
-    // Row pitch (height + any gap) is measured from the full list before windowing; windowing stays off unless every
-    // collapsed row measures the same height (long paths wrap otherwise and mixed heights would break the spacers).
     const [rowPitch, setRowPitch] = useState(0)
     const [rowGap, setRowGap] = useState(0)
 
-    // A stats-board jump re-points the chip band: the card drops its own lens and open row, so the landing is the
-    // frontier the click promised. The request is handed back so an unchanged kind can fire again.
     const filterFocus = props.filterFocus
     useEffect(() => {
       if (filterFocus === null || filterFocus === undefined) return
@@ -83,8 +67,6 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
     }, [filterFocus, props.onFilterFocusHandled])
 
     const q = query.trim().toLowerCase()
-    // Display form of an entry's path: bare workspace-relative inside the workspace, verbatim outside — except search rows,
-    // whose "path" is a pattern.
     const displayOf = (e: FileEntry): string => (e.pattern === true ? e.path : displayPathOf(e.path, props.workspace))
     const countOf = (e: FileEntry): number =>
       filter === 'read' ? e.reads : filter === 'write' ? e.writes : filter === 'search' ? e.searches : e.ops.length
@@ -105,8 +87,6 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
       name: byName,
       path: byPath,
     }
-    // Chip tallies cover the path-matched set only: the kind lens must not zero the other chips, which advertise
-    // what switching to them would show.
     const matched = q === '' ? activity.entries : activity.entries.filter(e => displayOf(e).toLowerCase().includes(q))
     const shown = matched.filter(e => matches(e, filter)).sort(comparators[sort])
     const matchedTotals = totalsOf(matched)
@@ -121,14 +101,12 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
       const sync = (): void => { setListWide(el.clientWidth >= 380) }
       sync()
       if (typeof ResizeObserver !== 'function') return
-      /* v8 ignore start -- jsdom has neither a layout nor ResizeObserver; the live page covers a pane resize. */
+      /* v8 ignore start */
       const observer = new ResizeObserver(sync)
       observer.observe(el)
       return () => { observer.disconnect() }
       /* v8 ignore stop */
     }, [shown.length > 0])
-    // Windowed rendering needs UNIFORM row heights. Measure the FULL list first (the initial render is unwindowed) and
-    // only enable windowing when every collapsed row has the same height; mixed heights would break the spacers.
     useEffect(() => {
       setRowPitch(0)
       setRowGap(0)
@@ -136,10 +114,9 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
     useEffect(() => {
       if (!listWide || openPath !== null || rowPitch > 0) return
       const el = listRef.current
-      /* v8 ignore start -- the ref attaches for every non-empty list; the guards only cover a mid-swap render. */
+      /* v8 ignore start */
       if (el === null) return
       const items = [...el.querySelectorAll<HTMLElement>('.lc-fa-item')]
-      // The reset above re-renders the list in full; a partial window is never a valid uniformity sample.
       if (items.length < 2 || items.length !== shown.length) return
       /* v8 ignore stop */
       const rects = items.map(item => item.getBoundingClientRect())
@@ -148,7 +125,7 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
       const uniform = height > 4 && rects.every(r => Math.abs(Math.round(r.height) - height) <= 1)
       if (!uniform) return
       const pitch = rects[1].top - first.top
-      /* v8 ignore next 1 -- uniform rows with a >4px height always yield a >4px pitch. */
+      /* v8 ignore next 1 */
       if (Number.isFinite(pitch) && pitch > 4) {
         setRowPitch(Math.round(pitch))
         setRowGap(Math.max(0, Math.round(pitch - first.height)))
@@ -215,14 +192,12 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
           <span className="lc-fa-meta">
             <span>{t(shown.length === 1 ? 'files.file' : 'files.files', { n: shown.length })}</span>
             {shownTotals.added + shownTotals.removed > 0 ? (
-              /* The one styled tip of the card lives OUTSIDE the scrolling list, so the bubble never clips. */
               <span className="lc-fa-meta-delta group/tip">
                 <DeltaPair added={shownTotals.added} removed={shownTotals.removed} />
                 <span className="lc-tip lc-fa-meta-tip group-hover/tip:opacity-100" role="tooltip">{t('files.deltaTip')}</span>
               </span>
             ) : null}
           </span>
-          {/* The five chips overflow a narrow card in English — fold the group to two lines. */}
           <div className="lc-gran lc-fa-chips @max-[380px]/lc-card:flex-wrap">
             {chips.map(c => (
               <button
@@ -239,8 +214,6 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
             ))}
           </div>
         </div>
-        {/* The controls and the list lane render in EVERY state, so an empty or pending card measures exactly what a
-            populated one does. */}
         <div>
           <div className="lc-fa-ctl">
             <ClearableInput
@@ -302,9 +275,6 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
                           )
                           : glyph.glyph}
                       </span>
-                      {/* Narrow cards wrap instead of crushing: the path's near-full-width basis keeps line 1 to
-                            chevron + icon + path, with badges/delta/time folded onto line 2. The 46px reservation is
-                            chevron (12) + gaps (2×7) + form icon (20). */}
                       <span className="lc-fa-path flex-1 @max-[380px]/lc-card:basis-[calc(100%-46px)]">
                         {dir !== '' ? <em>{dir}</em> : null}
                         {openable
@@ -341,8 +311,6 @@ export function makeFileCard(kit: ViewKit, settings: ContextSettings): Component
                       <div className="lc-fa-ops">
                         {e.ops.map((op, i) => {
                           const onLocate = props.onLocate
-                          // A meta-attributed search rows one op per matched file off ONE result — the ops share
-                          // that result's seq, so the key joins the index.
                           const key = `${op.seq}:${i}`
                           return onLocate !== undefined
                             ? (

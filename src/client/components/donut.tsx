@@ -1,9 +1,5 @@
-/** Ring chart: proportional `stroke-dasharray` segments over a 100-unit circumference; an all-zero ring draws one
- * neutral track (never a misleading "100% of nothing"). */
-
 import { type CSSProperties, type ReactElement, type ReactNode } from 'react'
 
-/** Divider between slices, in dasharray units (1 unit ≈ 1% of the circumference ≈ 2.3px at the 96px ring). */
 const SEG_GAP = 0.5
 
 export interface DonutSegment {
@@ -27,8 +23,6 @@ export function Donut(props: DonutProps): ReactElement {
   for (const s of props.segments) {
     if (Number.isFinite(s.value) && s.value > 0) total += s.value
   }
-  // One dasharray unit = 1% of the circumference (r = 15.9155 → C ≈ 100); each segment starts where the previous
-  // ends, and the +25 offset pins the first segment to 12 o'clock.
   const arcs: { key: string; color: string; len: number; offset: number }[] = []
   let acc = 0
   if (total > 0) {
@@ -40,8 +34,6 @@ export function Donut(props: DonutProps): ReactElement {
       acc += pct
     }
   }
-  // With a neighbour on each side a slice gives up half a gap at BOTH ends, so the card's own background parts the
-  // colours. A lone painted slice keeps its full ring (a gap reads as a nick); the cut stays ≤ half a sliver.
   if (arcs.length > 1) {
     for (const a of arcs) {
       const cut = Math.min(SEG_GAP / 2, a.len / 4)
@@ -49,7 +41,6 @@ export function Donut(props: DonutProps): ReactElement {
       a.offset -= cut
     }
   }
-  // The ring dims only for a hover landing on a painted arc — a legend row for a zero slice leaves the ring at rest.
   const hovering = props.hoverKey !== null && props.hoverKey !== undefined
     && arcs.some(a => a.key === props.hoverKey)
   return (
@@ -70,8 +61,6 @@ export function Donut(props: DonutProps): ReactElement {
               r="15.9155"
               strokeDasharray={`${a.len} ${100 - a.len}`}
               strokeDashoffset={a.offset}
-              // Sweep-in stagger slot (stats.css animates stroke-dasharray from 0 100 up to these attribute
-              // values). The stroke rides inline because CSS variables cannot live in SVG presentation attributes.
               style={{ '--lc-i': i, stroke: a.color } as CSSProperties}
               onMouseEnter={() => { if (props.onHoverKey !== undefined) props.onHoverKey(a.key) }}
             />

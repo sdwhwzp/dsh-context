@@ -98,7 +98,6 @@ describe('priceIndexOf / the model-side resolution tiers', () => {
   })
 
   test('a deepseek- model id prices from the first-party branch first (issue #93)', () => {
-    // azure re-lists `deepseek-v4-pro` flat without cache_read rates, so a `deepseek-` id must price from DeepSeek's own branch.
     const AZURE_FLAT = { hit: 1.74, miss: 1.74, write: 1.74, out: 3.48 }
     const hostBook = bookOf({
       deepseek: { 'deepseek-v4-pro': PRO },
@@ -205,7 +204,6 @@ describe('estimateSessionCost', () => {
   })
 
   test('a provider id the registry does not know still prices by model id', () => {
-    // A subscription/proxy route (`claude`) whose models live under the vendor's registry branch.
     close(estimateSessionCost({ unmapped: { 'deepseek-v4-flash': { peak: bucket(0, M, 0, 0) } } }, BOOK_B, 'usd'), 0.15)
   })
 

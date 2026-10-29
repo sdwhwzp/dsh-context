@@ -1,21 +1,15 @@
-/* Title, tally and chips share one row when they fit and wrap when they don't; at 380px the chips fold inside
-   their band, so the title row reserves that folded height rather than following the tallies it renders. */
 .lc-fa-card .lc-card-title { align-content: center; }
 @container lc-card (max-width: 380px) { .lc-fa-card .lc-card-title { min-height: 69px; position: relative; } }
 .lc-fa-ctl, .lc-br-toolctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .lc-fa-n { margin-left: 4px; font-weight: 700; opacity: 0.75; }
 .lc-fa-search, .lc-br-tool-search, .lc-find-input { font: inherit; font-size: 12px; color: var(--dsw-alias-label-primary); padding: 3px 8px; }
-/* The buttons fold inside the group rather than overflowing a narrow card. */
 .lc-fa-sort { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; }
 .lc-fa-meta { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 400; }
-/* Sits outside the scrolling list, so the tip bubble never clips. */
 .lc-fa-meta-delta { position: relative; }
 .lc-fa-meta-tip { top: calc(100% + 6px); left: 0; max-width: 260px; white-space: normal; line-height: 1.5; }
-/* Narrow tips anchor to the whole title, keeping the bubble inside the card instead of following the delta. */
 @container lc-card (max-width: 380px) { .lc-fa-meta-delta { position: static; } .lc-fa-meta-tip { box-sizing: border-box; right: auto; left: 0; max-width: 100%; } }
 .lc-fa-item { border: 1px solid transparent; border-radius: 8px; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out), border-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-fa-item-on { background: var(--dsw-alias-bg-layer-2); border-color: var(--dsw-alias-border-l2); }
-/* The class is set from the list's absolute index, so the stripe survives the virtual window's spacers. */
 .lc-fa-item-alt:not(.lc-fa-item-on) > .lc-fa-row { background: var(--lc-list-stripe); }
 .lc-fa-item-alt:not(.lc-fa-item-on) > .lc-fa-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 body:not([data-ds-dark-theme]) .lc-fa-item { border-width: 0.5px; }

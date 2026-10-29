@@ -30,7 +30,6 @@ describe('ContextBrowser header epochs', () => {
     assert.ok(catRow(m, 'system').className.includes('lc-br-cat-open'))
     assert.equal(queryAll(m.container, '.lc-br-content').length, 1)
     assert.ok(queryAll(m.container, '.lc-ts-desc-md').length >= 1, 'markdown view by default')
-    // Scope to the detail body: the header's own granularity toggles wear the same shared lc-gran classes.
     const rawBtn = queryAll(body, '.lc-gran-btn')[0]
     assert.equal(text(rawBtn), 'Raw')
     await click(rawBtn)
@@ -101,14 +100,12 @@ describe('ContextBrowser header epochs', () => {
     const deferred = (): Promise<HeaderEpochContent | null> =>
       new Promise((resolve, reject) => { pendings.push({ resolve, reject }) })
     const m = await mount(h(Browser, props({ data, headers: HEADERS, fetchHeader: deferred })))
-    // Epoch 35's fetch is in flight; picking step 20 re-arms for epoch 15.
     await click(catRow(m, 'system'))
     await flush()
     await pickStep(m, '20')
     await click(catRow(m, 'system'))
     await flush()
     assert.equal(pendings.length, 2)
-    // The stale epoch REJECTS first — ignored: no retry button, still loading epoch 15.
     await act(async () => { pendings[0]!.reject(new Error('stale')) })
     await flush()
     assert.ok(!text(m.container).includes('Load failed'))
@@ -116,7 +113,6 @@ describe('ContextBrowser header epochs', () => {
     await act(async () => { pendings[1]!.resolve(CONTENTS[15]!) })
     await flush()
     assert.ok(text(query(m.container, '.lc-br-body')).includes('SYS A'))
-    // Back to live: epoch 15 renders from cache, then the stale resolve lands, ignored.
     await pickStep(m, 'live')
     await click(catRow(m, 'system'))
     await flush()
@@ -202,8 +198,6 @@ describe('ContextBrowser header epochs', () => {
   })
 
   test('a legacy content-bearing epoch (pre-#37 wire) still counts the system prompt', async () => {
-    // Legacy value shape: the system TEXT rides the epoch with no systemTokens price; `headersOf` sanitizes
-    // the projection like the real callers do.
     const legacy = {
       headers: [{
         seq: 12,
@@ -229,7 +223,6 @@ describe('ContextBrowser header epochs', () => {
     assert.ok(text(query(m.container, '.lc-br-body')).includes('carried no system prompt'))
     await m.unmount()
 
-    // The node exists (so the category opens) but the fetched event maps to no prompt text.
     const systems = tl({
       current: { system: 30, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 30 },
       systems: [{ seq: 7, time: 700, tokens: 30 }],
@@ -242,8 +235,6 @@ describe('ContextBrowser header epochs', () => {
   })
 
   test('a system prompt rides the timeline systems list, fetched from its own event seq', async () => {
-    // The header epoch carries NO system price (the prompt is a `system/message` surface node), so the
-    // section resolves it from `data.systems` and reads its text off that node's seq.
     const headers: ContextHeaders = { headers: [{ seq: 15, time: 1500, tools: [{ name: 'x', tokens: 1 }] }] }
     const data = tl({
       current: { system: 30, tools: 1, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 31 },

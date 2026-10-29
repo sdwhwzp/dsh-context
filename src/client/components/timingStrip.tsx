@@ -1,6 +1,3 @@
-/** The timing card's session-time strip: spans packed gapless in occurrence order, each band's width its share of the
- * cumulative active time. The grow-in sweep rides ONE wrapper — per-band animations layerized thousands of bands. */
-
 import { useMemo, useRef, useState, type ReactElement } from 'react'
 import type { TimingSpan } from '../../shared/types'
 import type { ViewKit } from '../viewkit'
@@ -25,8 +22,6 @@ const KIND_LABEL: Record<TimingSpan['kind'], string> = {
 
 const TICK_FRACS: readonly number[] = [0, 0.25, 0.5, 0.75, 1]
 
-/** Above this many bands the strip paints two gradient layers instead of one div per band (the full band model still drives hit-testing).
- */
 export const TIMING_DOM_MAX = 600
 
 export function timingBandAt(bands: readonly { leftPct: number; widthPct: number }[], pct: number): number {
@@ -72,10 +67,8 @@ interface StripBand {
 }
 
 export function makeTimingStrip(kit: ViewKit): (props: {
-  /** The fold's painted spans, in log order (untrusted — re-proved per item). */
   spans: TimingSpan[]
   hoverKey?: string | null
-  /** Hover relay; absent renders the bands inert. */
   onHoverKey?: (key: string | null) => void
   locale?: string
 }) => ReactElement | null {
@@ -84,12 +77,9 @@ export function makeTimingStrip(kit: ViewKit): (props: {
     spans: TimingSpan[]
     hoverKey?: string | null
     onHoverKey?: (key: string | null) => void
-    /** Active UI locale: tooltip labels are translated eagerly, so a switch must rebuild the band model. */
     locale?: string
   }): ReactElement | null {
-    // The strip's own pointer hover: the floating tip answers this alone.
     const [tipKey, setTipKey] = useState<number | null>(null)
-    // Sanitize the untrusted collection: an unknown kind or an unusable/inverted instant drops the span whole.
     const model = useMemo(() => {
       const valid = props.spans.filter(s =>
         Object.hasOwn(TIMING_COLOR, s.kind)
@@ -138,7 +128,6 @@ export function makeTimingStrip(kit: ViewKit): (props: {
       setTipKey(band.key)
       props.onHoverKey?.(band.kind)
     }
-    // The tip centers on its band's rendered span, pinned 10% off both edges so a hairline band's bubble stays inside the card.
     let tip: { text: string; leftPct: number } | null = null
     for (const b of bands) {
       if (b.key === tipKey) {

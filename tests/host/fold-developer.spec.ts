@@ -4,7 +4,6 @@ import type { TimelineEvent } from '../../src/host/fold'
 import { assistantMessage, at, compaction, userMessage } from './helpers/events'
 import { assertStatesPlainJson, driveTimeline, timelineDef } from './helpers/projection'
 
-// The agent loop logs these blocks when the effective tool registry changes.
 const changes = [
   { type: 'tool-addition', toolName: 'read_file' },
   { type: 'tool-removal', toolName: 'shell' },

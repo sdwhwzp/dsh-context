@@ -7,7 +7,6 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { createFallbackActivityDefinition, createFallbackHeadersDefinition, createFallbackTimelineDefinition } from '../../src/host/fallback'
 import { BASELINE_DSH_VERSION } from '../../src/shared/version'
 
-// One rc below the raised floor: the version a just-below-floor deployment reports.
 const CURRENT = '0.2.0-rc.1'
 
 async function boot() {
@@ -64,7 +63,6 @@ describe('fallback units over the real registry', () => {
 
   test('the state schema strips any cached row instead of rejecting it', () => {
     const timeline = createFallbackTimelineDefinition(CURRENT)
-    // A ver-1 row of the REAL headers unit or any other persisted shape seeds the fold stripped to the empty state.
     assert.deepEqual(timeline.stateSchema.parse({ headers: [{ seq: 1 }] }), {})
     assert.deepEqual(timeline.stateSchema.parse({ surface: [null], sums: {} }), {})
     assert.equal(timeline.stateVersion, 1)
@@ -72,7 +70,6 @@ describe('fallback units over the real registry', () => {
 
   test('both registry contract generations read their shape off one definition, for every unit', () => {
     const timeline = createFallbackTimelineDefinition(CURRENT)
-    // Pre-0.1.1 aliases: top-level `schema` + `view`.
     assert.equal(timeline.schema.safeParse(timeline.view({})).success, true)
     assert.deepEqual(timeline.view({}).unsupported, { current: CURRENT, minimum: BASELINE_DSH_VERSION })
     const headers = createFallbackHeadersDefinition()

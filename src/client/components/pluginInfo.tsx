@@ -6,7 +6,6 @@ import { PLUGIN_NAME, PLUGIN_REPO, PLUGIN_REPO_SHORT, PLUGIN_VERSION } from '../
 import { openPluginSettings, type ClientCtx } from '../services'
 import type { ViewKit } from '../viewkit'
 
-// simple-icons marks fill their 24-unit box; the -2 inset restores the harness SiteGlyph's ~8% margin.
 function SiteMark({ icon }: { icon: SimpleIcon }): ReactElement {
   return (
     <svg width={12} height={12} className="lc-pi-labelicon" viewBox="-2 -2 28 28" fill="none" aria-hidden>
@@ -17,7 +16,6 @@ function SiteMark({ icon }: { icon: SimpleIcon }): ReactElement {
 
 export function makePluginInfo(kit: ViewKit, ctx: ClientCtx): () => ReactElement {
   const { t } = kit
-  // `title` carries the untruncated value the row's ellipsis may cut.
   const row = (icon: ReactElement, label: string, value: ReactNode, href: string, hint: string) => (
     <a className="lc-pi-row group/pi" href={href} target="_blank" rel="noreferrer">
       <div className="lc-pi-label">{icon}{label}</div>
@@ -29,7 +27,6 @@ export function makePluginInfo(kit: ViewKit, ctx: ClientCtx): () => ReactElement
     const nameText = PLUGIN_NAME + ' (v' + PLUGIN_VERSION + ')'
     const nameValue: ReactNode[] = [nameText]
     if (update) nameValue.push(<span key="update" className="lc-pi-update">{'↑ v' + update}</span>)
-    // Rows ellipsize and recover on hover, so a 240px floor suffices.
     return (
       <div className="lc-card flex-1 min-w-[min(240px,100%)]">
         <div className="lc-card-title">

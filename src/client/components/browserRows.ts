@@ -17,8 +17,6 @@ export interface NodeRow {
   kinds: ReturnType<typeof msgKindsOf>
 }
 
-/** One message row's display facts, shared by the category bodies and the DNA flat feed, so the text
- * filter scans exactly what the rows show — at derivation time, not per keystroke. */
 export function makeNodeRowOf(
   kit: ViewKit,
   nodeText: (n: SurfaceNode) => string,
@@ -28,7 +26,6 @@ export function makeNodeRowOf(
   const { t } = kit
   return function nodeRowOf(n: SurfaceNode): NodeRow {
     const conv = bySeq.get(n.seq)
-    // A `skill`-tool load reclassifies into the `skill` bucket but stays a tool result — same failure rule.
     const rowErr = (n.cat === 'tool' || n.cat === 'skill') && toolErrOf(n, conv).err
     let tag: string | null = null
     let tagNames: string[] | null = null
@@ -44,7 +41,6 @@ export function makeNodeRowOf(
         ?? (n.text !== undefined && n.text !== '' ? n.text : null)
         ?? callSummaryOf(conv) ?? preview
     } else if (n.cat === 'assistant') {
-      // The fold stamps `calls` only on TEXT-LESS replies; a reply carrying both text and calls recovers its breadcrumb through the join.
       const names = Array.isArray(n.calls) && n.calls.length > 0 ? n.calls : callNamesOf(conv)
       if (names.length > 0) {
         tag = names.join(' › ')

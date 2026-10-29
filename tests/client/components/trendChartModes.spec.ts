@@ -1,6 +1,3 @@
-/** The 'trend.empty' panel and granularity/mode settings reads live in the parent (contextView.tsx);
- *  TrendChart always renders the frame, so the empty-history arm is asserted here as an empty frame. */
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -40,7 +37,6 @@ describe('TrendChart entrance rise cap', () => {
     assert.equal(risers.length, RISE_CAP)
     assert.deepEqual(stacks.slice(0, 10).map(s => s.className.includes('animate-lc-bar-in')), new Array<boolean>(10).fill(false))
     assert.deepEqual(stacks.slice(10).map(s => s.className.includes('animate-lc-bar-in')), new Array<boolean>(RISE_CAP).fill(true))
-    // The window's own cascade counts from its edge — raw indices would exceed the stagger cap and rise in unison.
     assert.equal(stacks[10].style.getPropertyValue('--lc-i'), '0')
     await m.unmount()
 
@@ -199,8 +195,6 @@ describe('TrendChart delta mode', () => {
     const flat = req(1, { turn: 1, step: 0, system: 0, tools: 30, user: 0, inject: 0, assistant: 0, tool: 0, total: 30 })
     const mixed = req(2, { turn: 1, step: 1, system: 90, tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 90 })
     const m = await mount(h(TrendChart, propsOf([flat, mixed], { mode: 'delta' })))
-    // maxUp=90 (+90 system), maxDown=30 (−30 tools) → upPx 84: the zero label (top 97) sits exactly on
-    // the ¼-height mark (top 97), which drops itself; the ¾-height mark renders +60 clear of it.
     assert.equal(query(m.container, '.lc-axis-top').textContent, '+90')
     assert.equal(query(m.container, '.lc-axis-q3').textContent, '+60')
     assert.equal(queryAll(m.container, '.lc-axis-q1').length, 0)
@@ -228,7 +222,6 @@ describe('TrendChart turn granularity', () => {
     assert.deepEqual(turns.map(t => t.style.width), ['14px', '14px'])
     assert.deepEqual(turns.map(t => t.textContent), ['1', '2'])
 
-    // Multi-step aggregate → tip.turn; a single-step aggregate still speaks TURN (the step-count wording), never the step index.
     await m.update(h(TrendChart, propsOf(agg, { granularity: 'turn', hoveredSeq: t1s1.seq })))
     assert.ok(query(m.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.turn', { t: 1, n: 2 })))
     await m.update(h(TrendChart, propsOf(agg, { granularity: 'turn', hoveredSeq: t2s0.seq })))
@@ -240,8 +233,6 @@ describe('TrendChart turn granularity', () => {
     assert.ok(query(m2.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.turn', { t: 0, n: 2 })))
     await m2.unmount()
 
-    // A turn-mode record missing stepCount (the parent always aggregates; defensive) degrades to 1
-    // step; a missing turn field degrades to turn 0 the same way.
     const m3 = await mount(h(TrendChart, propsOf([req(20, { turn: undefined, step: 3 })], { granularity: 'turn', hoveredSeq: 20 })))
     assert.ok(query(m3.container, '.lc-chart-tip').textContent!.includes(kit.t('tip.turn1', { t: 0 })))
     await m3.unmount()

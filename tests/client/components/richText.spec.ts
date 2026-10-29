@@ -132,9 +132,9 @@ describe('useRichMode', () => {
     const m = await mount(h(Harness, { text: SAMPLE }))
     assert.ok(query(m.container, '.lc-ts-desc-md'))
     const buttons = queryAll(m.container, '.lc-gran-btn')
-    await click(buttons[0]) // Raw
+    await click(buttons[0])
     assert.equal(rawText(m.container), SAMPLE)
-    await click(queryAll(m.container, '.lc-gran-btn')[1]) // back to Markdown
+    await click(queryAll(m.container, '.lc-gran-btn')[1])
     assert.equal(query(m.container, '.lc-ts-desc-md h1').textContent, 'Title')
     await m.unmount()
   })
@@ -144,9 +144,9 @@ describe('useRichMode', () => {
     assert.ok(query(m.container, '.lc-ts-desc-json [role=tree]'))
     const buttons = queryAll(m.container, '.lc-gran-btn')
     assert.deepEqual(buttons.map(b => b.textContent), ['Raw', 'JSON'])
-    await click(buttons[0]) // Raw
+    await click(buttons[0])
     assert.equal(rawText(m.container), JSON_SAMPLE)
-    await click(queryAll(m.container, '.lc-gran-btn')[1]) // back to the tree
+    await click(queryAll(m.container, '.lc-gran-btn')[1])
     assert.ok(query(m.container, '.lc-ts-desc-json [role=tree]'))
     await m.unmount()
   })
@@ -164,7 +164,6 @@ describe('useRichMode', () => {
 describe('RichCopy', () => {
   const { RichCopy } = makeRichText(kit)
 
-  /** jsdom ships no clipboard API; stub the async one for the accepted path. */
   function stubClipboard(writeText: (text: string) => Promise<void>): void {
     Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } })
   }
@@ -186,7 +185,7 @@ describe('RichCopy', () => {
     assert.deepEqual(writes, [SAMPLE], 'the exact source text reached the clipboard host')
     assert.ok(button.className.includes('lc-rich-copy-on'))
     assert.equal(button.getAttribute('title'), 'Copied')
-    await click(button) // inside the confirmation window: no second write
+    await click(button)
     assert.deepEqual(writes, [SAMPLE])
     await act(async () => { await vi.advanceTimersByTimeAsync(1200) })
     assert.ok(!button.className.includes('lc-rich-copy-on'))
@@ -220,7 +219,6 @@ describe('useRichFind', () => {
         h(RichText, { text: props.text, mode: props.mode ?? 'raw' })))
   }
 
-  /** Type into the find input the way React's onChange sees it. */
   async function type(input: HTMLInputElement, value: string): Promise<void> {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
     await act(async () => {
@@ -234,7 +232,6 @@ describe('useRichFind', () => {
     return query<HTMLInputElement>(container, '.lc-find-input')
   }
 
-  /** Settle the debounce window inside act. */
   async function settle(): Promise<void> {
     await act(async () => { await vi.advanceTimersByTimeAsync(150) })
   }

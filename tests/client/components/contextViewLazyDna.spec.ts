@@ -9,7 +9,6 @@ import { buttonByText, makeView, projectionsFor, settingsWith, T0, timeline } fr
 
 const kit = makeKit()
 
-/** Auto-overview off, so the 600-step log stays on the bars face. */
 function makeViewNoAutoOverview() {
   return makeView(new TestClientCtx(), settingsWith({ overviewAutoSteps: 'off' }))
 }
@@ -59,7 +58,6 @@ describe('ContextView lazy DNA bands', () => {
       await flush()
       const deltaBars = queryAll(m.container, '.lc-bar-dna')
       assert.ok(deltaBars.length > 0)
-      // The whole-log axis walk must not turn into whole-log DOM: only the rendered window paints a band.
       assert.ok(deltaBars.length < 600, `only the window paints a band (${deltaBars.length})`)
     } finally {
       await m.unmount()

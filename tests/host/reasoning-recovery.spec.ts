@@ -5,7 +5,7 @@ import { SessionProjectionRegistry } from '@deepseek-ai/dsh-session-projection'
 import { createContextTimelineDefinition } from '../../src/host/timeline'
 import { assistantMessage, compaction, header, stepEnd, stepStart } from './helpers/events'
 
-test('content subsets survive checkpoint suffix recovery and invalidate v31 and v32 rows', async () => {
+test('content subsets survive checkpoint suffix recovery and invalidate older checkpoint rows', async () => {
   const ctx = new Context()
   const registry = new SessionProjectionRegistry(ctx as never)
   const dispose = registry.register(createContextTimelineDefinition({}, () => false) as never)
@@ -26,7 +26,7 @@ test('content subsets survive checkpoint suffix recovery and invalidate v31 and 
     const session = { id: 'reasoning-recovery', version: 1, createdAt: 1, cwd: '/tmp/reasoning-recovery', isSeeded: false }
     const prefix = registry.restore({}, log.slice(0, 5) as never, 0 as never, session as never, 0 as never)
     const row = prefix.checkpoint.contextTimeline
-    assert.equal(row.ver, 35)
+    assert.equal(row.ver, 36)
     const parsed = createContextTimelineDefinition({}, () => false).stateSchema.parse(row.val)
     assert.ok(parsed.assistantReasoning > 0)
     assert.equal(parsed.generatedReasoning, 3)
@@ -44,7 +44,7 @@ test('content subsets survive checkpoint suffix recovery and invalidate v31 and 
     const { billedGenerated: _billed, ...v34State } = parsed
     const { assistantAnswerTokens: _answers, assistantCallTokens: _calls, generatedAnswerTokens: _generatedAnswers, generatedCallTokens: _generatedCalls, ...v32State } = v34State
     const { assistantReasoning: _reasoning, generatedReasoning: _generated, ...v31State } = v32State
-    for (const [ver, val] of [[31, v31State], [32, v32State], [34, v34State]] as const) {
+    for (const [ver, val] of [[31, v31State], [32, v32State], [34, v34State], [35, parsed]] as const) {
       const stale = { contextTimeline: { ...row, ver, val } }
       assert.equal(registry.viewCheckpoint(stale).contextTimeline, undefined)
       assert.deepEqual(registry.restore(stale, log as never, 0 as never, session as never, 0 as never), cold)

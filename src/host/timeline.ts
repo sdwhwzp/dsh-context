@@ -1,6 +1,3 @@
-/** The `contextTimeline` session projection unit: pure `apply`/`view` math on the harness's projection registry — no subscriptions, no
- * client access; checkpoint persistence and push delivery are the framework's. */
-
 import { z } from 'zod'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Config } from './config'
@@ -57,11 +54,9 @@ const requestRecordSchema = z.object({
   tool: z.number().int().nonnegative(),
   total: z.number().int().nonnegative(),
   prompt: z.number().int().nonnegative().optional(),
-  /** Additive-optional: rows folded before the category existed still parse. */
   skill: z.number().int().nonnegative().optional(),
   cacheRead: z.number().int().nonnegative().optional(),
   output: z.number().int().nonnegative().optional(),
-  /** The request's step active ms; optional so a record whose step never closed (the live tail) still parses. */
   activeMs: z.number().nonnegative().optional(),
   stepCount: z.number().int().positive().optional(),
 }).strict()
@@ -138,7 +133,6 @@ const commandSchema = z.object({
   gone: z.number().int().nonnegative().optional(),
 }).strict()
 
-/** The persisted record adds the fold's pairing key, stripped by the wire builders. */
 const commandStateSchema = commandSchema.extend({
   call: z.string().optional(),
 }).strict()
@@ -195,7 +189,6 @@ const timingTotalsSchema = z.object({
   wallMs: z.number().nonnegative(),
   ttftMs: z.number().nonnegative(),
   genMs: z.number().nonnegative(),
-  // Additive-optional: rows cached before the generation split, the block counts or the throughput seat existed parse.
   reasoningMs: z.number().nonnegative().optional(),
   reasoningBlocks: z.number().int().nonnegative().optional(),
   textMs: z.number().nonnegative().optional(),
@@ -206,6 +199,8 @@ const timingTotalsSchema = z.object({
   speedMs: z.number().nonnegative().optional(),
   calls: z.number().int().nonnegative(),
   toolsMs: z.number().nonnegative(),
+  toolBusyMs: z.number().nonnegative().optional(),
+  idleMs: z.number().nonnegative().optional(),
   toolCalls: z.number().int().nonnegative(),
   tools: z.record(z.string(), toolTimingSchema),
 }).strict()
@@ -221,7 +216,6 @@ const countsSchema = z.object({
   injects: z.number().int().nonnegative(),
   compactions: z.number().int().nonnegative(),
   prunes: z.number().int().nonnegative(),
-  // Additive-optional like every head field derived at view time: a cached row restores with its full event set.
   skills: z.number().int().nonnegative().optional(),
 }).strict()
 
@@ -231,8 +225,6 @@ const lastSchema = z.object({
   prompt: z.number().int().nonnegative().optional(),
 }).strict()
 
-/** One wire contract for both generations: the SPLIT head (envelope scalars + counts/last/detailRev, heavy collections
- * on the detail channel) and the INLINE value (collections in place); `detailRev` present ⟺ split. */
 export const contextTimelineSchema = z.object({
   ok: z.literal(true),
   unsupported: unsupportedSchema.optional(),
@@ -249,7 +241,6 @@ export const contextTimelineSchema = z.object({
   billedGenerated: outputPartsSchema.optional(),
   toolCalls: z.number().int().nonnegative().optional(),
   humanInputs: z.number().int().nonnegative().optional(),
-  // Additive-optional like `humanInputs`: a pre-field row reads without it and clients degrade to zero.
   answers: z.number().int().nonnegative().optional(),
   lastUser: z.string().optional(),
   counts: countsSchema.optional(),
@@ -273,7 +264,6 @@ export const contextTimelineSchema = z.object({
   spans: z.array(timingSpanSchema).optional(),
 }).strict() as unknown as z.ZodType<ContextTimeline>
 
-/** The registry's `stateSchema` contract: validates plain-JSON `TimelineState` before a checkpoint row seeds a fold. */
 const timelineStateSchema = z.object({
   surface: z.array(surfaceNodeSchema),
   assistantReasoning: z.number().int().nonnegative(),
@@ -316,6 +306,8 @@ const timelineStateSchema = z.object({
   stepWaits: z.array(z.object({ start: z.number(), end: z.number() }).strict()).optional(),
   stepApprovals: z.record(z.string(), z.number()).optional(),
   stepRequestSeq: z.number().optional(),
+  stepBeats: z.array(z.number()).optional(),
+  stepBeatsFull: z.boolean().optional(),
   callNames: z.record(z.string(), z.object({ name: z.string(), start: z.number(), argsRaw: z.string().optional() }).strict()),
   pendingShadowedSeqs: z.array(z.number()).optional(),
   pendingShadowEventSeq: z.number().optional(),
@@ -331,11 +323,6 @@ const timelineStateSchema = z.object({
   pendingCodeOps: z.record(z.string(), z.array(fileOpSchema)).optional(),
 }) as unknown as z.ZodType<TimelineState>
 
-/**
- * Created per plugin instance with its config-resolved retention bounds. Without a `wire` block the registry serves
- * nothing and the Context tab waits on its loading screen forever; `slim` picks the wire generation PER SERVE as a
- * liveness probe — the split is view-only, both generations validate against one schema over the same state.
- */
 export function createContextTimelineDefinition(config: Config, slim: () => boolean): WiredProjection<'contextTimeline', TimelineState> {
   const bounds = resolveBounds(config)
   const view = (state: TimelineState): ContextTimeline =>
@@ -346,9 +333,7 @@ export function createContextTimelineDefinition(config: Config, slim: () => bool
     wire: { viewSchema: contextTimelineSchema, view },
     init: () => createTimelineState(),
     apply: (state: TimelineState, event: SessionEvent) => applyTimeline(state, event as Parameters<typeof applyTimeline>[1], bounds),
-    // Bump on any persisted-shape or fold-semantics change, which refolds cached rows; never for a backfillable or serve-time-derived
-    // field, since invalidating in-generation rows orphans idle sessions with no refresh channel.
-    stateVersion: 35,
+    stateVersion: 36,
   }
   return definition
 }

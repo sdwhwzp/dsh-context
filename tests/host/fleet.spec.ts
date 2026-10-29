@@ -14,8 +14,6 @@ interface CtxSpec {
   sessionPersistence?: unknown
 }
 
-/** A minimal host ctx double with cordis inject semantics (the detail route spec's own shape): the callback fires
- * once its dependency list completes, and disposers are collected. */
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?: RouteFetch }; disposers: (() => void)[] } {
   const captured: { path?: string; fetch?: RouteFetch } = {}
   const disposers: (() => void)[] = []
@@ -52,7 +50,6 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?
 }
 
 const OPEN_GATE: ColdReadGate = { admit: read => read() }
-/** A gate that refuses every read — the heap-pressure path. */
 const SKIP_GATE: ColdReadGate = { admit: () => Promise.resolve(undefined) }
 
 function armed(spec: CtxSpec = {}): { captured: { path?: string; fetch?: RouteFetch } } {
@@ -271,12 +268,10 @@ describe('fleetDetailOfEvents — roster facts and latest reply', () => {
       { type: 'assistant/message', seq: 4, time: 40, data: { message: { content: [{ type: 'text', text: '  ' }] } } },
       { type: 'assistant/message', seq: 5, time: 50, data: { message: { content: 'nope' } } },
       { type: 'assistant/message', seq: 6, time: 60, data: {} },
-      // The reply scan walks the log newest-LAST-in-array first: hostile blocks precede the winner here.
       { type: 'assistant/message', seq: 7, time: 70, data: { message: { content: [null, { type: 'text', text: 7 }] } } },
     ])
     assert.deepEqual(detail.lastReply, { time: 30, text: 'latest report' })
     assert.equal(fleetDetailOfEvents([]).lastReply, undefined)
-    // A reply with no readable instant zeros the clock.
     const timeless = fleetDetailOfEvents([
       { type: 'assistant/message', seq: 1, data: { message: { content: [{ type: 'text', text: 'hi' }] } } },
     ])
@@ -386,7 +381,6 @@ describe('fleetDetailOfEvents — inter-agent messages', () => {
   test('the no-closing markers leave no report; a long closing report clips and flags the row', () => {
     const noClosing = fleetDetailOfEvents([settled(`${SETTLEMENT}It left no closing message.`, SETTLEMENT)])
     assert.equal(noClosing.messages[0]?.report, undefined)
-    // Forward-compat guard: this marker landed after 0.2.1-rc.2 (dsh 70eab5706e); the fold must accept it on newer lines.
     const omitted = fleetDetailOfEvents([settled(`${SETTLEMENT}It sent you a message just before finishing, so its closing message is omitted.`, SETTLEMENT)])
     assert.equal(omitted.messages[0]?.report, undefined)
     const clipped = fleetDetailOfEvents([settled(`${SETTLEMENT}Its closing message:${'r'.repeat(500)}`, SETTLEMENT)])

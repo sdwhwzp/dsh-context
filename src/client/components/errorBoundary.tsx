@@ -1,5 +1,3 @@
-/** A subtree render error becomes this retryable card; the harness's slot boundary would leave an empty error placeholder. */
-
 import { Component, useRef, type ComponentType, type ReactNode } from 'react'
 import type { Translate } from '../i18n'
 import { useConversationSurface } from './useConversationSurface'

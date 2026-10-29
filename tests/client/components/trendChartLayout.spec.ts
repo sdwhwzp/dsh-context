@@ -57,8 +57,6 @@ describe('TrendChart adaptive scale (the title-adjacent toggle)', () => {
     assert.equal(query(empty.container, '.lc-axis-top').textContent, '1')
     await empty.unmount()
 
-    // A hidden pane (zero width) has nothing visible to scale to: the measured scale stands instead of collapsing
-    // every bar onto a unit axis.
     const m = await mount(h(TrendChart, propsOf(spikedSteps(), { adaptive: true })))
     await flush()
     const scroll = query<LayoutEl>(m.container, '.lc-chart-scroll')
@@ -82,8 +80,6 @@ describe('TrendChart adaptive scale (the title-adjacent toggle)', () => {
     assert.equal(queryAll(bars(m.container)[20], '.lc-bar-down > div')[0].style.height, `${Math.round(30 * CHART_H / 40)}px`)
     await m.unmount()
 
-    // Bars 0..24 carry no change at all and the +500 sits at bar 25: the all-zero window has no scale of its own,
-    // so the whole-log zero line stands instead of collapsing onto the chart top.
     const flat = [step(0, 100)]
     for (let i = 1; i < 25; i++) flat.push(step(i, 100))
     flat.push(step(25, 600))
@@ -111,8 +107,6 @@ describe('TrendChart adaptive scale (the title-adjacent toggle)', () => {
       const scroll = query<LayoutEl>(m.container, '.lc-chart-scroll')
       assert.equal(query(m.container, '.lc-axis-top').textContent, '100')
       assert.equal(callbacks.length, 1)
-      // The pane widens back to the whole log while the reader sits at the left edge — a resize renders nothing,
-      // so only the observer's callback re-measures.
       scroll.__clientW = 480
       scroll.__scrollL = 0
       await act(async () => { callbacks[0]() })
@@ -129,8 +123,6 @@ describe('TrendChart adaptive scale (the title-adjacent toggle)', () => {
     const m = await mount(h(TrendChart, propsOf(reqs)))
     await flush()
     const scroll = query<LayoutEl>(m.container, '.lc-chart-scroll')
-    // Mount anchors at the newest bars: a further rightward swipe is the browser's forward gesture, leftward
-    // still scrolls the chart, and a vertical-dominant gesture belongs to the page.
     assert.equal(scroll.scrollLeft, 240)
     assert.equal(wheel(scroll, 30, 0), true, 'right edge cancels the forward swipe')
     assert.equal(wheel(scroll, -30, 0), false, 'leftward still scrolls the chart')
@@ -254,8 +246,6 @@ describe('TrendChart scroll anchoring', () => {
     assert.equal(scroll.scrollLeft, 240)
     await scrollTo(scroll, 100)
 
-    // A selection-only update mid-scroll never re-anchors; only a real data push (new request,
-    // granularity/focus switch) may follow the newest bar, so hover/select never flashes the column.
     await m.update(h(TrendChart, propsOf(reqs, { ...handlers, selectedSeq: 1 })))
     assert.equal(scroll.scrollLeft, 100)
     await scrollTo(scroll, 230)
@@ -318,7 +308,7 @@ describe('TrendChart scroll anchoring', () => {
       await flush()
       const scroll = query<LayoutEl>(m.container, '.lc-chart-scroll')
       assert.ok(spies.focusHandled >= 1)
-      assert.equal(scroll.scrollLeft, 8) // 1 * 16 + 7 - 30/2
+      assert.equal(scroll.scrollLeft, 8)
 
       const before = spies.focusHandled
       await m.update(h(TrendChart, propsOf(agg, { ...handlers, granularity: 'turn', focusTurn: 99 })))
@@ -333,7 +323,7 @@ describe('TrendChart scroll anchoring', () => {
       await flush()
       const stepScroll = query<LayoutEl>(step.container, '.lc-chart-scroll')
       assert.ok(stepSpies.spies.seqFocusHandled >= 1)
-      assert.equal(stepScroll.scrollLeft, 20 * 16 + 7 - 15) // bar 21 is index 20
+      assert.equal(stepScroll.scrollLeft, 20 * 16 + 7 - 15)
 
       const stepBefore = stepSpies.spies.seqFocusHandled
       await step.update(h(TrendChart, propsOf(reqs, { ...stepSpies.handlers, focusSeq: 999 })))
@@ -351,7 +341,7 @@ describe('TrendChart scroll anchoring', () => {
     const m = await mount(h(TrendChart, propsOf(reqs, handlers)))
     const scroll = query<LayoutEl>(m.container, '.lc-chart-scroll')
     const labels = queryAll(m.container, '.lc-turn-label')
-    assert.equal(labels.length, 2) // T1 off 0 w 126, T2 off 128 w 126; scrollWidth 256
+    assert.equal(labels.length, 2)
 
     scroll.__clientW = 60
     await scrollTo(scroll, 150)
@@ -434,8 +424,6 @@ describe('TrendChart hover tip overlay', () => {
     return out
   }
 
-/** The tip lives beside the scroller: an absolutely positioned child of a scroller contributes to its
- *  scrollable overflow, so hovering inflated scrollWidth and flapped the horizontal scrollbar. */
   test('renders outside the scroller, glues to the visible slice while scrolling, and clamps real widths at both edges', async () => {
     const reqs = manySteps()
     const { handlers } = makeSpies()
@@ -456,13 +444,10 @@ describe('TrendChart hover tip overlay', () => {
     await scrollTo(scroll, 211)
     assert.equal(query(m.container, '.lc-chart-tip').style.transform, 'translate(100px, 0)')
 
-    // Left-edge clamp: hovering bar idx 1 (col 23) while parked deep right pushes the raw dx far negative.
     await m.update(h(TrendChart, propsOf(reqs, { ...handlers, hoveredSeq: 2 })))
     await scrollTo(scroll, 240)
     assert.equal(query(m.container, '.lc-chart-tip').style.transform, 'translate(0px, 0)')
 
-    // Overflow geometry stays honest: the scrollable area is exactly the bars', never the tip's (jsdom cannot prove
-    // the browser-level scrollbar parity here — verified against real Chromium separately).
     assert.equal(scroll.scrollWidth, 640)
     await m.unmount()
 

@@ -14,7 +14,6 @@ function part(key: string, value: number, raw?: number): PartsPart {
   return { key, color: '#123456', value, ...(raw !== undefined ? { raw } : {}) }
 }
 
-/** A parent that really holds the hover key, so hovering re-renders the bar. */
 function HoverHarness(props: { parts: PartsPart[]; max?: number; minBand?: number; reserve?: ContextReserve }) {
   const [hoverKey, setHoverKey] = useState<string | null>(null)
   return h(StackedBar, { parts: props.parts, max: props.max, minBand: props.minBand, hoverKey, onHoverKey: setHoverKey, reserve: props.reserve })
@@ -82,7 +81,6 @@ describe('StackedBar entrance grow', () => {
     for (const mask of queryAll(m.container, '.lc-reserve')) assert.equal(slot(mask), '')
     await m.unmount()
 
-    // Twelve occupied bands: past the cap every late band joins at the same slot, the free track one after.
     const capped = await mount(h(StackedBar, { parts: Array.from({ length: 12 }, (_, i) => part(`band-${i}`, i + 1)), max: 200 }))
     const cappedSegs = queryAll(capped.container, '.lc-stacked-seg')
     assert.equal(cappedSegs.length, 12)
@@ -155,8 +153,6 @@ describe('StackedBar hover link', () => {
   })
 
   test('degenerate negative counts pin scale to 0 while a free track opens: free tooltip shows 0%', async () => {
-    // Token counts are never negative in production; this guards the scale>0
-    // fallback in the free-tooltip math against corrupt input.
     const m = await mount(h(StackedBar, { parts: [part('user', -5)], max: 0, hoverKey: 'free' }))
     const tip = query(m.container, '.lc-bar-tip')
     assert.ok(tip.className.includes('lc-bar-tip-on'))
@@ -169,7 +165,6 @@ describe('StackedBar hover link', () => {
     const m = await mount(h(StackedBar, props))
     const wrap = query(m.container, '.lc-stacked-wrap')
     const tip = query(m.container, '.lc-bar-tip')
-    // jsdom lays nothing out: pin the two boxes the measure pass reads.
     const pin = (el: Element, width: number): void => {
       Object.defineProperty(el, 'getBoundingClientRect', {
         configurable: true,
@@ -235,7 +230,7 @@ describe('StackedBar reserve masks', () => {
     assert.ok(tip.className.includes('lc-bar-tip-on'))
     assert.deepEqual(tipRows(tip), ['Compaction Headroom', '100', 'Auto-compaction is expected to fire at 80% of the window'])
     assert.equal(tip.style.left, '85%')
-    assert.equal(query(m.container, '.lc-stacked').className, 'lc-stacked') // hoverKey cleared
+    assert.equal(query(m.container, '.lc-stacked').className, 'lc-stacked')
     await unhover(headroom)
     assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
     await hover(output)
@@ -252,7 +247,6 @@ describe('StackedBar reserve masks', () => {
   })
 
   test('a bound window fraction: true-size masks at the window tail, the trigger as its own line', async () => {
-    // threshold 800 sits strictly left of the masks' 840 edge: headroom + output (160) < 20% of the window.
     const reserve = { threshold: 800, headroom: 60, output: 100 }
     const m = await mount(h(HoverHarness, { parts: [part('user', 100)], max: 1000, reserve }))
     const headroom = query(m.container, '.lc-reserve-headroom')
@@ -270,7 +264,7 @@ describe('StackedBar reserve masks', () => {
     const tip = query(m.container, '.lc-bar-tip')
     assert.deepEqual(tipRows(tip), ['Auto-compaction trigger', '800 · 80% of window', 'Compaction fires when the used tokens reach this line'])
     assert.equal(tip.style.left, '80%')
-    assert.equal(query(m.container, '.lc-stacked').className, 'lc-stacked') // hoverKey cleared
+    assert.equal(query(m.container, '.lc-stacked').className, 'lc-stacked')
     await unhover(line)
     assert.equal(query(m.container, '.lc-bar-tip').className, 'lc-tip lc-bar-tip')
     await m.unmount()
@@ -408,7 +402,6 @@ describe('StackedBar minBand floor', () => {
     const segs = queryAll(m.container, '.lc-stacked-seg')
     assert.equal(segs[1].style.width, `${floor}%`)
     assert.equal(segs[2].style.width, `${floor}%`)
-    // The unpinned band rescales into the remaining room (the same arithmetic the component runs).
     assert.equal(segs[0].style.width, `${90 * (100 - 2 * floor) / 90}%`)
     await m.unmount()
   })

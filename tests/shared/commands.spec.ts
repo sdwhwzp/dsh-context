@@ -86,7 +86,6 @@ describe('markersOfText', () => {
   test('a clean exit carries no marker; the exit marker anchors at the very tail, like dsh’s own parser', () => {
     assert.deepEqual(markersOfText('total 8\nfile.ts'), {})
     assert.deepEqual(markersOfText('boom\n[exit code: 3]'), { exit: 3 })
-    // A marker-like line mid-output is output, not a status.
     assert.deepEqual(markersOfText('[exit code: 3]\nmore output'), {})
   })
 
@@ -115,14 +114,11 @@ describe('markersOfText', () => {
 
   test('a background hand-off is an ack, not an outcome', () => {
     assert.deepEqual(markersOfText('started background job abc123'), { backgroundAck: true })
-    // The REAL promoted shape: dsh's renderPromoted always appends the hand-off guidance after the marker.
     const realPromoted = 'partial output\n[still running after 10000ms; moved to background job abc123]\n'
       + 'The command keeps running in the background. You will be notified when it finishes; '
       + 'read newer output with job_output, stop it with job_kill.'
     assert.deepEqual(markersOfText(realPromoted), { backgroundAck: true })
-    // A marker at the very tail with no guidance (a trimmed spill read) still matches.
     assert.deepEqual(markersOfText('partial output\n[still running after 10000ms; moved to background job abc123]'), { backgroundAck: true })
-    // A spoofed marker line with unrelated output after it is output, not an ack.
     assert.deepEqual(markersOfText('[still running after 10ms; moved to background job x]\nother output'), {})
   })
 
@@ -140,9 +136,7 @@ describe('outcomeOfMarkers', () => {
     assert.deepEqual(outcomeOfMarkers({ exit: 2 }, false), { status: 'failed', exit: 2 })
     assert.deepEqual(outcomeOfMarkers({ denied: true }, false), { status: 'failed' })
     assert.deepEqual(outcomeOfMarkers({}, true), { status: 'failed' })
-    // A bare timeout with no exit resolution is an interruption, not a success.
     assert.deepEqual(outcomeOfMarkers({ timedOut: true }, false), { status: 'failed' })
-    // A timeout WITH a clean exit stays completed (a command can trap the signal and exit 0).
     assert.deepEqual(outcomeOfMarkers({ timedOut: true, exit: 0 }, false), { status: 'completed', exit: 0 })
     assert.deepEqual(outcomeOfMarkers({ exit: 0 }, false), { status: 'completed', exit: 0 })
     assert.deepEqual(outcomeOfMarkers({}, false), { status: 'completed', exit: 0, exitInferred: true })

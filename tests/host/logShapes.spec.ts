@@ -41,7 +41,6 @@ describe('streamTimingOf', () => {
       spans: { ...tally, text: 400 },
       blocks: { ...tally, text: 1 },
     }, 'a single block owns the whole tail to endTime')
-    // A repeated kind stays two spans — the strip paints stream order, not a tally.
     assert.deepEqual(streamTimingOf([
       chunk(1000, 'reasoning'), chunk(1300, 'text'), chunk(1500, 'reasoning'),
     ], 2000).spans, [
@@ -199,7 +198,6 @@ describe('replaceRangeOf', () => {
     assert.equal(replaceRangeOf(null), null)
     assert.equal(replaceRangeOf(undefined), null)
     assert.equal(replaceRangeOf({ op: 'insert', startSeq: 1, endSeq: 2 }), null)
-    // A pre-V3 spelling (`start`/`end`) is not an endpoint this dialect carries: it reads as malformed → append.
     assert.equal(replaceRangeOf({ op: 'replace', start: 3, end: 7 }), null)
     assert.equal(replaceRangeOf({ op: 'replace', startSeq: 1 }), null)
     assert.equal(replaceRangeOf({ op: 'replace', startSeq: Number.NaN, endSeq: 2 }), null)

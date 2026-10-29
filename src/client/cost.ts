@@ -1,6 +1,3 @@
-/** Session-cost estimate from the models.dev book (USD per 1M tokens; CNY at 1 CNY = 0.15 USD); DeepSeek's
- * OFF-peak figures, so only its `peak` buckets double. */
-
 import type { SessionCostUsage } from '../shared/types'
 import { isDeepSeekProvider, modelsDevProviderOf } from '../shared/providers'
 import { asRecord, numOf, type LocaleService } from './services'
@@ -21,12 +18,10 @@ const USD_PER_CNY = 0.15
 
 const PEAK_FACTOR = 2
 
-/** Per-1M-token rates (USD); an absent registry cache field falls back to the input rate. */
 export interface PriceTriple { hit: number; miss: number; write: number; out: number }
 
 export type ModelPrices = Record<string, Record<string, PriceTriple>>
 
-/** The rule that resolved one provider/model pair. */
 export type PriceVia =
   | 'direct'
   | 'branch-suffix'
@@ -48,14 +43,12 @@ export interface PriceCandidate {
   lab?: string
 }
 
-/** Why one provider/model pair could not be priced. */
 export type PriceMissReason = 'book-unavailable' | 'model-unknown' | 'ambiguous' | 'no-entry'
 
 export type PriceMiss =
   | { reason: 'ambiguous'; candidates: number }
   | { reason: 'book-unavailable' | 'model-unknown' | 'no-entry' }
 
-/** One resolved listing face, with the rule and confidence that selected it. */
 export interface PriceFace {
   pid: string
   mid: string
@@ -69,7 +62,6 @@ export type PriceResolution =
   | { kind: 'priced'; face: PriceFace }
   | { kind: 'unpriced'; miss: PriceMiss }
 
-/** One provider branch's indexes: exact, suffix, normalized, and the labs it carries. */
 export interface PriceBranch {
   pid: string
   byExact: Map<string, PriceCandidate[]>
@@ -80,7 +72,6 @@ export interface PriceBranch {
   multiVendor: boolean
 }
 
-/** Exact lowercased model id → its providers; short suffix aliases live only inside provider branches. */
 export interface PriceIndex {
   byModel: Map<string, PriceCandidate[]>
   byNormalized: Map<string, PriceCandidate[]>
@@ -89,7 +80,6 @@ export interface PriceIndex {
 
 export interface ModelBook { prices: ModelPrices; index: PriceIndex }
 
-/** One folded usage face and its resolution, or the reason it stayed unpriced. */
 export type PriceLookup =
   | { provider: string; model: string; face: PriceFace; miss?: undefined }
   | { provider: string; model: string; face: null; miss: PriceMiss }
@@ -98,7 +88,6 @@ export function toCurrency(usd: number, currency: CostCurrency): number {
   return currency === 'cny' ? usd / USD_PER_CNY : usd
 }
 
-/** Rate equality within the registry's float noise (sync drift prints 0.125000…003). */
 function sameRate(a: PriceTriple, b: PriceTriple): boolean {
   const close = (x: number, y: number): boolean => Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(x))
   return close(a.hit, b.hit) && close(a.miss, b.miss) && close(a.write, b.write) && close(a.out, b.out)
@@ -124,7 +113,6 @@ function pushForms(map: Map<string, PriceCandidate[]>, forms: readonly string[],
   for (const key of forms) pushCandidate(map, key, candidate)
 }
 
-/** `canonicalOf` maps each provider/model to the models.dev canonical id when the registry supplies one. */
 export function priceIndexOf(
   prices: ModelPrices,
   canonicalOf: Record<string, Record<string, string> | undefined> = {},
@@ -298,7 +286,6 @@ function ambiguous(count: number): PriceResolution {
   return { kind: 'unpriced', miss: { reason: 'ambiguous', candidates: count } }
 }
 
-/** Resolve one billed provider/model pair through the full authority chain. */
 export function priceResolutionOf(book: ModelBook | null | undefined, provider: string, model: string): PriceResolution {
   if (book === null || book === undefined) return unpriced('book-unavailable')
   const routed = routedBranch(book, provider)
@@ -347,7 +334,6 @@ export function priceResolutionOf(book: ModelBook | null | undefined, provider: 
   return unpriced('no-entry')
 }
 
-/** One billed model's price and registry face, or null when no authority resolves it. */
 export function priceFaceOf(book: ModelBook | null | undefined, provider: string, model: string): PriceFace | null {
   const resolution = priceResolutionOf(book, provider, model)
   return resolution.kind === 'priced' ? resolution.face : null
@@ -357,7 +343,6 @@ export function priceOf(book: ModelBook | null | undefined, provider: string, mo
   return priceFaceOf(book, provider, model)?.rate ?? null
 }
 
-/** Every folded usage face with its price resolution, for the tooltip's priced rows and miss notes. */
 export function priceLookupsOf(usage: SessionCostUsage | null | undefined, book: ModelBook | null | undefined): PriceLookup[] {
   if (usage === null || usage === undefined || book === null || book === undefined) return []
   const lookups: PriceLookup[] = []
@@ -374,7 +359,6 @@ export function priceLookupsOf(usage: SessionCostUsage | null | undefined, book:
   return lookups
 }
 
-/** Prices cumulative billed totals (`peak` doubles for DeepSeek only); null when nothing was priced. */
 export function estimateSessionCost(
   usage: SessionCostUsage | null | undefined,
   book: ModelBook | null | undefined,
@@ -423,7 +407,6 @@ export function billedTokensOf(usage: SessionCostUsage | null | undefined): numb
   return total
 }
 
-/** True when any bucket record merged — even an all-zero one — so the estimator prices it as $0. */
 function mergeInto(out: SessionCostUsage, usage: SessionCostUsage | null | undefined): boolean {
   if (usage === null || usage === undefined) return false
   let any = false
@@ -466,7 +449,6 @@ export function formatCost(amount: number, currency: CostCurrency): string {
   return symbol + (amount >= 1 ? amount.toFixed(2) : amount.toPrecision(2))
 }
 
-/** The display currency follows the active locale — read per render: slot outlets re-render on a locale switch. */
 export function displayCurrencyOf(locale: LocaleService): CostCurrency {
   return typeof locale.getLocale === 'function' && locale.getLocale().active === 'zh' ? 'cny' : 'usd'
 }

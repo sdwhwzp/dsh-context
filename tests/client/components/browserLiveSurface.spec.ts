@@ -55,8 +55,6 @@ describe('ContextBrowser live surface', () => {
     assert.ok(meta.includes('Live · Next Request'))
     assert.ok(meta.includes('Estimated ≈ 350'))
     assert.ok(meta.includes('Actual 800'), 'live pairs the estimate with the freshest actual')
-    // Live in 'prev turn' mode: the freshest request is turn-less (turn 0), so no previous turn exists —
-    // the zero baseline shows the whole live makeup as change.
     await clickDeltaBase(m, 'prev turn')
     const liveUserCat = queryAll(m.container, '.lc-br-cat')[ROW.user]
     assert.equal(text(query(liveUserCat, '.lc-br-delta')), '+1')
@@ -70,8 +68,6 @@ describe('ContextBrowser live surface', () => {
     assert.ok(meta2.includes('Turn 0 · Step 0'))
     assert.ok(!meta2.includes('Actual'), 'this freshest request reported no usage')
     assert.equal(queryAll(m.container, '.lc-br-delta').length, 0, 'the seq-7 view and its seq-20 baseline hold the same single node')
-    // Turn mode on a turn-less record: 'turn − 1' degrades to −1, so the zero baseline again shows the
-    // step's single node as pure change.
     await clickDeltaBase(m, 'prev turn')
     assert.equal(text(query(m.container, '.lc-br-delta')), '+1')
     await pickStep(m, 'live')
@@ -125,7 +121,6 @@ describe('ContextBrowser live surface', () => {
     const meta = text(query(m.container, '.lc-br-meta'))
     assert.ok(meta.includes('Turn 1 · Step 0'))
     assert.ok(!meta.includes('Actual'), 'this step reported no usage')
-    // The step's surface: archived node (gone 15 > 10) + seq 1; seq 11 is the response.
     await click(catRow(m, 'user'))
     assert.equal(elemRows(m).length, 2, 'archived + live nodes reconstructed')
     assert.ok(text(m.container).includes('archived hello'))
@@ -155,7 +150,6 @@ describe('ContextBrowser live surface', () => {
     })
     const m = await mount(h(Browser, props({ data })))
     const userRow = (): HTMLElement => queryAll(m.container, '.lc-br-cat')[ROW.user]
-    // Default 'prev step': step 4 reads against step 3, its immediate predecessor.
     await pickStep(m, '4')
     const countPills = queryAll(userRow(), '.lc-br-delta')
     assert.equal(countPills.length, 1, 'only the user count changed')
@@ -164,23 +158,18 @@ describe('ContextBrowser live surface', () => {
     const tokenPills = queryAll(userRow(), '.lc-br-tdelta')
     assert.equal(tokenPills.length, 1)
     assert.equal(text(tokenPills[0]), '+10')
-    // The log's first step has no predecessor: the zero baseline shows the full makeup as change, every
-    // category included (system +1, tools +2, user +10).
     await pickStep(m, '1')
     assert.equal(queryAll(m.container, '.lc-br-tdelta').length, 3)
     assert.equal(text(query(userRow(), '.lc-br-delta')), '+1')
     assert.equal(text(query(userRow(), '.lc-br-tdelta')), '+10')
-    // 'prev turn': step 4 reads against turn 1's last step (seq 2).
     await pickStep(m, '4')
     await clickDeltaBase(m, 'prev turn')
     assert.equal(text(query(userRow(), '.lc-br-delta')), '+2')
     assert.equal(text(query(userRow(), '.lc-br-tdelta')), '+20')
-    // A first-turn step in 'prev turn' mode has no baseline either: zero again.
     await pickStep(m, '1')
     assert.equal(queryAll(m.container, '.lc-br-tdelta').length, 3)
     assert.equal(text(query(userRow(), '.lc-br-delta')), '+1')
     assert.equal(text(query(userRow(), '.lc-br-tdelta')), '+10')
-    // Live: 'prev step' reads the last request; 'prev turn' reads the previous turn's last step (seq 4).
     await pickStep(m, 'live')
     await clickDeltaBase(m, 'prev step')
     assert.equal(text(query(userRow(), '.lc-br-delta')), '+1')
@@ -253,7 +242,6 @@ describe('ContextBrowser live surface', () => {
     const meta = text(query(m.container, '.lc-br-meta'))
     assert.ok(meta.includes('Turn 1 · Step 0'))
     assert.ok(meta.includes('Actual 700'))
-    // Unknown preview seq: no request matches → live surface, estimate paired with the freshest actual.
     await m.update(h(Browser, props({ data, previewSeq: 999 })))
     const liveMeta = text(query(m.container, '.lc-br-meta'))
     assert.ok(liveMeta.includes('Live · Next Request'))
@@ -281,7 +269,6 @@ describe('ContextBrowser live surface', () => {
         surfaceNode({ seq: 45, cat: 'tool', tokens: 1, tool: 'bash' }),
       ],
     })
-    // The header epoch at seq 22 enters the context with the seq-30 request, like the inject node.
     const headers: ContextHeaders = { headers: [{ seq: 22, time: 100, systemTokens: 10, tools: [{ name: 't1', tokens: 5 }] }] }
     const epoch = withEpochContent(headers, { 22: { system: 'SYS', tools: [{ name: 't1', schema: {} }] } })
     const m = await mount(h(Browser, props({ data, headers: epoch.headers, fetchHeader: epoch.fetchHeader })))
@@ -296,8 +283,6 @@ describe('ContextBrowser live surface', () => {
     assert.match(injectStamp, /^T1 S2 · \d{2}:\d{2}:\d{2}$/, 'the stamp merges with the clock into one run')
     assert.deepEqual(await stampOfCat('assistant'), ['T2 S1'])
     assert.deepEqual(await stampOfCat('skill'), ['T2 S1'])
-    // The tool result landed after the last logged request, so it wears the PENDING estimate: the newest
-    // tail item is a tool result, the turn continues, next step predicted.
     await click(catRow(m, 'tool'))
     await flush()
     const toolBody = query(queryAll(m.container, '.lc-br-cat')[ROW.tool], '.lc-br-body')

@@ -6,7 +6,7 @@ The rules dsh-context must hold on every supported `@deepseek-ai/dsh` release, a
 
 **Law.** Record only what no other artifact carries; delete what code, tests, or git history already say. Verify against the dsh sources before acting — source wins over this page. Less is ALWAYS better.
 
-Last verified: **2026-10-28** (dsh-context `0.78.0`, dsh `0.2.0-rc.2` / `0.2.1-rc.2` tag trees).
+Last verified: **2026-10-29** (dsh-context `0.78.1`, dsh `0.2.0-rc.2` / `0.2.1-rc.2` tag trees).
 
 ## 1 · Supported set
 
@@ -66,6 +66,8 @@ Last verified: **2026-10-28** (dsh-context `0.78.0`, dsh `0.2.0-rc.2` / `0.2.1-r
 - Per-message output allocations retain reported reasoning counts and distribute remaining output by text/call estimates; without a reported reasoning count all three content prices determine the split. State version 35 refolds older checkpoints; additive `billedGenerated` wire fields let older hosts keep their prior approximate output split.
 - **Limitation — date-ledger content splits:** daily activity rows carry usage without reasoning, answer or call-content tallies. Ledger-scoped Overview breakdowns label those unavailable lifetime subsets as Combined model content; the lifetime Token Stats card exposes all three estimates.
 - **Limitation — declared divergence:** the timing card's wait/generation boundary opens at the first OBSERVABLE instant (the first token, or an earlier `block-start` marker the token packing could not stamp), not at the meter's first-token anchor — so marker-tiled decode buckets and the split never double-count one window.
+- **Limitation — timing-card tool slice:** the card attributes the per-step busy UNION (`toolBusyMs`, clipped into each step's window) so its rows partition the active wall and a parallel batch prices once; a run outside every step window therefore prices no busy time. The harness's own `sessionStats.toolMs` stays the per-call sum and remains the tooltip's figure when the two differ. (dsh: `packages/session/session-stats/src/projection.ts` `toolMs`; `src/host/fold.ts`, `src/shared/types.ts`)
+- **Limitation — idle carve:** the card's active figure is step wall minus idle windows — eventless gaps ≥ 2 min in the step's un-painted residue plus user-wait windows (approvals, `ask_user_question`) of the same length, taken only after the step's model response because a sent request stays active; a quiet running tool stays busy by the same rule, and a step past the heartbeat-stamp cap skips the carve conservatively. Idle paints no span: the strip packs active time only. (`src/host/fold.ts`, `src/host/foldMetering.ts`, `src/client/services.ts` `activeMsOf`)
 - **Limitation — daily-ledger attribution:** `contextTimeline.cost` prices at the settlement instant while the daily ledger prices at the step-initiation instant, so a tariff-boundary step can split its peak/off buckets differently between the lifetime total and the KPI band; the ledger also retains 400 days (`MAX_KEPT_DAYS` in `src/host/activity.ts`).
 - **Limitation — statutory holidays:** no holiday calendar is maintained (by decision), so a holiday-weekday request inside the peak windows prices at peak where the platform bills off-peak; the tooltip states the weekday/weekend rule. (`src/host/foldMetering.ts` `isBeijingPeak`)
 

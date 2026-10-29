@@ -1,17 +1,11 @@
-/** The ONE read of "what the agent ran": the host fold books one record per shell/code call. Argument and result-marker
- * parsing live here so the fold and the tests share them; every reader is TOTAL (a hostile payload degrades, never throws). */
-
 import type { CommandRecord } from './types'
 import { parseCallArgs } from './fileOps'
 
-/** The tools whose calls are command executions. `bash` also covers the persistent-shell variant (same tool name; its
- * result carries the `[Command finished with exit code N]` marker family instead). */
 export function commandTool(tool: string | undefined): 'bash' | 'pwsh' | 'run_code' | null {
   if (tool === 'bash' || tool === 'pwsh' || tool === 'run_code') return tool
   return null
 }
 
-/** The call-argument facts a record books. Every field is optional in the wild except the command text itself. */
 export interface CommandArgs {
   cmd: string
   description?: string
@@ -25,15 +19,12 @@ function stringOf(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
-/** Normalize the durable call arguments (a JSON string in `tool/call`, an already-normalized object in a PTC dispatch). */
 export function commandArgsRecordOf(value: unknown): Record<string, unknown> | null {
   if (typeof value === 'string') return parseCallArgs(value)
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
   return null
 }
 
-/** Parse the arguments of a command-bearing call. The command text caps at `maxChars`; an unreadable or command-less
- * payload books nothing. */
 export function commandArgsOf(tool: string, raw: unknown, maxChars: number): (CommandArgs & { truncated?: true }) | null {
   const args = commandArgsRecordOf(raw)
   const cmd = tool === 'run_code' ? stringOf(args?.code) : stringOf(args?.command)
@@ -54,11 +45,7 @@ export function commandArgsOf(tool: string, raw: unknown, maxChars: number): (Co
   return out
 }
 
-/** The facts the fold parses off a shell result's rendered text. The shell tools append their status markers at the
- * very end (render.ts keeps the exit marker last), so the exit/signal reads anchor at the tail like dsh's own
- * `parseExitStatus`; the persistent-shell family prints `[Command finished with exit code N]` (also on a clean exit). */
 export interface CommandMarkers {
-  /** An explicit exit code, from either marker family. */
   exit?: number
   signal?: string
   timedOut?: true
@@ -66,12 +53,9 @@ export interface CommandMarkers {
   denied?: true
   truncated?: true
   stderr?: true
-  /** The result is a background hand-off ack, not an outcome (`started background job …` / `[still running …]`). */
   backgroundAck?: true
 }
 
-// The promoted marker is followed by dsh's fixed hand-off guidance sentence (both shell tools share it), so it
-// matches the marker only with that sentence attached — a spoofed lookalike line mid-output never qualifies.
 const PROMOTED_ACK = new RegExp(
   '(?:^|\\n)\\[still running after \\d+ms; moved to background job [^\\]\\n]+\\]'
   + '(?:\\nThe command keeps running in the background\\.[^\\n]*)?\\s*$',
@@ -92,7 +76,6 @@ export function markersOfText(text: string): CommandMarkers {
       ?? /(?:^|\n)\[Command finished with exit code (\d+)\]\s*$/.exec(text)
       ?? /(?:^|\n)\[shell exited: code (\d+)\](?=\n|$)/.exec(text)
     if (exit?.[1] !== undefined) out.exit = Number(exit[1])
-    // The persistent shell died without a code: the run was interrupted.
     else if (/(?:^|\n)\[shell exited\](?=\n|$)/.test(text)) out.stopped = true
   }
   if (/(?:^|\n)\[timed out after \d+ms\](?=\n|$)/.test(text)) out.timedOut = true
@@ -104,39 +87,30 @@ export function markersOfText(text: string): CommandMarkers {
   return out
 }
 
-/** The exit code out of a settled job's detail line (`exit code: 3`, optionally followed by sandbox notes). */
 export function exitOfJobDetail(detail: unknown): number | undefined {
   if (typeof detail !== 'string') return undefined
   const match = /(?:^|;\s*)exit code: (\d+)\b/.exec(detail)
   return match?.[1] === undefined ? undefined : Number(match[1])
 }
 
-/** The signal out of a killed job's detail line (`signal: SIGTERM`, or `killed before exit` → none). */
 export function signalOfJobDetail(detail: unknown): string | undefined {
   if (typeof detail !== 'string') return undefined
   const match = /(?:^|;\s*)signal: ([^;]+)/.exec(detail)
   return match?.[1]?.trim() || undefined
 }
 
-/** Terminal status off the parsed markers: a signal/stop kills, a denial or nonzero exit or an infrastructure error
- * fails, anything else completes. `exit`/`exitInferred` land on the record — the inferred 0 is the shell tools' own
- * convention (no marker on a clean exit), never a fabricated value. */
 export function outcomeOfMarkers(markers: CommandMarkers, isError: boolean): Pick<CommandRecord, 'status' | 'exit' | 'exitInferred'> {
   if (markers.signal !== undefined || markers.stopped === true) return { status: 'killed' }
   if (markers.exit !== undefined) return markers.exit === 0 ? { status: 'completed', exit: 0 } : { status: 'failed', exit: markers.exit }
-  // A bare timeout with no exit resolution (the persistent shell's `[Command timed out or OOM]`) is an interruption, not a success.
   if (markers.denied === true || markers.timedOut === true || isError) return { status: 'failed' }
   return { status: 'completed', exit: 0, exitInferred: true }
 }
 
-/** The first line for the collapsed row; multi-line commands show it with a line-count badge. */
 export function firstLineOf(cmd: string): string {
   const nl = cmd.indexOf('\n')
   return (nl < 0 ? cmd : cmd.slice(0, nl)).trim()
 }
 
-/** A leading `cd <workspace> && ` prefix is navigation noise when it targets the session's own workspace; the collapsed
- * row hides exactly that one prefix (anything else stays — it carries real information). */
 export function hideableCdPrefix(cmd: string, workspace: string | undefined): number {
   if (workspace === undefined || workspace === '') return 0
   const root = workspace.replace(/\/+$/, '')
@@ -147,13 +121,10 @@ export function hideableCdPrefix(cmd: string, workspace: string | undefined): nu
   return target === root ? match[0].length : 0
 }
 
-/** The dialect whose quoting and assignment rules {@link headProgramOf} reads. `bash` also covers zsh and Git Bash. */
 export type CommandDialect = 'bash' | 'pwsh'
 
-/** Launchers that wrap a real command; their own arguments never name the program. */
 const BASH_WRAPPERS = new Set(['env', 'sudo', 'doas', 'command', 'exec', 'time', 'nohup', 'nice', 'stdbuf', 'timeout', 'caffeinate', 'noglob', 'nocorrect'])
 
-/** Per-wrapper flags whose next word is the flag's value, not the command. */
 const WRAPPER_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
   env: new Set(['-u', '--unset', '-C', '--chdir', '-S', '--split-string']),
   sudo: new Set(['-u', '--user', '-g', '--group', '-p', '--prompt', '-C', '--close-from', '-D', '--chdir', '-h', '--host', '-r', '--role', '-t', '--type', '-U', '--other-user', '-R', '--chroot']),
@@ -166,7 +137,6 @@ const WRAPPER_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
   exec: new Set(['-a']),
 }
 
-/** The single-letter value flags of a short-flag cluster (`sudo -iu postgres`). */
 const WRAPPER_VALUE_LETTERS = new Map<string, ReadonlySet<string>>([
   ['sudo', new Set(['u', 'g', 'p', 'C', 'D', 'h', 'r', 't', 'U', 'R'])],
   ['doas', new Set(['u', 'C'])],
@@ -178,7 +148,6 @@ const WRAPPER_VALUE_LETTERS = new Map<string, ReadonlySet<string>>([
   ['exec', new Set(['a'])],
 ])
 
-/** Shell constructs that carry no program identity. */
 const BASH_HEADS = new Set(['[', '[[', 'for', 'if', 'while', 'until', 'case', 'do', 'then', 'else', 'elif', 'function', 'select', 'coproc', 'done', 'fi', 'esac'])
 const BASH_DECLARATIONS = new Set(['export', 'local', 'declare', 'readonly', 'typeset'])
 const PWSH_HEADS = new Set(['if', 'elseif', 'else', 'for', 'foreach', 'while', 'do', 'switch', 'function', 'filter', 'param', 'begin', 'process', 'end', 'try', 'catch', 'finally', 'trap', 'return', 'throw', 'break', 'continue', 'using', 'class', 'enum'])
@@ -188,7 +157,6 @@ interface Word {
   end: number
 }
 
-/** Read one shell word: quotes are stripped, a backslash escapes a space, and whitespace/control operators end it. */
 function readWord(text: string): Word | null {
   let i = 0
   let word = ''
@@ -213,7 +181,6 @@ function readWord(text: string): Word | null {
   return word === '' ? null : { word, end: i }
 }
 
-/** The index just past the `)` matching the `(` at `open`; quote content is skipped. */
 function scanParens(text: string, open: number): number {
   let depth = 0
   for (let i = open; i < text.length; i++) {
@@ -230,7 +197,6 @@ function scanParens(text: string, open: number): number {
   return text.length
 }
 
-/** Consume a bash `NAME=value`; the value stays a literal only when no expansion can change it. */
 function readAssignment(text: string): { name: string; value: string | null; end: number } | null {
   const head = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/.exec(text)
   if (head === null) return null
@@ -279,7 +245,6 @@ function readAssignment(text: string): { name: string; value: string | null; end
   return { name: head[1], value: compound ? null : value, end: i }
 }
 
-/** Consume a declaration keyword and its options/assignments; a following `;`/`&&` keeps the rest for the next command. */
 function readDeclaration(text: string, vars: Map<string, string | null>): string | null {
   const first = readWord(text)
   if (first === null || !BASH_DECLARATIONS.has(first.word)) return null
@@ -303,8 +268,6 @@ function readDeclaration(text: string, vars: Map<string, string | null>): string
   return text.slice(i)
 }
 
-/** Strip leading file-descriptor redirections (operator plus its target word); a statement with only redirections
- *  returns ''. */
 function trimRedirections(text: string): string {
   let rest = text
   for (let guard = 0; guard < 8; guard++) {
@@ -318,8 +281,6 @@ function trimRedirections(text: string): string {
   return rest
 }
 
-/** Consume `cd …` navigation when another statement follows (`&&`, `;` or a newline, redirects included); a lone
- *  `cd` stays the head command. */
 function readCdPrefix(text: string): string | null {
   const head = /^cd[ \t]+/.exec(text)
   if (head === null) return null
@@ -339,7 +300,6 @@ function readCdPrefix(text: string): string | null {
   return next.trim() === '' ? null : next
 }
 
-/** Consume PowerShell navigation (`cd`/`Set-Location`/`sl`) when another statement follows; a lone one stays the head. */
 function readPwshCdPrefix(text: string): string | null {
   const head = /^(?:cd|Set-Location|sl)\b[ \t]*/i.exec(text)
   if (head === null) return null
@@ -359,7 +319,6 @@ function readPwshCdPrefix(text: string): string | null {
   return next.trim() === '' ? null : next
 }
 
-/** Consume a launcher and its flags/arguments when a real command still follows; null when the launcher itself is the command. */
 function readWrapper(text: string): string | null {
   const first = readWord(text)
   if (first === null) return null
@@ -413,7 +372,6 @@ function readWrapper(text: string): string | null {
   return next === '' || /^[;|&#]/.test(next) ? null : next
 }
 
-/** Resolve a bash head word against assignments seen earlier in the same command; only literal values resolve. */
 function resolveBashWord(word: string, vars: ReadonlyMap<string, string | null>): string | null {
   if (word === '' || word.startsWith('$(') || word.startsWith('`') || word.includes('`')) return null
   const simple = /^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(word) ?? /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(word)
@@ -433,7 +391,6 @@ function resolveBashWord(word: string, vars: ReadonlyMap<string, string | null>)
   return word.includes('$') ? null : word
 }
 
-/** Advance to the end of a PowerShell statement without interpreting it; brackets and quotes hold the depth. */
 function skipPwshStatement(text: string, from: number): number {
   let depth = 0
   for (let i = from; i < text.length; i++) {
@@ -457,7 +414,6 @@ function skipPwshStatement(text: string, from: number): number {
   return text.length
 }
 
-/** `[type]$name`, a member/index target, an optional compound assignment, then the value. */
 const PWSH_ASSIGNMENT = new RegExp(
   '^\\s*(?:\\[[^\\]]+\\]\\s*)?\\$('
   + '[A-Za-z_][A-Za-z0-9_]*'
@@ -465,8 +421,6 @@ const PWSH_ASSIGNMENT = new RegExp(
   + ')\\s*(?:\\+|-|\\*|\\/|%|\\?\\?)?=\\s*',
 )
 
-/** Consume a PowerShell assignment (`[type]$name`, `$name.member`, `$name[i]`, `+=`, …); only a quoted literal
- *  value is resolvable. */
 function readPwshAssignment(text: string): { name: string; value: string | null; end: number } | null {
   const head = PWSH_ASSIGNMENT.exec(text)
   if (head === null) return null
@@ -496,7 +450,6 @@ function readPwshAssignment(text: string): { name: string; value: string | null;
   return { name: head[1], value: compound ? null : value, end }
 }
 
-/** Resolve a PowerShell head word; a bare/parameter variable resolves only from a literal value. */
 function resolvePwshWord(word: string, vars: ReadonlyMap<string, string | null>): string | null {
   if (word === '' || word.startsWith('$(')) return null
   const scoped = /^\$([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_-]*)*)$/.exec(word) ?? /^\$\{([^}]+)\}$/.exec(word)
@@ -515,8 +468,6 @@ function resolvePwshWord(word: string, vars: ReadonlyMap<string, string | null>)
   return word.includes('$') || word.includes('`') ? null : word
 }
 
-/** The display identity of a program word: the basename on either separator, without a Windows executable suffix
- *  (`.exe`/`.cmd`/`.bat`); case is kept. */
 function normalizeProgram(word: string): string {
   let name = word.trim()
   const cut = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'))
@@ -554,7 +505,6 @@ function skipHeredocs(text: string, from: number, pending: readonly Heredoc[]): 
   return at
 }
 
-/** Split only shell command positions; quoted text, nested groups and heredoc bodies stay opaque. */
 function commandSegments(cmd: string, dialect: CommandDialect): CommandSegment[] {
   const out: CommandSegment[] = []
   const heredocs: Heredoc[] = []
@@ -762,12 +712,6 @@ function pwshProgram(cmd: string, vars = new Map<string, string | null>()): stri
   return normalizeProgram(word)
 }
 
-/** The first real program of a command, for a record's primary identity. Bash/zsh/Git Bash read POSIX quoting,
- * leading assignments (literal values resolve within the same command), declarations, launcher wrappers and `cd …`
- * navigation; PowerShell reads `&`/`.` call operators, `$var` assignments and quoted paths. Path heads normalize to
- * the basename (both separators, Windows extensions dropped); a head that cannot name a program (assignment-only,
- * control structure, unresolved variable/command substitution) falls back to `shell`/`pwsh` rather than inventing one
- * from its arguments. Display-only — never throws. */
 export function headProgramOf(cmd: string, dialect: CommandDialect = 'bash'): string {
   return programOfText(cmd, dialect)
 }
@@ -776,9 +720,6 @@ function programOfText(text: string, dialect: CommandDialect, vars = new Map<str
   return dialect === 'pwsh' ? pwshProgram(text, vars) : bashProgram(text, vars)
 }
 
-/** Every recognizable program invocation in command text, primary head first. Nested groups stay one shell construct;
- * a loop or conditional body counts once, not per iteration; the fallback is counted at most once, from the primary
- * head, rather than once per unresolved fragment. */
 export function programsOfCommand(cmd: string, dialect: CommandDialect = 'bash'): string[] {
   if (cmd.trim() === '') return []
   const fallback = dialect === 'pwsh' ? 'pwsh' : 'shell'
@@ -802,11 +743,9 @@ export function programsOfCommand(cmd: string, dialect: CommandDialect = 'bash')
 export interface CommandShape {
   lines: number
   heredoc: boolean
-  /** An inline interpreter script (`node -e`, `python3 -c`, …). */
   inline: boolean
 }
 
-/** Cheap display badges off the raw text; deliberately NOT a shell parser — the row is a preview, not an audit. */
 export function shapeOfCmd(cmd: string): CommandShape {
   let lines = 1
   for (let i = 0; i < cmd.length; i++) if (cmd[i] === '\n') lines++

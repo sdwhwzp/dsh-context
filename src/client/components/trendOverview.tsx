@@ -1,6 +1,3 @@
-/** The trend card's Overview face: the whole retained log as one continuous stacked ribbon, not compressed columns
- * (sub-pixel slivers would layerize at ~1500 steps); mutually exclusive with DNA mode and Adaptive. */
-
 import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { Category, ContextEventRecord, RequestRecord } from '../../shared/types'
 import { CATS, CAT_COLOR } from '../categories'
@@ -25,16 +22,12 @@ export interface TrendOverviewProps {
   onPickCat?: (cat: Category | 'system' | 'tools', seq: number) => void
 }
 
-/** X flags sit on the three quartiles plus the full span: the log's start collapses into the pane edge, so the 0 pole is unshowable. */
 const FLAG_FRACS: readonly number[] = [0.25, 0.5, 0.75, 1]
 
 const CHART_H = 112
 
-/** The ribbon's plot starts this far below the surface's box (`.lc-chart` top padding in trendChart.css). */
 const PLOT_TOP = 18
 
-/** The drawn y of a cumulate, rounded to the svg's hundredth of a px. Shared by the polygon path and the band hit-test,
- * so a change to the axis can never desync paint from hit-testing. */
 const yOf = (cum: number, scale: number, baseline: number, dir: 1 | -1): number =>
   Math.round((baseline - dir * cum * scale) * 100) / 100
 
@@ -42,7 +35,6 @@ interface RibbonBand {
   cat: Category | 'system' | 'tools'
   upper: number[]
   lower: number[]
-  /** +1 for bands growing up from the baseline, −1 for the down arm. */
   dir: 1 | -1
   points: string
 }
@@ -61,8 +53,6 @@ interface RibbonGeometry {
   durationDots: [number, number][]
 }
 
-/** The ribbon's full drawing geometry in one pure pass: maxima, band polygons, duration runs/dots. Module-scope so the
- * component memoizes it on [requests, mode, duration]; a hover-driven render never rebuilds them. */
 function ribbonGeometry(requests: RequestRecord[], delta: boolean, durationOn: boolean): RibbonGeometry {
   const n = requests.length
   const geo: RibbonGeometry = {
@@ -84,13 +74,9 @@ function ribbonGeometry(requests: RequestRecord[], delta: boolean, durationOn: b
   const deltaScale = CHART_H / span
   geo.span = span
   geo.upPx = Math.round(geo.maxUp * deltaScale)
-  // The svg maps x in viewBox units (one per record, stretched edge to edge) and y in px: the 112 viewBox height equals
-  // the rendered height, so vertical figures stay px-exact. A single record closes its bands across the full unit width.
   const u = n > 1 ? n - 1 : 1
   const xs: number[] = n === 1 ? [0, u] : Array.from({ length: n }, (_, i) => i)
   const cumAt = (v: number[], x: number): number => v[n === 1 ? 0 : x]
-  /** A band's closed polygon (upper cumulate forward, lower reversed); a zero-width band is dropped — the neighbor's
-   * fill already paints the shared boundary. `upper` is the visually-upper edge at `dir`. */
   const ribbon = (cat: RibbonBand['cat'], upper: number[], lower: number[], dir: 1 | -1): void => {
     let width = 0
     for (let i = 0; i < n; i++) {
@@ -101,7 +87,6 @@ function ribbonGeometry(requests: RequestRecord[], delta: boolean, durationOn: b
     const pts: string[] = []
     for (const x of xs) pts.push(`${x},${yOf(cumAt(upper, x), geo.scale, geo.baseline, dir)}`)
     for (let k = xs.length - 1; k >= 0; k--) pts.push(`${xs[k]},${yOf(cumAt(lower, xs[k]), geo.scale, geo.baseline, dir)}`)
-    // The stack loop mutates the live cumulate arrays for the next category: copy them for hit-testing.
     geo.bands.push({ cat, upper: [...upper], lower: [...lower], dir, points: pts.join(' ') })
   }
   if (delta) {
@@ -131,8 +116,6 @@ function ribbonGeometry(requests: RequestRecord[], delta: boolean, durationOn: b
     }
   }
   if (durationOn) {
-    // The right-hand axis plots raw active time, whole-log by construction. A bar without `activeMs` breaks the run;
-    // an isolated single point needs a dot — a one-point polyline renders invisible.
     let maxActiveMs = 0
     for (const req of requests) {
       const m = req.activeMs ?? 0
@@ -159,8 +142,6 @@ function ribbonGeometry(requests: RequestRecord[], delta: boolean, durationOn: b
   return geo
 }
 
-/** The painted band under `y` px at fractional position `f`: both edges interpolate as the polygon does, so the lit band
- * is the one under the pointer — not the nearest record's. */
 function bandAt(geo: RibbonGeometry, f: number, n: number, y: number): RibbonBand['cat'] | null {
   const i0 = Math.min(n - 1, Math.floor(f))
   const i1 = Math.min(n - 1, i0 + 1)
@@ -174,7 +155,6 @@ function bandAt(geo: RibbonGeometry, f: number, n: number, y: number): RibbonBan
   return null
 }
 
-/** The turn strip's labeled groups: the group holding each width quartile of the record span, deduped. */
 function wideQuartiles(groups: { count: number }[]): number[] {
   const total = groups.reduce((s, g) => s + g.count, 0)
   const picks: number[] = []
@@ -196,7 +176,6 @@ function wideQuartiles(groups: { count: number }[]): number[] {
 export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => ReactElement | null {
   const { eventLabel, eventAt } = kit
 
-  // Mirrored by .lc-axis-q1/.lc-axis-q3 in trendChart.css (the bars' own mapping; see trendChart.tsx).
   const Q3_TOP = 41
   const Q1_TOP = 97
   const fmtSigned = (v: number): string => (v > 0 ? '+' : '') + kit.fmt(v)
@@ -214,8 +193,6 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
     const wrapRef = useRef<HTMLDivElement | null>(null)
     const lastIdxRef = useRef<number | null>(null)
     const lastCatRef = useRef<RibbonBand['cat'] | null>(null)
-    // Pointer hover is local (the bars' idiom): the tip and cursor track it while the parent's preview follows a
-    // throttle/transition; the band under the pointer also rides local state, since a relay would re-render per band.
     const [localHover, setLocalHover] = useState<number | null>(null)
     const [localCat, setLocalCat] = useState<RibbonBand['cat'] | null>(null)
     const hoverSeq = localHover ?? props.hoveredSeq
@@ -224,8 +201,6 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
       props.onHover(seq)
     }, [props.onHover])
     if (n === 0) return null
-    // Blocks grow ∝ the RECORDS they span — the ribbon's own x unit: a step counts one, and turn granularity's one-record-per-turn
-    // aggregates stay equal width.
     const u = n > 1 ? n - 1 : 1
     const groups: { turn: number; count: number; first: number }[] = []
     for (let i = 0; i < n; i++) {
@@ -237,15 +212,12 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
       }
       grp.count++
     }
-    // Quartile + full-span flags, deduped (see FLAG_FRACS): labeled with a step's 1-based position or the turn it lands on.
     const flagRecords = [...new Set(FLAG_FRACS.map(q => Math.round(q * (n - 1))))].filter(idx => idx > 0)
     const flagLabel = (idx: number): number => (props.granularity === 'step' ? idx + 1 : requests[idx].turn ?? 0)
     const flagGroups = wideQuartiles(groups)
-    // A delta quarter mark yields when its label box would overlap the zero label (see trendChart.tsx).
     const q3Clear = Math.abs(Q3_TOP - 13 - geo.upPx) >= 11
     const q1Clear = Math.abs(Q1_TOP - 13 - geo.upPx) >= 11
 
-    // The active turn's plot range: half a step past each end record, clamped to the ribbon's edges.
     let wash: { left: string; right: string } | null = null
     if (props.activeTurn !== null) {
       const wi = groups.findIndex(g => g.turn === props.activeTurn)
@@ -257,8 +229,6 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
       }
     }
 
-    /** The pointer's fractional record position: one unit per record, clamped to the ribbon's edges. A zero-width rect (jsdom) reads as
-     * the first record. */
     const xAt = (rect: { width: number; left: number }, clientX: number): number => {
       if (rect.width <= 0) return 0
       const fx = (clientX - rect.left) / rect.width
@@ -299,16 +269,15 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
     const stepsOf = useMemo(() => turnStepsOf(props.requests), [props.requests])
     useLayoutEffect(() => {
       const el = surfaceRef.current
-      /* v8 ignore next 1 -- the surface renders unconditionally while the ribbon
-         renders, so React attaches the ref before layout effects run. */
+      /* v8 ignore next 1 */
       if (el === null) return
       const cw = el.clientWidth
-      /* v8 ignore next 1 -- the wrap renders unconditionally while the ribbon does. */
+      /* v8 ignore next 1 */
       const tip = (wrapRef.current ?? document.body).querySelector<HTMLElement>('.lc-chart-tip')
       if (tip === null) return
       const lw = tip.offsetWidth
       const half = Math.min(lw / 2, cw / 2)
-      /* v8 ignore next 1 -- the tip renders only while a record is hovered, so the unwarmed arm cannot fire. */
+      /* v8 ignore next 1 */
       const cx = hoveredIdx >= 0 ? Math.min(Math.max(hoveredIdx / u * cw, half), cw - half) : 0
       const next = `translate(${Math.round(cx - lw / 2)}px, 0)`
       if (tip.style.transform !== next) tip.style.transform = next
@@ -348,15 +317,12 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
             <div
               className="lc-chart"
               ref={surfaceRef}
-              // The CSS lights the key's bands in place, so neither an external legend hover nor the local band trace re-renders polygons.
               data-catdim={localCat ?? props.hoverCat ?? undefined}
               onMouseMove={onMove}
               onMouseLeave={onLeave}
               onClick={onClick}
             >
               <div className="lc-grid lc-grid-top" />
-              {/* Dashed guides aligning the ribbon with the axis quarter marks; a delta mark that yielded to the zero label drops its
-                  guide too. */}
               {(!delta || q3Clear) ? <div className="lc-grid lc-grid-q3" /> : null}
               {(!delta || q1Clear) ? <div className="lc-grid lc-grid-q1" /> : null}
               {!delta ? <div className="lc-grid lc-grid-mid" /> : null}
@@ -373,8 +339,6 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
                       key={i}
                       data-cat={b.cat}
                       className="lc-cat-seg"
-                      // Presentation attributes don't resolve var(); the fill rides inline style. The self-colored
-                      // stroke seals the antialiasing seam against each neighbor.
                       style={{ fill: CAT_COLOR[b.cat], stroke: CAT_COLOR[b.cat] }}
                       points={b.points}
                     />
@@ -393,7 +357,6 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
                   ))}
                 </svg>
               ) : null}
-              {/* A lit band keeps its original color along the whole ribbon, so its dim-and-light replaces the wash. */}
               {wash !== null && localCat === null ? (
                 <>
                   <div className="lc-fit-wash" style={{ left: 0, width: wash.left, right: 'auto' }} />
@@ -419,8 +382,6 @@ export function makeTrendOverview(kit: ViewKit): (props: TrendOverviewProps) => 
                   <span
                     key={`flag-${idx}`}
                     className="lc-trend-flag"
-                    // The full-span pole hugs inside the pane's right edge: at left 100% its 1px falls past the clip,
-                    // so it insets by its own width while the label still reads leftward.
                     style={{ left: idx === n - 1 ? 'calc(100% - 1px)' : `${idx / u * 100}%` }}
                     aria-hidden="true"
                   >

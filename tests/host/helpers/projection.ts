@@ -1,22 +1,15 @@
-// Fold drivers for the host specs: run event envelopes through the REAL projection units and pin the plain-JSON
-// rule on every intermediate state (see assertNoAbsentMembers).
-
 import assert from 'node:assert/strict'
 import type { Config } from '../../../src/host/config'
 import type { TimelineEvent, TimelineState } from '../../../src/host/fold'
 import type { ContextTimeline } from '../../../src/shared/types'
 import { createContextTimelineDefinition } from '../../../src/host/timeline'
 
-/** The fold's contract takes the core `SessionEvent` union, but the log also carries declaration-merged
- * `compaction/*` events, so it widens to `TimelineEvent`; these faces mirror the supported registry contract via the ONE cast. */
 export interface TimelineDefLike {
   key: string
-  /** The persisted-state gate the projection cache's cold path parses rows with. */
   stateSchema: { parse(value: unknown): unknown }
   init(): TimelineState
   apply(state: TimelineState, event: TimelineEvent): TimelineState
   wire: {
-    /** The wire gate every delivery channel parses the served value with. */
     viewSchema: { parse(value: unknown): unknown; safeParse(value: unknown): { success: boolean } }
     view(state: TimelineState): ContextTimeline
   }
@@ -26,8 +19,6 @@ export function timelineDef(config?: Config, slim = false): TimelineDefLike {
   return createContextTimelineDefinition(config ?? {}, () => slim) as unknown as TimelineDefLike
 }
 
-/** Lossless-JSON probe and detach, inlined with dsh `snapshotJsonValue` semantics (lives in
- * `@deepseek-ai/dsh-util-values`; fixtures must track no single dsh face). Returns undefined when not losslessly serializable. */
 export function snapshotJson(value: unknown, ancestors: Set<object> = new Set()): unknown {
   switch (typeof value) {
     case 'string': case 'boolean': return value
@@ -63,15 +54,12 @@ export function snapshotJson(value: unknown, ancestors: Set<object> = new Set())
   }
 }
 
-/** The projection-cache precondition: every folded state must be losslessly JSON-serializable. Returns the detached copy. */
 export function assertPlainJson<T>(state: T): T {
   const copy = snapshotJson(state)
   assert.ok(copy !== undefined, 'fold state must be losslessly JSON-serializable')
   return copy as T
 }
 
-/** The one plain-JSON rule a DURABLE log can break: no own `undefined`-valued property may enter a folded state —
- * one fails EVERY projection-cache write for that session. Checked on every state the fold PRODUCES (a mid-log violation sticks). */
 function assertNoAbsentMembers(value: unknown, path = '$', seen = new Set<object>()): void {
   if (value === null || typeof value !== 'object' || seen.has(value)) return
   seen.add(value)
@@ -84,7 +72,6 @@ function assertNoAbsentMembers(value: unknown, path = '$', seen = new Set<object
 export interface TimelineDrive {
   def: TimelineDefLike
   state: TimelineState
-  /** Every intermediate state, including init (index = events folded). */
   states: TimelineState[]
   view: ContextTimeline
 }

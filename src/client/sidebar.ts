@@ -1,17 +1,11 @@
-/** The right Sidebar's Context tab, reusing the Context view verbatim: `sidebar.right.pane.tab` delivers
- * the same standard kit as `conversation.view`, so panel and tab are one component with one data path. */
-
 import { ContextIcon, makeContextTabTitle } from './icon'
 import type { ClientCtx, ContextViewProps, SidebarTabsFace } from './services'
 import type { Translate } from './i18n'
 
-/** The tab type's identity in the sidebar's tab system (also its body-seat key). */
 export const SIDEBAR_CONTEXT_ID = 'dsh-context'
 
-/** Namespaced rather than the bare `context`: the registry throws on collision and a foreign plugin may own the bare kind. */
 export const SIDEBAR_CONTEXT_KIND = 'dsh-context'
 
-/** The guide capsule's position: after the shipped Files entry (order 10). */
 const GUIDE_ORDER = 20
 
 export function watchSidebarContextTab(
@@ -44,7 +38,6 @@ export function watchSidebarContextTab(
         { name: 'sidebar.right.pane.tab', key: SIDEBAR_CONTEXT_ID, locale: ns },
         (props: { sessionId?: string } & Record<string, unknown>) => view({ ...props, host: 'sidebar' }),
       )))
-      // Under the type id, so the kit dispatches it for this type's tabs only.
       own(injected.slots.inject('sidebar.right.pane.tab.title', () => injected.slots.register(
         { name: 'sidebar.right.pane.tab.title', key: SIDEBAR_CONTEXT_ID },
         makeContextTabTitle(t),
@@ -57,7 +50,6 @@ export function watchSidebarContextTab(
       for (const dispose of disposers) dispose()
     }
   })
-  // Re-proved at runtime: a harness face may return no handle at all.
   const handle = fiber as { dispose?: () => unknown } | undefined
   return () => { void handle?.dispose?.() }
 }

@@ -12,14 +12,12 @@ export interface SettingsScopeLike {
   set(field: string, value: unknown): Promise<void>
 }
 
-/** The `ctx.configForms` service face, as consumed; the bound form satisfies {@link SettingsScopeLike}. */
 export interface ConfigFormsFace {
   get(namespace: string): SettingsScopeLike
   whileServed(namespaces: readonly string[], register: () => () => void): () => void
 }
 
 export interface SettingsState {
-  /** Scope sync: loading until the first Host section, unavailable when unserved. */
   status: 'loading' | 'ready' | 'unavailable'
   placement: DefaultPlacement
   granularity: DefaultGranularity
@@ -38,7 +36,6 @@ export interface SettingsState {
 }
 
 export interface ContextSettings {
-  /** Observable snapshot store, bound onto card props as `useContextSettings`. */
   store: { subscribe(listener: () => void): () => void; getSnapshot(): SettingsState }
   defaultPlacement(): DefaultPlacement
   defaultGranularity(): DefaultGranularity
@@ -52,7 +49,6 @@ export interface ContextSettings {
   defaultOverviewRange(): DefaultOverviewRange
   fleetTab(): FleetTab
   attach(scope: SettingsScopeLike): () => void
-  /** Persist one preference choice (local echo, then the fenced scope write). */
   set(field: SettingsField, value: string): void
 }
 
@@ -96,7 +92,6 @@ export function createContextSettings(): ContextSettings {
   let state: SettingsState = { status: 'loading', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'lines', insightsEntry: 'show', durationCurve: 'show', overviewAutoSteps: '100', overviewRange: '30d', fleetTab: 'show', promptPrefix: '', promptSuffix: '', writable: false }
   let scope: SettingsScopeLike | undefined
   const listeners = new Set<() => void>()
-  /** Every field is a scalar, so a shallow compare is the identity check; a new preference joins it automatically. */
   const unchanged = (a: SettingsState, b: SettingsState): boolean =>
     (Object.keys(b) as (keyof SettingsState)[]).every(key => a[key] === b[key])
   const publish = (next: SettingsState): void => {
@@ -106,14 +101,12 @@ export function createContextSettings(): ContextSettings {
   }
   const sync = (bound: SettingsScopeLike): { placement?: DefaultPlacement; insightsEntry?: InsightsEntry; fleetTab?: FleetTab } => {
     const snap = bound.getSnapshot()
-    // Bounded catch: a value throwing on property access keeps the current state instead of breaking the mirror's fan-out.
     let prefs: Prefs = {}
     let raw: Record<string, unknown> | undefined
     try {
       prefs = prefsOf(snap.value)
       raw = snap.value !== null && typeof snap.value === 'object' ? snap.value as Record<string, unknown> : undefined
-    } catch { /* hostile value */ }
-    // Fail open: an unreadable value degrades to the field's default; a section missing the field keeps the current state.
+    } catch {}
     publish({
       status: snap.status === 'ready' || snap.status === 'unavailable' ? snap.status : 'loading',
       placement: prefs.placement ?? (raw?.defaultPlacement === undefined ? state.placement : 'all'),
@@ -158,20 +151,15 @@ export function createContextSettings(): ContextSettings {
       const unsubscribe = bound.subscribe(() => { sync(bound) })
       return () => {
         unsubscribe()
-        // A set() after disposal must not write into a dead form.
         if (scope === bound) scope = undefined
       }
     },
     set(field, value) {
       publish({ ...state, ...prefsOf({ [field]: value }) })
-      // The scope write's promise REJECTS on a transport failure (dsh keeps only its queue tail fulfilled),
-      // so never let it float: roll the optimistic echo back to the scope's truth; a refused write recovers via subscribe.
       const bound = scope
       if (bound === undefined) return
       void bound.set(field, value).catch(() => {
         const truth = sync(bound)
-        // A gate whose write was refused must not stay hidden on an unpersisted echo: it degrades to the
-        // default, while a scope that DOES carry a readable value keeps that truth (the sync above already did).
         const refused: Partial<SettingsState> = {}
         if (field === 'defaultPlacement' && truth.placement === undefined) refused.placement = 'all'
         else if (field === 'insightsEntry' && truth.insightsEntry === undefined) refused.insightsEntry = 'show'

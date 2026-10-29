@@ -1,5 +1,3 @@
-/** Chat → Context jump relay: the clicked reply's request seq is consumed once the target view's projection data is in. */
-
 import { useEffect, useState } from 'react'
 import { asRecord, type ClientCtx } from './services'
 import { SIDEBAR_CONTEXT_KIND } from './sidebar'
@@ -13,7 +11,6 @@ export function requestContextFocus(sessionId: string, seq: number): void {
   for (const listener of focusListeners) listener()
 }
 
-/** Every subscribed view wakes on each record and takes its OWN session's entry; the rest stay pending. */
 export function subscribeContextFocus(listener: () => void): () => void {
   focusListeners.add(listener)
   return () => { focusListeners.delete(listener) }
@@ -26,9 +23,6 @@ export function takeContextFocus(sessionId: string): number | null {
   return seq
 }
 
-/** Fleet member highlight channel: one resting pick per session that every subscribed view adopts (the tab, its own
- *  graph, the sidebar copy), so no consumer can eat another's pick. */
-
 const memberFocus = new Map<string, string>()
 
 const memberListeners = new Set<() => void>()
@@ -38,7 +32,6 @@ export function requestFleetMemberFocus(sessionId: string, memberId: string): vo
   for (const listener of memberListeners) listener()
 }
 
-/** The latest pick for a session; absent = nothing picked yet. */
 export function currentFleetMemberFocus(sessionId: string): string | null {
   return memberFocus.get(sessionId) ?? null
 }
@@ -48,7 +41,6 @@ export function subscribeFleetMemberFocus(listener: () => void): () => void {
   return () => { memberListeners.delete(listener) }
 }
 
-/** The resting member highlight a view renders: adopted on mount and on every later pick. */
 export function useFleetMemberFocus(sessionId: string | undefined): string | null {
   const [id, setId] = useState<string | null>(null)
   useEffect(() => {
@@ -60,8 +52,6 @@ export function useFleetMemberFocus(sessionId: string | undefined): string | nul
   return id
 }
 
-/** `ctx.sidebarRight.openTab` (the column expands in the same step); any absence or hostility reports
- * false so the caller keeps its conversation-tab fallback. */
 export function openContextSidebar(ctx: ClientCtx): boolean {
   try {
     const face = asRecord(ctx.get('sidebarRight'))
@@ -73,8 +63,6 @@ export function openContextSidebar(ctx: ClientCtx): boolean {
   }
 }
 
-/** Click the tab's own `button[role="tab"]` chrome: the harness hands `openView` only to the ACTIVE view entry, so a nested action cannot
- * call it. */
 export function activateViewTab(label: string): boolean {
   const tabs = document.querySelectorAll<HTMLButtonElement>('button[role="tab"]')
   for (const tab of tabs) {

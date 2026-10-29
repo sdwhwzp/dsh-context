@@ -25,7 +25,6 @@ function detailIdOf(key: string): string {
   return 'lc-comms-detail-' + key.replace(/[^a-zA-Z0-9_-]+/g, '-')
 }
 
-/** One timeline event: the parties and direction on the hit line, the text preview beneath, and the open state. */
 export function CommsEvent(props: CommsEventProps): ReactElement {
   const { row, t } = props
   const from = props.agentOf(fromPartyOf(row))
@@ -42,7 +41,6 @@ export function CommsEvent(props: CommsEventProps): ReactElement {
   const kindClass = `lc-comms-kind-${row.kind}` + (variant !== null ? ` lc-comms-tone-${tone}` : '')
   const itemRef = useRef<HTMLLIElement | null>(null)
 
-  // Bring the opened row to the nearest edge; a taller record then scrolls with the timeline.
   useEffect(() => {
     if (!props.open) return
     scrollIntoViewIfPossible(itemRef.current, { block: 'nearest', behavior: 'smooth' })
@@ -112,7 +110,6 @@ export interface CommsEventDetailProps {
   t: ViewKit['t']
 }
 
-/** The opened record: provenance, outcome, full report, structured payload, diagnostics, and participant actions. */
 export function CommsEventDetail(props: CommsEventDetailProps): ReactElement {
   const { row, t } = props
   const from = props.agentOf(fromPartyOf(row))
@@ -121,7 +118,6 @@ export function CommsEventDetail(props: CommsEventDetailProps): ReactElement {
   const resolvedVariant = resolvedSummary !== undefined ? settledVariantOf(resolvedSummary) : null
   const resolvedTone = settledToneOf(resolvedVariant)
   const settledBody = props.full?.report ?? row.report ?? ''
-  // A legacy notice with neither a summary nor a report still carries its content in text; never open an empty card.
   const body = row.kind === 'settled'
     ? settledBody !== '' ? settledBody : resolvedSummary === undefined ? props.full?.text ?? row.text : ''
     : props.full?.text ?? row.text

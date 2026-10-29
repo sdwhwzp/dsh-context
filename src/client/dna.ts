@@ -1,6 +1,3 @@
-/** The browser's DNA mode: one band per assembled-context item in PROMPT order. The header epoch's `seq`
- * is NOT an ordering key: dsh appends `request/header` at the first dispatch, after the messages already there. */
-
 import type { Category, SurfaceNode } from '../shared/types'
 import type { Assembled } from './assemble'
 import { CAT_COLOR } from './categories'
@@ -20,7 +17,6 @@ export function dnaOf(view: Assembled): DnaItem[] {
       items.push({ key: 'tool:' + tool.name, cat: 'tools', tokens: tool.tokens })
     }
   }
-  // Zero-token items keep their band: the bar drops zero widths, the reading order stays truthful.
   for (const n of view.nodes) {
     items.push({
       key: 'n' + String(n.seq),
@@ -33,7 +29,6 @@ export function dnaOf(view: Assembled): DnaItem[] {
   return items
 }
 
-/** One band of a TREND CHART bar's gradient: the decomposition plus color and cumulative `off`. */
 export type TrendBand =
   | { key: string; cat: 'system' | 'tools'; tokens: number; off: number; color: string }
   | { key: string; cat: Category; tokens: number; off: number; color: string; node: SurfaceNode }
@@ -52,8 +47,6 @@ export function trendBandsOf(view: Assembled): TrendBand[] {
   return bands
 }
 
-/** DNA mode's DELTA view: per-item differences of two band lists paired by key. `tokens` is signed (up
- * positive); `off` is the cumulative magnitude from the zero line. */
 export type DeltaBand =
   | { key: string; cat: 'system' | 'tools'; tokens: number; off: number; color: string }
   | { key: string; cat: Category; tokens: number; off: number; color: string; node: SurfaceNode }
@@ -63,8 +56,6 @@ export interface DnaDelta {
   down: DeltaBand[]
 }
 
-/** The churn TOTALS of one step against its predecessor — what an axis scale needs. Same pairing as
- * {@link deltaBandsOf}, without materializing the bands. */
 export function deltaTotalsOf(bands: readonly TrendBand[], prev: readonly TrendBand[] | null): { up: number; down: number } {
   if (prev === null) return { up: 0, down: 0 }
   const before = new Map<string, number>()
@@ -77,7 +68,6 @@ export function deltaTotalsOf(bands: readonly TrendBand[], prev: readonly TrendB
     else if (d < 0) down -= d
     before.delete(b.key)
   }
-  // Keys the step dropped fall to zero.
   for (const tokens of before.values()) {
     if (tokens > 0) down += tokens
     else if (tokens < 0) up -= tokens
@@ -86,7 +76,6 @@ export function deltaTotalsOf(bands: readonly TrendBand[], prev: readonly TrendB
 }
 
 export function deltaBandsOf(bands: TrendBand[], prev: TrendBand[] | null): DnaDelta {
-  // A null predecessor is no baseline: the scale stays change-driven rather than pinned by the opening bulk.
   if (prev === null) return { up: [], down: [] }
   const before = new Map(prev.map(b => [b.key, b.tokens] as const))
   const after = new Map(bands.map(b => [b.key, b.tokens] as const))

@@ -14,7 +14,6 @@ export function surfaceNodeAt(seq: number, over: Partial<SurfaceNode> = {}): Sur
   return { seq, cat: 'user', tokens: 1, ...over }
 }
 
-/** The harness locale chain (active → en → key) over the plugin's REAL dictionaries, so assertions stay shipped-accurate. */
 export function makeTranslate(active: 'en' | 'zh' = 'en', dicts?: Record<string, Record<string, string>>): Translate {
   const table: Record<string, Record<string, string>> = dicts ?? { zh: DICT_ZH, en: DICT_EN }
   return (key, params) => {
@@ -41,8 +40,6 @@ export async function cleanupMounts(): Promise<void> {
   for (const m of [...mounted]) await m.unmount()
 }
 
-// A failed assertion must not leave roots in the shared per-worker jsdom; keeping the hook here (not setup.ts)
-// means only specs that import the kit pay its React import.
 afterEach(cleanupMounts)
 
 export async function mount(el: ReactElement): Promise<Mounted> {
@@ -76,22 +73,18 @@ export async function flush(): Promise<void> {
   await act(async () => {})
 }
 
-/** Let timer-driven work land inside act, so React attributes the update to the test. */
 export async function settle(ms: number): Promise<void> {
   await act(async () => {
     await new Promise(resolve => setTimeout(resolve, ms))
   })
 }
 
-/** Fire a scroll event inside act (jsdom never fires one from `scrollTop`). */
 export async function fireScroll(el: HTMLElement): Promise<void> {
   await act(async () => {
     el.dispatchEvent(new Event('scroll'))
   })
 }
 
-/** Poll until the predicate holds, one short act() scope per tick, so timer/promise updates are
- * act-attributed and committed before the next check. `message` labels the give-up failure. */
 export async function until(fn: () => boolean, message: string): Promise<void> {
   for (let i = 0; i < 400; i++) {
     await act(async () => {
@@ -103,8 +96,6 @@ export async function until(fn: () => boolean, message: string): Promise<void> {
   throw new Error(message)
 }
 
-/** Silence a deliberately-thrown render error: React 18 dev replays it as a fake DOM event jsdom reports as
- * uncaught; preventing the default keeps the throw inside the test. */
 export function silenceWindowErrors(): () => void {
   const onError = (e: Event) => { e.preventDefault() }
   window.addEventListener('error', onError)
@@ -115,7 +106,6 @@ export function text(container: HTMLElement): string {
   return container.textContent ?? ''
 }
 
-/** The composition bar's tooltip rows, so specs assert the bubble's structure instead of textContent. */
 export function tipRows(tip: HTMLElement): (string | null)[] {
   return ['.lc-bar-tip-head', '.lc-bar-tip-fig', '.lc-bar-tip-note']
     .map(sel => tip.querySelector<HTMLElement>(sel)?.textContent ?? null)
@@ -131,7 +121,6 @@ export function queryAll<T extends Element = HTMLElement>(container: ParentNode,
   return [...container.querySelectorAll<T>(selector)]
 }
 
-/** Pin a jsdom element's boxes: jsdom lays nothing out, so measuring components need geometry. */
 export function pinRect(el: Element, width: number, height = 0): void {
   Object.defineProperty(el, 'getBoundingClientRect', {
     configurable: true,
@@ -145,7 +134,6 @@ export async function click(el: HTMLElement): Promise<void> {
   })
 }
 
-/** The native value setter plus the input event React's onChange listens for (a plain assignment is swallowed). */
 export async function typeText(el: HTMLTextAreaElement | HTMLInputElement, text: string): Promise<void> {
   await act(async () => {
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
@@ -154,7 +142,6 @@ export async function typeText(el: HTMLTextAreaElement | HTMLInputElement, text:
   })
 }
 
-/** React 18 synthesizes onMouseEnter/Leave from the BUBBLING mouseover/mouseout pair. */
 export async function hover(el: Element): Promise<void> {
   await act(async () => {
     el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
@@ -167,7 +154,6 @@ export async function unhover(el: Element): Promise<void> {
   })
 }
 
-/** React synthesizes onFocus/onBlur from the BUBBLING focusin/focusout pair. */
 export async function focus(el: Element): Promise<void> {
   await act(async () => {
     el.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))

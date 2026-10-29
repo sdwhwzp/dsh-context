@@ -10,8 +10,6 @@ import { blur, click, flush, focus, hover, makeKit, mount, query, queryAll, text
 
 const kit = makeKit()
 
-// The price book's loader stays pending by default, so no card shows a cost
-// estimate unless a test arms the fixture itself.
 beforeEach(() => {
   resetModelPrices()
   setModelPricesLoader(() => new Promise(() => {}))
@@ -21,7 +19,6 @@ afterEach(() => {
   resetModelPrices()
 })
 
-/** The price-book fixture (the stats board specs' own): deepseek-v4-flash at $0.15/$0.6/$0.003 per 1M. */
 const PROVIDERS = {
   deepseek: { models: { 'deepseek-v4-flash': { cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
 }
@@ -69,7 +66,6 @@ class FakeSessions {
 }
 
 function makeView(sessions: unknown, options: { locale?: 'en' | 'zh' } = {}) {
-  // The session jump rides the view owner's verb (uiWorkspace.openSession).
   const nav = { openSession: (id: string) => (sessions as { openSession?: (id: string) => void }).openSession?.(id) }
   const ctx = new TestClientCtx({ locale: options.locale, services: { sessions, uiWorkspace: nav } })
   return makeAgentGraph(asClientCtx(ctx), options.locale === 'zh' ? makeKit('zh') : kit)
@@ -187,8 +183,6 @@ describe('AgentGraph — the family tree', () => {
 
     assert.equal(queryAll(m.container, '.lc-agents-legend-item').length, 9)
 
-    // The stage cancels a horizontal swipe it cannot consume, so the browser never reads it as a history swipe
-    // (jsdom reports zero scroll metrics, so a horizontal-dominant gesture always sits at the edge).
     const stage = query(m.container, '.lc-agents-stage')
     assert.equal(wheel(stage, 30, 0), true, 'horizontal swipe canceled at the stage edge')
     assert.equal(wheel(stage, 30, 120), false, 'vertical-dominant gestures stay with the page')
@@ -392,7 +386,6 @@ describe('AgentGraph — the family tree', () => {
     await m.unmount()
   })
 
-  /** peak: (1M uncached × $0.15 + 0.5M output × $0.6) × DeepSeek's peak factor 2 = $0.90 (¥6.00). */
   const COST_LEDGER = { 'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 500_000 } } } }
 
   test('the headline prices the consumed tokens once the price book lands', async () => {
@@ -528,7 +521,6 @@ describe('AgentGraph — cold-relative composition fetch', () => {
     vi.unstubAllGlobals()
   })
 
-  /** A multi-category slim head (the detail payload's cold-node field). */
   function composedHead(): unknown {
     return {
       ok: true,
@@ -542,7 +534,6 @@ describe('AgentGraph — cold-relative composition fetch', () => {
     }
   }
 
-  /** A detail payload without the head (the collections-only shape). */
   function detailValue(head: unknown): Record<string, unknown> {
     return {
       rev: 1,
@@ -588,8 +579,6 @@ describe('AgentGraph — cold-relative composition fetch', () => {
     assert.deepEqual(rpc.calls, ['api/dsh-context/detail:done'])
     assert.equal(query(m.container, '[data-agent="done"]').querySelectorAll('.lc-agent-bar-seg').length, 1)
 
-    // A snapshot tick while the read is in flight re-attaches the SAME
-    // pending read; its duplicate landing settles on the identity bail-out instead of re-rendering.
     await act(async () => {
       face.setState(family())
     })
@@ -609,8 +598,6 @@ describe('AgentGraph — cold-relative composition fetch', () => {
     await flush()
     assert.deepEqual(rpc.calls, ['api/dsh-context/detail:done'])
 
-    // A remount (tab switch) resets the instance state but replays the
-    // factory-cached read: the bar recomposes with no new request.
     await m.unmount()
     const remounted = await mount(h(View, { sessionId: 'root', self: selfStats() }))
     await flush()

@@ -14,7 +14,6 @@ afterEach(() => {
   resetTimelineDetailStores()
 })
 
-/** Two logged steps, an injection before each, one past the log tail, one unserved (dropped-window arm). */
 function injectTimeline(over: Partial<ContextTimeline> = {}): ContextTimeline {
   return timeline({
     requests: [
@@ -43,7 +42,6 @@ function mountInject(sessionId: string, data: ContextTimeline) {
 describe('ContextView — injection rows reveal their item', () => {
   test('a click opens the browser on the injection\'s own item at its entry step and scrolls the card in', async () => {
     const scroller = overflowingScroller(800)
-    // jsdom lays out nothing: fixed viewport tops make the reveal's rect delta deterministic (450 − 100).
     const gBCR = stubRevealRects(scroller, el => (el.classList.contains('lc-col-browser') ? 450 : 0))
     try {
       const View = makeView(new TestClientCtx())
@@ -92,7 +90,6 @@ describe('ContextView — injection rows reveal their item', () => {
       archive: [{ seq: 3, cat: 'inject', tokens: 20, time: T0 + 500, text: 'the removed note', gone }],
     })
 
-    // Removed at seq 6: the step-4 surface still held it, so the row opens there.
     const m = await mountInject('sv-injectshadow', archived(6))
     await click(eventLink(m.container, DICT_EN['form.notice'] + ' · hook'))
     assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, '4')
@@ -101,7 +98,6 @@ describe('ContextView — injection rows reveal their item', () => {
     assert.ok(text(open[0]).includes('the removed note'))
     await m.unmount()
 
-    // Removed at seq 4 — before any step dispatched it: nothing is left to reveal.
     const gone = await mountInject('sv-injectgone', archived(4))
     await click(eventLink(gone.container, DICT_EN['form.notice'] + ' · hook'))
     assert.equal(query<HTMLSelectElement>(gone.container, 'select.lc-br-pick').value, 'live')

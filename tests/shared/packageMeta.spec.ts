@@ -28,7 +28,6 @@ describe('package meta localization', () => {
   })
 
   test('the zh dictionary is a real translation of the en one', async () => {
-    // The Host resolves the active locale against these entries with `en` as the final fallback.
     const en = JSON.parse(await readFile('locale/en.json', 'utf8')) as { meta: Record<string, string> }
     const zh = JSON.parse(await readFile('locale/zh.json', 'utf8')) as { meta: Record<string, string> }
     assert.deepEqual(Object.keys(zh.meta).sort(), Object.keys(en.meta).sort())

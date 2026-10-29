@@ -84,7 +84,6 @@ describe('trend chart windowing', () => {
         'window follows the scroll to the oldest bars',
       )
       assert.equal(bars(m.container)[0].getAttribute('data-seq'), String(list[0].seq))
-      // The full readout remains: the turn strip still sees all 400 columns.
       assert.equal(query(m.container, '.lc-turns').children.length, 1)
     } finally {
       await m.unmount()

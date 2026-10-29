@@ -3,7 +3,6 @@ import { describe, test } from 'vitest'
 import z from '@deepseek-ai/schemastery'
 import { Config, DEFAULT_BOUNDS, resolveBounds, volatileField } from '../../src/host/config'
 
-/** Dereference a resolved value: volatile fields resolve to references. */
 function deref(value: unknown): unknown {
   return value !== null && typeof value === 'object' && typeof (value as { get?: unknown }).get === 'function'
     ? (value as { get: () => unknown }).get()
@@ -50,7 +49,6 @@ describe('Config validator (cordis Standard Schema face)', () => {
   })
 
   test('unknown keys merge through (schemastery objects are not key-strict)', () => {
-    // Deliberately not key-strict: an unrecognized key rides along instead of failing the entry load.
     assert.equal(deref(Config({ unknown: 1 } as unknown as Config).maxEvents), DEFAULT_BOUNDS.maxEvents)
   })
 })
@@ -85,7 +83,6 @@ describe('volatileField', () => {
   test('marks the field where schemastery ships the modifier; returns it unchanged on an older schemastery', () => {
     assert.equal(volatileField(z.union(['a', 'b']).default('a')).meta?.volatile, true)
     const plain = z.union(['a', 'b']).default('a')
-    // A schema-shaped value with no `volatile` member at all — the shape the older lines' schemastery presents.
     const legacy = { meta: plain.meta } as typeof plain
     assert.equal(volatileField(legacy), legacy)
     assert.equal(legacy.meta?.volatile, undefined)

@@ -14,7 +14,6 @@ interface CtxSpec {
   llm?: unknown
 }
 
-/** A minimal host ctx double with cordis inject semantics (fires when the service map completes) and a collected disposer. */
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?: RouteFetch }; disposers: (() => void)[] } {
   const captured: { path?: string; fetch?: RouteFetch } = {}
   const disposers: (() => void)[] = []
@@ -39,7 +38,6 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?
     const conn = spec.connection as { fetch?: { register?: unknown } }
     if (typeof conn.fetch?.register === 'function') {
       const original = conn.fetch.register as (route: { path: string; fetch: RouteFetch }) => (() => void)
-      // Delegate to the spec's own register (a hostile one still throws), so the capture only lands when mounted.
       conn.fetch.register = (route: { path: string; fetch: RouteFetch }) => {
         const dispose = original(route)
         captured.path = route.path
@@ -54,8 +52,6 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?
   return { ctx: ctx as unknown as Context, captured, disposers }
 }
 
-/** The harness settings face projecting one row per configurable entry (`throws` fails the read); the read
- * options are recorded, so the redaction the fold asks for is provable. */
 function settingsDescribeOf(rows: unknown, throws = false): { describe(options?: { redactSecrets?: boolean }): unknown; options: unknown[] } {
   const options: unknown[] = []
   return {
@@ -68,7 +64,6 @@ function settingsDescribeOf(rows: unknown, throws = false): { describe(options?:
   }
 }
 
-/** The settings face serving one provider section, as the Config-form projection's `llm-deepseek` row. */
 function settingsOf(section: unknown): { describe(options?: { redactSecrets?: boolean }): unknown; options: unknown[] } {
   return settingsDescribeOf([{ ns: 'llm-deepseek', value: section }])
 }
@@ -98,7 +93,6 @@ const CNY_BALANCE = {
   balance_infos: [{ currency: 'CNY', total_balance: '110.00', granted_balance: '10.00', topped_up_balance: '100.00' }],
 }
 
-/** The all-configured ctx spec: the provider row (its served value always declares the credential ref), a resolvable key. */
 function configuredCtx(spec: CtxSpec = {}): CtxSpec {
   return {
     connection: { fetch: { register: () => () => {} } },
@@ -505,15 +499,12 @@ describe('balanceOfPayload (direct)', () => {
       ],
     })
     assert.deepEqual(disagreed?.balances, [{ currency: 'CNY', total: 940.66, granted: 920.85, toppedUp: 19.81 }])
-    // The parts are what prove the entry, so a total the platform gets wrong (or omits) never drops it:
-    // total_balance is not read at all.
     for (const totalField of [{}, { total_balance: 'abc' }, { total_balance: '-1' }, { total_balance: null }]) {
       assert.deepEqual(balanceOfPayload({
         is_available: true,
         balance_infos: [{ currency: 'CNY', granted_balance: '10.00', topped_up_balance: '100.00', ...totalField }],
       })?.balances, [{ currency: 'CNY', total: 110, granted: 10, toppedUp: 100 }])
     }
-    // Without both parts there is no total to derive, whatever total_balance says.
     assert.equal(balanceOfPayload({
       is_available: true,
       balance_infos: [{ currency: 'CNY', total_balance: '110.00' }],

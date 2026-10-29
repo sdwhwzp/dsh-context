@@ -1,7 +1,3 @@
-/** Insights page hover tips: one fixed bubble portaled to `<body>`, driven by event delegation off the page root; the
- * page's `lc-ov` containment would capture in-tree FIXED descendants (overview.css). Anchors carry `data-lc-tip` and
- * optional `data-lc-tip-side` ('top' default, 'bottom'). */
-
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -34,8 +30,6 @@ function tipOf(anchor: Element): ActiveTip | null {
   const r = anchor.getBoundingClientRect()
   const side = anchor.getAttribute('data-lc-tip-side') === 'bottom' ? 'bottom' : 'top'
   const rect = { left: r.left, top: r.top, width: r.width, height: r.height, bottom: r.bottom }
-  // The pass reads side, the rect edges and the viewport; the label sets the bubble width. Key on those inputs, not
-  // the tip object: React can replay the show updater, and an equivalent rebuilt tip must not re-measure.
   const signature = JSON.stringify([side, label, rect.left, rect.top, rect.width, rect.bottom, window.innerWidth, window.innerHeight])
   return { anchor, label, side, rect, signature }
 }
@@ -51,7 +45,6 @@ export interface HoverTipZone {
   bubble: ReactElement | null
 }
 
-/** The bubble renders hidden until the layout effect measures it, so it never flashes at an unmeasured spot. */
 export function useHoverTip(): HoverTipZone {
   const [tip, setTip] = useState<ActiveTip | null>(null)
   const [measured, setMeasured] = useState<Measured | null>(null)
@@ -59,7 +52,6 @@ export function useHoverTip(): HoverTipZone {
 
   const show = useCallback((anchor: Element): void => {
     setTip((current) => {
-      // Same anchor (moving across its own subtree): keep tip and measure.
       if (current?.anchor === anchor) return current
       current?.anchor.removeAttribute('aria-describedby')
       const next = tipOf(anchor)
@@ -76,7 +68,6 @@ export function useHoverTip(): HoverTipZone {
     })
   }, [])
 
-  // Anchor switching never hides: leaving A for B skips the hide, since B's mouseover re-anchors.
   const onMouseOver = useCallback((ev: React.MouseEvent): void => {
     const anchor = anchorOf(ev.target)
     if (anchor !== null) show(anchor)
@@ -93,7 +84,6 @@ export function useHoverTip(): HoverTipZone {
   }, [hide])
   const onScrollCapture = useCallback((): void => { hide() }, [hide])
 
-  // A viewport resize moves every anchor: retract rather than float detached.
   useEffect(() => {
     if (tip === null) return undefined
     const retract = (): void => { hide() }
@@ -104,7 +94,7 @@ export function useHoverTip(): HoverTipZone {
   useLayoutEffect(() => {
     if (tip === null || measured?.signature === tip.signature) return
     const el = bubbleRef.current
-    /* v8 ignore next -- unreachable: the portal commits its ref before layout effects run. */
+    /* v8 ignore next */
     if (el === null) return
     const w = el.offsetWidth
     const h = el.offsetHeight

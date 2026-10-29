@@ -9,7 +9,6 @@ import { click, flush, mount, query, queryAll, text, until } from '../helpers/ki
 import { makeView, projectionsFor, richTimeline, T0, timeline } from './contextViewHarness'
 
 describe('ContextView — the split generation (slim head + detail channel)', () => {
-  /** A slim wire head: the pushed value with the collections empty and the counters/markers on. */
   function slimHead(over: Record<string, unknown> = {}): ContextTimeline {
     return timeline({
       model: 'deepseek-v4-flash',
@@ -24,7 +23,6 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
     })
   }
 
-  /** The matching detail payload (richTimeline's collections). */
   function slimDetail(rev = 6): Record<string, unknown> {
     const rich = richTimeline()
     return {
@@ -155,8 +153,6 @@ describe('ContextView — the split generation (slim head + detail channel)', ()
     }))
     const ctx = new TestClientCtx()
     const View = makeView(ctx)
-    // The jump is armed BEFORE the view mounts (the chat action relay): with the detail read still
-    // pending, the pin must wait for it rather than clamp against an empty record list.
     requestContextFocus('sv-slim-jump', 4)
     const m = await mount(h(View, { sessionId: 'sv-slim-jump', useProjection: projectionsFor(slimHead()) }))
     assert.equal(queryAll(m.container, '.lc-bar-selected').length, 0, 'nothing pins before the detail')
@@ -185,7 +181,6 @@ describe('ContextView — the op-log generation (fileOps on the detail payload)'
           nodes: [],
           droppedNodes: 0,
           archive: [],
-          // The op log covers the full session; the conversation window join plays no role here.
           fileOps: [
             { seq: 1, path: '/ws/README.md', kind: 'read', tool: 'read', err: false, added: 0, removed: 0, read: { start: 1, count: 12 } },
             { seq: 2, path: '/ws/src/a.ts', kind: 'write', tool: 'edit', err: false, added: 3, removed: 1 },

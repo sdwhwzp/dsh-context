@@ -121,11 +121,9 @@ describe('TrendChart lazy DNA bands', () => {
     try {
       assert.ok(queryAll(m.container, '.lc-bar-dna').length > 0)
       assert.deepEqual(axisOf(m.container), eagerAxis, 'lazy delta axes match the eager per-band maxima')
-      // Exact churn bounds need every bar's key changes, so there is no totals shortcut.
       assert.ok(lazy.calls.size <= reqs.length * 2, `bounded per-seq lookups (${lazy.calls.size})`)
       assert.ok(bars(m.container).length > 0)
 
-      // The whole-log axis walk is memoized: a hover re-render must not re-read one step per bar.
       const afterMount = lazy.calls.size
       const firstBar = queryAll(m.container, '.lc-bar')[0]
       await act(async () => {
@@ -143,7 +141,6 @@ describe('TrendChart lazy DNA bands', () => {
     const reread = await mount(h(TrendChart, propsOf(rereadReqs, { dnaAt: rereadLazy.at, mode: 'delta' })))
     assert.equal(rereadLazy.calls.size, rereadReqs.length, 'the axis walk read every step')
     const afterMount = total()
-    // A props change re-renders the card: the memoized walk keeps its answer, so only the painted window re-reads.
     await reread.update(h(TrendChart, propsOf(rereadReqs, { dnaAt: rereadLazy.at, mode: 'delta', markers: [] })))
     await flush()
     const rereadCount = total() - afterMount

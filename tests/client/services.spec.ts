@@ -11,6 +11,7 @@ import {
   seedConversationViewVia,
   sessionAddressOf,
   timelineOf,
+  activeMsOf,
   timingOf,
   tokenUsageOf,
   unsupportedOf,
@@ -169,7 +170,6 @@ describe('timelineOf', () => {
   })
 
   test('a junk entry inside an otherwise well-formed value leaves the fast path and is dropped', () => {
-    // A null/primitive collection element would throw on the first downstream property read, so the guard routes to the sanitizing path.
     const good = { seq: 1, time: 1, system: 0, tools: 0, user: 1, inject: 0, assistant: 0, tool: 0, total: 1 }
     const out = timelineOf({ ok: true, current, requests: [good, null], events: [], nodes: [], archive: [], droppedNodes: 0 })
     assert.ok(out !== null)
@@ -345,7 +345,6 @@ describe('timelineOf', () => {
     assert.equal(out.commandsFloor, 2)
     assert.deepEqual(out.commandStats, { runs: 7, failed: 1, ms: 900, bg: 1 })
     assert.equal(out.spans?.length, 1, 'the strip spans survive, junk entries dropped')
-    // A shapeless stats object drops out (the panel then counts the retained list instead).
     const noStats = timelineOf({ current, commandStats: 'junk' })
     assert.ok(noStats !== null && !('commandStats' in noStats))
   })
@@ -451,18 +450,11 @@ describe('contextBreakdownOf', () => {
 })
 
 describe('tokenUsageOf', () => {
-  test('the four-bucket wire value passes as a value', () => {
-    assert.deepEqual(
-      tokenUsageOf({ uncachedInputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4 }),
-      { uncachedInputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4 },
-    )
-  })
-
-  test('a missing/wrong-typed/non-finite bucket degrades the WHOLE value to null', () => {
-    // The buckets must sum into the billed total; anything short of the strict wire shape drops whole.
+  test('the four-bucket wire value passes as a value; a missing/wrong-typed/non-finite bucket degrades the WHOLE value to null', () => {
+    const good = { uncachedInputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4 }
+    assert.deepEqual(tokenUsageOf(good), good)
     assert.equal(tokenUsageOf({ uncachedInputTokens: 1, outputTokens: 2, cacheReadTokens: 3 }), null, 'missing bucket')
     assert.equal(tokenUsageOf({ total: { input: 100 } }), null, 'a foreign record shape')
-    const good = { uncachedInputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4 }
     for (const key of Object.keys(good) as (keyof typeof good)[]) {
       assert.equal(tokenUsageOf({ ...good, [key]: 'x' }), null, `${key} wrong-typed`)
       assert.equal(tokenUsageOf({ ...good, [key]: Number.NaN }), null, `${key} non-finite`)
@@ -524,21 +516,27 @@ describe('timingOf', () => {
     assert.equal(Object.getPrototypeOf(out?.tools ?? {}), Object.prototype)
   })
 
-  test('the generation split passes through when well-formed', () => {
-    const out = timingOf({ ...wellFormed, reasoningMs: 5_000, textMs: 2_000, toolArgMs: 3_000 })
-    assert.deepEqual(out, { ...wellFormed, reasoningMs: 5_000, textMs: 2_000, toolArgMs: 3_000 })
+  test('the idle carve and the hostile idle scalar ride the optional face; activeMsOf prices wall minus idle', () => {
+    assert.deepEqual(timingOf({ ...wellFormed, idleMs: 5_000 }), { ...wellFormed, idleMs: 5_000 })
+    assert.ok(!('idleMs' in (timingOf({ ...wellFormed, idleMs: -1, toolBusyMs: 3 }) ?? {})), 'a negative carve degrades to absent')
+    for (const timing of [null, undefined]) assert.equal(activeMsOf(timing), 0)
+    assert.equal(activeMsOf({ ...wellFormed, wallMs: 0, idleMs: 5_000 }), 0)
+    assert.equal(activeMsOf({ ...wellFormed, idleMs: 0 }), 60_000, 'a zero carve keeps the wall')
+    assert.equal(activeMsOf({ ...wellFormed, idleMs: Number.NaN }), 60_000, 'a hostile carve keeps the wall')
+    assert.equal(activeMsOf({ ...wellFormed, idleMs: 90_000 }), 0, 'the carve clamps to the wall')
+    assert.equal(activeMsOf(wellFormed), 60_000, 'a pre-field row keeps the wall')
+    assert.equal(activeMsOf({ ...wellFormed, idleMs: 5_000 }), 55_000)
   })
 
-  test('absent split fields stay ABSENT — the card keeps the un-split shape', () => {
-    const out = timingOf(wellFormed)
-    assert.ok(out !== null)
-    assert.equal(Object.hasOwn(out, 'reasoningMs'), false)
-    assert.equal(Object.hasOwn(out, 'textMs'), false)
-    assert.equal(Object.hasOwn(out, 'toolArgMs'), false)
-  })
-
-  test('a wrong-typed or negative split field drops alone, keeping the rest', () => {
-    const out = timingOf({ ...wellFormed, reasoningMs: 'x', textMs: -5, toolArgMs: 1_000 })
+  test('optional split and block fields stay ABSENT when absent, pass through when well-formed, and drop alone when hostile', () => {
+    const bare = timingOf(wellFormed)
+    assert.ok(bare !== null)
+    for (const k of ['reasoningMs', 'textMs', 'toolArgMs', 'reasoningBlocks', 'textBlocks', 'toolArgBlocks']) {
+      assert.equal(Object.hasOwn(bare, k), false, `${k} stays absent`)
+    }
+    const split = { reasoningMs: 5_000, textMs: 2_000, toolArgMs: 3_000, reasoningBlocks: 3, textBlocks: 1, toolArgBlocks: 9 }
+    assert.deepEqual(timingOf({ ...wellFormed, ...split }), { ...wellFormed, ...split })
+    const out = timingOf({ ...wellFormed, reasoningMs: 'x', textMs: -5, toolArgMs: 1_000, reasoningBlocks: 'x', textBlocks: -1, toolArgBlocks: 4 })
     assert.equal(out?.reasoningMs, undefined)
     assert.equal(out?.textMs, undefined)
     assert.equal(out?.toolArgMs, 1_000)
@@ -632,6 +630,8 @@ describe('timelineOf — timing integration', () => {
   test('a well-formed timing passes through by reference (fast path)', () => {
     const wire = { ...base, timing }
     assert.equal(timelineOf(wire), wire)
+    const busy = { ...timing, toolBusyMs: 25_000 }
+    assert.equal(timelineOf({ ...base, timing: busy })?.timing, busy, 'the optional busy union tolerates the fast path')
   })
 
   test('a malformed timing takes the sanitizing slow path', () => {
@@ -664,6 +664,9 @@ describe('timelineOf — timing integration', () => {
     assert.deepEqual(sanitized({ ...timing, reasoningMs: 'x' }), timing)
     assert.deepEqual(sanitized({ ...timing, textMs: Number.NaN }), timing)
     assert.deepEqual(sanitized({ ...timing, toolArgMs: -1 }), timing)
+    for (const bad of ['x', -1, Number.NaN]) assert.deepEqual(sanitized({ ...timing, toolBusyMs: bad }), timing)
+    assert.deepEqual(sanitized({ ...timing, toolBusyMs: 25_000 }), { ...timing, toolBusyMs: 25_000 })
+    assert.deepEqual(sanitized({ ...timing, wallMs: 'x', toolBusyMs: 25_000 }), { ...timing, wallMs: 0, toolBusyMs: 25_000 })
   })
 })
 

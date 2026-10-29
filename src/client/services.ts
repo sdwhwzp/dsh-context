@@ -17,7 +17,6 @@ export interface LocaleService {
   register(ns: string, dicts: Record<string, Record<string, string>>): () => void
   bind(ns: string): (key: string, params?: Record<string, string | number>) => string
   getLocale?(): { active: string }
-  /** The harness's LocaleFace change feed; absent on older faces (cards then keep the boot locale until remount). */
   subscribe?(listener: () => void): () => void
 }
 
@@ -26,7 +25,6 @@ export interface SlotRegistration {
   id?: string
   order?: number
   key?: string
-  /** Dictionary namespace; the framework synthesizes the `t` seat from it. */
   locale?: string
   label?: () => string
   inject?: (sessionId?: string) => unknown
@@ -38,12 +36,9 @@ export interface SlotsService {
     registration: SlotRegistration,
     component: (props: { sessionId?: string } & Record<string, unknown>) => unknown,
   ): unknown
-  /** The slot ledger's raw entries view (`SlotCore.entries`); optional: an older face mounts without the second-mount guard
-   * (docs/compatibility.md §5). */
   entries?(name: string): unknown
 }
 
-/** Fail-open: an absent, shape-shifted, or hostile ledger reports false, so the mount proceeds and never blanks a working one. */
 export function entrySeated(ctx: ClientCtx, name: string, id: string): boolean {
   try {
     const entries = ctx.slots.entries?.(name)
@@ -58,7 +53,6 @@ export function entrySeated(ctx: ClientCtx, name: string, id: string): boolean {
   }
 }
 
-/** The harness `SidebarRightGuideEntry` subset a right-Sidebar tab type contributes. */
 export interface SidebarGuideEntryLike {
   order: number
   title: () => string
@@ -73,39 +67,32 @@ export interface SidebarTabDefinitionLike {
   guide?: readonly SidebarGuideEntryLike[]
 }
 
-/** `ctx.sidebarRightTabs` through a deferred inject: absent → composes fully (docs/compatibility.md §5). */
 export interface SidebarTabsFace {
   register(definition: SidebarTabDefinitionLike): () => void
 }
 
-/** The harness's `SidebarRightOpenResourceOptions`: the opening type's name and the fresh-pane claim. */
 export interface SidebarResourceOpenOptions {
   kind?: string
   preferNewPane?: boolean
 }
 
-/** `ctx.sidebarRight.openResource` claims a `dsh-resource://…` address; an absent or refusing face falls back. */
 export interface SidebarResourceFace {
   openResource(address: string, options?: SidebarResourceOpenOptions): void
 }
 
-/** A finalized chat node carries its source surface event's `seq`; the browser joins nodes on it, never on projected content. */
 export interface ConversationNodeLike {
   kind: string
   seq: number
-  /** Durable message id; absent on synthetic/interrupted replies. */
   messageId?: unknown
   content?: readonly unknown[]
   blocks?: readonly unknown[]
   call?: { name: string; argsRaw: string } | null
   isError?: boolean
   summary?: string | null
-  /** Nested dsh ToolCallBlock[] tree of a PTC `run_code` dispatch; re-proved structurally in fileActivity. */
   subCalls?: readonly unknown[]
   meta?: unknown
 }
 
-/** dsh's `ImageAttachmentRef`, re-typed to avoid an attachment-package dependency; the log never holds inline bytes. */
 export interface ImageRefLike {
   attachmentId: string
   name?: string
@@ -132,7 +119,7 @@ export function imageLoaderOf(
       const imageUrl = conversation.imageUrl.bind(conversation)
       return attachment => imageUrl(sessionId, attachment)
     }
-  } catch { /* absent or hostile service — metadata-only cards */ }
+  } catch {}
   return undefined
 }
 
@@ -140,7 +127,6 @@ export type AttachmentLocator = (attachment: AttachmentRef) => Promise<string | 
 
 export type AttachmentOpener = (attachment: AttachmentRef) => Promise<boolean>
 
-/** The `useChat` seat: the selector must return a reference-stable slice, or every event re-renders the view. */
 export type UseChatLike = <T>(selector: (snapshot: unknown) => T) => T
 
 export function conversationNodesOf(props: {
@@ -149,16 +135,14 @@ export function conversationNodesOf(props: {
   const useChat: unknown = props.useChat
   if (typeof useChat !== 'function') return undefined
   try {
-    // `s.legacy` is a stable object; the array is read outside the selector.
     const slice = (useChat as UseChatLike)((s: unknown) =>
       s !== null && typeof s === 'object' ? (s as { legacy?: unknown }).legacy : undefined)
     const nodes = slice !== null && typeof slice === 'object' ? (slice as { nodes?: unknown }).nodes : undefined
     return Array.isArray(nodes) ? nodes as readonly ConversationNodeLike[] : undefined
-  } catch { /* hostile seat — the join degrades to nothing */ }
+  } catch {}
   return undefined
 }
 
-/** The framework standard kit of a session-scope slot component. */
 export interface SessionStandardProps {
   sessionId?: string
   useProjection?: (key: string) => unknown
@@ -166,11 +150,9 @@ export interface SessionStandardProps {
 }
 
 export interface ContextViewProps extends SessionStandardProps {
-  /** Set only by the right-Sidebar registration, which drops the head cards a narrow column cannot serve. */
   host?: 'sidebar'
 }
 
-/** The seat is a hook: call it unconditionally, one call per key, in a stable order. */
 export function projectionOf<T>(props: SessionStandardProps, key: string, narrow: (value: unknown) => T | null): T | null {
   if (typeof props.useProjection !== 'function') return null
   return narrow(props.useProjection(key))
@@ -186,7 +168,6 @@ function objectsOf<T>(value: unknown): T[] {
   return value.filter((v): v is T => v !== null && typeof v === 'object')
 }
 
-/** The collection/floor block shared by the full snapshot (timelineOf) and the split detail (timelineSource.ts). */
 export function collectionsOf(data: Record<string, unknown>): Pick<ContextTimeline,
   'requests' | 'events' | 'nodes' | 'droppedNodes' | 'archive'
   | 'surfaceFloor' | 'archiveFloor' | 'fileOps' | 'fileOpsFloor' | 'commands' | 'commandsFloor' | 'commandStats' | 'spans'> {
@@ -208,7 +189,6 @@ export function collectionsOf(data: Record<string, unknown>): Pick<ContextTimeli
   }
 }
 
-/** A non-record drops out; wrong-typed fields zero out. */
 function commandStatsOf(value: unknown): ContextTimeline['commandStats'] | undefined {
   const data = asRecord(value)
   if (data === null) return undefined
@@ -220,7 +200,6 @@ function commandStatsOf(value: unknown): ContextTimeline['commandStats'] | undef
   }
 }
 
-/** A null/primitive entry passes a bare `Array.isArray` yet throws on the first property read, so it takes the sanitizing slow path. */
 function recordsOnly(value: unknown): boolean {
   return Array.isArray(value) && value.every(e => e !== null && typeof e === 'object')
 }
@@ -350,7 +329,6 @@ function systemsFastOk(value: unknown): boolean {
   })
 }
 
-/** An absent value stays absent (legacy generation): callers then derive the counts from the collections. */
 function countsOf(value: unknown): ContextTimeline['counts'] {
   const data = asRecord(value)
   if (data === null) return undefined
@@ -376,8 +354,6 @@ function lastOf(value: unknown): ContextTimeline['last'] {
   }
 }
 
-/** Each field is an independent last-wins record of a different moment (dsh's `ContextPressureProjection`); an absent one sends callers
- * to their derived anchor. */
 export function contextPressureOf(value: unknown): ContextPressure | null {
   const data = asRecord(value)
   if (data === null) return null
@@ -388,7 +364,6 @@ export function contextPressureOf(value: unknown): ContextPressure | null {
   return out
 }
 
-/** A partial value degrades to null so the card uses the fold's own sums. */
 export function contextBreakdownOf(value: unknown): ContextBreakdown | null {
   const data = asRecord(value)
   if (data === null) return null
@@ -399,7 +374,6 @@ export function contextBreakdownOf(value: unknown): ContextBreakdown | null {
   return { systemTokens, toolsTokens, messageTokens }
 }
 
-/** dsh token-meter's `projectionSchema` requires all four buckets, so a partial value degrades whole to null rather than undercount. */
 export function tokenUsageOf(value: unknown): TokenUsage | null {
   const data = asRecord(value)
   if (data === null) return null
@@ -411,12 +385,10 @@ export function tokenUsageOf(value: unknown): TokenUsage | null {
   return { uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }
 }
 
-/** NaN or negative degrades to 0 instead of leaking into donut shares. */
 function msNumOf(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0
 }
 
-/** Anything but a non-negative number stays undefined, so the field never materializes as a zero. */
 function optNumOf(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
 }
@@ -428,8 +400,7 @@ function timingFastOk(value: unknown): boolean {
   for (const k of ['wallMs', 'ttftMs', 'genMs', 'calls', 'toolsMs', 'toolCalls']) {
     if (typeof t[k] !== 'number') return false
   }
-  // Optional split/block scalars must pass the same non-negative gate the slow path applies.
-  for (const k of ['reasoningMs', 'textMs', 'toolArgMs', 'reasoningBlocks', 'textBlocks', 'toolArgBlocks']) {
+  for (const k of ['reasoningMs', 'textMs', 'toolArgMs', 'reasoningBlocks', 'textBlocks', 'toolArgBlocks', 'toolBusyMs', 'idleMs']) {
     const v = t[k]
     if (v !== undefined && (typeof v !== 'number' || !Number.isFinite(v) || v < 0)) return false
   }
@@ -444,7 +415,6 @@ function timingFastOk(value: unknown): boolean {
   return true
 }
 
-/** One row failing the shape drops alone, so it never blanks the ranking. */
 export function timingOf(value: unknown): TimingTotals | null {
   const data = asRecord(value)
   if (data === null) return null
@@ -452,7 +422,6 @@ export function timingOf(value: unknown): TimingTotals | null {
   const rawTools = data.tools
   if (rawTools !== null && typeof rawTools === 'object' && !Array.isArray(rawTools)) {
     for (const k in rawTools) {
-      // An own '__proto__' key would set the prototype instead of a row.
       if (k === '__proto__' || !Object.hasOwn(rawTools, k)) continue
       const row = (rawTools as Record<string, unknown>)[k]
       if (row === null || typeof row !== 'object') continue
@@ -471,7 +440,6 @@ export function timingOf(value: unknown): TimingTotals | null {
     toolCalls: msNumOf(data.toolCalls),
     tools,
   }
-  // Optional scalars stay absent when the host served none, so the card renders the un-split shape instead of meaningless zeros.
   const reasoning = optNumOf(data.reasoningMs)
   if (reasoning !== undefined) totals.reasoningMs = reasoning
   const reasoningBlocks = optNumOf(data.reasoningBlocks)
@@ -484,12 +452,22 @@ export function timingOf(value: unknown): TimingTotals | null {
   if (toolArgMs !== undefined) totals.toolArgMs = toolArgMs
   const toolArgBlocks = optNumOf(data.toolArgBlocks)
   if (toolArgBlocks !== undefined) totals.toolArgBlocks = toolArgBlocks
+  const toolBusyMs = optNumOf(data.toolBusyMs)
+  if (toolBusyMs !== undefined) totals.toolBusyMs = toolBusyMs
+  const idleMs = optNumOf(data.idleMs)
+  if (idleMs !== undefined) totals.idleMs = idleMs
   return totals
 }
 
-/** The `contextHeaders` projection: epoch METADATA only (CONTENT is fetched on demand, historyPage.ts). A pre-#37 host
- * serving from its cache carries the system TEXT in place of the token price, so the legacy arm estimates it; one
- * malformed epoch degrades the WHOLE projection to null because downstream reads index blindly. */
+export function activeMsOf(timing: TimingTotals | null | undefined): number {
+  const wall = timing !== null && timing !== undefined && Number.isFinite(timing.wallMs) && timing.wallMs > 0
+    ? timing.wallMs
+    : 0
+  const idle = timing?.idleMs
+  const carved = idle !== undefined && Number.isFinite(idle) && idle > 0 ? Math.min(idle, wall) : 0
+  return wall - carved
+}
+
 export function headersOf(value: unknown): ContextHeaders | null {
   const headers = asRecord(value)
   if (headers === null || !Array.isArray(headers.headers)) return null
@@ -524,15 +502,12 @@ export function headersOf(value: unknown): ContextHeaders | null {
 
 export interface TriggerCandidate {
   name: string
-  /** Display title; absent = the name itself (a differing title renders the name as a trailing alias). */
   label?: string
-  /** Visual heading of this candidate's group; its presence suppresses the menu's source-title row. */
   section?: string
   description?: string
   icon?: ComponentType<{ size?: number }>
 }
 
-/** Pick-moment snapshot of the trigger token span (draftRev CAS). */
 export interface TokenSpan {
   start: number
   end: number
@@ -549,7 +524,6 @@ export interface TriggerPick {
 
 export type SourcePickOutcome = 'handled' | undefined
 
-/** The harness input-trigger service (`ctx.inputTriggers`): one '/' source whose candidates, picks, and enter stay client-side. */
 export interface InputTriggersFace {
   registerSource(src: {
     trigger: '/'
@@ -568,7 +542,6 @@ export interface InputTriggersFace {
   }): () => void
 }
 
-/** The session scope (`ctx.sessions.scope`), used to dispatch the scoped consume-token event. */
 export interface SessionScopeFace {
   bail(subject: unknown, event: string, payload: unknown): unknown
 }
@@ -576,7 +549,6 @@ export interface SessionScopeFace {
 export interface SessionsFace {
   scope(id: string): SessionScopeFace | undefined
   refresh?(): Promise<unknown>
-  /** The direct-parent address the harness already knows for a subagent child, without opening it. */
   subagentAddress?(id: string): unknown
 }
 
@@ -584,8 +556,6 @@ export interface HistoryEntryLike {
   event?: unknown
 }
 
-/** The durable identity a session's own history read carries; the host refuses a subagent child read under a plain
- * session address with `session/agent-busy`. */
 export type SessionAddressLike =
   | { kind: 'session'; sessionId: string }
   | {
@@ -595,8 +565,6 @@ export type SessionAddressLike =
     mode: 'one-shot' | 'continuable' | 'unknown'
   }
 
-/** The gateway's `remote.session.page`: `throughSeq` inclusive and must exist in the log, `beforeSeq` exclusive; packed `chunks` runs are
- * skipped. */
 export interface SessionPageFace {
   page(request: {
     address: SessionAddressLike
@@ -606,7 +574,6 @@ export interface SessionPageFace {
   }, signal?: AbortSignal): Promise<unknown>
 }
 
-/** The connection service face: the generic RPC caller and the loopback fact the harness's own open affordances gate on. */
 export interface ConnectionFace {
   isLoopback?: boolean
   rpc?: {
@@ -627,14 +594,12 @@ function rpcCallOf(ctx: ClientCtx): ((channel: string, endpoint: string, payload
     if (rpc !== null && typeof fn === 'function') {
       return (fn as (channel: string, endpoint: string, payload: unknown) => Promise<unknown>).bind(rpc)
     }
-  } catch { /* absent or hostile connection — the caller degrades off */ }
+  } catch {}
   return undefined
 }
 
-/** The SESSION's cwd from its session-list row, not the host process's launch directory. */
 export function workspaceOf(ctx: ClientCtx, sessionId: string | undefined): string | undefined {
   if (typeof sessionId !== 'string' || sessionId === '') return undefined
-  // Host data: a hostile object may throw on the call or on property access.
   try {
     const sessions = ctx.get('sessions') as { list?: { getSnapshot(): unknown } } | undefined
     const snapshot = typeof sessions?.list?.getSnapshot === 'function' ? sessions.list.getSnapshot() : undefined
@@ -647,8 +612,6 @@ export function workspaceOf(ctx: ClientCtx, sessionId: string | undefined): stri
   }
 }
 
-/** The narrowest address a history read of THIS session may carry. The harness's own resolver wins (it names the exact
- * mode); the listed subagent row is the fallback for the line whose resolver reads no list summaries. */
 export function sessionAddressOf(ctx: ClientCtx, sessionId: string): SessionAddressLike {
   const plain: SessionAddressLike = { kind: 'session', sessionId }
   if (typeof sessionId !== 'string' || sessionId === '') return plain
@@ -675,12 +638,10 @@ export function sessionAddressOf(ctx: ClientCtx, sessionId: string): SessionAddr
     if (row?.origin === 'subagent' && typeof parentId === 'string' && parentId !== '' && parentId !== sessionId) {
       return { kind: 'subagent', parentSessionId: parentId, childSessionId: sessionId, mode: 'unknown' }
     }
-  } catch { /* absent or hostile face — read this session the plain way */ }
+  } catch {}
   return plain
 }
 
-/** Loopback AND the session controller's opener capability over an RPC round-trip; every absence, hostility, or transport failure
- * resolves false. */
 export async function canOpenPathsOf(ctx: ClientCtx): Promise<boolean> {
   const call = rpcCallOf(ctx)
   if (call === undefined) return false
@@ -700,14 +661,12 @@ export function openPathVia(ctx: ClientCtx): ((path: string) => void) | undefine
   if (call === undefined) return undefined
   return (path: string): void => {
     try {
-      // `args` is keyed by the remote's declared parameter names; the gateway rejects an array.
       void call(OPEN_CHANNEL, OPEN_ENDPOINT, { args: { request: { path } } })
-        .catch(() => { /* the open is best-effort; a failure stays silent */ })
-    } catch { /* same contract, for a synchronously throwing transport */ }
+        .catch(() => {})
+    } catch {}
   }
 }
 
-/** `openResource` throws for an unclaimed address or with no session surface, so the boolean says whether it was taken. */
 export function openResourceVia(ctx: ClientCtx): ((address: string, options?: SidebarResourceOpenOptions) => boolean) | undefined {
   const faceOf = (): SidebarResourceFace | undefined => {
     try {
@@ -732,21 +691,16 @@ export function openResourceVia(ctx: ClientCtx): ((address: string, options?: Si
   }
 }
 
-/** Jump through the view owner's own selection verb (`uiWorkspace.openSession`); the sessions service carries no selection verb. */
 export function openSessionVia(ctx: ClientCtx, id: string): void {
   try {
     const workspace = asRecord(ctx.get('uiWorkspace'))
     const open = workspace?.openSession
     if (typeof open === 'function') open.call(workspace, id)
-  } catch { /* absent or hostile face — the jump is best-effort */ }
+  } catch {}
 }
 
-/** This bundle's `conversation.view` registration id, shared by the registration and the pre-seed jump. */
 export const CONTEXT_VIEW_ID = 'context'
 
-/** The conversation shell re-reads its per-session persisted `view` preference on EVERY session binding, so seeding
- * `dsh.conversation.<sessionId>` before an `openSession` jump lands the entered session on that view. Merge-write — any
- * existing draft rides along, a malformed stored state is replaced whole; no storage degrades to the shell's default. */
 export function seedConversationViewVia(sessionId: string, view: string): void {
   try {
     const key = `dsh.conversation.${sessionId}`
@@ -755,37 +709,31 @@ export function seedConversationViewVia(sessionId: string, view: string): void {
       const raw = localStorage.getItem(key)
       const parsed: unknown = raw !== null ? JSON.parse(raw) : null
       if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) stored = parsed as Record<string, unknown>
-    } catch { /* malformed stored state — replaced whole */ }
+    } catch {}
     stored.view = view
     localStorage.setItem(key, JSON.stringify(stored))
-  } catch { /* no storage — the entered session lands on its default view */ }
+  } catch {}
 }
 
-/** Jump to this bundle's page on the Plugins panel through the panel's own navigator: it selects the panel and resets the
- * remembered tab, so a contributed `plugins.tab` left selected cannot swallow the jump (docs/compatibility.md §5.6). */
 export function openPluginSettings(ctx: ClientCtx): void {
   try {
     const navigation = asRecord(ctx.get('pluginNavigation'))
     const open = navigation?.openBundle
     if (typeof open === 'function') open.call(navigation, PLUGIN_NAME)
-  } catch { /* absent or hostile face — the jump is best-effort */ }
+  } catch {}
 }
 
-/** Replicated verbatim from the shipped subagent catalog's "open in sidebar" verb (the host publishes no helper): its parser accepts only
- * this form. */
 export function subagentChatAddressOf(address: { parentSessionId: string; childSessionId: string; mode: string }): string {
   const query = new URLSearchParams({ parent: address.parentSessionId, mode: address.mode })
   return `dsh-resource://subagentchat/session/${encodeURIComponent(address.childSessionId)}?${query}`
 }
 
-/** The direct parent is the row's own edge; a row without its subagent projection rides the harness's own `unknown` mode. */
 export interface SubagentAddressLike {
   parentSessionId?: string
   childSessionId: string
   mode?: 'one-shot' | 'continuable' | 'unknown'
 }
 
-/** The shipped catalog's aside verb (kind `subagentchat`, a new pane); false keeps the caller's whole-view jump. */
 export function openChildAsideVia(ctx: ClientCtx, address: SubagentAddressLike): boolean {
   const { parentSessionId, childSessionId, mode } = address
   if (parentSessionId === undefined) return false
@@ -796,10 +744,8 @@ export function openChildAsideVia(ctx: ClientCtx, address: SubagentAddressLike):
   )
 }
 
-/** On-demand content for one surface-node seq: `null` when the durable log lacks the seq, rejects on transport failure. */
 export type ContentFetcher = (seq: number) => Promise<ConversationNodeLike | null>
 
-/** On-demand system prompt and tool schemas for one `contextHeaders` epoch seq (historyPage.ts); `null` when the log lacks the epoch. */
 export type HeaderFetcher = (seq: number) => Promise<HeaderEpochContent | null>
 
 /**

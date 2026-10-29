@@ -8,7 +8,6 @@ import { TestClientCtx } from '../helpers/harness'
 import { click, flush, mount, pinRect, query, queryAll, text } from '../helpers/kit'
 import { buttonByText, makeView, mountRich, projectionsFor, settingsWith, T0, timeline } from './contextViewHarness'
 
-/** A session with `n` retained request steps, one per column. */
 function stepsTimeline(n: number) {
   return timeline({
     model: 'deepseek-v4-flash',
@@ -25,7 +24,6 @@ function stepsTimeline(n: number) {
   })
 }
 
-/** Settings bound to one auto-overview choice, served the way the Host form would. */
 function viewWith(value: OverviewAutoSteps, sessionId: string, steps: number) {
   const View = makeView(new TestClientCtx(), settingsWith({ overviewAutoSteps: value }))
   return { View, props: { sessionId, useProjection: projectionsFor(stepsTimeline(steps)) } }
@@ -68,9 +66,7 @@ describe('ContextView — overview face', () => {
     assert.match(query(m.container, '.lc-chart-scroll').className, /lc-chart-fit/)
     const svg = query(m.container, '.lc-fit-svg')
     assert.equal(svg.getAttribute('viewBox'), '0 0 2 112')
-    // The whole retained log's axis: max 420.
     assert.equal(query(m.container, '.lc-axis-top').textContent, '420')
-    // Quartile + full-span record flags (3 records: the interior ½ and the full span), labeled by step.
     assert.deepEqual(queryAll(m.container, '.lc-trend-flag-label').map(f => f.textContent), ['2', '3'])
     assert.deepEqual(queryAll(m.container, '.lc-turn-label').map(l => l.textContent), ['1', '0'])
 
@@ -87,7 +83,6 @@ describe('ContextView — overview face', () => {
     const surface = query(m.container, '.lc-chart')
     pinRect(surface, 400, 130)
     await act(async () => {
-    // Plot y 42 (clientY 60) is the tools band in every record: 100..300 tokens of the 420 max.
       surface.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 200, clientY: 60 }))
     })
     await flush()

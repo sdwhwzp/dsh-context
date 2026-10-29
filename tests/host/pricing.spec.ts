@@ -60,14 +60,11 @@ describe('estimateCallTokens', () => {
 
 describe('estimateMessage', () => {
   test('text, reasoning, tool-call, retired wrapper and unknown blocks price their own arm plus block and role overhead', () => {
-    // 16 chars → 4, +4 block, +4 role
     assert.equal(estimateMessage({ content: [{ type: 'text', text: '0123456789abcdef' }] }), 12)
     assert.equal(estimateMessage({ content: [{ type: 'reasoning', text: '0123456789abcdef' }] }), 12)
     assert.equal(estimateMessage({ content: [{ type: 'text' }] }), 8, 'a text block with no text is overhead only')
-    // 'bash' → 1, '{}' → 1, +4 block, +4 role
     assert.equal(estimateMessage({ content: [{ type: 'tool-call', name: 'bash', arguments: '{}' }] }), 10)
     assert.equal(estimateMessage({ content: [{ type: 'tool-call' }] }), 8)
-    // The supported log generation carries no wrapper blocks; a hostile one prices through the structural-JSON arm.
     for (const block of [
       { type: 'tool-result', content: [{ type: 'text', text: 'ok' }] },
       { type: 'mystery', payload: { a: 1 } },
@@ -122,7 +119,7 @@ describe('imageCountOf', () => {
 
 describe('firstText', () => {
   test('returns the first non-blank text block, whitespace-normalized and truncated to 80', () => {
-    const long = 'word '.repeat(30) // 150 chars
+    const long = 'word '.repeat(30)
     const out = firstText([{ type: 'text', text: long }])
     assert.equal(out.length, 80)
     assert.ok(!out.includes('  '))
@@ -146,7 +143,7 @@ describe('toolCallNames', () => {
       { type: 'tool-call', name: 'bash' },
       { type: 'text', text: 'x' },
       { type: 'tool-call', name: 'read' },
-      { type: 'tool-call' }, // no name: skipped
+      { type: 'tool-call' },
     ]), ['bash', 'read'])
     assert.deepEqual(toolCallNames(undefined), [])
   })
@@ -187,7 +184,6 @@ describe('isInjection', () => {
     assert.equal(isInjection({ kind: '' }), false)
     assert.equal(isInjection({}), false)
     assert.equal(isInjection({ kind: 'plugin', form: 'notice' }), true)
-    // Any transport form marks an injection even with kind 'user' (the 'user-rpc' spelling).
     assert.equal(isInjection({ kind: 'user', form: 'rpc' }), true)
     assert.equal(isInjection({ form: 'notice' }), true)
   })

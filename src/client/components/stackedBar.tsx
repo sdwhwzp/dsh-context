@@ -3,11 +3,8 @@ import type { PartsPart } from '../categories'
 import type { ContextReserve } from '../reserve'
 import type { ViewKit } from '../viewkit'
 
-/** Entrance-stagger cap: a long DNA band list joins within the cap (`stackedBar.css` delays by `--lc-i`). */
 const STAGGER_CAP = 8
 
-/** Above this many parts the entrance animation is dropped: past it a band is under ~1.5px on the narrowest pane, so
- *  the scale-in cannot be seen, while thousands of CSS animations cost the DNA toggle a few hundred ms of style work. */
 export const SEGMENT_ANIMATION_MAX = 256
 
 interface ReserveMask {
@@ -32,13 +29,8 @@ export interface StackedBarProps {
   hoverKey?: string | null
   onHoverKey?: (key: string | null) => void
   onPickKey?: (key: string) => void
-  /** Minimum width each segment keeps, as a share of the OCCUPIED region. Bands below the floor pin to it and the
-   * rest rescale; the floor caps at the equal split (100/N). Tooltips keep reporting TRUE shares. */
   minBand?: number
-  /** Render the hover tooltip (default true); a mirroring bar turns it off so no tip floats off its own surface. */
   tip?: boolean
-  /** Auto-compaction reserve (reserve.ts derives the geometry): masks tiling the window's tail — headroom, then
-   * output — plus the trigger line when it detaches; in WINDOW tokens, only when `max` is positive. */
   reserve?: ContextReserve
 }
 
@@ -53,15 +45,12 @@ export function makeStackedBar(kit: ViewKit): (props: StackedBarProps) => ReactE
     for (const p of props.parts) total += p.value
     const scale = props.max !== undefined && props.max > total ? props.max : total
     const free = props.max !== undefined && props.max > total ? props.max - total : 0
-    // Segment WIDTHS lay out against the full window (scale), but legend/tooltip percentages are shares of the OCCUPIED total.
     const usedPct = scale > 0 ? total / scale * 100 : 0
     const hovering = props.hoverKey !== null && props.hoverKey !== undefined
     const showBox = free > 0 && hovering
     const pickKey = props.onPickKey
     const minBand = props.minBand !== undefined && props.minBand > 0 ? props.minBand : 0
 
-    // Segments with their BAR-unit widths, floored in occupied units: pinned bands take the floor, the rest rescale.
-    // The floor ≤ 100/N keeps one band unpinned, so `restRaw` never divides by zero.
     const visible = total > 0 ? props.parts.filter(p => p.value > 0) : []
     const animate = visible.length <= SEGMENT_ANIMATION_MAX
     const widths = ((): number[] => {
@@ -79,12 +68,9 @@ export function makeStackedBar(kit: ViewKit): (props: StackedBarProps) => ReactE
       return shares.map(s => (s < floor ? floor : s * restRoom / restRaw) * total / scale)
     })()
 
-    // The masks lay out in WINDOW units scaled onto the bar's track, so they keep the same physical slice with or
-    // without a free track; a mask too narrow to hover is dropped rather than rendered sub-pixel.
     const win = props.max !== undefined && props.max > 0 ? props.max : undefined
     const reserve = win === undefined ? undefined : props.reserve
     const trackPct = (tokens: number): number => Math.round(Math.max(0, Math.min(100, tokens / scale * 100)) * 10) / 10
-    // Read the trigger off the same projection the masks use — clamped to the window, so no impossible percent reaches the copy.
     const triggerPct = reserve === undefined ? 0 : trackPct(reserve.threshold)
     const masks: ReserveMask[] = []
     let triggerDetached = false
@@ -108,8 +94,6 @@ export function makeStackedBar(kit: ViewKit): (props: StackedBarProps) => ReactE
     }
     const leaveReserve = (): void => { setReserveOn(null) }
 
-    // The tooltip is DERIVED from the shared hover key (a legend chip and its segment light the same one); a hovered
-    // reserve piece overrides the slot. Every figure names its denominator: segments share USED, the free/trigger WINDOW.
     let tip: BarTip | null = null
     const hoveredMask = reserveOn === null ? undefined : masks.find(m => m.key === reserveOn)
     if (reserveOn === 'trigger' && reserve !== undefined && triggerDetached) {
@@ -138,7 +122,6 @@ export function makeStackedBar(kit: ViewKit): (props: StackedBarProps) => ReactE
         }
       } else {
         let acc = 0
-        // Counts come from the part's heuristic `raw` figure; widths ride the floored `widths` so the tip centers on the RENDERED segment.
         let rawTotal = 0
         for (const p of props.parts) rawTotal += p.raw ?? p.value
         for (let i = 0; i < visible.length; i++) {
@@ -157,15 +140,12 @@ export function makeStackedBar(kit: ViewKit): (props: StackedBarProps) => ReactE
       }
     }
 
-    // The percentage anchor stays the source of truth; the px shift only fires when the rows would overhang the bar.
-    // Rects, not clientWidth: the latter truncates to a whole pixel and the residue lands back on the overhang.
     useLayoutEffect(() => {
-      // No visible tip → no measurement; reading layout here would flush the whole page's layout for nothing.
       if (tip === null) {
         setTipShift(prev => (prev === 0 ? prev : 0))
         return
       }
-      /* v8 ignore next -- unreachable: the wrap commits its ref before layout effects run. */
+      /* v8 ignore next */
       const wrapW = wrapRef.current === null ? 0 : wrapRef.current.getBoundingClientRect().width
       const tipW = tipRef.current === null ? 0 : tipRef.current.getBoundingClientRect().width
       setTipShift((prev) => {
@@ -194,7 +174,6 @@ export function makeStackedBar(kit: ViewKit): (props: StackedBarProps) => ReactE
           }}
         >
           {visible.map((p, i) => {
-            // Exact-key hover lights the one segment; a part's `group` answers a mirrored CATEGORY hover (DNA bands light per category).
             const on = props.hoverKey !== undefined
               && (props.hoverKey === p.key || (p.group !== undefined && props.hoverKey === p.group))
             return (
@@ -232,13 +211,11 @@ export function makeStackedBar(kit: ViewKit): (props: StackedBarProps) => ReactE
               onMouseLeave={leaveReserve}
             />
           ) : null}
-          {/* Occupied-region frame: painted last to stay above the segments, always mounted so it fades out. */}
           <div
             className={'lc-occupied-box' + (showBox ? ' lc-occupied-box-on' : '')}
             style={{ width: `${usedPct}%` }}
           />
         </div>
-        {/* Always mounted (opacity via `.lc-bar-tip-on`) so it fades in and out; hidden it holds no pointer events. */}
         {props.tip !== false
           ? (
             <div
@@ -266,7 +243,6 @@ export interface LegendProps {
   parts: PartsPart[]
   hoverKey?: string | null
   onHoverKey?: (key: string | null) => void
-  /** Signed figures (Delta mode): the count prints with sign and color, and the share drops out — a signed change has no share. */
   delta?: boolean
 }
 

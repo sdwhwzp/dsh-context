@@ -1,41 +1,30 @@
-/** The durable attachment vocabulary both halves share: one parser normalizes the durable `type:` and the snapshot's `kind:` spellings,
- * so the host can re-prove WHICH attachment a session cites. */
-
 export type AttachmentKind = 'image' | 'file'
 
-/** One attachment block's proven facts; every optional field is re-proved, never borrowed. */
 export interface AttachmentRef {
   kind: AttachmentKind
   attachmentId: string
   name?: string
   bytes?: number
-  /** Images only: the media type verified when the raster was admitted. */
   mediaType?: string
   width?: number
   height?: number
   originalDimensions?: { width: number; height: number }
 }
 
-/** Suffixes the preview column's image viewers claim — the harness's own image-body extensions. */
 const EXTENSION_IMAGE: ReadonlySet<string> = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg',
 ])
 
-/** The leaf of a display name: both separator styles stripped, so a hostile log path never names a file outside the caller's directory. */
 export function leafNameOf(name: string): string {
   return name.slice(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1)
 }
 
-/** The lower-case extension of a display name (no dot), following the harness's own `fileExtension`: a leading dot starts the suffix, so
- * `.env` is `env`. */
 export function attachmentExtension(name: string): string {
   const base = leafNameOf(name)
   const dot = base.lastIndexOf('.')
   return dot < 0 ? '' : base.slice(dot + 1).toLowerCase()
 }
 
-/** Whether a display name's suffix is one the preview column's image viewers claim; an image with another suffix is named by its verified
- * media type instead. */
 export function isImageName(name: string): boolean {
   return EXTENSION_IMAGE.has(attachmentExtension(name))
 }
@@ -52,7 +41,6 @@ function dimensionsOf(value: unknown): { width: number; height: number } | undef
   return width !== undefined && height !== undefined ? { width, height } : undefined
 }
 
-/** One content block → its attachment reference, or null when it is none; re-proves every optional fact. */
 export function attachmentOf(block: unknown): AttachmentRef | null {
   if (block === null || typeof block !== 'object') return null
   const b = block as { type?: unknown; kind?: unknown; attachment?: unknown }
@@ -87,7 +75,6 @@ export function attachmentOf(block: unknown): AttachmentRef | null {
   }
 }
 
-/** Every attachment of one message content, in the message's own order; a malformed block drops out instead of throwing. */
 export function attachmentsIn(content: unknown): AttachmentRef[] {
   if (!Array.isArray(content)) return []
   const out: AttachmentRef[] = []

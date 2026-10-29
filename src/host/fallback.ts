@@ -1,8 +1,3 @@
-/** The baseline gate's fallback units: below the baseline the plugin registers these INSTEAD of the real folds —
- * `apply` is the identity over an opaque empty state and `view` serves a fixed value carrying the gate record
- * (`unsupported`). They also carry the pre-0.1.1 top-level `schema` + `view` aliases those registries read, and
- * `stateVersion` stays 1 so a downgrade/upgrade refolds cleanly. */
-
 import { z } from 'zod'
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import type { WiredProjection } from './projection'
@@ -11,7 +6,6 @@ import { contextActivitySchema } from './activity'
 import { contextHeadersSchema } from './headers'
 import { contextTimelineSchema } from './timeline'
 
-/** The opaque fold state: the gate folds nothing, so any cached row seeds it and the plain-JSON cache gate holds. */
 const fallbackStateSchema = z.object({})
 type FallbackState = z.infer<typeof fallbackStateSchema>
 

@@ -4,20 +4,15 @@ export interface SliceRow {
   key: string
   color: string
   label: string
-  /** Preformatted share, e.g. '84%' or '—'. */
   pct: string
-  /** Preformatted secondary line; empty omits it. */
   count: string
-  /** Native tooltip override for the row and its label; absent falls back to the label. */
   tip?: string
-  /** A zero-figure slice dims whole; the owning card decides whether its row still renders. */
   dim?: boolean
 }
 
 export interface SliceListProps {
   rows: SliceRow[]
   hoverKey?: string | null
-  /** Absent renders the rows inert. */
   onHoverKey?: (key: string | null) => void
 }
 

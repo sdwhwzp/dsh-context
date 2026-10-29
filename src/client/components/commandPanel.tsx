@@ -19,29 +19,19 @@ import type { CommandFill } from './useCommandLog'
 
 export interface CommandPanelProps {
   commands: Command[]
-  /** Whole-log tallies (survive list trimming); absent = the retained list counts itself. */
   stats?: CommandStats
-  /** Set when the log trimmed: the list may still be filling toward the log's start. */
   floor?: number
-  /** The history fill's status; absent = the served list is final. */
   fill?: CommandFill
   workspace?: string
-  /** The turn/step whose request first carried a run's result node, by node seq; absent = rows print no stamps. */
   stampOf?: (seq: number) => { turn: number; step: number } | null
-  /** Reveal the run's result message in the Context Browser; absent = no reveal affordance. */
   onLocate?: (rec: Command) => void
-  /** A one-shot program lens the panel opens with (the stats card's command chip). */
   focusProgram?: string | null
   onFocusProgramHandled?: () => void
-  /** On-demand content for one surface-node seq; absent = the detail serves no result block. */
   fetchContent?: ContentFetcher
   state?: DetailState
   onRetry?: () => void
 }
 
-/** Command text as its highlight runs (one span per run), or the plain text when no run set reached the renderer. The
- *  runs carry the text verbatim, so browser find, select-all, the copy control and the panel's find lens all read the
- *  same characters they would without coloring. */
 function CmdText(props: { text: string; runs: readonly HighlightSpan[][] | undefined }): ReactElement {
   const { runs } = props
   if (runs === undefined) return <>{props.text}</>
@@ -64,7 +54,6 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
 
   const FILTERS: readonly CommandFilter[] = ['all', 'failed', 'slow', 'background']
   const SORTS: readonly CommandSort[] = ['latest', 'slowest']
-  /** Below this many matched rows the full list stays in the DOM (browser find, select-all); above it the list windows. */
   const WINDOW_MIN_ROWS = 100
 
   function statusGlyphOf(rec: Command): { glyph: string; cls: string; tip: string } {
@@ -74,7 +63,6 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     return { glyph: '🛑', cls: 'kill', tip: t(rec.stopped === true ? 'cmds.status.stopped' : 'cmds.status.killed') }
   }
 
-  /** One section card carrying the browser's copy + find pair; the find lens marks matches inside the keyed body only. */
   function FindCard(props: {
     label: string
     text: string
@@ -98,7 +86,6 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
         </>}
       >
         {find.bar}
-        {/* Keyed by the text itself: a content change remounts the body outright, so React never diffs over the find bar's DOM marks. */}
         <div key={find.bodyKey} ref={find.bodyRef}>{props.children}</div>
         {props.trailing}
       </Section>
@@ -106,10 +93,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
   }
 
   return memo(function CommandPanel(props: CommandPanelProps): ReactElement {
-    // The memo must not block a locale switch: the tick re-renders on it even when the props are reference-stable.
     kit.useLocaleTick()
-    // One binding per shell grammar, held for the mount; a lazy grammar (powershell) colors its rows on the load tick,
-    // which the hook's own store subscription drives, and stays plain until then.
     const highlightShell = useCodeHighlighter('bash')
     const highlightPwsh = useCodeHighlighter('powershell')
     const runsOf = (tool: string, text: string): readonly HighlightSpan[][] | undefined => {
@@ -126,8 +110,6 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     const [query, setQuery] = useState('')
     const [programPick, setProgramPick] = useState<string | null>(null)
     const [openSeq, setOpenSeq] = useState<number | null>(null)
-    // The expanded row's result content, read once per target seq through the shared content fetcher (it caches);
-    // `miss` is a seq outside the loaded window, `empty` a node with no text blocks, `failed` a rejected read.
     type ResultRead = { state: 'loading' } | { state: 'miss' } | { state: 'empty' } | { state: 'failed' } | { state: 'ready'; text: string }
     const [results, setResults] = useState<Partial<Record<number, ResultRead>>>({})
     const openRec = openSeq === null ? undefined : commands.find(rec => rec.seq === openSeq)
@@ -150,8 +132,6 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
 
     const q = query.trim().toLowerCase()
     const views = useMemo(() => viewsOf(commands, props.workspace), [commands, props.workspace])
-    // The chip counts describe the search + picked-program scope (what picking a chip would show); the chip then
-    // narrows the list. The rail's ranking and attention facts stay session-wide, so no list control moves them.
     const searched = useMemo(() => views.filter(view => matchesQuery(view.rec, q, view.programs)), [views, q])
     const picked = useMemo(
       () => (programPick === null ? searched : searched.filter(view => view.programs.includes(programPick))),
@@ -174,7 +154,6 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     }), [picked])
     const programs = useMemo(() => programsOf(views), [views])
     const attention = useMemo(() => attentionOf(views), [views])
-    // A trimmed or refreshed log can drop a picked program; clearing the pick keeps the list from sticking empty.
     useEffect(() => {
       if (programPick === null || programs.some(p => p.name === programPick)) return
       setProgramPick(null)
@@ -183,15 +162,14 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     const listRef = useRef<HTMLDivElement | null>(null)
     const [rowPitch, setRowPitch] = useState(0)
     const [rowGap, setRowGap] = useState(0)
-    // Fixed-height rows, so one measured pitch holds for the mount.
     const measured = useRef(false)
     useEffect(() => {
       if (measured.current || openSeq !== null || shown.length < WINDOW_MIN_ROWS) return
       const el = listRef.current
-      /* v8 ignore next 1 -- the list renders whenever `shown` is non-empty; the guard covers a mid-swap render. */
+      /* v8 ignore next 1 */
       if (el === null) return
       const items = [...el.querySelectorAll<HTMLElement>('.lc-cmd-item')]
-      /* v8 ignore next 1 -- the committed full-list render is what arms this effect. */
+      /* v8 ignore next 1 */
       if (items.length !== shown.length) return
       measured.current = true
       const rects = items.map(item => item.getBoundingClientRect())
@@ -199,7 +177,7 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
       const uniform = height > 4 && rects.every(r => Math.abs(Math.round(r.height) - height) <= 1)
       if (!uniform) return
       const pitch = rects[1].top - rects[0].top
-      /* v8 ignore next 1 -- uniform rows taller than 4px always pitch past 4px. */
+      /* v8 ignore next 1 */
       if (Number.isFinite(pitch) && pitch > 4) {
         setRowPitch(Math.round(pitch))
         setRowGap(Math.max(0, Math.round(pitch - height)))
@@ -208,11 +186,9 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     const windowed = openSeq === null && rowPitch > 0 && shown.length >= WINDOW_MIN_ROWS
     const rowRange = useRowWindow(listRef, shown.length, rowPitch, windowed)
     const lastRow = Math.max(0, shown.length - 1)
-    // A filter/sort can shrink the list under a stale range for one render; clamping keeps the window non-empty.
     const windowFrom = Math.min(rowRange.from, lastRow)
     const windowTo = Math.min(rowRange.to, lastRow)
     const [progQuery, setProgQuery] = useState('')
-    /** A rail preview keeps to a tight budget; the full text is one click into the row. */
     const railPreview = (cmd: string): string => {
       const first = previewTextOf(cmd, props.workspace)
       return first.length > 34 ? first.slice(0, 34) + '…' : first
@@ -223,25 +199,20 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
       (patch.query ?? '') === query &&
       (patch.sort ?? 'latest') === sort &&
       (patch.program ?? null) === programPick
-    /** A rail lens is exclusive: it clears every other facet before applying its own. Clicking the active lens again
-     *  clears it outright. */
     const applyLens = (patch: LensPatch): void => {
       setProgramPick(patch.program ?? null)
       setFilter(patch.filter ?? 'all')
       setQuery(patch.query ?? '')
       setSort(patch.sort ?? 'latest')
     }
-    // The search box is the visible text lens: typing releases any program pick it was showing.
     const changeQuery = (value: string): void => {
       setProgramPick(null)
       setQuery(value)
     }
-    /** A program pick writes its name into the search box, so the box never disagrees with the rail's highlight. */
     const pickProgram = (name: string | null): void => {
       setProgramPick(name)
       setQuery(name ?? '')
     }
-    // The stats card's pick is one-shot: hand the slot back so the same program can fire again.
     const focusProgram = props.focusProgram
     useEffect(() => {
       if (focusProgram === undefined || focusProgram === null) return
@@ -265,17 +236,14 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     }
     if (attention.slowest !== undefined) {
       const s = attention.slowest
-      // The box carries the run's first line (a whole multiline script would swamp it); the sort surfaces the run.
       pushAttention({ key: 'slowest', label: t('cmds.rail.slowest'), value: railPreview(s.cmd), n: fmtDuration(s.ms), title: s.cmd }, { query: previewTextOf(s.cmd, props.workspace), sort: 'slowest' })
     }
     if (attention.failing !== undefined) {
       const f = attention.failing
-      // The pick lands on exactly the named program's failures; the text lens also shows the program in the box.
       pushAttention({ key: 'failing', label: t('cmds.rail.failing'), value: f.program, n: '×' + fmt(f.count) }, { filter: 'failed', program: f.program, query: f.program })
     }
     if (attention.repeats !== undefined) {
       const r = attention.repeats
-      // The full text searches exactly the repeated command (a prefix would catch look-alikes).
       pushAttention({ key: 'repeats', label: t('cmds.rail.repeats'), value: railPreview(r.cmd), n: '×' + fmt(r.count), title: r.cmd }, { query: r.cmd })
     }
     if (attention.background !== undefined) {
@@ -284,15 +252,11 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
     }
     const topProgramN = Math.max(1, ...programs.map(p => p.n))
     const pq = progQuery.trim().toLowerCase()
-    // A query keeps its input visible below the threshold: a trimmed or refreshed log can drop the ranking under
-    // it, and an invisible box cannot be cleared. The picked program stays visible so the highlight never disappears.
     const showProgSearch = programs.length > 6 || pq !== ''
     const shownPrograms = programs.filter(p => p.name === programPick || pq === '' || p.name.toLowerCase().includes(pq))
 
     const loadingChannel = commands.length === 0 && props.state === 'loading'
     const failedChannel = commands.length === 0 && props.state === 'failed'
-    // The fill's status sits ahead of the list: below a long list it would never be seen. A completed fill drops the
-    // note — the list then covers the whole log.
     const fillNote = ((): ReactNode => {
       if (props.floor === undefined || commands.length === 0 || fillStatus === 'done') return null
       if (fillStatus === 'loading') {
@@ -322,11 +286,11 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
           <div className="lc-cmd-rail-h" title={t('cmds.rail.summaryTip')}>{t('cmds.rail.summary')}</div>
           <div className="lc-cmd-kpis">
             <div className="lc-cmd-kpi"><b>{fmt(tally.runs)}</b><span>{t('cmds.rail.runs')}</span></div>
+            <div className="lc-cmd-kpi lc-cmd-kpi-time"><b>{totalTime}</b><span>{t('cmds.rail.totalTime')}</span></div>
             <div className="lc-cmd-kpi lc-cmd-kpi-fail">
               <b>{fmt(tally.failed)}</b>
               <span>{t('cmds.rail.failed')}{tally.runs > 0 ? ' · ' + kit.fmtShare(tally.failed, tally.runs) : ''}</span>
             </div>
-            <div className="lc-cmd-kpi lc-cmd-kpi-time"><b>{totalTime}</b><span>{t('cmds.rail.totalTime')}</span></div>
             <div className="lc-cmd-kpi lc-cmd-kpi-bg"><b>{fmt(tally.bg)}</b><span>{t('cmds.rail.background')}</span></div>
           </div>
         </div>
@@ -385,7 +349,6 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
                     <span className="lc-cmd-prog-runs">
                       {t(p.runs === 1 ? 'cmds.rail.programRun' : 'cmds.rail.programRuns', { n: fmt(p.runs) })}
                     </span>
-                    {/* The underline bar is relative to the heaviest program (the Skills list's idiom). */}
                     <i className="lc-cmd-prog-bar" style={{ width: `calc(${Math.round(p.n / topProgramN * 100)}% - ${Math.round(p.n / topProgramN * 12)}px)`, background: color }} />
                   </button>
                 )
@@ -600,7 +563,6 @@ export function makeCommandPanel(kit: ViewKit): ComponentType<CommandPanelProps>
               <div className="lc-empty lc-lane">{t(commands.length === 0 ? 'cmds.empty' : 'cmds.noMatch')}</div>
             ) : (
               <div className="lc-cmd-list" ref={listRef}>
-                {/* One stable fragment: branching to a separate fragment for the pads would remount every row. */}
                 {windowed && windowFrom > 0
                   ? <div className="lc-row-pad" style={{ height: Math.max(0, windowFrom * rowPitch - rowGap) }} aria-hidden="true" />
                   : null}

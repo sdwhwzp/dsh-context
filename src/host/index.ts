@@ -1,7 +1,3 @@
-/** Host-half package entry: a plain Cordis plugin module loaded as the `dsh-context` loader row. The projection units
- * register on `ctx.sessionProjections` (REQUIRED — Cordis keeps this plugin pending until it exists); the detail
- * channel serves the heavy collections per viewing client, keeping the wire value a slim head. */
-
 import type { Context } from '@deepseek-ai/cordis'
 import { createContextActivityDefinition } from './activity'
 import { watchAttachmentChannel } from './attachment'
@@ -26,18 +22,13 @@ export const name = 'dsh-context'
 
 export const inject = ['sessionProjections']
 
-/** Re-exported as both value (the cordis validator) and type (the resolved config shape). */
 export { Config } from './config'
 export function apply(ctx: Context, config: Config): void {
-  // One host-wide cold-read gate: every on-demand log read shares one FIFO admission. Routes MUST arm before the baseline gate's early
-  // return below — they work on either side of it.
   const coldReads = makeColdReadGate()
   watchBalanceChannel(ctx)
   watchSkillCatalog(ctx, coldReads)
   watchFleetChannel(ctx, coldReads)
   watchAttachmentChannel(ctx, coldReads)
-  // Below the baseline: fallback units serve zeroed data plus the gate record, never the real folds; an undetectable version fails open
-  // into the normal composition below (docs/compatibility.md §2).
   const harnessVersion = detectHarnessVersion(ctx)
   if (harnessVersion !== undefined && !meetsBaseline(harnessVersion)) {
     ctx.sessionProjections.register(createFallbackTimelineDefinition(harnessVersion) as never)
@@ -45,10 +36,8 @@ export function apply(ctx: Context, config: Config): void {
     ctx.sessionProjections.register(createFallbackActivityDefinition() as never)
     return
   }
-  // Additive over toolSources.ts's static chain; an unsupported cordis or a missed read degrades to it.
   const attribution = createToolAttribution(ctx)
   watchStepIdentity(ctx)
-  // The unit's view reads the gate per serve: slim wire while the detail channel is live, inline otherwise.
   const gate = watchDetailChannel(ctx, resolveBounds(config), coldReads)
   watchCommandPageChannel(ctx, resolveBounds(config), coldReads)
   ctx.sessionProjections.register(createContextTimelineDefinition(config, () => gate.live))

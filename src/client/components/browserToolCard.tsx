@@ -59,7 +59,6 @@ export function TextSection(props: {
       meta={<span className="lc-ts-card-meta">{props.lines(lineCount)}</span>}
     >
       {find.bar}
-      {/* Keyed by the text itself: a content change remounts the body outright, so React never diffs over the find bar's DOM marks. */}
       <div key={find.bodyKey} ref={find.bodyRef}>
         <rich.RichText text={props.text} mode={mode} />
       </div>
@@ -67,7 +66,6 @@ export function TextSection(props: {
   )
 }
 
-/** The raw schema is untrusted log data: a cyclic or throwing value degrades to no matchable text. */
 export function schemaTextOf(schema: unknown): string {
   try {
     return JSON.stringify(schema ?? '')
@@ -76,7 +74,6 @@ export function schemaTextOf(schema: unknown): string {
   }
 }
 
-/** Shared row-filter toolbar; it stays mounted on an empty match so the filter can always be cleared. */
 export function RowToolbar(props: {
   value: string
   placeholder: string
@@ -138,7 +135,6 @@ export function ToolSchema(props: {
     }
     return out
   }, [params])
-  // Pretty-printed only while open: eagerly stringifying every collapsed row dominated the section's render cost.
   const schemaJson = useMemo(
     () => jsonOpen ? JSON.stringify(props.schema, null, 2) : '',
     [props.schema, jsonOpen],
@@ -178,9 +174,6 @@ export interface DetailLabels {
   callState: (err: boolean, exit: number | null) => ReactNode
 }
 
-/** Both block vocabularies normalize here — raw durable blocks (`type`) and snapshot assistant blocks (`kind`). Every
- * attachment block collects into ONE ordered group, rendered where the first of them sits (attachments above the text,
- * as the chat arranges them); nested tool-result blocks flatten into the same flow. */
 export function BlocksBody(props: {
   blocks: readonly unknown[]
   textLabel: string
@@ -246,9 +239,6 @@ export function BlocksBody(props: {
   return <>{out}</>
 }
 
-/** dsh shell tools append trailing status markers while `isError` stays false: `[exit code: N]`, `[killed by signal: X]`,
- * `[shell killed by signal: X]`, `[shell exited: code N]`, and job_output's `[status: killed|failed]`. Parsed end-anchored
- * like dsh's own parseExitStatus, so marker text quoted inside the output is not a failure; a clean exit is a notice. */
 function tailStatusOf(conv: ConversationNodeLike | undefined): { fail: boolean; exit: number | null } {
   if (conv === undefined || !Array.isArray(conv.content)) return { fail: false, exit: null }
   for (const b of conv.content) {
@@ -271,8 +261,6 @@ function tailStatusOf(conv: ConversationNodeLike | undefined): { fail: boolean; 
   return { fail: false, exit: null }
 }
 
-/** The fold-stamped `err`/`isError` (infrastructure failures) or a trailing status marker; dsh settles a failing
- * COMMAND as a completed call, so the marker is the only failure signal — a timeout stays a notice, as in the chat. */
 export function toolErrOf(node: SurfaceNode, conv: ConversationNodeLike | undefined): { err: boolean; exit: number | null } {
   const tail = tailStatusOf(conv)
   const err = node.err === true || conv?.isError === true || tail.fail
@@ -303,8 +291,7 @@ export function ToolCallCard(props: {
 
 function CallArgRow(props: { name: string; value: unknown }): ReactElement {
   const v = props.value
-  /* v8 ignore next 2 -- the only caller maps Object.keys of a JSON.parse'd
-     object, which never holds undefined values; defensive. */
+  /* v8 ignore next 2 */
   const text = typeof v === 'string' ? v
     : v === undefined ? ''
       : JSON.stringify(v)

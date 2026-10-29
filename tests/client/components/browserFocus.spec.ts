@@ -124,7 +124,6 @@ describe('ContextBrowser open-category reporting', () => {
     const onOpenCat = (c: string | null): void => { opens.push(c) }
     let handled = 0
     const m = await mount(h(Browser, props({ data, onOpenCat })))
-    // The Answers figure: assistant open, the answer chip picked; the tool-call-only row filters out.
     await m.update(h(Browser, props({
       data,
       onOpenCat,
@@ -141,7 +140,6 @@ describe('ContextBrowser open-category reporting', () => {
     const shownRows = queryAll(assistantCat, '.lc-br-elem')
     assert.equal(shownRows.length, 1, 'only the textual reply survives the answer filter')
     assert.ok(text(shownRows[0]).includes('an answer'))
-    // The Skill Loads figure: skill open, no chip picked, lens cleared.
     await m.update(h(Browser, props({
       data,
       onOpenCat,

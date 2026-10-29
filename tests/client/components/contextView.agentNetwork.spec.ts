@@ -1,5 +1,3 @@
-// The card's own session stats can only arrive from the view's projections: a list row carries no subagent timing.
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -8,8 +6,6 @@ import { TestClientCtx } from '../helpers/harness'
 import { click, mount, query, queryAll, text } from '../helpers/kit'
 import { makeView, projectionsFor, richTimeline } from './contextViewHarness'
 
-/** The sessions face's one row; getSnapshot returns the SAME object — `useSyncExternalStore` loops on a
- *  fresh snapshot per read. */
 function selfOnly() {
   const snapshot = { byId: { 'sv-self': { displayTitle: 'Main Agent', running: false, blank: false, updatedAt: 1 } } }
   return { list: { getSnapshot: (): unknown => snapshot, subscribe: (): (() => void) => () => {} } }
@@ -23,7 +19,6 @@ describe('ContextView — the agent network card\'s own session', () => {
     const m = await mount(h(View, { sessionId: 'sv-self', host: 'sidebar', useProjection: projectionsFor(richTimeline({ timing: TIMING })) }))
     const self = query(m.container, '.lc-agent-card.lc-agent-self')
     assert.equal(text(self).includes('Main Agent'), true)
-    // Three steps come from richTimeline; 6m27s is TIMING.wallMs.
     assert.equal(query(self, '.lc-agent-meta-text').textContent, '6m27s · 3 steps')
     await m.unmount()
 

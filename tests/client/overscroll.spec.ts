@@ -3,7 +3,6 @@ import { describe, test } from 'vitest'
 import { containHorizontalOverscroll } from '../../src/client/overscroll'
 import { wheel } from './helpers/kit'
 
-/** A div with test-controlled scroll metrics (jsdom lays nothing out). */
 function scroller(scrollLeft: number, clientWidth: number, scrollWidth: number): HTMLDivElement {
   const el = document.createElement('div')
   let left = scrollLeft

@@ -1,7 +1,3 @@
-/** Block map under the composition bar: a squarified treemap of the shown step (treemap.ts builds the grouped blocks).
- * Layout is measured in px and re-run on pane drags; the hover bubble anchors INSIDE the panel, so page scroll never
- * detaches it (the stackedBar tip's trick). */
-
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react'
 import type { Assembled } from '../assemble'
 import { CAT_COLOR } from '../categories'
@@ -11,9 +7,7 @@ import { mapOf, squarify, type MapBlock, type MapCat } from '../treemap'
 export interface BrowserTreemapProps {
   view: Assembled
   openCat: string | null
-  /** Incoming shared composition hover (a category key, live only). */
   hoverKey?: string | null
-  /** Present only on the live step: a block hover reports its category upward. */
   onHoverKey?: (key: string | null) => void
   onPickCat: (cat: string) => void
   onPickBlock: (cat: string, block: MapBlock) => void
@@ -30,26 +24,21 @@ export function MapIcon(): ReactElement {
   )
 }
 
-/** First-paint and jsdom canvas, replaced by the measured box on the first layout effect. */
 const FALLBACK_W = 640
 const FALLBACK_H = 240
 
 const GAP = 2
-const FRAME = 1 // the region border width, mirrored in browser.css
+const FRAME = 1
 const PAD = 2
 const HEAD = 16
-// A region smaller than this drops its header strip; its blocks fill the frame.
 const HEAD_MIN_W = 56
 const HEAD_MIN_H = 40
 const LABEL_MIN_W = 42
 const LABEL_MIN_H = 22
 const NUM_MIN_H = 36
-// Regions/blocks below this floor render nothing; the color still reads through the survivors.
 const MIN_RECT = 6
-// A block hugging the panel's top flips its bubble below the block.
 const TIP_FLIP_Y = 64
 
-/** One laid block: `sx/sy/sw/sh` style coords (region padding-box space), `px/py` the panel-coords anchor. */
 interface LaidBlock {
   b: MapBlock
   sx: number
@@ -125,18 +114,16 @@ export function makeBrowserTreemap(kit: ViewKit): (props: BrowserTreemapProps) =
     let total = 0
     for (const c of cats) total += c.tokens
 
-    // No-deps measure after every render (the same-value bail-out keeps it loopless); the ResizeObserver
-    // tick covers pane drags, which change no prop. jsdom lays nothing out, so the fallback canvas stands in.
     useLayoutEffect(() => {
       const el = wrapRef.current
-      /* v8 ignore next 1 -- the panel commits its ref before layout effects run. */
+      /* v8 ignore next 1 */
       if (el === null) return
       const r = el.getBoundingClientRect()
       const w = Math.round(r.width)
       const h = Math.round(r.height)
       setSize(prev => (prev.w === w && prev.h === h ? prev : { w, h }))
     })
-    /* v8 ignore start -- jsdom has no ResizeObserver; the re-measure path is the layout effect above. */
+    /* v8 ignore start */
     useLayoutEffect(() => {
       const el = wrapRef.current
       if (el === null || typeof ResizeObserver !== 'function') return
@@ -148,8 +135,6 @@ export function makeBrowserTreemap(kit: ViewKit): (props: BrowserTreemapProps) =
 
     const tree = layoutTree(cats, size.w > 0 ? size.w : FALLBACK_W, size.h > 0 ? size.h : FALLBACK_H)
 
-    // The hover bubble derives from the hover key, so a push removing the hovered block drops the tip
-    // instead of floating a stale one (the composition bar's invariant).
     let tip: MapTip | null = null
     if (tipKey !== null) {
       const catHit = tree.find(lc => 'cat:' + lc.c.cat === tipKey)
@@ -161,7 +146,6 @@ export function makeBrowserTreemap(kit: ViewKit): (props: BrowserTreemapProps) =
         }
       }
       if (catHit !== undefined) {
-        // A hit exists only while the map is non-empty, so the map's token total is nonzero here.
         const pct = Math.round(catHit.c.tokens / total * 100)
         let items = 0
         for (const b of catHit.c.blocks) items += b.count
@@ -186,7 +170,6 @@ export function makeBrowserTreemap(kit: ViewKit): (props: BrowserTreemapProps) =
       }
     }
 
-    // Horizontal clamp, the stackedBar pattern: the px shift fires only when the bubble would overhang.
     useLayoutEffect(() => {
       const wrapW = wrapRef.current === null ? 0 : wrapRef.current.getBoundingClientRect().width
       const tipW = tipRef.current === null ? 0 : tipRef.current.getBoundingClientRect().width

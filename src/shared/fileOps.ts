@@ -1,6 +1,3 @@
-/** The ONE derivation of "what the agent did to files" from a settled file-tool call: the host fold books the op log
- * and the client's inline fallback re-derives the same ops; line deltas are estimates off the call ARGUMENTS, never results. */
-
 import type { FileOpRecord } from './types'
 
 export function parseCallArgs(raw: unknown): Record<string, unknown> | null {
@@ -29,8 +26,6 @@ export function kindOfTool(tool: string | undefined): FileOpRecord['kind'] | nul
   return KIND_BY_TOOL[tool] ?? null
 }
 
-/** The file purpose of one executed call: `str_replace_editor` reads on `view` and writes otherwise (an unknown command's call failed,
- * keeping its error flag). */
 export function kindOfCall(tool: string, args: Record<string, unknown> | null): FileOpRecord['kind'] | null {
   if (tool === 'str_replace_editor') return args !== null && args.command === 'view' ? 'read' : 'write'
   return kindOfTool(tool)
@@ -44,7 +39,6 @@ export function rawArgsNeeded(tool: string): boolean {
   return opBearingTool(tool) || tool === 'run_code'
 }
 
-/** The operation's target path; for a pathless search it is the searched pattern itself. */
 export function pathOfArgs(tool: string, args: Record<string, unknown> | null): string | null {
   if (args === null) return null
   if (tool === 'grep' || tool === 'glob') {
@@ -74,8 +68,6 @@ function pairOf(added: unknown, removed: unknown): { added: number; removed: num
   }
 }
 
-/** The signed line footprint: an edit removes its old string and adds its new one; a write adds alone (the pre-existing body is
- * unknowable from the arguments). */
 function deltaOf(tool: string, args: Record<string, unknown>): { added: number; removed: number } {
   if (tool === 'edit') return pairOf(args.new_string, args.old_string)
   if (tool === 'write') return pairOf(args.content, undefined)
@@ -116,8 +108,6 @@ function searchDetailOf(args: Record<string, unknown> | null): string | undefine
   return typeof include === 'string' && include !== '' ? `${pattern} (${include})` : pattern
 }
 
-/** The files a search demonstrably reached, off the result's presentation meta (grep groups matched
- * lines by file; glob lists paths). Only a COMPLETE list attributes — a capped or malformed meta names none. */
 function searchFilesOf(meta: unknown): { path: string; hits: number }[] | null {
   if (meta === null || typeof meta !== 'object') return null
   const m = meta as { shape?: unknown; truncated?: unknown; files?: unknown; paths?: unknown }
@@ -139,7 +129,6 @@ function searchFilesOf(meta: unknown): { path: string; hits: number }[] | null {
   return files.length > 0 ? files : null
 }
 
-/** A dispatch carries no meta, so its read window and per-file attribution degrade to the argument-only forms. */
 export function opsOfCall(input: {
   seq: number
   tool: string
@@ -151,7 +140,6 @@ export function opsOfCall(input: {
   parent?: number
   program?: string
 }): FileOpRecord[] {
-  // A non-op-bearing tool's arguments are never parsed — they can be a large bash/pwsh payload.
   const args = opBearingTool(input.tool) ? parseCallArgs(input.argsRaw) : null
   const kind = kindOfCall(input.tool, args)
   if (kind === null) return []
@@ -168,8 +156,6 @@ export function opsOfCall(input: {
     ...(input.parent !== undefined ? { parent: input.parent } : {}),
     ...(input.program !== undefined ? { program: input.program } : {}),
   }
-  // A COMPLETE meta rows per real file AND the call's own target ("searched" and "hit" both count),
-  // except a single-file search whose target IS the sole matched file.
   if (kind === 'search') {
     const files = searchFilesOf(input.meta)
     if (files !== null) {

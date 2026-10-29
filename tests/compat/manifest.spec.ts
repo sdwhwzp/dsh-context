@@ -1,6 +1,3 @@
-// Lockstep gate: the supported set is declared in the manifest, the baseline matrix and the CI tag fetches; a bump that
-// updates only some of them fails here instead of desyncing silently. Always-on: no dsh checkout or built artifacts needed.
-
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, test } from 'vitest'

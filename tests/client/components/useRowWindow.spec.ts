@@ -42,7 +42,6 @@ describe('useRowWindow', () => {
       assert.equal(el.dataset.from, '0')
       assert.equal(el.dataset.to, '49')
       Object.defineProperty(el, 'clientHeight', { configurable: true, value: 100 })
-      // The effect re-reads the box on a list change.
       await m.update(h(Probe, { count: 51, enabled: true }))
       await until(() => query<HTMLElement>(m.container, 'div').dataset.to !== '50', 'window measures the viewport')
       assert.equal(el.dataset.from, '0')

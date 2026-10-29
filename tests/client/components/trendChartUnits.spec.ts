@@ -85,14 +85,11 @@ describe('TrendChart entrance rise', () => {
     const ups = queryAll(delta.container, '.lc-bar-up')
     const downs = queryAll(delta.container, '.lc-bar-down')
     assert.deepEqual([slot(ups[0]), slot(ups[1]), slot(downs[1])], ['0', '1', '1'], 'delta arms share their bar rise stagger slot')
-    // The first bar diffs against nothing, so it grows no down arm.
     assert.equal(queryAll(downs[0], 'div').length, 0)
     await delta.unmount()
   })
 
   test('switching granularity remounts every bar so the entrance rise replays', async () => {
-    // A turn aggregate is its last step's record (same seq): without the granularity-keyed remount,
-    // the step bars would reuse the aggregate's DOM node and not rise.
     function GranularityHarness(props: { requests: RequestRecord[] }) {
       const [granularity, setGranularity] = useState<'step' | 'turn'>('turn')
       const display = granularity === 'turn' ? aggregateByTurn(props.requests) : props.requests
@@ -119,7 +116,6 @@ describe('attachMarkers', () => {
     assert.equal(markers.length, 2)
     assert.equal(markers[0], undefined)
     assert.equal(markers[1], ev)
-    // `new Array(n)` leaves holes: an event that never matches assigns no index at all.
     assert.equal(Object.keys(attachMarkers(reqs, [{ seq: 99, time: 0, kind: 'prune' }])).length, 0)
     assert.equal(Object.keys(attachMarkers(reqs, [{ seq: 1, time: 0, kind: 'inject' }])).length, 0)
     assert.equal(attachMarkers([], [{ seq: 1, time: 0, kind: 'compaction' }]).length, 0)

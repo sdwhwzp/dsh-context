@@ -35,7 +35,6 @@ describe('assistant reasoning accounting', () => {
       content: [reasoning('think'), ...text('reply')],
     })])
     const node = drive.state.surface.at(-1)
-    // 'think' and 'reply' are 5 chars: ceil(5/4) + 4 block overhead each; the role adds 4.
     assert.deepEqual([node?.tokens, node?.reasoning], [16, 6])
     assert.equal(drive.state.sums.assistant, 16)
     assert.equal(drive.state.assistantReasoning, 6)
@@ -105,8 +104,6 @@ describe('applySurface tool/result branch', () => {
       toolResult(2, { callId: 'c1', content: text('boom'), error: true }),
     ]).state.surface.at(-1)
     assert.deepEqual([flagged?.err, flagged?.tool], [true, 'bash'], 'the message mark flags while the source callId still pairs')
-    // The pre-V4 spelling (an event-level `data.error` with no message mark) is unreachable through the
-    // supported harnesses' admission validation; a hostile replay carrying it degrades to an unflagged node.
     const ev: TimelineEvent = {
       type: 'tool/result', seq: 2, time: at(),
       data: {
@@ -185,7 +182,7 @@ describe('shadow-price claim lifecycle', () => {
 })
 
 describe('surfaceOp variants', () => {
-  const big = 'a'.repeat(16) // 12 tokens: ceil(16/4) + 4 block + 4 role
+  const big = 'a'.repeat(16)
 
   test('a null, non-object, or non-replace surfaceOp appends', () => {
     for (const surfaceOp of [null, 'append', undefined, { op: 'insert', startSeq: 0, endSeq: 0 }]) {
@@ -197,11 +194,11 @@ describe('surfaceOp variants', () => {
 
   test('a replace with an armed claim removes by seqs and rewrites the metering event net-freed, clamped at zero', () => {
     const { state } = driveTimeline([
-      userMessage(1, text(big)), // 12 tokens
-      userMessage(2, text(big)), // 12 tokens
-      userMessage(3, text(big)), // 12 tokens — NOT shadowed, survives the replace
+      userMessage(1, text(big)),
+      userMessage(2, text(big)),
+      userMessage(3, text(big)),
       compaction(4, 'summary', { shadowedTokenCount: 100, shadowedSeqs: [1, 2] }),
-      userMessage(5, text('bbbbbbbb'), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 2 } }), // 10 tokens
+      userMessage(5, text('bbbbbbbb'), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 2 } }),
     ])
     assert.deepEqual(
       [state.surface.map(n => n.seq), state.sums.user, state.archived.map(n => [n.seq, n.gone]), state.events[0].tokens],
@@ -210,9 +207,9 @@ describe('surfaceOp variants', () => {
     )
     assertPlainJson(state)
     const clamped = driveTimeline([
-      userMessage(1, text(big)), // 12 tokens
+      userMessage(1, text(big)),
       compaction(2, 'prune', { shadowedTokenCount: 12, shadowedSeqs: [1] }),
-      userMessage(3, text('x'.repeat(400)), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }), // 108 tokens
+      userMessage(3, text('x'.repeat(400)), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }),
     ]).state
     assert.equal(clamped.events[0].tokens, 0)
     assert.equal(clamped.sums.user, 108)
@@ -220,8 +217,8 @@ describe('surfaceOp variants', () => {
 
   test('the range path splices in place and never rewrites the metering event; missing endpoints append', () => {
     const { state } = driveTimeline([
-      userMessage(1, text('aaaa')), // 9 tokens
-      userMessage(2, text('bbbb')), // 9 tokens
+      userMessage(1, text('aaaa')),
+      userMessage(2, text('bbbb')),
       compaction(3, 'summary', { shadowedTokenCount: 50, shadowedSeqs: [] }),
       userMessage(4, text('cccc'), undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 2 } }),
     ])
@@ -248,7 +245,6 @@ describe('surfaceOp variants', () => {
   })
 
   test('restored state: a claim whose metering event cannot be rewritten skips the rewrite', () => {
-    // A checkpoint restore may carry the claim fields partially — def.apply accepts any TimelineState.
     const def = timelineDef({})
     const base = driveTimeline([userMessage(1, text(big))]).state
     const withoutSeq = def.apply(
@@ -278,7 +274,6 @@ describe('assistant content subsets', () => {
       content: [...text('reply'), reasoning('think'), { type: 'tool-call', name: 'bash', arguments: '{}' }],
     })])
     const node = drive.state.surface.at(-1)
-    // text 6 + reasoning 6 + call 6, plus the role's 4.
     assert.deepEqual([node?.tokens, node?.answerTokens, node?.reasoning, node?.callTokens], [22, 6, 6, 6])
     assert.equal(drive.state.assistantAnswerTokens, 6)
     assert.equal(drive.state.assistantCallTokens, 6)

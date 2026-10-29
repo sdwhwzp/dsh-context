@@ -27,7 +27,6 @@ export function blockSummaryOf(conv: ConversationNodeLike | undefined): string |
   return null
 }
 
-/** The fold keeps `calls` only for text-less replies; a texted reply recovers them via the conversation join. */
 export function callNamesOf(conv: ConversationNodeLike | undefined): string[] {
   if (conv === undefined || !Array.isArray(conv.blocks)) return []
   const names: string[] = []

@@ -31,7 +31,7 @@ describe('timing — step lifecycle', () => {
   test('a step prices its TTFT, generation, and wall time, then disarms the slot', () => {
     const { state } = driveTimeline(step(1, 10_000, 2_000, { tokenMs: 600 }))
     assert.deepEqual(state.timing, {
-      wallMs: 6_000, ttftMs: 600, genMs: 1_400, calls: 1, toolsMs: 0, toolCalls: 0, tools: {},
+      wallMs: 6_000, ttftMs: 600, genMs: 1_400, calls: 1, toolsMs: 0, toolBusyMs: 0, toolCalls: 0, tools: {},
     })
     assert.equal(state.stepStart, undefined, 'step/end consumes the pending slot')
   })
@@ -92,11 +92,42 @@ describe('timing — tool call durations', () => {
       toolResult(5, { callId: 'c2', content: text('ok'), time: 9_000 }),
     ])
     assert.deepEqual(drive.states[2].timing, {
-      wallMs: 0, ttftMs: 0, genMs: 0, calls: 0, toolsMs: 3_500, toolCalls: 1,
+      wallMs: 0, ttftMs: 0, genMs: 0, calls: 0, toolsMs: 3_500, toolBusyMs: 0, toolCalls: 1,
       tools: { bash: { calls: 1, ms: 3_500 } },
     })
     assert.equal(drive.state.timing?.toolsMs, 3_500 + 4_000)
     assert.deepEqual(drive.state.timing?.tools, { bash: { calls: 2, ms: 7_500 } })
+  })
+
+  test('the busy union accumulates per step: parallel runs price once, and a cross-step run prices no wall', () => {
+    const { state } = driveTimeline([
+      stepStart(1, { time: 0 }),
+      assistantMessage(2, { time: 1_000 }),
+      { type: 'tool/call', seq: 3, time: 2_000, data: { callId: 'c1', name: 'bash', arguments: '{}' } },
+      { type: 'tool/call', seq: 4, time: 2_000, data: { callId: 'c2', name: 'web_fetch', arguments: '{}' } },
+      toolResult(5, { callId: 'c1', content: text('ok'), time: 8_000 }),
+      toolResult(6, { callId: 'c2', content: text('ok'), time: 8_000 }),
+      stepEnd(7, { time: 9_000 }),
+      { type: 'tool/call', seq: 8, time: 10_000, data: { callId: 'c3', name: 'bash', arguments: '{}' } },
+      toolResult(9, { callId: 'c3', content: text('ok'), time: 12_000 }),
+    ])
+    assert.equal(state.timing?.toolsMs, 6_000 + 6_000 + 2_000, 'the per-call sum keeps the harness parity')
+    assert.equal(state.timing?.toolBusyMs, 6_000, 'the parallel runs share one painted window')
+    assert.ok((state.timing?.toolBusyMs ?? 0) <= (state.timing?.wallMs ?? 0))
+  })
+
+  test('a pre-field timing row folded forward leaves the busy union absent, never partial', () => {
+    const def = timelineDef()
+    const legacy = {
+      ...def.init(),
+      timing: { wallMs: 0, ttftMs: 0, genMs: 0, calls: 0, toolsMs: 0, toolCalls: 0, tools: {} },
+      stepStart: { time: 0 },
+    }
+    let state = def.apply(legacy, { type: 'tool/call', seq: 1, time: 1_000, data: { callId: 'c1', name: 'bash', arguments: '{}' } })
+    state = def.apply(state, toolResult(2, { callId: 'c1', content: text('ok'), time: 2_000 }))
+    state = def.apply(state, stepEnd(3, { time: 3_000 }))
+    assert.equal(Object.hasOwn(state.timing ?? {}, 'toolBusyMs'), false, 'a partial total would undercount the card')
+    assert.equal(state.timing?.toolsMs, 1_000)
   })
 
   test('an unpaired or out-of-order result prices nothing, with no `timing` slot at all', () => {
@@ -113,7 +144,6 @@ describe('timing — tool call durations', () => {
   test('the per-name tally stays bounded: the smallest ms evicts past 16 names', () => {
     const events: TimelineEvent[] = []
     let seq = 1
-    // Tool 't0' is the cheapest (100ms); every later tool is costlier.
     for (let i = 0; i < 17; i++) {
       events.push({ type: 'tool/call', seq: seq++, time: i * 1_000, data: { callId: 'c' + i, name: 't' + i, arguments: '{}' } })
       events.push(toolResult(seq++, { callId: 'c' + i, content: text('ok'), time: i * 1_000 + (i === 0 ? 100 : 5_000) }))
@@ -154,7 +184,6 @@ describe('timing — the generation split (reasoning / text / tool args)', () =>
   })
 
   test('an unstamped call carries no split (its model time is unattributed wholesale)', () => {
-    // Block markers but no token: the call prices no generation time, so its spans must not reappear as generation.
     const { state } = driveTimeline([
       stepStart(1, { time: 0 }),
       assistantMessage(2, {
@@ -195,7 +224,6 @@ describe('timing — the generation split (reasoning / text / tool args)', () =>
         stream: [
           chunkRec(100, { type: 'block-start', index: 0, blockType: 'reasoning' }),
           { type: 'reasoning-chunks', time0: 100, index: 0, dt: [], texts: ['x'] },
-          // The text marker's unusable time anchors no span and counts nothing — the open reasoning block tiles on.
           chunkRec(Number.NaN, { type: 'block-start', index: 0, blockType: 'text' }),
         ],
       }),
@@ -268,7 +296,6 @@ describe('timing — served wire view', () => {
 
   test('a hostile __proto__ tool name books no row and keeps the served view schema-valid', () => {
     const def = timelineDef({})
-    // One hostile tool only: a later tool-run event re-clones the tally through a spread, laundering the damage.
     const drive = driveTimeline([
       toolCall(5, { callId: 'c1', name: '__proto__' }),
       toolResult(6, { callId: 'c1', content: text('ok') }),
@@ -277,9 +304,6 @@ describe('timing — served wire view', () => {
     assert.equal(Object.getPrototypeOf(tools), Object.prototype, 'the tally keeps a plain prototype')
     assert.deepEqual(Object.keys(tools), [], 'the reserved name books no row')
     assert.deepEqual(drive.view.timing?.tools, {}, 'nothing inherited rides the wire')
-    // The consequence this guards: assigning that name sets the prototype instead of a row, so foldWire's
-    // `for...in` copies the inherited `calls`/`ms` as `{}` — which the strict tool-timing schema rejects, and the
-    // registry's drive has no error boundary, so the throw would stall this unit's push feed for good.
     const wire = def as unknown as { wire: { viewSchema: { parse(v: unknown): unknown } } }
     assert.doesNotThrow(() => wire.wire.viewSchema.parse(drive.view))
   })
@@ -288,22 +312,16 @@ describe('timing — served wire view', () => {
     const def = timelineDef({})
     const drive = driveTimeline([
       toolCall(5, { callId: '__proto__', name: 'bash' }),
-      // Any later result runs the pairing-map rebuild: an inherited entry would land as own scalar props.
       toolResult(6, { callId: 'c1', content: text('ok') }),
     ])
     const names = drive.state.callNames ?? {}
     assert.equal(Object.getPrototypeOf(names), Object.prototype, 'the pairing map keeps a plain prototype')
     assert.deepEqual(Object.keys(names), [], 'the reserved id arms no row')
-    // The consequence this guards: assigning that id installs the entry as the map's prototype instead of a row,
-    // so the rebuild's `for...in` copies its name/start as own scalars — which the record-of-objects state schema
-    // rejects on every restore, forcing the session off its checkpoint channel.
     const c = def as unknown as { stateSchema: { parse(s: unknown): unknown } }
     assert.doesNotThrow(() => c.stateSchema.parse(structuredClone(drive.state)))
   })
 
   test('a tool/result citing the reserved id pairs no tool and leaves no undefined property', () => {
-    // driveTimeline's assertNoAbsentMembers fails on any own undefined property, so reaching the assertions below
-    // already proves no `node.tool = undefined` materialized from the prototype lookup.
     const drive = driveTimeline([toolResult(5, { callId: '__proto__', content: text('ok') })])
     const node = drive.state.surface.at(-1)
     assert.ok(node !== undefined && !('tool' in node), 'no own tool property materializes from the prototype')
@@ -316,12 +334,11 @@ describe('timing — served wire view', () => {
       toolCall(5, { callId: 'c1', name: 'bash' }),
       toolResult(6, { callId: 'c1', content: text('ok') }),
       stepEnd(7, { time: 30_000 }),
-      // A step left OPEN with a stamped slot: the final state carries stepStart.{time,firstToken} for the gate.
       stepStart(8, { time: 40_000 }),
       assistantAttempt(9, { stream: [chunkRec(40_100, { type: 'text-delta', text: 'x' })] })])
     const c = def as unknown as { stateSchema: { parse(s: unknown): unknown } }
     for (const state of drive.states) {
-      c.stateSchema.parse(structuredClone(state)) // throws on drift
+      c.stateSchema.parse(structuredClone(state))
       assertPlainJson(state)
     }
     assert.ok(drive.state.stepStart?.firstToken !== undefined, 'the open slot carried the stamp')
@@ -447,7 +464,6 @@ describe('timing — the step\'s active time (user waits priced out)', () => {
     ]).state
     assert.equal(bare.requests.length, 0)
     assert.equal(bare.timing?.wallMs, 5_000)
-    // The seq guard: the open step armed no back-pointer, so the earlier step's record keeps its own stamp untouched.
     const { state } = driveTimeline([
       ...step(1, 0, 1_000, { tokenMs: 200 }),
       stepStart(4, { time: 10_000 }),
@@ -499,5 +515,140 @@ describe('timing — the throughput seat', () => {
       ...step(1, 10_000, 2_000, { tokenMs: 600, usage: { inputTokens: 5 } }),
     ]).state
     assert.deepEqual([outputless.timing?.speedMs, outputless.timing?.speedTokens, outputless.timing?.genMs], [undefined, undefined, 1_400])
+  })
+})
+
+describe('timing — the idle carve (eventless stretches price out of the active figure)', () => {
+  const chunkAt = (time: number): unknown => chunkRec(time, { type: 'text-delta', text: 'x' })
+
+  test('a post-response eventless stretch leaves no span and books idleMs against the wall', () => {
+    const { state } = driveTimeline([
+      stepStart(1, { time: 0 }),
+      assistantMessage(2, { time: 1_000, stream: [chunkAt(100)] }),
+      stepEnd(3, { time: 300_000 }),
+    ])
+    assert.deepEqual([state.timing?.wallMs, state.timing?.idleMs], [300_000, 299_000])
+    assert.deepEqual(state.spans, [
+      { kind: 'ttft', start: 0, end: 100 },
+      { kind: 'other', start: 100, end: 1_000 },
+    ])
+    assert.equal(state.requests[0].activeMs, 300_000, 'the request record keeps its own wait-based figure')
+    assert.equal(Object.hasOwn(state, 'stepBeats'), false, 'the heartbeats are step-transient')
+  })
+
+  test('the quiet wait before the model response stays active — a sent request is active', () => {
+    const { state } = driveTimeline([
+      stepStart(1, { time: 0 }),
+      assistantMessage(2, { time: 300_000 }),
+      stepEnd(3, { time: 301_000 }),
+    ])
+    assert.deepEqual([state.timing?.wallMs, state.timing?.idleMs], [301_000, undefined])
+    assert.deepEqual(state.spans, [{ kind: 'other', start: 0, end: 301_000 }])
+  })
+
+  test('a quiet long-running tool stays busy — a running tool is active by the same rule as a sent request', () => {
+    const { state } = driveTimeline([
+      stepStart(1, { time: 0 }),
+      assistantMessage(2, { time: 1_000, stream: [chunkAt(100)] }),
+      { type: 'tool/call', seq: 3, time: 2_000, data: { callId: 'c1', name: 'bash', arguments: '{}' } },
+      toolResult(4, { callId: 'c1', content: text('ok'), time: 602_000 }),
+      stepEnd(5, { time: 603_000 }),
+    ])
+    assert.deepEqual([state.timing?.wallMs, state.timing?.idleMs, state.timing?.toolBusyMs], [603_000, undefined, 600_000])
+    assert.deepEqual(state.spans, [
+      { kind: 'ttft', start: 0, end: 100 },
+      { kind: 'other', start: 100, end: 2_000 },
+      { kind: 'tools', start: 2_000, end: 602_000 },
+      { kind: 'other', start: 602_000, end: 603_000 },
+    ])
+  })
+
+  test('an approval wait carves the busy window: idle total up, busy union down, activeMs unchanged', () => {
+    const { state } = driveTimeline([
+      stepStart(1, { time: 0 }),
+      assistantMessage(2, { time: 2_000, stream: [chunkAt(200)] }),
+      { type: 'tool/call', seq: 3, time: 3_000, data: { callId: 'c1', name: 'bash', arguments: '{}' } },
+      { type: 'approval/asked', seq: 4, time: 3_500, data: { id: 'a1', toolName: 'bash' } },
+      { type: 'approval/decided', seq: 5, time: 183_500, data: { id: 'a1', outcome: 'allowed-once' } },
+      toolResult(6, { callId: 'c1', content: text('ok'), time: 184_000 }),
+      stepEnd(7, { time: 185_000 }),
+    ])
+    assert.deepEqual([state.timing?.wallMs, state.timing?.idleMs, state.timing?.toolBusyMs, state.timing?.toolsMs], [185_000, 180_000, 1_000, 181_000])
+    assert.deepEqual(state.spans, [
+      { kind: 'ttft', start: 0, end: 200 },
+      { kind: 'other', start: 200, end: 3_000 },
+      { kind: 'tools', start: 3_000, end: 3_500 },
+      { kind: 'tools', start: 183_500, end: 184_000 },
+      { kind: 'other', start: 184_000, end: 185_000 },
+    ])
+    assert.equal(state.requests[0].activeMs, 5_000, 'the wait prices out of the request record as before')
+  })
+
+  test('an ask_user answer wait prices as idle; the per-call tool sum keeps the parity figure', () => {
+    const { state } = driveTimeline([
+      stepStart(1, { time: 0 }),
+      assistantMessage(2, { time: 2_000, stream: [chunkAt(200)] }),
+      { type: 'tool/call', seq: 3, time: 3_000, data: { callId: 'q1', name: 'ask_user_question', arguments: '{}' } },
+      toolResult(4, { callId: 'q1', content: text('answer'), time: 200_000 }),
+      stepEnd(5, { time: 201_000 }),
+    ])
+    assert.deepEqual([state.timing?.wallMs, state.timing?.idleMs, state.timing?.toolBusyMs], [201_000, 197_000, 0])
+    assert.deepEqual(state.timing?.tools, { ask_user_question: { calls: 1, ms: 197_000 } })
+    assert.deepEqual(state.spans, [
+      { kind: 'ttft', start: 0, end: 200 },
+      { kind: 'other', start: 200, end: 3_000 },
+      { kind: 'other', start: 200_000, end: 201_000 },
+    ])
+  })
+
+  test('sub-threshold quiet stays overhead and books no idle total', () => {
+    const { state } = driveTimeline([
+      stepStart(1, { time: 0 }),
+      assistantMessage(2, { time: 1_000, stream: [chunkAt(100)] }),
+      stepEnd(3, { time: 120_000 }),
+    ])
+    assert.deepEqual([state.timing?.wallMs, state.timing?.idleMs], [120_000, undefined])
+    assert.deepEqual(state.spans, [
+      { kind: 'ttft', start: 0, end: 100 },
+      { kind: 'other', start: 100, end: 120_000 },
+    ])
+  })
+
+  test('a hostile step instant closes the step with no beats, no carve, and no span', () => {
+    const { state } = driveTimeline([
+      stepStart(1, { time: 0 }),
+      { type: 'step/end', seq: 2, time: Number.NaN },
+    ])
+    assert.deepEqual([state.timing?.wallMs, state.timing?.idleMs], [0, undefined])
+    assert.deepEqual(state.spans, [])
+    assert.equal(Object.hasOwn(state, 'stepBeats'), false)
+  })
+
+  test('a heartbeat flood skips the carve and keeps the wall figure whole', () => {
+    const events: TimelineEvent[] = [stepStart(1, { time: 0 })]
+    for (let i = 0; i < 1_030; i++) {
+      events.push(toolCall(i + 2, { callId: 'c' + i, name: 'bash', time: 1_000 + i }))
+    }
+    events.push(stepEnd(1_100, { time: 800_000 }))
+    const { state } = driveTimeline(events)
+    assert.equal(state.stepBeatsFull, undefined, 'the flood flag is step-transient too')
+    assert.equal(state.timing?.idleMs, undefined, 'no detection ran, so no idle books')
+    assert.equal(state.timing?.wallMs, 800_000)
+  })
+
+  test('idle carves accumulate across steps and stay plain JSON', () => {
+    const drive = driveTimeline([
+      stepStart(1, { time: 0 }),
+      assistantMessage(2, { time: 1_000, stream: [chunkAt(100)] }),
+      stepEnd(3, { time: 300_000 }),
+      stepStart(4, { time: 400_000 }),
+      assistantMessage(5, { time: 400_500, stream: [chunkAt(400_100)] }),
+      stepEnd(6, { time: 400_600 }),
+    ])
+    assert.deepEqual([drive.state.timing?.wallMs, drive.state.timing?.idleMs], [300_600, 299_000])
+    assertPlainJson(drive.state)
+    const def = timelineDef({})
+    const c = def as unknown as { stateSchema: { parse(s: unknown): unknown } }
+    for (const mid of drive.states) c.stateSchema.parse(structuredClone(mid))
   })
 })

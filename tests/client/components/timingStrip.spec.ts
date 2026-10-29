@@ -10,8 +10,6 @@ const Strip = makeTimingStrip(kit)
 
 const timeOf = (ms: number): string => new Date(ms).toLocaleTimeString('en-GB', { hour12: false })
 
-// A 50-second session window (epoch 1s → 51s) holding 40s of ACTIVE time: the three decode slices, then tools and
-// overhead, with 5s idle gaps between them (21s → 26s, 41s → 46s) that must take NO track on the strip.
 const SPANS: TimingSpan[] = [
   { kind: 'ttft', start: 1_000, end: 6_000 },
   { kind: 'reasoning', start: 6_000, end: 16_000 },
@@ -29,8 +27,6 @@ describe('TimingStrip', () => {
     const m = await mount(h(Strip, { spans: SPANS }))
     const segs = segsOf(m.container)
     assert.equal(segs.length, 5)
-    // Width reads HOW LONG (5/10/5/15/5s of the 40s active total), position reads the running share: the idle
-    // gaps take no track, so tools sits at 50%, not at the wall-clock 62.5%.
     assert.deepEqual(leftsOf(m.container), [0, 12.5, 37.5, 50, 87.5])
     assert.deepEqual(widthsOf(m.container), [12.5, 25, 12.5, 37.5, 12.5])
     assert.deepEqual(segs.map(s => s.style.background), [
@@ -40,7 +36,6 @@ describe('TimingStrip', () => {
       'var(--color-teal-500)',
       'var(--color-slate-400)',
     ])
-    // The axis: zero, the three quartiles, and the full span of the 40s ACTIVE total (not the 50s wall window).
     const ticks = queryAll(m.container, '.lc-tstrip-tick')
     assert.deepEqual(ticks.map(t => t.textContent), ['0', '10.0s', '20.0s', '30.0s', '40.0s'])
     assert.deepEqual(ticks.map(t => (t as HTMLElement).style.left), ['0%', '25%', '50%', '75%', '100%'])
@@ -64,7 +59,6 @@ describe('TimingStrip', () => {
     assert.equal(wrapper.length, 1)
     assert.ok(wrapper[0].className.includes('animate-lc-stacked-in'))
     assert.ok(wrapper[0].className.includes('motion-reduce:animate-none'))
-    // Every band sits INSIDE the wrapper (their percent offsets keep the bar's own box) and carries no animation of its own.
     assert.equal(wrapper[0].querySelectorAll('.lc-tstrip-seg').length, 300)
     assert.deepEqual(queryAll(m.container, '.lc-tstrip-seg').filter(s => /animate-/.test(s.className)), [])
     await m.unmount()
@@ -99,7 +93,6 @@ describe('TimingStrip', () => {
   })
 
   test('every span of the hovered KIND lights together and dims the rest, WITHOUT floating the tip (the mirror rule)', async () => {
-    // A second ttft span inside the idle window: kind grouping ignores wall time.
     const spans: TimingSpan[] = [...SPANS, { kind: 'ttft', start: 21_000, end: 26_000 }]
     const m = await mount(h(Strip, { spans, hoverKey: 'ttft' }))
     const on = queryAll(m.container, '.lc-tstrip-seg-on')
@@ -116,10 +109,8 @@ describe('TimingStrip', () => {
     for (let i = 0; i < 700; i++) spans.push({ kind: i % 2 === 0 ? 'ttft' : 'tools', start: i * 1_000, end: i * 1_000 + 500 })
     let relayed: string | null = 'unset'
     const m = await mount(h(Strip, { spans, onHoverKey: (k) => { relayed = k } }))
-    // Thousands of sub-pixel divs would be pointless: the dense strip paints two gradients instead.
     assert.equal(segsOf(m.container).length, 0)
     const bar = query(m.container, '.lc-tstrip-bar')
-    // A zero-width box cannot answer a hit and keeps the tip closed.
     await act(async () => { bar.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 10 })) })
     await flush()
     assert.equal(queryAll(m.container, '.lc-bar-tip-on').length, 0)

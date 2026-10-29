@@ -1,5 +1,3 @@
-/** The Context panel's placement never gates this tab — only its own switch does. */
-
 import type { Translate } from './i18n'
 import type { ContextSettings } from './settings'
 import type { ClientCtx } from './services'

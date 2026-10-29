@@ -10,7 +10,6 @@ const kit = makeKit()
 const StatsTokens = makeStatsTokens(kit, Donut)
 
 const CURRENT: Snapshot['current'] = { system: 200, tools: 100, user: 300, inject: 100, skill: 0, assistant: 200, tool: 100, total: 1000 }
-// Billed input 400 (300 uncached + 100 read) + output 50 = the chat line's 450.
 const USAGE: TokenUsage = { uncachedInputTokens: 300, outputTokens: 50, cacheReadTokens: 100, cacheWriteTokens: 0 }
 
 function rowOf(container: HTMLElement, i: number): { pct: string; label: string; count: string } {
@@ -27,7 +26,6 @@ describe('StatsTokens', () => {
     const m = await mount(h(StatsTokens, { usage: USAGE, current: CURRENT, breakdown: null }))
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '450')
     assert.equal(query(m.container, '.lc-donut-center span').textContent, 'Total')
-    // Estimated composition (sum 1000) scales to billed input 400; the assistant rest joins tool results and the output, so rows share the whole 450.
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 5)
     const expected = [
       { pct: '17.8%', label: 'System Prompt', count: '≈80' },
@@ -81,7 +79,6 @@ describe('StatsTokens', () => {
     const usage: TokenUsage = { uncachedInputTokens: 200, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 }
     const m = await mount(h(StatsTokens, { usage, current, breakdown: null, generatedReasoning: 40, generatedCallTokens: 60 }))
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '300')
-    // Assistant anchored at 100 splits 60 reasoning / 40 tool calls; the 100 output keeps 40 thinking and 60 tool calls.
     assert.deepEqual(rowOf(m.container, 1), { pct: '33.3%', label: 'Tool Calls', count: '≈100' })
     assert.deepEqual(rowOf(m.container, 2), { pct: '33.3%', label: 'Reasoning', count: '≈100' })
     await m.unmount()
@@ -97,7 +94,6 @@ describe('StatsTokens', () => {
     const usage: TokenUsage = { uncachedInputTokens: 800, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0 }
     const m = await mount(h(StatsTokens, { usage, current, breakdown }))
     assert.equal(query(m.container, '.lc-donut-center b').textContent, '840')
-    // Ratios 1:1:1:1 over input 800 → 200 each; shares of the 840 total.
     assert.deepEqual(rowOf(m.container, 0), { pct: '23.8%', label: 'System Prompt', count: '≈200' })
     assert.deepEqual(rowOf(m.container, 1), { pct: '23.8%', label: 'Tool Schemas', count: '≈200' })
     assert.deepEqual(rowOf(m.container, 2), { pct: '23.8%', label: 'User Messages', count: '≈200' })

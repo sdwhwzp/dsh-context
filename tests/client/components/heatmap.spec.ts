@@ -7,7 +7,6 @@ import { click, makeKit, mount, query, queryAll, text } from '../helpers/kit'
 const kit = makeKit()
 const Heatmap = makeHeatmap(kit)
 
-// 2026-09-16 was a Wednesday of the week starting Sunday 2026-09-13.
 const TODAY = '2026-09-16'
 
 describe('gridOf', () => {
@@ -28,8 +27,6 @@ describe('gridOf', () => {
     assert.equal(gridOf('garbage', 2), null)
     assert.equal(gridOf(TODAY, 0), null, 'no columns to draw')
     assert.equal(gridOf(TODAY, 3000), null, 'a window reaching before the epoch has no first Sunday')
-    // 9999-12-31 was a Friday of the week starting Sunday 9999-12-26: the
-    // week's tail days leave the four-digit year, so no grid can hold it.
     assert.equal(gridOf('9999-12-31', 2), null, 'the final week of the representable range overflows')
   })
 })
@@ -66,7 +63,6 @@ describe('Heatmap', () => {
     assert.ok(byKey.get('2026-09-10')?.className.includes('lc-heat-2'), '30 of the 100-token peak draws level 2')
     assert.ok(byKey.get('2026-09-09')?.className.includes('lc-heat-3'))
     assert.ok(byKey.get('2026-09-08')?.className.includes('lc-heat-1'), 'a crumb is never invisible')
-    // A zero-token day stays a button (its requests count) but the token metric depths it at 0.
     assert.ok(byKey.get('2026-09-07')?.className.includes('lc-heat-0'))
     assert.equal(byKey.get('2026-09-16')?.getAttribute('aria-label'), '2026-09-16\n2 active sessions\n100 tokens')
     assert.equal(byKey.get('2026-09-10')?.getAttribute('aria-label'), '2026-09-10\n1 active sessions\n30 tokens')
@@ -80,8 +76,6 @@ describe('Heatmap', () => {
 
   test('month labels mark the columns where a month begins', async () => {
     const days = { '2026-09-16': { tokens: 10, requests: 1, sessions: 1, cost: null } }
-    // The default 8-week window runs Sunday 2026-07-26 → 2026-09-13: August begins in the Jul 26
-    // column (Sat Aug 1) and September in the Aug 30 column (Tue Sep 1).
     const m = await mount(h(Heatmap, { days, today: TODAY }))
     assert.deepEqual(queryAll(m.container, '.lc-heat-mon').map(s => s.textContent), ['Aug', 'Sep'])
     await m.unmount()

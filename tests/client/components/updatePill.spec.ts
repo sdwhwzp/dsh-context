@@ -1,14 +1,9 @@
-// The version-check itself (dev skip, not-newer, registry failure, late result) is covered once in
-// tests/client/latestVersion.spec.ts.
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
 import type { makeUpdatePill as makeUpdatePillFn } from '../../../src/client/components/updatePill'
 import { flush, makeKit, mount, query, queryAll } from '../helpers/kit'
 
-/** `resetModules` clears the baked version define and the fetch TTL cache; `version` stands in for the
- *  tsdown define. */
 async function loadUpdatePill(version: string): Promise<ReturnType<typeof makeUpdatePillFn>> {
   vi.resetModules()
   ;(globalThis as Record<string, unknown>).__DSH_CTX_VERSION__ = version

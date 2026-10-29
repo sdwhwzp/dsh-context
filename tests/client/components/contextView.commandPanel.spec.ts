@@ -25,7 +25,6 @@ function cmd(seq: number, over: Partial<CommandRecord> = {}): CommandRecord {
   }
 }
 
-/** Two steps; the bash result node (seq 3) is first carried by the seq-4 request (T1 S2). */
 function commandTimeline(commands: CommandRecord[]): ContextTimeline {
   return timeline({
     requests: [
@@ -62,7 +61,6 @@ describe('ContextView — command panel', () => {
     const pick = query<HTMLSelectElement>(m.container, 'select.lc-br-pick')
     const row = query(card, '.lc-cmd-row')
     assert.ok(text(row).includes('git status --short'))
-    // The trailing time/stamp is the reveal affordance.
     await click(query(row, '.lc-cmd-time'))
     assert.equal(pick.value, '4', 'the browser lands on the step that first carried the result')
     assert.ok(text(query(m.container, '.lc-br-elem-on')).includes('on branch main'))
@@ -86,7 +84,6 @@ describe('ContextView — command panel', () => {
   })
 
   test('the card follows the detail channel states', async () => {
-    // A pre-field projection (no commands array) renders the empty state, not a crash.
     const { m } = await mountCommands('sv-cmds-none', [])
     assert.ok(text(m.container).includes('No commands executed in this session'))
     await m.unmount()
@@ -154,7 +151,6 @@ describe('ContextView — command panel', () => {
       const card = queryAll(m.container, '.lc-card').find(c => c.className.includes('lc-cmd-card'))
       assert.ok(card !== undefined)
       const pick = query<HTMLSelectElement>(m.container, 'select.lc-br-pick')
-      // The reveal affordance renders (the result node exists), but the jump is a no-op: nothing carried it.
       await click(query(card, '.lc-cmd-time'))
       assert.equal(pick.value, 'live')
     } finally {

@@ -1,5 +1,3 @@
-/** Per-session open-state stores for the /context modal, module-level so the state survives overlay remounts. */
-
 import type { TokenSpan } from './services'
 
 export interface ModalStore {
@@ -30,9 +28,6 @@ export function modalStoreOf(sessionId: string): ModalStore {
   stores.set(sessionId, store)
   return store
 }
-
-// Each open path records the guard the input shell understands — span CAS for picks, bare-token equality for enter — and a stale guard
-// fails soft.
 
 export type ConsumeGuard =
   | { kind: 'span'; span: TokenSpan }

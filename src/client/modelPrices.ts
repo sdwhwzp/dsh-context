@@ -8,7 +8,6 @@ function rateOf(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
 }
 
-/** Extract the registry's per-model USD rates and build the resolution index; a non-record payload returns null (a failed fetch). */
 export function pricesBookOf(value: unknown): ModelBook | null {
   const data = asRecord(value)
   if (data === null || Array.isArray(data)) return null
@@ -63,12 +62,10 @@ let timer: ReturnType<typeof setTimeout> | null = null
 const listeners = new Set<() => void>()
 
 function fail(): void {
-  // Runs once per fetch cycle: both fire() callers are blocked while a timer is armed, so re-arming cannot leak.
   snap = { ...snap, failed: true }
   failures++
   timer = setTimeout(() => {
     timer = null
-    // Nobody reads the book anymore: end the cycle instead of polling for the page's whole life.
     if (listeners.size === 0) return
     void fire()
   }, RETRY_BASE_MS * 2 ** Math.min(failures - 1, 3))

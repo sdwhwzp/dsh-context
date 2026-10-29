@@ -5,7 +5,6 @@ import { SliceList } from '../../../src/client/components/sliceList'
 import type { SliceRow } from '../../../src/client/components/sliceList'
 import { hover, mount, query, queryAll, unhover } from '../helpers/kit'
 
-/** A parent that really holds the hover key, so hovering re-renders the rows. */
 function HoverHarness(props: { rows: SliceRow[] }) {
   const [hoverKey, setHoverKey] = useState<string | null>(null)
   return h(SliceList, { rows: props.rows, hoverKey, onHoverKey: setHoverKey })

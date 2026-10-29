@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import type { TimingSpan, TimingTotals } from '../../shared/types'
 import type { ViewKit } from '../viewkit'
+import { activeMsOf } from '../services'
 import { IconClock } from '../primitives'
 
 import { SliceList } from './sliceList'
@@ -12,14 +13,18 @@ interface Slice {
   key: string
   color: string
   label: string
-  /** TRUE duration (the row prints this; the ring clamps it into its window). */
   ms: number
   times?: string
 }
 
+interface TimingSlice {
+  slice: Slice
+  ring: number
+  tip?: string
+}
+
 const COLOR = TIMING_COLOR
 
-/** Decode throughput, formatted exactly as the harness's own session-stats seat: whole tokens from ten up, one decimal below. */
 function formatTokensPerSecond(tps: number): string {
   const clamped = Math.max(0, tps)
   return clamped >= 10 ? String(Math.round(clamped)) : String(Math.round(clamped * 10) / 10)
@@ -27,7 +32,6 @@ function formatTokensPerSecond(tps: number): string {
 
 export interface StatsTimingProps {
   timing: TimingTotals | null
-  /** Per-step time slices; absent on the overview aggregate card and on rows folded before the collection existed. */
   spans?: TimingSpan[]
   locale?: string
 }
@@ -39,8 +43,7 @@ export function makeStatsTiming(kit: ViewKit, Donut: (props: DonutProps) => Reac
     const [hoverKey, setHoverKey] = useState<string | null>(null)
     const timing = props.timing
     const wall = timing !== null && Number.isFinite(timing.wallMs) && timing.wallMs > 0 ? timing.wallMs : 0
-    // Host-paired output tokens over decode windows, exactly as the harness session-stats fold does; an unreadable pairing renders no
-    // figure.
+    const active = timing !== null ? activeMsOf(timing) : 0
     const tps = timing !== null
       && typeof timing.speedMs === 'number' && Number.isFinite(timing.speedMs) && timing.speedMs > 0
       && typeof timing.speedTokens === 'number' && Number.isFinite(timing.speedTokens) && timing.speedTokens >= 0
@@ -49,12 +52,10 @@ export function makeStatsTiming(kit: ViewKit, Donut: (props: DonutProps) => Reac
     let segments: DonutSegment[] = []
     let rows: SliceRow[] = []
     if (timing !== null && (wall > 0 || timing.calls > 0 || timing.toolCalls > 0)) {
-      // Model slices run from the step's start to its assistant message: TTFT to the first token, generation from there.
       const callTimes = t('timing.callTimes', { n: fmt(timing.calls) })
       const modelSlices: Slice[] = [
         { key: 'ttft', color: COLOR.ttft, label: t('timing.ttft'), ms: timing.ttftMs, times: callTimes },
       ]
-      // The generation window expands into decode buckets only when the buckets carry time (absent reads 0).
       const blockTimes = (blocks?: number): string | undefined =>
         blocks !== undefined && blocks > 0 ? t('timing.blockTimes', { n: fmt(blocks) }) : undefined
       const buckets: [key: string, color: string, label: string, ms: number, times?: string][] = [
@@ -70,10 +71,8 @@ export function makeStatsTiming(kit: ViewKit, Donut: (props: DonutProps) => Reac
       } else {
         modelSlices.push({ key: 'gen', color: COLOR.reasoning, label: t('timing.gen'), ms: timing.genMs })
       }
-      // Ring windows: TTFT, then generation, then tools with what is left; the residue is overhead. Every window clamps
-      // into the space its predecessors leave, so a hostile over-long slice never pushes the ring past the wall.
-      const ttftRing = Math.min(timing.ttftMs, wall)
-      const genRing = Math.max(0, Math.min(timing.genMs, wall - ttftRing))
+      const ttftRing = Math.min(timing.ttftMs, active)
+      const genRing = Math.max(0, Math.min(timing.genMs, active - ttftRing))
       const modelRings: number[] = [ttftRing]
       let used = ttftRing
       const genEnd = ttftRing + genRing
@@ -82,49 +81,42 @@ export function makeStatsTiming(kit: ViewKit, Donut: (props: DonutProps) => Reac
         modelRings.push(take)
         used += take
       }
-      const toolRing = Math.max(0, Math.min(timing.toolsMs, wall - ttftRing - genRing))
-      const other = Math.max(0, wall - ttftRing - genRing - toolRing)
-      const share = (ms: number): number => (wall > 0 ? ms / wall : 0)
-      // The secondary line leads with the duration and qualifies it with the tally; a zero-duration slice keeps the tally.
+      const toolMs = timing.toolBusyMs ?? timing.toolsMs
+      const toolRing = Math.max(0, Math.min(toolMs, active - ttftRing - genRing))
+      const other = Math.max(0, active - used - toolRing)
+      const share = (ms: number): number => (active > 0 ? ms / active : 0)
       const countOf = (ms: number, times?: string): string => {
         const dur = fmtDuration(ms)
         if (times === undefined) return dur
         return ms > 0 ? `${dur} · ${times}` : times
       }
-      const modelSegments = modelSlices.map((slice, index) => ({
-        key: slice.key, color: slice.color, value: share(modelRings[index]),
-      }))
+      const toolDisplayMs = wall > 0 ? toolRing : toolMs
       const toolSlice: Slice = {
         key: 'tools',
         color: COLOR.tools,
         label: t('timing.tools'),
-        ms: timing.toolsMs,
+        ms: toolDisplayMs,
         times: t('timing.toolTimes', { n: fmt(timing.toolCalls) }),
       }
+      const toolTip = timing.toolsMs > toolDisplayMs
+        ? t('timing.toolsBusyTip', { total: fmtDuration(timing.toolsMs) })
+        : undefined
       const otherSlice: Slice = { key: 'other', color: COLOR.other, label: t('timing.other'), ms: other }
-      segments = [
-        ...modelSegments,
-        { key: 'tools', color: COLOR.tools, value: share(toolRing) },
-        { key: 'other', color: COLOR.other, value: share(other) },
+      const slices: TimingSlice[] = [
+        ...modelSlices.map((slice, index) => ({ slice, ring: modelRings[index] })),
+        { slice: toolSlice, ring: toolRing, ...(toolTip !== undefined ? { tip: toolTip } : {}) },
+        { slice: otherSlice, ring: other },
       ]
-      const toRow = (slice: Slice): SliceRow => ({
+      segments = slices.map(({ slice, ring }) => ({ key: slice.key, color: slice.color, value: share(ring) }))
+      rows = slices.map(({ slice, ring, tip }) => ({
         key: slice.key,
         color: slice.color,
         label: slice.label,
         dim: slice.ms === 0,
-        pct: fmtShare(slice.ms, wall),
+        pct: fmtShare(ring, active),
         count: countOf(slice.ms, slice.times),
-      })
-      // A slice that never happened stays hidden (a "0.0%" row carrying the tally reads as "many calls, no time").
-      // The residual overhead row is the exception: its transient zero clamp would resize the card at every step boundary.
-      const sliceRows = [
-        ...modelSlices.map(toRow),
-        toRow(toolSlice),
-        toRow(otherSlice),
-      ]
-      rows = sliceRows.some(row => !row.dim)
-        ? sliceRows.filter(row => !row.dim || row.key === otherSlice.key)
-        : []
+        ...(tip !== undefined ? { tip } : {}),
+      }))
     }
     return (
       <div className="lc-card lc-col-donut flex-1 min-w-[min(360px,100%)]">
@@ -147,14 +139,13 @@ export function makeStatsTiming(kit: ViewKit, Donut: (props: DonutProps) => Reac
                 <Donut
                   segments={segments}
                   size={96}
-                  centerTop={wall > 0 ? fmtDuration(wall) : '—'}
+                  centerTop={wall > 0 ? fmtDuration(active) : '—'}
                   centerSub={t('timing.total')}
                   hoverKey={hoverKey}
                   onHoverKey={setHoverKey}
                 />
                 <SliceList rows={rows} hoverKey={hoverKey} onHoverKey={setHoverKey} />
               </div>
-              {/* The strip joins the hover link: a span hover lights every span of its KIND plus the donut arc and legend row. */}
               {props.spans !== undefined && props.spans.length > 0
                 ? <TimingStrip spans={props.spans} hoverKey={hoverKey} onHoverKey={setHoverKey} locale={props.locale} />
                 : null}

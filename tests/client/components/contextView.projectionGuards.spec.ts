@@ -51,7 +51,6 @@ describe('ContextView — projection guards', () => {
     assert.ok(text(m.container).includes(DICT_EN['files.empty']))
     assert.ok(text(m.container).includes(DICT_EN['footer']))
     assert.ok(m.container.querySelector('.lc-br-cats') !== null)
-    // No model/provider: the composition card carries no subtitle.
     const comp = queryAll(m.container, '.lc-card').find(c => text(c).includes(DICT_EN['overview.title']))
     assert.ok(comp !== undefined && comp.querySelector('.lc-card-sub') === null)
     await m.unmount()
@@ -68,8 +67,6 @@ describe('ContextView — projection guards', () => {
         contextHeaders: { headers: [{ seq: 1, time: T0, system: 'SYS', tools: [{ name: 'bash', tokens: 12 }] }] },
       }),
     }))
-    // Anchored headline, then the Token card off the official tokenUsage projection: billed total
-    // 100+200+0+50 = 350, cache-hit rate 200/300 truncated to two decimals.
     assert.ok(text(m.container).includes(DICT_EN['overview.used']))
     const tokensCard = queryAll(m.container, '.lc-head > .lc-col-donut')[0]
     assert.equal(query(tokensCard, '.lc-donut-center b').textContent, '350')
@@ -110,7 +107,6 @@ describe('ContextView — baseline gate', () => {
     assert.ok(text(card).includes(DICT_EN['gate.title']))
     assert.ok(text(card).includes('v0.1.1-rc.2'))
     assert.ok(text(card).includes('v0.2.0-rc.2'))
-    // The cards keep rendering the fallback's zeroed data behind it.
     assert.ok(text(m.container).includes(DICT_EN['overview.title']))
     assert.ok(text(m.container).includes(DICT_EN['trend.empty']))
     assert.ok(text(m.container).includes(DICT_EN['events.empty']))

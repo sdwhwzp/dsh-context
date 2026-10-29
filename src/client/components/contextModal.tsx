@@ -1,6 +1,3 @@
-/** The `/context` command's centered dialog: the same pushed `contextTimeline` as the Context tab, distilled to the current
- * composition and the shared browser. */
-
 import { createElement as h, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { providerModelLabelOf } from '../agentTree'
@@ -24,9 +21,7 @@ import { useEscapeClose } from './escapeClose'
 import { makeLegend, makeStackedBar } from './stackedBar'
 
 export interface ContextModalProps extends SessionStandardProps {
-  /** Bound selector hook over the per-session open flag (hooks compartment). */
   useContextModal?: (sel: (open: boolean) => boolean) => boolean
-  /** Set by the input-overlay registration: the always-mounted gate warms this session's detail. */
   warm?: boolean
 }
 
@@ -43,27 +38,21 @@ export function makeContextModal(
   const DetailNote = makeDetailNote(kit)
   const ErrorBoundary = makeErrorBoundary(t)
 
-  /** The slot outlet re-renders this body on a locale switch; the browser's memoized labels follow the prop. */
   function activeLocale(): string {
     const locale = ctx.locale
-    /* v8 ignore next 1 -- older Host halves may serve no locale service; the live shell always does. */
+    /* v8 ignore next 1 */
     return typeof locale.getLocale === 'function' ? locale.getLocale().active : 'en'
   }
 
-  /** Reads the open flag without mounting the reader: a closed modal must not subscribe to or fetch session data. */
   function ContextModalGate(props: ContextModalProps): ReactElement | null {
-    // One warm-up per session, from the always-mounted input overlay: not a listener per assistant message. Only the
-    // registration opts in, so a directly-mounted dialog keeps its closed-modal no-reader contract.
     const warm = props.warm === true
     useSessionDetailWarm(warm ? props.sessionId : undefined, warm ? props.useProjection : undefined)
     const open = typeof props.useContextModal === 'function' ? props.useContextModal(s => s) : false
     return open ? h(ContextModalBody, props) : null
   }
 
-  /** Mounted only while open. */
   function ContextModalBody(props: ContextModalProps): ReactElement {
     const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
-    // Shares the tab's per-session detail store, so an open tab's detail serves the modal with no refetch.
     const source = useTimelineSource(props)
     const data = source.data
     const pressure = projectionOf(props, 'contextPressure', contextPressureOf)
@@ -83,7 +72,6 @@ export function makeContextModal(
       [ctx, sessionId],
     )
 
-    // A watch rebuild can remount this overlay before the declared inject re-fires: rebuild the fetchers when the face lands.
     const historyFace = useHistoryFace()
 
     const fetchContent = useMemo(
@@ -102,7 +90,6 @@ export function makeContextModal(
     const close = useCallback(() => {
       if (sessionId === '') return
       modalStoreOf(sessionId).set(false)
-      // The sessions service is read at CLOSE time because capturing it at apply would race the finer module composition.
       const guard = takePendingConsume(sessionId)
       const sessions = ctx.get('sessions') as SessionsFace | undefined
       if (guard === undefined || sessions === undefined) return

@@ -22,14 +22,14 @@ describe('pageNodesOf — the durable-page mapper', () => {
       42,
       {},
       { event: null },
-      { event: { type: 'user/message' } }, // no seq
+      { event: { type: 'user/message' } },
       { event: { type: 'user/message', seq: Number.NaN } },
       row('request/header', 1, {}),
       row('turn/end', 2, {}),
-      row('tool/call', 4, {}), // no callId: nothing recorded
-      row('compaction/summary', 5, {}), // no compactionId
-      row('compaction/summary', 6, { compactionId: 'k0', summary: [{ type: 'text', text: '   ' }] }), // blank summary
-      row('compaction/summary', 7, { compactionId: 'k0b', summary: 'not-an-array' }), // malformed summary
+      row('tool/call', 4, {}),
+      row('compaction/summary', 5, {}),
+      row('compaction/summary', 6, { compactionId: 'k0', summary: [{ type: 'text', text: '   ' }] }),
+      row('compaction/summary', 7, { compactionId: 'k0b', summary: 'not-an-array' }),
     ])
     assert.equal(nodes.size, 0)
     assert.deepEqual(pageNodesOf([{ event: { type: 'user/message', seq: 3 } }]).get(3), {
@@ -143,8 +143,6 @@ describe('pageNodesOf — the durable-page mapper', () => {
   })
 })
 
-/** Arm the DECLARED inject with one `remote` facade; the direct `remote.session` service is hostile on
- * purpose — an undeclared read of the traced proxy throws on the real host. Dispose the returned ctx. */
 function armHistoryFaces(remote: unknown): TestClientCtx {
   const ctx = new TestClientCtx()
   ctx.setService('remote', remote)
@@ -155,7 +153,6 @@ function armHistoryFaces(remote: unknown): TestClientCtx {
 
 const ev = (type: string, seq: number, data: unknown) => ({ type, seq, time: seq, data })
 
-/** The plain-session resolver a non-subagent caller passes. */
 const plainOf = (sessionId: string) => (): SessionAddressLike => ({ kind: 'session', sessionId })
 
 const pageFace = (events: unknown[], calls: unknown[] = [], envelope: (records: unknown[]) => unknown = (r) => ({ ok: true, value: { records: r } })) => ({
@@ -195,7 +192,6 @@ describe('makeContentFetcher — the per-session targeted read', () => {
     const fetch = makeContentFetcher(plainOf('cap'))!
     for (let seq = 1; seq <= 200; seq++) await fetch(seq)
     assert.equal(calls.length, 200)
-    // Reading the oldest survivor refreshes its recency; the truly oldest id was evicted by the cap.
     await fetch(130)
     assert.equal(calls.length, 200, 'seq 130 survived the cap')
     await fetch(1)
@@ -224,7 +220,6 @@ describe('makeContentFetcher — the per-session targeted read', () => {
   })
 
   test('a hostile or shapeless declared face leaves the slot unset (issue #42)', () => {
-    // A hostile face (throwing reads, null/primitive/verb-less): the callback contains it, the slot stays unset.
     const remotes = [
       { get session() { throw new Error('traced read failed') } },
       { session: null },
@@ -322,7 +317,7 @@ describe('makeHeaderFetcher — the lazy epoch content read', () => {
           tools: [
             { name: 'bash', description: 'run a command', parameters: { type: 'object' } },
             { name: 'mcp__gh__issue', description: '', plugin: 'mcp:github' },
-            null, // hostile entry degrades to an unnamed row
+            null,
             42,
           ],
         },

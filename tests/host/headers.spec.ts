@@ -45,7 +45,6 @@ describe('createContextHeadersDefinition', () => {
     assert.ok(!('schema' in view.headers[0].tools[0]), 'schemas stay in the log')
     assert.ok(!('system' in view.headers[0]), 'system text stays in the log')
 
-    // An event-level `system` is not an epoch field: only a cached v1 row may carry one.
     const withSystem = def.apply(init, headerEvent(2, { system: 'You are an agent.', tools: [] }) as never)
     assert.ok(!('system' in withSystem.headers[0]), 'a logged system prompt never enters the fold')
     assert.ok(!('systemTokens' in withSystem.headers[0]), 'and is never priced into state')
@@ -61,8 +60,6 @@ describe('createContextHeadersDefinition', () => {
     for (const [seq, raw] of [[2, null], [3, undefined], [4, 42]] as const) {
       assert.equal(def.apply(state, headerEvent(seq, raw) as never), state, `header ${String(raw)} is not an epoch`)
     }
-    // A data-less envelope is unreachable from the harness (append validates the payload) but must degrade
-    // to "not an epoch" all the same: this unit has no try/catch around its fold.
     assert.equal(def.apply(state, { type: 'request/header', seq: 5, time: 5000 } as never), state)
     assert.equal(def.apply(state, header(1, { tools: [] }) as never), state, 'duplicate epoch suppressed')
     assert.equal(state.headers.length, 1)
@@ -75,7 +72,7 @@ describe('createContextHeadersDefinition', () => {
     const def = createContextHeadersDefinition()
     const view = def.wire.view(fold(def, [headerEvent(1, {
       tools: [
-        { name: 42, description: 'kept' }, // non-string name → '?'
+        { name: 42, description: 'kept' },
         { name: 'a', description: 7 },
         { name: 'b', description: '' },
         { name: 'c', description: 'ok', schema: { type: 'object' } },
@@ -118,7 +115,7 @@ describe('createContextHeadersDefinition', () => {
     const view = def.wire.view(fold(def, [headerEvent(1, {
       tools: [
         { name: 'mcp__github__get_issue', plugin: 'mcp:github' },
-        { name: 'plain', plugin: '' }, // empty plugin behaves as absent
+        { name: 'plain', plugin: '' },
         { name: 'naked' },
       ],
     })]))
@@ -136,7 +133,7 @@ describe('createContextHeadersDefinition', () => {
       tools: [
         { name: 'bash' },
         { name: 'mcp__github__x' },
-        { name: 'bash', plugin: 'logged-owner' }, // logged wins over the resolver
+        { name: 'bash', plugin: 'logged-owner' },
         { name: 'unknown' },
       ],
     })]))
@@ -145,7 +142,6 @@ describe('createContextHeadersDefinition', () => {
     assert.equal(tools[1].plugin, 'mcp:github')
     assert.equal(tools[2].plugin, 'logged-owner')
     assert.ok(!('plugin' in tools[3]))
-    // The fill is a view-time projection: the folded state stays pure.
     assert.ok(!('plugin' in fold(def, [headerEvent(9, { tools: [{ name: 'bash' }] })]).headers[0].tools[0]))
   })
 
@@ -153,8 +149,6 @@ describe('createContextHeadersDefinition', () => {
 
 describe('hostile tool entries', () => {
   test('null and primitive entries degrade to unnamed JSON-priced tools and never leak content into state', () => {
-    // Committed event data is already the harness's lossless-JSON snapshot, so the hostile surface here is
-    // wrong-SHAPED plain JSON — never functions or exotic objects; content-sized junk must not leak into state.
     const def = createContextHeadersDefinition()
     const state = fold(def, [headerEvent(1, {
       tools: [
@@ -162,7 +156,7 @@ describe('hostile tool entries', () => {
         42,
         'x',
         [],
-        { name: 123, extra: { deep: [true, 'x'] } }, // wrong-typed name, nested junk
+        { name: 123, extra: { deep: [true, 'x'] } },
         { name: 'read', parameters: { type: 'object', properties: {} } },
       ],
     })])
@@ -176,7 +170,6 @@ describe('hostile tool entries', () => {
 })
 
 describe('read-compat over v1 rows', () => {
-  /** A v1-era state: content-bearing records exactly as the old build persisted them. */
   function v1State(): HeadersState {
     return {
       headers: [

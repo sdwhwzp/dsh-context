@@ -9,12 +9,10 @@ import {
 import type { DayRange } from '../../../src/client/overview'
 import { click, hover, keydown, makeKit, mount, query, queryAll, text, type Mounted } from '../helpers/kit'
 
-/** The specs' calendar: a Friday, so the month opens mid-week and ends mid-week. */
 const TODAY = '2026-10-09'
 
 const DateRange = makeDateRange(makeKit())
 
-/** Every tree this spec mounted, torn down after each test (the panel portals to <body>). */
 const mounted: Mounted[] = []
 
 function panel(): HTMLElement | null {
@@ -31,7 +29,6 @@ function cell(m: Mounted, key: string): HTMLElement {
   return found
 }
 
-/** Dispatch a raw event on a window listener, act-wrapped like the kit's own relays. */
 async function fireWindow(ev: Event): Promise<void> {
   await act(async () => { window.dispatchEvent(ev) })
 }
@@ -39,7 +36,6 @@ async function fireWindow(ev: Event): Promise<void> {
 interface Harness {
   m: Mounted
   changes: (DayRange | null)[]
-  /** Re-render with new props, as a controlled parent would. */
   set: (next: Partial<DateRangeProps>) => Promise<void>
 }
 
@@ -92,8 +88,6 @@ describe('the trigger', () => {
     assert.equal(trigger(m).getAttribute('aria-expanded'), 'true')
     assert.ok(panel() !== null, 'the panel is portaled to the body')
 
-    // A preset's window rides the chip too, but never in the brand voice and with no way back:
-    // a preset is not a pick.
     await set({ value: { from: '2026-09-10', to: '2026-10-09' } })
     assert.deepEqual(halves(), ['2026-09-10', '2026-10-09'])
     assert.ok(!trigger(m).className.includes('lc-dp-trigger-on'))
@@ -242,10 +236,8 @@ describe('the keyboard cursor', () => {
     const { m } = await open()
     await toggle(m)
     const grid = () => query(panel()!, '.lc-dp-grid')
-    // The 1st is a Thursday; a week up from it would leave October.
     await keydown('ArrowUp', grid())
     assert.match(cell(m, '2026-10-01').className, /lc-dp-cursor/, 'the cursor stays inside the shown month')
-    // Rightward it walks, and today is the last stop — the future is not a seat.
     for (let i = 0; i < 40; i++) await keydown('ArrowRight', grid())
     assert.match(cell(m, TODAY).className, /lc-dp-cursor/)
     await keydown('ArrowRight', grid())
@@ -265,8 +257,6 @@ describe('the keyboard cursor', () => {
 
 describe('the panel seat', () => {
   test('sits under its trigger, inside the viewport, and flips when it would fall off', async () => {
-    // jsdom measures every element as 0; drive the panel's own box, then restore the prototype's
-    // descriptors (deleting them would leave every later measurement NaN).
     const size = { w: 240, h: 300 }
     const own = (name: string): PropertyDescriptor | undefined => Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)
     const width = own('offsetWidth')
@@ -279,7 +269,6 @@ describe('the panel seat', () => {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => size.h })
     try {
       const { m } = await open()
-      // The panel measures its anchor wrapper (the trigger's own box): jsdom's rects are all zeros, so drive the one it reads.
       const rect = { left: 800, right: 900, top: 680, bottom: 700 }
       query(m.container, '.lc-dp').getBoundingClientRect = () =>
         ({ ...rect, x: rect.left, y: rect.top, width: 100, height: 20, toJSON: () => '' }) as DOMRect

@@ -88,10 +88,10 @@ describe('skillLoadsOf', () => {
           tokens: 1,
           requests: 1,
           skills: {
-            alpha: { n: 3, last: NOW - 3000 },   // 3 loads, 1 loader, stalest
-            beta: { n: 1, last: NOW - 1000 },    // 2 loads, 2 loaders
-            gamma: { n: 2, last: NOW - 500 },    // 2 loads, 1 loader, freshest
-            delta: { n: 1, last: NOW - 700 },    // delta and epsilon agree on every key — the name decides
+            alpha: { n: 3, last: NOW - 3000 },
+            beta: { n: 1, last: NOW - 1000 },
+            gamma: { n: 2, last: NOW - 500 },
+            delta: { n: 1, last: NOW - 700 },
             epsilon: { n: 1, last: NOW - 700 },
           },
         },

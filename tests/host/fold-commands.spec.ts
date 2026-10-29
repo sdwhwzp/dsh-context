@@ -101,7 +101,6 @@ describe('the command log — call/result lifecycle', () => {
       bashCall(1, 'c1', { command: 'x' }),
       toolResult(2, { callId: 'c1', content: [null, { type: 'image' }, { type: 'text', text: 'ok' }] as never }),
       bashCall(3, 'c2', { command: 'y' }),
-      // No content array at all: no text to parse, the outcome still derives.
       toolResult(4, { callId: 'c2', content: 'junk' as never }),
     ])
     const rec = cmdsOf(state)[0]
@@ -114,7 +113,6 @@ describe('the command log — call/result lifecycle', () => {
 
   test('the command text caps at maxCommandChars with the truncation flag', () => {
     const { state } = driveTimeline([
-      // No turn/step on this envelope: those optional fields stay absent.
       toolCall(1, { callId: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'x'.repeat(40), description: 'd' }) }),
     ], { maxCommandChars: 16 })
     const rec = cmdsOf(state)[0]
@@ -154,7 +152,6 @@ describe('the command log — job events', () => {
     assert.equal(rec.exit, 2)
     assert.equal(rec.derived, undefined)
     assert.equal(rec.resultSeq, 4, 'the result node stays the locate target even when the job settles first')
-    // The tally fired exactly once (at the running → terminal transition), not again at the result.
     assert.equal(state.commandStats?.runs, 1)
     assert.equal(state.commandStats?.failed, 1)
     assert.equal(state.commandStats?.ms, 4100)
@@ -205,7 +202,6 @@ describe('the command log — background runs', () => {
     assert.equal(rec.end, 999000)
     assert.equal(launched.commandStats?.bg, 1)
     assert.equal(launched.commandStats?.runs, 1, 'the tally fired once, at the terminal transition')
-    // A foreground call promoted at its wait timeout: the ack marks it background, the job record ends it.
     const promoted = driveTimeline([
       bashCall(1, 'c1', { command: 'slow', description: 's' }, 1000),
       jobRegistered(2, { callId: 'c1', startedAt: 1100 }),
@@ -225,7 +221,6 @@ describe('the command log — background runs', () => {
   test('a promoted foreground call (wait timeout) marks the run background at its ack, still running', () => {
     const { state } = driveTimeline([
       bashCall(1, 'c1', { command: 'slow', description: 's' }),
-      // The real renderPromoted text: the marker followed by the fixed hand-off guidance.
       bashResult(2, 'c1', 'partial\n[still running after 10000ms; moved to background job j9]\n'
         + 'The command keeps running in the background. You will be notified when it finishes; '
         + 'read newer output with job_output, stop it with job_kill.'),
@@ -284,7 +279,6 @@ describe('the command log — Code Mode (PTC) sub-dispatches', () => {
     ], { maxCommandChars: 16 })
     assertStatesPlainJson(drive)
     assert.equal(drive.state.pendingCodeCmds, undefined, 'the buffer flushed and emptied')
-    // The root books at its own call; the nested record flushes BEHIND it at the root's result.
     const [root, nested] = cmdsOf(drive.state)
     assert.deepEqual(
       [nested.cmd, nested.cmdTruncated, nested.codeMode, nested.parent, nested.status, nested.exit],
@@ -292,7 +286,6 @@ describe('the command log — Code Mode (PTC) sub-dispatches', () => {
       'the locate target is the root result row',
     )
     assert.deepEqual([root.tool, root.status, drive.state.commandStats?.runs], ['run_code', 'completed', 2], 'both the root and the nested run tallied')
-    // The nested record carries its full argument set; an isError settle fails it without an exit marker.
     const armed = driveTimeline([
       toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }),
       codeDispatchStart(2, {
@@ -335,7 +328,6 @@ describe('the command log — Code Mode (PTC) sub-dispatches', () => {
       toolCall(1, { callId: 'rc1', name: 'run_code', arguments: JSON.stringify({ code: 'x' }) }),
       codeDispatch(2, { rootCallId: 'rc1', subCallId: 'rc1:ptc:9', name: 'bash', arguments: { command: 'x' } }),
       { type: 'tool/ptc-dispatch-start', seq: 3, time: 3, data: null } as unknown as TimelineEvent,
-      // No subCallId at all: the settle pairs with nothing.
       { type: 'tool/ptc-dispatch', seq: 5, time: 5, data: { rootCallId: 'rc1', name: 'bash', isError: false, content: [] } } as unknown as TimelineEvent,
       toolResult(4, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
     ])
@@ -353,7 +345,6 @@ describe('the command log — Code Mode (PTC) sub-dispatches', () => {
         arguments: { command: 'serve' },
         content: [{ type: 'text', text: 'started background job j8' }],
       }),
-      // The job registers and settles while the run_code program is still running.
       jobRegistered(4, { callId: 'rc1:ptc:0', startedAt: 2000 }),
       jobSettled(5, { callId: 'rc1:ptc:0', finishedAt: 62000, status: 'completed', detail: 'exit code: 0' }),
       toolResult(6, { callId: 'rc1', content: [{ type: 'text', text: 'ok' }] }),
@@ -428,7 +419,6 @@ describe('the command log — retention, stats, and the served payload', () => {
       events.push(bashCall(10 + i * 2, `c${i}`, { command: `cmd${i}` }))
       events.push(bashResult(11 + i * 2, `c${i}`, 'ok'))
     }
-    // One still-running record sits between the settled ones.
     events.push(bashCall(20, 'keep', { command: 'running' }))
     const { state } = driveTimeline(events, { maxCommands: 3 })
     assert.deepEqual(cmdsOf(state).map(r => r.cmd), ['cmd3', 'cmd4', 'running'])

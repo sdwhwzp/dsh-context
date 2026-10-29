@@ -1,5 +1,3 @@
-/** One step's assembled context: the model-visible surface BEFORE the response landed, plus the header in force. */
-
 import type { ContextHeaders, ContextTimeline, HeaderRecord, SurfaceNode, SystemPromptNode } from '../shared/types'
 
 export interface Assembled {
@@ -20,7 +18,6 @@ export function headerAt(headers: ContextHeaders | null, seq: number | null): He
   return null
 }
 
-/** The LAST live system node at or before `seq` with tokens — the host fold's "last nonempty surviving system" rule. */
 export function systemAt(
   data: ContextTimeline,
   header: HeaderRecord | null,
@@ -59,7 +56,6 @@ export function assemble(data: ContextTimeline, headers: ContextHeaders | null, 
 
   let missingLive = 0
   if (data.droppedNodes > 0) {
-    // Live flags every dropped node; a past step only above `surfaceFloor`, where its subset is not overstated.
     if (live || (data.surfaceFloor !== undefined && seq > data.surfaceFloor)) {
       missingLive = data.droppedNodes
     }

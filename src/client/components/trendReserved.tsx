@@ -2,7 +2,6 @@ import type { ReactElement, ReactNode } from 'react'
 import type { Category } from '../../shared/types'
 import { CATS } from '../categories'
 
-/** The trend card's reserved body, so the pending and loaded states measure the same boxes (trendChart.css, requestDetail.css). */
 export function TrendReserved(props: { children: ReactNode; catLabel: (cat: Category | 'system' | 'tools') => string }): ReactElement {
   return (
     <div className="lc-trend-lane">

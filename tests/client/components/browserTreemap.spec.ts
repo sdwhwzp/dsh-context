@@ -6,7 +6,6 @@ import type { ContextHeaders } from '../../../src/shared/types'
 import { click, focus, hover, mount, pinRect, query, queryAll, surfaceNode, text, tipRows, unhover, type Mounted } from '../helpers/kit'
 import { Browser, catRow, elemRows, props, tl } from './browserHarness'
 
-/** The map fixtures lay out on the panel's jsdom fallback canvas (640×240) — jsdom never sizes the wrap. */
 const mapHeaders: ContextHeaders = {
   headers: [{ seq: 1, time: 1000, systemTokens: 100, tools: [{ name: 'bash', tokens: 50 }, { name: 'write', tokens: 25 }] }],
 }
@@ -74,11 +73,9 @@ describe('ContextBrowser block map', () => {
   test('grouped blocks carry a ×N fold and a figure, tiny blocks render bare, and a click opens the group', async () => {
     const m = await mount(h(Browser, props({ data: mapData(), headers: mapHeaders })))
     await click(mapBtn(m))
-    // bash ×2 = the two bash results folded into one block of the tool-results region.
     const bash = blockByText(m, 'bash')
     assert.equal(query(bash, '.lc-map-label').textContent, 'bash×2')
     assert.equal(query(bash, '.lc-map-num').textContent, '≈300')
-    // The injections region is too shallow for its figure: label only, no token line.
     const notice = blockByText(m, 'Notice')
     assert.equal(queryAll(notice, '.lc-map-num').length, 0)
     assert.equal(text(blockByText(m, 'System Prompt')).includes('≈100'), true)

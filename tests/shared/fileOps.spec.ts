@@ -145,7 +145,6 @@ describe('opsOfCall — one op per settled call', () => {
       meta: { shape: 'matches', truncated: false, files: [{ path: 42 }, null] },
     })
     assert.deepEqual(junk.map(o => o.path), ['src/'], 'a meta whose entries are all junk falls back')
-    // An empty complete list attributes nothing — the call target rows instead.
     const empty = opsOfCall({
       seq: 1, tool: 'glob',
       argsRaw: JSON.stringify({ pattern: '*.ts', path: 'src/' }),

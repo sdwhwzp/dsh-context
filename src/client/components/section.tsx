@@ -3,7 +3,6 @@ import type { ReactElement, ReactNode } from 'react'
 export function Section(props: {
   label: string
   labelClass?: string
-  /** Fold the head's trailing group onto a second line under width pressure; the call-name head must stay one-line. */
   foldHead?: boolean
   /** Optional note after the label, preserving line breaks and wrapping within the header. */
   headNote?: string

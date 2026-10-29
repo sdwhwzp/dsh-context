@@ -1,6 +1,3 @@
-/** Fleet overview strip: family-wide stats; the progress bar follows the team's shared tasks when present, else
- * subagent completion, and stays absent for a solo session. */
-
 import type { ReactElement } from 'react'
 import type { AgentForest } from '../agentTree'
 import { estimateSessionCost, formatCost, type CostCurrency, type ModelBook } from '../cost'

@@ -9,7 +9,6 @@ describe('grammarOfTool', () => {
   test('maps the shell dialects and leaves every other tool plain', () => {
     assert.equal(grammarOfTool('bash'), 'bash')
     assert.equal(grammarOfTool('pwsh'), 'powershell')
-    // run_code names no language: its runtime is TypeScript or Python, so one grammar would mis-color the other.
     assert.equal(grammarOfTool('run_code'), undefined)
     assert.equal(grammarOfTool('read_file'), undefined)
   })
@@ -36,7 +35,6 @@ describe('highlightRuns', () => {
     const long = 'x'.repeat(1001)
     assert.equal(highlightRuns(highlight, 'bash', long), undefined)
     assert.equal(calls, 2)
-    // The cap reads per line: a second long line under a short one is refused just the same.
     assert.equal(highlightRuns(highlight, 'bash', 'ls\n' + long), undefined)
     assert.equal(calls, 2)
   })
@@ -47,7 +45,6 @@ describe('highlightRuns', () => {
     const texts = Array.from({ length: 601 }, (_, i) => 'lru probe ' + i)
     for (const text of texts) highlightRuns(highlight, 'bash', text)
     assert.equal(calls, 601)
-    // The first text is the one the cap dropped, so it tokenizes again.
     highlightRuns(highlight, 'bash', texts[0])
     assert.equal(calls, 602)
   })

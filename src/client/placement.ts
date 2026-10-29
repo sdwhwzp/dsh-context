@@ -6,7 +6,6 @@ export interface PlacementMounts {
   sidebar(): unknown
 }
 
-/** The surfaces a placement mounts; a positive membership set, so 'hide' mounts neither. */
 export function placementSurfaces(placement: DefaultPlacement): { tab: boolean; sidebar: boolean } {
   return {
     tab: placement === 'all' || placement === 'tab',
@@ -17,8 +16,6 @@ export function placementSurfaces(placement: DefaultPlacement): { tab: boolean; 
 export function watchPlacement(settings: ContextSettings, mounts: PlacementMounts): () => void {
   let tab: (() => void) | undefined
   let sidebar: (() => void) | undefined
-  // A mount is tracked by its OWN state, not the disposer it hands back: a face registering without
-  // one must still count as mounted, or a later publish would register the seats twice.
   let tabMounted = false
   let sidebarMounted = false
   const mount = (placement: DefaultPlacement): void => {

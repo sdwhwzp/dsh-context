@@ -1,28 +1,18 @@
-/** The fold's untrusted-input metering: provider-reported usage normalized to billed counts, plus the accumulators that write the state's
- * cumulative cost, decode and per-tool timing tallies. */
-
-import type { CostBucketTotals, CostModelUsage, SessionCostUsage, TimingTotals, ToolTimingTotals } from '../shared/types'
+import type { CostBucketTotals, CostModelUsage, SessionCostUsage, TimingSpan, TimingTotals, ToolTimingTotals } from '../shared/types'
 import { isDeepSeekProvider } from '../shared/providers'
 import type { DecodeKind } from './logShapes'
 import type { TimelineState } from './foldState'
 
-/** The durable usage object, as far as the fold reads it — every bucket is re-proved by `tokenCountOf`, never trusted. */
 export interface UsageLike {
   inputTokens?: unknown
   cacheReadTokens?: unknown
   cacheWriteTokens?: unknown
   outputTokens?: unknown
-  /** An output subset when the route reports it; absent on the supported DeepSeek routes. */
   reasoningTokens?: unknown
 }
 
 export type BilledUsage = CostBucketTotals
 
-/**
- * One provider-reported usage bucket as a billed count, or null when unreadable. Fractions round and negatives clamp
- * to 0: a gateway reporting `cached_tokens > prompt_tokens` drives the disjoint uncached figure negative, and one raw
- * figure would fail the wire/state schemas' `.int().nonnegative()` gates on every delivery, freezing the projection feed.
- */
 export function tokenCountOf(value: unknown): number | null {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? Math.max(0, Math.round(value)) : null
@@ -36,7 +26,6 @@ export function tokenCountOf(value: unknown): number | null {
 
 const BEIJING_OFFSET_MS = 8 * 3_600_000
 
-/** DeepSeek's peak clock; statutory holidays are deliberately not modeled. */
 export function isBeijingPeak(time: number): boolean {
   const at = new Date(time + BEIJING_OFFSET_MS)
   const day = at.getUTCDay()
@@ -45,8 +34,6 @@ export function isBeijingPeak(time: number): boolean {
   return (h >= 9 && h < 12) || (h >= 14 && h < 18)
 }
 
-/** Clones along the mutated path only: the untouched branch stays shared with the persisted previous state, which the apply contract
- * never mutates in place; buckets arrive sanitized, so totals stay safe non-negative integers. */
 export function addBilledUsage(
   prev: SessionCostUsage | undefined,
   provider: string,
@@ -69,7 +56,6 @@ export function addBilledUsage(
   return { ...(prev ?? {}), [provider]: nextModels }
 }
 
-/** The mirror of {@link addBilledUsage}: a served value must never alias the persisted record it was folded from. */
 export function copyCostUsage(cost: SessionCostUsage): SessionCostUsage {
   const copy: SessionCostUsage = {}
   for (const provider in cost) {
@@ -86,7 +72,6 @@ export function copyCostUsage(cost: SessionCostUsage): SessionCostUsage {
   return copy
 }
 
-/** The key is the request envelope's (provider, model) face; a request without a model has nothing to price. */
 export function accumulateCost(st: TimelineState, time: number, usage: BilledUsage): void {
   const model = st.model
   if (model === undefined) return
@@ -95,7 +80,6 @@ export function accumulateCost(st: TimelineState, time: number, usage: BilledUsa
 
 const TOOL_TIMING_CAP = 16
 
-/** The decode buckets of the generation split, in card order. */
 export const DECODE_KINDS: readonly DecodeKind[] = ['reasoning', 'text', 'toolarg']
 
 export function durOf(from: number, to: number): number {
@@ -103,10 +87,9 @@ export function durOf(from: number, to: number): number {
   return Math.max(0, to - from)
 }
 
-/** Created on first use and CLONED on every later `ensure()`: the persisted previous state is never written in place. */
 export function ensureTiming(st: TimelineState): TimingTotals {
   if (st.timing === undefined) {
-    st.timing = { wallMs: 0, ttftMs: 0, genMs: 0, calls: 0, toolsMs: 0, toolCalls: 0, tools: {} }
+    st.timing = { wallMs: 0, ttftMs: 0, genMs: 0, calls: 0, toolsMs: 0, toolBusyMs: 0, toolCalls: 0, tools: {} }
   }
   return st.timing
 }
@@ -117,19 +100,14 @@ const DECODE_FIELDS: Record<DecodeKind, { ms: 'reasoningMs' | 'textMs' | 'toolAr
   toolarg: { ms: 'toolArgMs', n: 'toolArgBlocks' },
 }
 
-/** A zero span or count stays ABSENT, so a pre-split-shaped state gains no dead properties; the card reads absence as 0. */
 export function addDecode(timing: TimingTotals, kind: DecodeKind, ms: number, blocks: number): void {
   const field = DECODE_FIELDS[kind]
   if (ms > 0) timing[field.ms] = (timing[field.ms] ?? 0) + ms
   if (blocks > 0) timing[field.n] = (timing[field.n] ?? 0) + blocks
 }
 
-/** A new name beyond the cap evicts the smallest tally, so the state stays bounded even over a hostile log of unique names. */
 export function bumpToolTotals(timing: TimingTotals, name: string, ms: number): void {
-  // `__proto__` assigns the prototype instead of a row: the tally would be lost and `foldWire`'s `for...in` would then
-  // copy inherited members, failing the strict wire schema inside the registry's uncontained drive. The client skips it too.
   if (name === '__proto__') return
-  // hasOwn, not an index check: a missing key IS possible at runtime (a name outside the persisted tally).
   if (!Object.hasOwn(timing.tools, name)) {
     if (Object.keys(timing.tools).length >= TOOL_TIMING_CAP) {
       let minKey = ''
@@ -151,4 +129,65 @@ export function bumpToolTotals(timing: TimingTotals, name: string, ms: number): 
   }
   const cur = timing.tools[name]
   timing.tools[name] = { calls: cur.calls + 1, ms: cur.ms + ms }
+}
+
+export const IDLE_MIN_MS = 120_000
+
+export interface IdleWindow {
+  start: number
+  end: number
+}
+
+export function idleGapWindows(beats: readonly number[], from: number, to: number, zoneStart: number): IdleWindow[] {
+  const windows: IdleWindow[] = []
+  let prev = from
+  for (const t of beats) {
+    if (!(t > prev) || !Number.isFinite(t)) continue
+    if (t >= to) break
+    pushIdleGap(windows, prev, t, zoneStart)
+    prev = t
+  }
+  pushIdleGap(windows, prev, to, zoneStart)
+  return windows
+}
+
+function pushIdleGap(windows: IdleWindow[], from: number, to: number, zoneStart: number): void {
+  const idleFrom = Math.max(from, zoneStart)
+  if (Number.isFinite(idleFrom) && to - idleFrom >= IDLE_MIN_MS) {
+    windows.push({ start: idleFrom, end: to })
+  }
+}
+
+export function mergeWindows(list: readonly IdleWindow[]): IdleWindow[] {
+  const sorted = list
+    .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end) && w.end > w.start)
+    .sort((a, b) => (a.start - b.start) || (a.end - b.end))
+  const out: IdleWindow[] = []
+  for (const window of sorted) {
+    const last = out.at(-1)
+    if (last !== undefined && window.start <= last.end) {
+      if (window.end > last.end) last.end = window.end
+      continue
+    }
+    out.push({ ...window })
+  }
+  return out
+}
+
+export function carveWindows(out: TimingSpan[], kind: TimingSpan['kind'], from: number, to: number, idle: readonly IdleWindow[]): number {
+  if (!(to > from)) return 0
+  let cursor = from
+  let carved = 0
+  for (const window of idle) {
+    if (window.end <= cursor) continue
+    if (window.start >= to) break
+    const a = Math.max(cursor, window.start)
+    if (a > cursor) out.push({ kind, start: cursor, end: a })
+    const b = Math.min(to, window.end)
+    carved += b - a
+    cursor = Math.max(cursor, b)
+    if (cursor >= to) break
+  }
+  if (to > cursor) out.push({ kind, start: cursor, end: to })
+  return carved
 }

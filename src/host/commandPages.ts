@@ -1,7 +1,3 @@
-/** The paged full command log behind the command card's incremental history fill. The projection state keeps only the
- * newest `maxCommands` records (the wire and checkpoint stay bounded), so an older page folds the complete observed log
- * through the SAME reducer, cached and extended in place: every page is the fold's own record, never a re-parse. */
-
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandPage } from '../shared/types'
 import { type ColdReadGate, makeColdReadGate } from './coldRead'
@@ -17,10 +13,8 @@ export const COMMANDS_ROUTE = '/api/dsh-context/commands'
 const PAGE_LIMIT = 400
 const PAGE_LIMIT_MAX = 1_000
 
-/** ~13ms of synchronous fold per chunk (the detail route's measured rate); yields keep the route off the event loop. */
 const FOLD_YIELD_EVENTS = 1_000
 
-/** A folded full command state is a few MB on a long session; two entries cover the tab and the modal reading at once. */
 const STATE_CACHE_MAX = 2
 
 interface CommandObservation {
@@ -37,10 +31,8 @@ interface SessionQueryFace {
 
 interface CachedState {
   live: boolean
-  /** The persistence service identity the stored log was read through (a swapped backend must not alias a stale fold). */
   persistence?: unknown
   revision?: string
-  /** The last folded event seq (-1 for an empty log). */
   cursor: number
   state: TimelineState
 }
@@ -53,7 +45,6 @@ function failure(code: string, message: string): Response {
   return reply({ ok: false, error: { code, message } })
 }
 
-/** The durable change token; absent on a live observation, a moving target that must never key the cache. */
 function revisionOf(observation: CommandObservation): string | undefined {
   const revision = observation.revision
   return typeof revision === 'string' && revision !== '' ? revision : undefined
@@ -64,8 +55,6 @@ function cursorOf(observation: CommandObservation): number {
   return typeof cursor === 'number' && Number.isFinite(cursor) ? cursor : -1
 }
 
-/** A cached entry covers this read when it is the same source (and, for a stored log, the same persistence identity and
- * durable revision) and its fold already reached no further than the observation's cut. */
 function reusable(
   entry: CachedState | undefined,
   live: boolean,
@@ -77,7 +66,6 @@ function reusable(
   return live || (entry.revision === revision && entry.persistence === persistence)
 }
 
-/** The newest `limit` records older than `beforeSeq`, oldest-first; `atStart` says this page reached the log's head. */
 function pageOf(state: TimelineState, beforeSeq: number | undefined, limit: number): CommandPage {
   const older: CommandStateRecord[] = []
   for (const rec of state.commands) if (beforeSeq === undefined || rec.seq < beforeSeq) older.push(rec)
@@ -128,8 +116,6 @@ async function readPage(
   return pageOf(state, beforeSeq, limit)
 }
 
-/** Arm the paged command route: one folded state per session, extended by each later read and re-keyed when the
- * durable revision moves. Every face is re-proved; an absent one leaves the route unregistered. */
 export function watchCommandPageChannel(
   ctx: Context,
   bounds: FoldBounds,

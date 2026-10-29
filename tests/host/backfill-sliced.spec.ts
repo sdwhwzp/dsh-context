@@ -10,7 +10,6 @@ import { createContextHeadersDefinition } from '../../src/host/headers'
 import { arm, captureLogs, connectionOf, fakeState, trigger, until } from './helpers/backfill'
 import type { RouteBox } from './helpers/backfill'
 
-/** A contiguous fake log of the given length (restore validates seq continuity, nothing else). */
 function fakeEvents(length: number): SessionEvent[] {
   return Array.from({ length }, (_, seq) => ({ type: 'todo/write', seq, time: seq + 1, data: {} })) as unknown as SessionEvent[]
 }
@@ -32,8 +31,6 @@ function referenceRows(events: SessionEvent[], id: string): unknown {
   return registry.restore({}, events, 0 as never, { id, version: 1, createdAt: 1, cwd: `/repo/${id}`, isSeeded: false } as never, 0 as never).checkpoint
 }
 
-/** Arm the backfill with the REAL registry + the plugin's REAL units, fake persistence serving `events`, and the
- * sliced path's faces (prepare/write) wired the way dsh wires them. */
 function armSliced(ctx: Context, eventsById: Map<string, SessionEvent[]>, opts: {
   liveOnPrepare?: Set<string>
   failPrepare?: Set<string>
@@ -112,7 +109,7 @@ function armSliced(ctx: Context, eventsById: Map<string, SessionEvent[]>, opts: 
 describe('the sliced cold fold (issue #145)', () => {
   test('a monster session folds in slices (a dropped restore answer refolds from init) and lands one-shot rows byte for byte', async () => {
     const ctx = new Context()
-    const events = fakeEvents(4_001) // three slices: 2000 + 2000 + 1
+    const events = fakeEvents(4_001)
     const rig = armSliced(ctx, new Map([['monster', events]]), { hostileRestoreAt: 2 })
     const dispose = watchActivityBackfill(ctx)
     await trigger(rig.route)
@@ -209,7 +206,7 @@ describe('the sliced cold fold (issue #145)', () => {
     const sleeps: number[] = []
     let clock = 0
     const dispose = watchActivityBackfill(ctx, undefined, {
-      now: () => (clock += 400), // every session measures 400ms of work
+      now: () => (clock += 400),
       sleep: async (ms) => { sleeps.push(ms) },
       minRestMs: 25,
       workBudgetMs: 1_000,
@@ -257,8 +254,6 @@ describe('the sliced cold fold (issue #145)', () => {
     await trigger(rig.route)
     await until(() => (rig.writes.has('monster') ? true : undefined), 'the write-back landed')
     dispose()
-    // Two inter-slice rests (3 slices, 400ms per injected clock jump); the session-level rest
-    // covers only the non-sliced remainder (whole session 2800ms minus the 1200ms of slice work).
     assert.deepEqual(sleeps, [400, 400, 1_600])
   })
 
@@ -269,7 +264,7 @@ describe('the sliced cold fold (issue #145)', () => {
     let sleeping = false
     const dispose = watchActivityBackfill(ctx, undefined, {
       now: () => 0,
-      sleep: async () => { sleeping = true; await new Promise(() => {}) }, // never resolves on its own
+      sleep: async () => { sleeping = true; await new Promise(() => {}) },
       minRestMs: 25,
       workBudgetMs: 60_000,
       roundPauseMs: 2_000,
@@ -289,7 +284,7 @@ describe('the sliced cold fold (issue #145)', () => {
       admit: <T>(read: () => Promise<T>): Promise<T | undefined> => {
         const p = read()
         folds++
-        if (folds === 2) disposeLater() // the second session's fold completes with the pass already disposed
+        if (folds === 2) disposeLater()
         return p
       },
     }
@@ -324,8 +319,6 @@ describe('the sliced cold fold (issue #145)', () => {
     await trigger(rig.route)
     await until(() => (rig.writes.has('monster') ? true : undefined), 'the write-back landed')
     dispose()
-    // Slice 1 rests 400; slice 2's rest trips the 800ms budget into a 2000ms pause; the
-    // session-level remainder (1600) trips it again. The pass resumes after each pause.
     assert.deepEqual(sleeps, [400, 2_000, 2_000])
     const pauses = lines.filter(l => l.level === 'info' && l.text.includes('pausing after'))
     assert.equal(pauses.length, 2)

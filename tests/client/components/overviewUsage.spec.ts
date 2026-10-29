@@ -8,7 +8,6 @@ import { makeKit, mount, query, queryAll, text } from '../helpers/kit'
 const kit = makeKit()
 const OverviewUsage = makeOverviewUsage(kit)
 
-// 2026-09-16 was a Wednesday; the window is its seven-day tail.
 const TODAY = '2026-09-16'
 
 function day(over: Partial<DayTotals> = {}): DayTotals {
@@ -69,11 +68,9 @@ describe('OverviewUsage', () => {
     }))
     const heightOf = (col: number, cls: string): string =>
       (queryAll(m.container, '.lc-ov-usage-col')[col].querySelector('.' + cls) as HTMLElement).style.height
-    // Columns run oldest first; 09-16 (col 6) holds both series' maxima, the slivers under the 4% floor before it.
     assert.equal(heightOf(6, 'lc-ov-usage-tokens'), '100%')
     assert.equal(heightOf(5, 'lc-ov-usage-tokens'), '10%')
     assert.equal(heightOf(4, 'lc-ov-usage-tokens'), '4%')
-    // Cost scales independently: 1 → 100%, 0.5 → 50%, 0.01 → 4%.
     assert.equal(heightOf(6, 'lc-ov-usage-cost'), '100%')
     assert.equal(heightOf(5, 'lc-ov-usage-cost'), '50%')
     assert.equal(heightOf(4, 'lc-ov-usage-cost'), '4%')
@@ -131,7 +128,6 @@ describe('OverviewUsage', () => {
       days: {
         '2026-09-16': day({ tokens: 1_200_000 }),
         '2026-09-15': day({ tokens: 5000 }),
-        // 09-14 stays absent — a day with no tokens has no figure to print.
       },
       currency: 'usd',
       today: TODAY,
@@ -142,7 +138,6 @@ describe('OverviewUsage', () => {
     assert.equal(labelIn(5), '5.0k')
     assert.equal(labelIn(4), null)
     assert.equal(queryAll(m.container, '.lc-ov-usage-value').length, 2)
-    // The label is the tokens bar's own child, so it rides that bar's height; cost bars never carry one.
     assert.equal(queryAll(m.container, '.lc-ov-usage-bar.lc-ov-usage-tokens .lc-ov-usage-value').length, 2)
     assert.equal(queryAll(m.container, '.lc-ov-usage-cost .lc-ov-usage-value').length, 0)
     await m.unmount()

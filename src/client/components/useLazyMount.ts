@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
-/** Give the idle slice (or the timeout fallback) room to mount the deferred block without blocking a scroll frame. */
 const IDLE_TIMEOUT_MS = 200
 
-/** Mounts a below-the-fold block once its placeholder nears the conversation viewport (or immediately without
- * IntersectionObserver), so the first commit stays small; the placeholder keeps the row's measured height. */
 export function useLazyMount(force = false): [(el: HTMLElement | null) => void, boolean] {
   const [node, setNode] = useState<HTMLElement | null>(null)
   const ref = useCallback((el: HTMLElement | null) => { setNode(el) }, [])
@@ -16,7 +13,7 @@ export function useLazyMount(force = false): [(el: HTMLElement | null) => void, 
       return
     }
     if (node === null) return
-    /* v8 ignore start -- jsdom has neither IntersectionObserver nor layout: without it the block mounts at once. */
+    /* v8 ignore start */
     let idle = 0
     const reveal = (): void => {
       if (typeof requestIdleCallback === 'function') {

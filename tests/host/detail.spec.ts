@@ -23,8 +23,6 @@ interface CtxSpec {
   stateOf?: (session: unknown, key: string) => unknown
 }
 
-/** A minimal host ctx double with cordis inject semantics: the callback runs once its dependency list
- * completes, and its returned disposer is collected. */
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?: RouteFetch }; disposers: (() => void)[] } {
   const captured: { path?: string; fetch?: RouteFetch } = {}
   const disposers: (() => void)[] = []
@@ -149,7 +147,6 @@ describe('the detail route', () => {
       assert.equal(result.ok, false, `payload ${JSON.stringify(body)} rejected`)
       assert.equal(result.error?.code, 'dsh-context/bad-request')
     }
-    // A non-JSON body degrades to the same typed rejection.
     const raw = await callRaw(captured, 'not json') as { ok: boolean; error?: { code: string } }
     assert.equal(raw.ok, false)
     assert.equal(raw.error?.code, 'dsh-context/bad-request')
@@ -298,7 +295,6 @@ describe('the detail route', () => {
     assert.ok(liveHead.value.head.current.total > 0)
     assert.equal(liveHead.value.requests, undefined, 'the collections never ride a head read')
 
-    // A state that never bumped the detail revision (a header alone) serves the zero rev.
     const fresh = liveCtx(driveTimeline([header(1, { model: 'deepseek-v4-flash', provider: 'deepseek' })]).state)
     watchDetailChannel(fresh.ctx, BOUNDS)
     const freshHead = await call(fresh.captured, { sessionId: 's1', head: true }) as { ok: true; value: { rev: number; head: { model?: unknown } } }
@@ -325,22 +321,18 @@ describe('the detail route', () => {
     assert.equal(coldHead.ok, true)
     assert.ok(coldHead.value.head !== undefined)
     assert.equal(coldHead.value.requests, undefined, 'the cold head read serves the envelope only')
-    // The cold read still caches the FULL payload at its revision, so a later full read re-serves it.
     const full = await call(cold.captured, { sessionId: 'cold1' }) as { ok: true; value: { requests: unknown[] } }
     assert.equal(full.ok, true)
     assert.ok(Array.isArray(full.value.requests))
-    // The cached payload answers a repeat head read at the same revision.
     const cachedHead = await call(cold.captured, { sessionId: 'cold1', head: true }) as { ok: true; value: { rev: number; head?: unknown } }
     assert.equal(cachedHead.ok, true)
     assert.ok(cachedHead.value.head !== undefined)
 
-    // A head read whose observation carries no durable revision folds and serves the head without caching.
     const unkeyed = ctxOf({
       connection: { fetch: { register: () => () => {} } },
       sessions: sessionsWith(okSession()),
       stateOf: () => undefined,
       sessionQuery: { observeSession: () => Promise.resolve({
-        // A header alone never bumps the detail revision, so the unkeyed head path reads the zero rev.
         events: [header(1, { model: 'deepseek-v4-flash', provider: 'deepseek' })],
         [Symbol.dispose]: () => {},
       }) },
@@ -378,7 +370,6 @@ describe('the detail route', () => {
     assert.equal(r2.ok, false)
     assert.equal(r2.error.message, 'hostile registry')
 
-    // A state whose collections are junk (the detail builder throws).
     const junkState = ctxOf({
       connection: { fetch: { register: () => () => {} } },
       sessions: sessionsWith(okSession()),
@@ -388,7 +379,6 @@ describe('the detail route', () => {
     const r3 = await call(junkState.captured, { sessionId: 's1' }) as { ok: boolean }
     assert.equal(r3.ok, false)
 
-    // A non-Error rejection stringifies into the envelope.
     const stringThrow = ctxOf({
       connection: { fetch: { register: () => () => {} } },
       sessions: {
@@ -478,10 +468,10 @@ describe('the cold fold (issue #145)', () => {
     }))
     watchDetailChannel(ctx, BOUNDS)
     await call(captured, { sessionId: 'cold1' })
-    revision = 'r2' // the log moved: a new durable revision must fold again
+    revision = 'r2'
     await call(captured, { sessionId: 'cold1' })
     assert.equal(eventReads, 2, 'the changed log refolded instead of serving stale data')
-    revision = undefined // a live-race cut names no durable revision
+    revision = undefined
     await call(captured, { sessionId: 'cold1' })
     await call(captured, { sessionId: 'cold1' })
     assert.equal(eventReads, 4, 'no revision — every read folds, as before')
@@ -536,7 +526,7 @@ describe('the cold fold (issue #145)', () => {
     }))
     watchDetailChannel(ctx, BOUNDS)
     await call(captured, { sessionId: 'cold1' })
-    watchDetailChannel(ctx, BOUNDS) // the config remount's re-arm shares nothing with the first watch
+    watchDetailChannel(ctx, BOUNDS)
     await call(captured, { sessionId: 'cold1' })
     assert.equal(remountReads, 2, 'the remounted route folds against its own cache')
   })

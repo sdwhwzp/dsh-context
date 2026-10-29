@@ -10,7 +10,6 @@ import { click, hover, makeKit, mount, query, queryAll, text, unhover } from '..
 
 const kit = makeKit()
 
-/** React's controlled input needs the native setter for the change to register. */
 async function typeIn(input: HTMLInputElement, value: string): Promise<void> {
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value)
@@ -129,7 +128,6 @@ describe('MemberBoard — team cards', () => {
     const entered = new Array<string>()
     const opened = new Array<string>()
     const hovers = new Array<string | null>()
-    // The owner filter is a controlled prop: the wrapper plays the view, holding its state.
     let ownerFilter: string | null = null
     const filters = new Array<string | null>()
     function Controlled(): ReactElement {
@@ -210,7 +208,6 @@ describe('MemberBoard — team cards', () => {
       leadDetail: null,
     })))
     const cards = queryAll(m.container, '.lc-member-card')
-    // No roster facts: no duty descriptions; the descriptor model stands in.
     assert.ok(text(cards[1]).includes('flash-lite (high)'))
     assert.equal(queryAll(cards[1], '.lc-member-desc').length, 0)
     assert.equal(queryAll(m.container, '.lc-member-opens').length, 0)
@@ -219,7 +216,6 @@ describe('MemberBoard — team cards', () => {
 })
 
 describe('MemberBoard — the other-agents cards', () => {
-  /** The cards of the "other agents" section: the grid after that section's own head. */
   function otherCards(container: HTMLElement): HTMLElement[] {
     const head = queryAll(container, '.lc-board-section-head')
       .find(h => text(h).includes(DICT_EN['fleet.board.others']))

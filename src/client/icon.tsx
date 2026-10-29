@@ -1,5 +1,3 @@
-/** The Context emblem, bundled from the package-root `icon.svg` so the plugin's identity is self-contained. */
-
 import sheetMarkup from '../../icon.svg?raw'
 import { useId, type ReactElement } from 'react'
 import type { Translate } from './i18n'
@@ -11,15 +9,12 @@ const SHEET_MARKUP = sheetMarkup
 
 const SHEET_OUTLINE = SHEET_MARKUP.replace(/fill="#[0-9A-Fa-f]{6}"/g, '')
 
-/** The harness icon set's line weight: one unit of its 16-unit box, which this artboard spells as 64. */
 const HARNESS_STROKE = 1024 / 16
 
-/** The source artboard's own bar weight: every pill and the dot measures 98 to 101 units. */
 const SHEET_STROKE = 98
 
 const INSET = (SHEET_STROKE - HARNESS_STROKE) / 2
 
-/** The mask canvas: the artboard grown past every shifted copy of itself, so no edge clips. */
 const CANVAS = { x: -2 * INSET, y: -2 * INSET, width: 1024 + 4 * INSET, height: 1024 + 4 * INSET }
 const CANVAS_ATTRS = `x="${CANVAS.x}" y="${CANVAS.y}" width="${CANVAS.width}" height="${CANVAS.height}"`
 
@@ -27,8 +22,6 @@ const canvasRect = (fill: string, rest = ''): string => `<rect ${CANVAS_ATTRS} f
 
 const SHIFTS: [number, number][] = [[INSET, 0], [-INSET, 0], [0, INSET], [0, -INSET]]
 
-/** The mono seat masks the sheet down to the harness line weight rather than redrawing — the plugin ships
- * ONE artwork. Compositing, not `feMorphology`: that filter rounds to whole device pixels and thins at 2×. */
 function monoMarkup(id: string): string {
   const hole = `${id}-hole`
   const thin = `${id}-thin`
@@ -51,7 +44,6 @@ export interface ContextIconProps {
 }
 
 export function ContextIcon({ size = 20, className, mono = false }: ContextIconProps): ReactElement {
-  // Mask defs are per instance: a second emblem would otherwise resolve `url(#…)` against this one's defs.
   const id = `dsh-context-sheet-${useId().replaceAll(':', '')}`
   return (
     <svg
@@ -66,12 +58,10 @@ export function ContextIcon({ size = 20, className, mono = false }: ContextIconP
   )
 }
 
-/** The sidebar panel-list glyph: the emblem in `mono`, so the shell row's hover/active colors paint it. */
 export function InsightPanelIcon({ size = 18 }: { size?: number }): ReactElement {
   return <ContextIcon size={size} mono />
 }
 
-/** The tab chip's title: the plugin's own bound translate (the tab-information hook can throw pre-commit). */
 export function makeContextTabTitle(t: Translate): () => ReactElement {
   return function ContextTabTitle(): ReactElement {
     return (

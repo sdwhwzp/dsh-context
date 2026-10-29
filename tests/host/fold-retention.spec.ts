@@ -24,7 +24,6 @@ describe('trimToLastTurns', () => {
       assert.deepEqual(trimToLastTurns(requests, maxTurns).map(r => r.seq), kept, `cap ${maxTurns} over ${requests.length} records`)
     }
     assert.deepEqual(trimToLastTurns([], 2), [])
-    // A turn straddling the cut is kept whole.
     const straddling = [req(1, 1), req(2, 2), req(3, 2), req(4, 2), req(5, 3)]
     const kept = trimToLastTurns(straddling, 2)
     assert.deepEqual(kept.map(r => r.seq), [2, 3, 4, 5])
@@ -72,7 +71,6 @@ describe('the incremental turnRuns ledger', () => {
       assistantMessage(4, { turn: 2, step: 1 }),
       assistantMessage(5, { turn: 2, step: 2 }),
     ])
-    // Scan semantics: the leading turn-less record forms no run; runs open at turn 1 (record 2) and turn 2 (record 4).
     assert.equal(drive.state.turnRuns, 2)
     assertStatesPlainJson(drive)
   })
@@ -81,7 +79,6 @@ describe('the incremental turnRuns ledger', () => {
     const def = timelineDef()
     let state = def.apply(def.init(), assistantMessage(1, { turn: 1, step: 1 }))
     state = def.apply(state, assistantMessage(2, { turn: 1, step: 2 }))
-    // A cached row from an older build carries no `turnRuns` (additive-optional).
     delete (state as { turnRuns?: unknown }).turnRuns
     const pushed = def.apply(state, assistantMessage(3, { turn: 2, step: 1 }))
     assert.equal(pushed.turnRuns, 2)
@@ -130,7 +127,6 @@ describe('trimState restored-state defenses', () => {
     const def = timelineDef({ maxArchiveNodes: 2 })
     const st = createTimelineState()
     st.requests.push(req(5, 1, 1))
-    // A restored/legacy row without `gone`: `gone ?? Infinity` keeps it above any oldest retained request.
     st.archived.push({ seq: 1, cat: 'user', tokens: 9 })
     const next = def.apply(st, planMode(10, { active: true }))
     assert.deepEqual(next.archived.map(n => n.seq), [1])

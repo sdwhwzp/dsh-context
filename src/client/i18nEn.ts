@@ -1,5 +1,3 @@
-/** The English dictionary; `DictKey` pins it to the zh key set at compile time. */
-
 import type { DictKey } from './i18nZh'
 
 export const DICT_EN = {
@@ -90,6 +88,7 @@ export const DICT_EN = {
   'timing.text': 'Answers',
   'timing.toolArgs': 'Tool args',
   'timing.tools': 'Tool runs',
+  'timing.toolsBusyTip': 'Busy time with at least one tool running. Per-call durations sum to {total}: parallel runs overlap, and runs outside a step window or awaiting the user are not attributed.',
   'timing.other': 'Overhead',
   'timing.callTimes': '{n} calls',
   'timing.toolTimes': '{n} runs',
@@ -97,7 +96,7 @@ export const DICT_EN = {
   'timing.empty': 'No timing data yet — durations appear as the conversation runs',
   'timing.tps': 'TPS {tps} tok/s',
   'timing.tpsTip': 'Output speed (TPS): summed decoded output tokens over summed decode time — the same pairing as the harness session stats.',
-  'timing.strip': 'Session-time strip: slices packed in occurrence order, width as share of the active time; ticks at zero, the quartiles, and the full span',
+  'timing.strip': 'Timing strip: slices packed in occurrence order, width as share of the active time; ticks at zero, the quartiles, and the full span',
   'tokens.title': 'Token Stats',
   'tokens.total': 'Total',
   'tokens.thinking': 'Reasoning',

@@ -9,10 +9,8 @@ import { IconCheck, IconCopy } from '../primitives'
 import type { ViewKit } from '../viewkit'
 import { ClearableInput } from './clearableInput'
 
-/** Render bound on listed skills — a hostile corpus can coin a name per injection. */
 const MAX_ROWS = 20
 
-/** The description's display bound — a registry description can run paragraphs. */
 const MAX_DESC = 160
 
 const COPIED_MS = 1500
@@ -24,10 +22,8 @@ const TIP_ID = 'lc-skilltip-bubble'
 
 const SKILL_SORTS: readonly SkillSort[] = ['loads', 'recent']
 
-/** The skills palette is the shared name-hash palette (nameColor.ts). */
 export const skillColorOf = nameColorOf
 
-/** Known discovery sources localize; unknown/provider-named sources display raw; source-less has no label. */
 function originLabelOf(t: ViewKit['t'], info: SkillInfo): string {
   const source = info.source
   if (source === 'project-dsh' || source === 'project-agents') return t('ov.skills.src.project')
@@ -63,7 +59,6 @@ function DetailHead(props: { name: string; origin: string }): ReactElement {
   )
 }
 
-/** Plain record so state identity means anchor identity (the measure effect keys on it). */
 interface HoverRow {
   name: string
   rect: { left: number; top: number; width: number; bottom: number }
@@ -84,10 +79,8 @@ export function makeOverviewSkills(kit: ViewKit): (props: OverviewSkillsProps) =
   const { t, fmt } = kit
   return function OverviewSkills(props: OverviewSkillsProps): ReactElement {
     const { stats } = props
-    // Scope-wide heaviest tally (not the visible rows') keeps the bars from overflowing or jumping.
     const max = stats.reduce((top, s) => Math.max(top, s.loads), 0)
 
-    // Kept mounted on empty matches (the shared RowToolbar contract).
     const [query, setQuery] = useState('')
     const needle = query.trim().toLowerCase()
     const visible = needle === '' ? stats : stats.filter(s => s.name.toLowerCase().includes(needle))
@@ -98,7 +91,6 @@ export function makeOverviewSkills(kit: ViewKit): (props: OverviewSkillsProps) =
     const bubbleRef = useRef<HTMLDivElement | null>(null)
     const hoverStat = hoverRow === null ? undefined : stats.find(s => s.name === hoverRow.name)
 
-    // Any scroll or resize moves every anchor — retract rather than float detached.
     useEffect(() => {
       if (hoverRow === null) return undefined
       const retract = (): void => { setHoverRow(null) }
@@ -110,11 +102,10 @@ export function makeOverviewSkills(kit: ViewKit): (props: OverviewSkillsProps) =
       }
     }, [hoverRow])
 
-    // Measured once per shown card; keyed on the hover record so a same-row re-render never re-hides.
     useLayoutEffect(() => {
       if (hoverRow === null) return
       const el = bubbleRef.current
-      /* v8 ignore next -- unreachable: the portal commits its ref before layout effects run. */
+      /* v8 ignore next */
       if (el === null) return
       const w = el.offsetWidth
       const h = el.offsetHeight
@@ -126,7 +117,6 @@ export function makeOverviewSkills(kit: ViewKit): (props: OverviewSkillsProps) =
 
     const [copied, setCopied] = useState(false)
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-    // A pin change drops any lingering flash; the pending timer clears on unmount.
     useEffect(() => { setCopied(false) }, [props.selected])
     useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current) }, [])
     const copyPath = async (path: string): Promise<void> => {
@@ -266,8 +256,6 @@ export function makeOverviewSkills(kit: ViewKit): (props: OverviewSkillsProps) =
             {visible.slice(0, MAX_ROWS).map((s) => {
               const color = skillColorOf(s.name)
               const pinned = props.selected === s.name
-              // A % width resolves against the padding box but the track is the content box:
-              // subtract the 2x6px insets or 100% pokes through the unit's ring.
               const share = Math.round(s.loads / Math.max(max, 1) * 100)
               const bar = <i className="lc-ov-skill-bar" style={{ width: `calc(${share}% - ${Math.round(share * 12) / 100}px)`, background: color }} />
               const rowButton = (
@@ -304,7 +292,6 @@ export function makeOverviewSkills(kit: ViewKit): (props: OverviewSkillsProps) =
             )}
           </div>
         )}
-        {/* The pinned row is out of scope or past the render bound — the pin still gets its detail. */}
         {!pinnedRowVisible && detailBlock}
         {hoverTip}
       </div>

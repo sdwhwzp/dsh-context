@@ -34,7 +34,6 @@ async function until<T>(read: () => T | undefined, message: string): Promise<T> 
   assert.fail(message)
 }
 
-/** The minimal real envelope trio: header epoch, user message, metered assistant reply. */
 function appendRealEnvelopes(session: Session): void {
   session.append('request/header', {
     header: {
@@ -134,7 +133,6 @@ describe('dsh-context host plugin', () => {
     assert.equal(tools.find(t => t.name === 'mcp__github__get_issue')?.plugin, 'mcp:github')
     assert.ok(!('plugin' in tools.find(t => t.name === 'agent_teams_add_member')!), 'unmapped third-party tools stay untagged')
 
-    // dsh-context booted before any tools service existed; a late-provided instance is wrapped on first read.
     ctx.provide('tools', { register() { return () => {} } })
     await ctx.plugin({
       name: 'my-agent-tools',

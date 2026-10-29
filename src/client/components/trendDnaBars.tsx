@@ -7,8 +7,6 @@ export const RISE_CLASS = ' animate-lc-bar-in motion-reduce:animate-none'
 export const STAGGER_CAP = 20
 const DNA_MAX_STOPS = 64
 
-/** A 14px bar cannot show one stop per band, and thousands of stops bloat every inline style: sample the runs down to
- *  a small fixed set — visually indistinguishable at this width, while the tooltip still reads the full model. */
 export function capDnaRuns(
   runs: { color: string; from: number; to: number }[],
   maxStops: number,
@@ -32,8 +30,6 @@ export function capDnaRuns(
 
 
 
-/** DNA bars share one px-per-token scale, so band boundaries must snap to ONE shared pixel grid: per-bar sampling or
- *  bucketing made identical strands land on different offsets and broke alignment. */
 export const DNA_SNAP_PX = 2
 
 export function snapDnaRuns(
@@ -72,8 +68,6 @@ export const DnaBar = function DnaBar(props: DnaBarProps): ReactElement | null {
   const visible: TrendBand[] = []
   for (const b of props.bands) if (b.tokens > 0) visible.push(b)
   if (visible.length === 0) return null
-  // Shared per-token scale (chartHeight/maxTotal): the same band starts at the same px in every bar, and the stops
-  // additionally snap to a shared pixel grid so adjacent bars keep identical strand boundaries.
   const pxPerToken = props.chartHeight / props.maxTotal
   const runs: { color: string; from: number; to: number }[] = []
   for (const b of visible) {
@@ -84,7 +78,6 @@ export const DnaBar = function DnaBar(props: DnaBarProps): ReactElement | null {
     else runs.push({ color: b.color, from, to })
   }
   const stops = snapDnaRuns(runs, DNA_SNAP_PX)
-  // A token count far below the shared max can round every endpoint to 0px; keep the top band's colour instead of an empty gradient.
   const background = stops.length === 0
     ? visible[visible.length - 1].color
     : 'linear-gradient(to top, ' + stops.map(r => `${r.color} ${r.from}px, ${r.color} ${r.to}px`).join(', ') + ')'
@@ -117,7 +110,6 @@ export const DnaBar = function DnaBar(props: DnaBarProps): ReactElement | null {
 }
 
 
-/** DNA+delta bar interior: ONE gradient div spans both arms — the down arm's bands in REVERSE read order, then the up arm. */
 interface DnaDeltaBarProps {
   d: DnaDelta
   scale: number

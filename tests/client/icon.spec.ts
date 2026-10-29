@@ -73,7 +73,6 @@ describe('ContextIcon', () => {
   })
 
   test('the package-root icon.svg stays in lockstep with the component', async () => {
-    // The static file is what the Host's package-meta reader serves (`package.json` `icon`): component and file must move together.
     const raw = await readFile('icon.svg', 'utf8')
     const svgPaths = [...raw.matchAll(/<path d="([^"]+)" fill="([^"]+)"\/>/g)].map(([, d, fill]) => ({ d, fill }))
     const m = await mount(h(ContextIcon, {}))

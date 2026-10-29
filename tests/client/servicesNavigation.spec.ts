@@ -41,7 +41,7 @@ describe('canOpenPathsOf / openPathVia', () => {
   test('openPathVia returns a fire-and-forget caller that forwards the path and swallows failures', () => {
     const open = openPathVia(ctxWith({ connection: { rpc: { call: () => Promise.reject(new Error('no desktop')) } } }))
     assert.ok(open !== undefined)
-    open('/repo/a.ts') // must not throw
+    open('/repo/a.ts')
     const syncThrow = openPathVia(ctxWith({ connection: { rpc: { call: () => { throw new Error('sync') } } } }))
     syncThrow!('/repo/a.ts')
     assert.equal(openPathVia(ctxWith({})), undefined)

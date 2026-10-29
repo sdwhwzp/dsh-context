@@ -30,7 +30,6 @@ describe('ContextView — targeted content fetch and image loading', () => {
         },
       },
     })
-    // The direct `remote.session` service is hostile, as on the real host: only the declared inject resolves the face.
     ctx.setService('remote.session', { get page() { throw new Error('cannot get property "remote.session" without inject') } })
     watchHistoryFaces(asClientCtx(ctx))
     const View = makeView(ctx)
@@ -43,13 +42,11 @@ describe('ContextView — targeted content fetch and image loading', () => {
     }))
     const catRow = queryAll(m.container, '.lc-br-cat-row').find(r => text(r).includes(DICT_EN['cat.user']))
     assert.ok(catRow !== undefined)
-    // The lone node auto-expands with the category, triggering the fetch.
     await click(catRow)
     await flush()
     assert.deepEqual(calls, [{ sessionId: 'sv-page', throughSeq: 1, beforeSeq: 2 }], 'one read anchored just past the seq')
     assert.ok(text(m.container).includes('OLD FULL BODY'), 'mapped page content renders')
     await m.unmount()
-    // Unload the declared slot so no face stales into the next test.
     ctx.dispose()
   })
 
@@ -163,7 +160,6 @@ describe('ContextView — scroll ledger', () => {
       useProjection: undefined as ((key: string) => unknown) | undefined,
     }
 
-    // First visit: no ledger entry, so the shared scroller is re-anchored at top.
     const scroller1 = document.createElement('div')
     scroller1.setAttribute('data-conversation-scroll', '')
     const m1 = await mountInScroller(

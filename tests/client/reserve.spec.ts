@@ -34,7 +34,7 @@ describe('reserveGeometry', () => {
   })
 
   test('a window too small to hold the headroom reserves nothing, as dsh refuses that route', () => {
-    assert.equal(reserveGeometry(65_536, 0), undefined) // exactly the boundary
+    assert.equal(reserveGeometry(65_536, 0), undefined)
     assert.equal(reserveGeometry(65_535, 0), undefined)
     assert.equal(reserveGeometry(1_000, 200), undefined)
     assert.equal(reserveGeometry(1_000, 1_000), undefined)

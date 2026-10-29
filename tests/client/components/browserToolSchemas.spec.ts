@@ -10,7 +10,6 @@ describe('ContextBrowser tool schemas', () => {
     headers: [{
       seq: 1, time: 1, systemTokens: 3,
       tools: [
-        // Producer order is NOT meaningful: rows re-rank by token price.
         { name: 'omega', tokens: 5, plugin: 'mcp:github' },
         { name: 'rho', tokens: 6 },
         { name: 'theta', tokens: 8 },
@@ -229,7 +228,6 @@ describe('ContextBrowser tool schemas', () => {
         surfaceNode({ seq: 5, cat: 'tool', tool: 'beta', tokens: 20 }),
         surfaceNode({ seq: 6, cat: 'tool', tool: 'gamma', tokens: 20 }),
         surfaceNode({ seq: 7, cat: 'tool', tool: 'delta', tokens: 20 }),
-        // An unpaired result (no name stamped by the fold) hits nothing.
         surfaceNode({ seq: 8, cat: 'tool', tokens: 20 }),
       ],
     })
@@ -283,7 +281,6 @@ describe('ContextBrowser tool schemas', () => {
       await m.unmount()
     }
 
-    // In-toolbar toggling never writes the preference back.
     const m = await mountWith('count')
     await click(sortBtns(m.container)[0])
     assert.equal(settings.store.getSnapshot().toolSort, 'count')
@@ -336,7 +333,7 @@ describe('ContextBrowser tool schemas', () => {
       headers: [{ seq: 1, time: 1, systemTokens: 3, tools: [
         { name: 'write', tokens: 5, plugin: '@deepseek-ai/dsh-tool-fs' },
         { name: 'mcp__github__get_issue', tokens: 3, plugin: 'mcp:github' },
-        { name: 'agent_teams_add_member', tokens: 2 }, // no attribution → no chip
+        { name: 'agent_teams_add_member', tokens: 2 },
         { name: 'claim_files', tokens: 2, plugin: UNKNOWN_TOOL_SOURCE },
       ] }],
     }
@@ -353,8 +350,6 @@ describe('ContextBrowser tool schemas', () => {
     assert.ok(!text(rows[2]).includes('@'), 'unattributed tools stay untagged')
     assert.equal(chips[2].textContent, 'Unknown plugin')
     assert.ok((chips[2] as HTMLElement).title.includes('registered before the context plugin loaded'), 'unknown chips explain the boot gap')
-    // Layout: the tool name leads the row, the plugin chip trails it directly — one frame only,
-    // so `lc-br-tag` must not nest another `lc-br-tag`.
     assert.equal(text(query(rows[0], '.lc-br-preview')), 'write', 'tool name leads')
     const chip = chips[0] as HTMLElement
     assert.equal(chip.previousElementSibling, query(rows[0], '.lc-br-preview'), 'plugin chip sits right after the tool name')

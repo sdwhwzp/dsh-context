@@ -81,8 +81,6 @@ describe('FileCard — empty state', () => {
   test('no file ops keeps the controls so the card measures the same as a populated one', async () => {
     const m = await mount(h(FileCard, { activity: richActivity({ entries: [] }), }))
     assert.ok(text(m.container).includes('No file reads, writes, or searches'))
-    // The empty state wears the SAME controls and the SAME reserved lane as a populated card: the card's
-    // activity re-scopes on every step, and a controls-free empty state resized the page on the first read.
     assert.equal(queryAll(m.container, '.lc-card-title .lc-fa-chips').length, 1)
     assert.equal(queryAll(m.container, '.lc-fa-ctl').length, 1)
     assert.equal(queryAll(m.container, '.lc-fa-meta').length, 1)
@@ -116,15 +114,14 @@ describe('FileCard — header, rows, and filters', () => {
     const logRow = rowByTitle(m.container, '/var/many.log')
     assert.ok(logRow.querySelector('.lc-fa-path em')?.textContent === '/var/')
     assert.ok(logRow.querySelector('.lc-fa-path b')?.textContent === 'many.log')
-    assert.ok(text(logRow).includes('9')) // read ×9 badge
-    assert.equal(queryAll(logRow, '.lc-fa-badge').length, 1) // read only
+    assert.ok(text(logRow).includes('9'))
+    assert.equal(queryAll(logRow, '.lc-fa-badge').length, 1)
     assert.ok(logRow.querySelector('.lc-fa-time') !== null)
     const aRow = rowByTitle(m.container, '/src/a.ts')
     assert.ok(aRow.querySelector('.lc-fa-path em')?.textContent === '/src/')
     assert.ok(aRow.querySelector('.lc-fa-path b')?.textContent === 'a.ts')
-    assert.equal(queryAll(aRow, '.lc-fa-badge').length, 2) // read + write
+    assert.equal(queryAll(aRow, '.lc-fa-badge').length, 2)
     assert.ok(text(aRow).includes('+2') && text(aRow).includes('−3'))
-    // Failures surface on the expanded op rows only: the collapsed row keeps no error dot.
     assert.equal(queryAll(aRow, '.lc-br-err-dot').length, 0)
     assert.ok(aRow.title === '/src/a.ts')
     const dirRow = rows.find(r => r.title === '/src/')
@@ -313,7 +310,6 @@ describe('FileCard — header, rows, and filters', () => {
       },
       workspace: '/w',
     }))
-    // The raw '/w/a.ts' sorts before '/x/z.ts', while the displayed 'a.ts' would sort after it.
     assert.deepEqual(queryAll(churn.container, '.lc-fa-row').map(r => r.title), ['/w/a.ts', '/x/z.ts'])
     await churn.unmount()
   })
@@ -333,7 +329,6 @@ describe('FileCard — header, rows, and filters', () => {
       await m.unmount()
     }
 
-    // The stored preference resets the default; in-card toggling never writes back.
     settings.set('defaultFileSort', 'count')
     const m = await mount(h(FileCard, { activity: richActivity() }))
     assert.ok(sortBtns(m.container)[0].className.includes('lc-gran-on'))
@@ -384,8 +379,6 @@ describe('FileCard — expansion and locate', () => {
     const m = await mount(h(FileCard, { activity: richActivity() }))
     await click(rowByTitle(m.container, '/src/'))
     assert.ok(text(query(m.container, '.lc-fa-ops')).includes('needle'))
-    // The nine-read log renders all nine rows — no cap, no overflow line
-    // (one expanded file at a time: this click collapsed the directory row).
     await click(rowByTitle(m.container, '/var/many.log'))
     const many = query(m.container, '.lc-fa-ops')
     assert.equal(queryAll(many, '.lc-fa-op').length, 9)
@@ -428,7 +421,6 @@ describe('FileCard — expansion and locate', () => {
     }))
     await click(rowByTitle(m.container, '/src/a.ts'))
     const ops = queryAll(m.container, '.lc-fa-op')
-    // The exact read rides the row's right-edge group: `>> count` with the range as the title.
     const exact = queryAll(ops[0], '.lc-fa-op-meta .lc-fa-read')
     assert.equal(exact.length, 1)
     assert.equal(exact[0].textContent, '>>30')
@@ -454,7 +446,6 @@ describe('FileCard — expansion and locate', () => {
 })
 
 describe('FileCard — workspace display and system open', () => {
-  /** Entries exercising every display form against one workspace root. */
   function workspaceActivity(): FileActivity {
     return {
       entries: [

@@ -1,6 +1,3 @@
-/** Named imports resolve defensively: an absent or renamed export would render as React error #130,
- * so each degrades to a render-nothing fallback. */
-
 import type { ReactElement } from 'react'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import type { IconProps } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -43,7 +40,6 @@ export const IconFolderOpen = resolveIcon('IconFolderOpenOutlineRegular')
 export const IconApi = resolveIcon('IconApiOutlineRegular')
 export const IconPlugin = resolveIcon('IconPluginPinwheelOutlineRegular')
 
-/** The harness's file-type glyph: its props are its own (`path`/`kind`), not an icon's. */
 export interface FileGlyphProps {
   path?: string
   kind?: string

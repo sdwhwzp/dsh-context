@@ -43,7 +43,6 @@ describe('FleetView — the agent family on its own page', () => {
     await m.unmount()
     ctx.dispose()
 
-    // The read stays in flight for the whole second mount, so only the head's own counters can carry the card.
     vi.stubGlobal('fetch', () => new Promise(() => {}))
     const slimCtx = new TestClientCtx({ services: { sessions: selfOnly('sv-slim') } })
     const SlimView = makeView(slimCtx)

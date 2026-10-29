@@ -12,7 +12,6 @@ describe('mcpServerOf', () => {
     assert.equal(mcpServerOf('mcp__github__get_issue'), 'github')
     assert.equal(mcpServerOf('mcp__my_server__send_message'), 'my_server')
     assert.equal(mcpServerOf('mcp__a__b__c'), 'a__b', 'server names may themselves contain __')
-    // Overlong names are sliced to 51 chars + '_<12-hex>'; a cut through an inner '__' degrades the server read.
     const hex64 = '0123456789abcdef'.repeat(4)
     assert.equal(mcpServerOf(`mcp__github__tool_${hex64}`), 'github')
     const cutThrough = `mcp__github__${'y'.repeat(37)}__tail`.slice(0, 51)

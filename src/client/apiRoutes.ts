@@ -1,5 +1,3 @@
-/** Browser-relative spellings (docs/compatibility.md §5.11); re-declared: the client bundle must never import a host module. */
-
 export const DETAIL_ROUTE = 'api/dsh-context/detail'
 
 export const COMMANDS_ROUTE = 'api/dsh-context/commands'

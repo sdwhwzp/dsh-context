@@ -5,9 +5,7 @@ import type { RowKind } from './browserNodes'
 export interface CatFocus {
   cat: string
   kind?: RowKind
-  /** The step to show; absent lands on the live surface. */
   step?: number
-  /** The row text-lens the opened category opens with (the tool jumps seed the tool's name). */
   query?: string
 }
 
@@ -22,10 +20,7 @@ export function lastOfTurn(requests: RequestRecord[], turn: number): RequestReco
   return null
 }
 
-/** Entry stamp of a surface item: the FIRST request logged after its seq carried it (assemble includes
- * `n.seq < R.seq`); no following request stamps null. */
 export function stepStampOf(requests: RequestRecord[]): (itemSeq: number) => { turn: number; step: number } | null {
-  // Sort a copy: restored rows can re-order, so the derivation must not trust wire append order.
   const sorted = requests.slice().sort((a, b) => a.seq - b.seq)
   return (itemSeq) => {
     for (const r of sorted) {
@@ -37,6 +32,4 @@ export function stepStampOf(requests: RequestRecord[]): (itemSeq: number) => { t
   }
 }
 
-/** Bands keep at least this share of the occupied region so a tiny item stays a hoverable filament, not a sub-pixel
- * sliver; tooltips still report true shares. */
 export const DNA_MIN_BAND = 0.35

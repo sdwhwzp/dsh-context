@@ -14,7 +14,6 @@ function ev(kind: ContextEventRecord['kind']): ContextEventRecord {
   return { seq: 0, time: 0, kind }
 }
 
-/** A skill-tagged inject event the way the host fold stamps it (fold.ts). */
 function skillEv(name: string): ContextEventRecord {
   return { seq: 0, time: 0, kind: 'inject', form: 'instructions', sub: 'skill', name }
 }
@@ -25,16 +24,12 @@ describe('countsOfRecords (the inline generation derivation)', () => {
       [req(1), req(1), req(2), req()],
       [
         ev('inject'), ev('inject'), ev('inject'), ev('compaction'), ev('compaction'), ev('prune'), ev('model'), ev('mode'),
-        // Skill loads and a `/name` invocation count by DISTINCT name; the
-        // available-skills catalog digest rides an untagged inject event and never lands in the tally.
         skillEv('grilling'), skillEv('grilling'), skillEv('ponytail'),
         { ...ev('inject'), name: 'available-skills' },
         { ...ev('inject'), sub: 'skill' },
         { ...ev('inject'), sub: 'skill', name: 5 } as unknown as ContextEventRecord,
       ],
     )
-    // Only the three priced event kinds appear; every inject rides kind 'inject' — only the skills
-    // TALLY filters by the tag (catalog digest and hostile shapes included).
     assert.deepEqual(counts, { turns: 3, steps: 4, injects: 9, compactions: 2, prunes: 1, skills: 2 })
     assert.deepEqual(countsOfRecords([], []), { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0, skills: 0 })
   })
@@ -46,10 +41,10 @@ describe('toolTallyOf (the live-surface per-tool tally)', () => {
   test('folds the host predicate: tool results, plus skill nodes carrying a tool', () => {
     const tally = toolTallyOf([
       node('tool', 'read'), node('tool', 'read'), node('tool', 'bash'),
-      node('skill', 'run_code'), // a skill node carrying a tool counts
-      node('skill'), // a bare skill node does not
+      node('skill', 'run_code'),
+      node('skill'),
       node('user'), node('assistant'),
-      node('tool'), // an unnamed result counts toward the head figure but rides no pill
+      node('tool'),
     ])
     assert.deepEqual(tally, [['read', 2], ['bash', 1], ['run_code', 1]])
   })

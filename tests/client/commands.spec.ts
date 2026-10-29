@@ -40,14 +40,14 @@ describe('commandsOf — the gone join', () => {
     const archive: SurfaceNode[] = [
       { seq: 50, cat: 'tool', tokens: 1, gone: 70 },
       { seq: 60, cat: 'tool', tokens: 1, gone: 71 },
-      { seq: 62, cat: 'tool', tokens: 1 }, // a live archived node carries no stamp
+      { seq: 62, cat: 'tool', tokens: 1 },
     ]
     const records = [
       cmd(1, { resultSeq: 50 }),
       cmd(2, { resultSeq: 55 }),
       cmd(3, { codeMode: true, parent: 60 }),
-      cmd(4), // running: no surface node at all
-      cmd(5, { resultSeq: 50, gone: 99 }), // an already-stamped record keeps its own stamp
+      cmd(4),
+      cmd(5, { resultSeq: 50, gone: 99 }),
     ]
     const joined = commandsOf(records, archive)
     assert.equal(joined[0].gone, 70)
@@ -232,7 +232,6 @@ describe('the rail derivations', () => {
 
     assert.deepEqual(attentionOf([]), {})
     assert.deepEqual(attentionOf(viewsOf([cmd(1, { start: 0, end: 50 })], undefined)), {})
-    // A sub-second slowest is not attention-worthy.
     assert.equal(attentionOf(viewsOf([cmd(1, { start: 0, end: 500 })], undefined)).slowest, undefined)
   })
 })

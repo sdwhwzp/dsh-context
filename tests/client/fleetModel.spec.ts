@@ -51,7 +51,6 @@ describe('teamOfSnapshot', () => {
 
 describe('useFleetModel', () => {
   function sessionsFace(byId: Record<string, unknown>, refreshed: string[]) {
-    // The snapshot object must stay reference-stable across reads: useSyncExternalStore loops on a fresh one.
     const snapshot = { byId }
     return {
       list: {

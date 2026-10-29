@@ -1,5 +1,3 @@
-// A faithful in-memory harness client context: every member implements the DOCUMENTED contract, not a test stub.
-
 import type { ClientCtx, LocaleService, SlotRegistration, SlotsService } from '../../../src/client/services'
 import { makeTranslate } from './kit'
 
@@ -12,7 +10,6 @@ export class TestSlots implements SlotsService {
   readonly seated: SlotEntry[] = []
 
   inject(_name: string, callback: () => unknown): unknown {
-    // slots.inject is a declaration injection riding the caller's effect: the callback runs synchronously.
     return callback()
   }
 
@@ -25,7 +22,6 @@ export class TestSlots implements SlotsService {
     }
   }
 
-  /** The raw ledger view (`SlotRegistry.entries`): the shape the session header reads and the mount guard proves. */
   entries(name: string): {
     component: SlotEntry['component']
     options: { key?: string; id?: string; order?: number; priority?: number }
@@ -73,7 +69,6 @@ export interface TestClientCtxOptions {
   services?: Record<string, unknown>
 }
 
-/** A client ctx with cordis semantics: `inject` waits for its services; `effect` collects LIFO disposers. */
 export class TestClientCtx {
   readonly slots = new TestSlots()
   readonly locale: TestLocale
@@ -92,7 +87,6 @@ export class TestClientCtx {
 
   setService(name: string, service: unknown): void {
     this.services.set(name, service)
-    // Cordis surfaces services as context properties (ctx.configForms …).
     if (!(name in this)) {
       Object.defineProperty(this, name, { get: () => this.services.get(name), configurable: true })
     }
@@ -105,8 +99,6 @@ export class TestClientCtx {
     }
   }
 
-  /** The fiber exists as soon as the inject is declared (PENDING while a service is missing); disposing either
-   * cancels the wait or unwinds the loaded callback, which also belongs to the context's LIFO dispose. */
   inject(deps: string[] | Record<string, unknown>, cb: (ctx: TestClientCtx) => (() => void) | void): { dispose: () => Promise<void> } {
     const list = Array.isArray(deps) ? deps : Object.keys(deps)
     let ran = false

@@ -164,10 +164,8 @@ describe('AgentInspector — the fleet-detail sections', () => {
       detail: { detail: DETAIL },
     })))
     const el = query(m.container, '.lc-inspector')
-    // The node's own model (with its effort) leads; the descriptor's distinct model follows, deduped.
     assert.ok(text(el).includes('deepseek-flash (max) · fork · deepseek-v4 · careful reviewer'))
     assert.ok(text(el).includes('Review the diff carefully.'))
-    // jsdom reports no clamping: the expand toggle stays hidden.
     assert.equal(queryAll(el, '.lc-inspector-btn').length, 1, 'only the open button')
     await m.unmount()
 
@@ -190,7 +188,6 @@ describe('AgentInspector — the fleet-detail sections', () => {
   })
 
   test('a clamped prompt expands and collapses', async () => {
-    // Fake layout: the prompt box measures taller than its clamp.
     const realScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
     const realClient = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get() { return 100 } })
@@ -227,7 +224,6 @@ describe('AgentInspector — comms', () => {
     { key: 'w1:9', to: 'w1', seq: 9, time: 100, kind: 'relay', from: 'root', text: 'how far along?' },
     { key: 'root:4', to: 'root', seq: 4, time: 90, kind: 'settled', from: 'w1', text: 'w1 finished' },
     { key: 'w1:3', to: 'w1', seq: 3, time: 80, kind: 'mailbox', fromName: 'lead', text: 'old school' },
-    // Neither an id nor a name: the arrow alone introduces the recipient.
     { key: 'w1:2', to: 'w1', seq: 2, time: 70, kind: 'relay', text: 'anonymous relay' },
   ]
 
@@ -243,7 +239,6 @@ describe('AgentInspector — comms', () => {
     const rows = queryAll(el, '.lc-inspector-comm')
     assert.equal(rows.length, 4)
     assert.ok(text(rows[0]).includes('Main Agent'))
-    // The self side (this inspector's agent) renders as plain text, its peer as a button.
     assert.ok(text(rows[1]).includes('worker-bee'))
     assert.ok(text(rows[1]).includes('Main Agent'))
     assert.ok(text(rows[2]).includes('lead'))

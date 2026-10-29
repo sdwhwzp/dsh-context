@@ -16,8 +16,6 @@ interface CtxSpec {
   workingDirectory?: unknown
 }
 
-/** A minimal host ctx double with cordis inject semantics (mirrors balance.spec.ts's): the callback runs once its
- * dependency list completes, and `ctx.get` serves the request-time reads. */
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?: RouteFetch } } {
   const captured: { path?: string; fetch?: RouteFetch } = {}
   const services = new Map<string, unknown>()
@@ -48,7 +46,6 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?
   return { ctx: ctx as unknown as Context, captured }
 }
 
-/** A fresh registry per mount: reusing one would chain captures across routes. */
 const connectionOf = (): { fetch: { register: () => () => void } } => ({ fetch: { register: () => () => {} } })
 
 function registryOf(rows: unknown, log?: unknown[]): { list: (options: unknown) => Promise<unknown> } {

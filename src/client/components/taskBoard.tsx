@@ -14,13 +14,9 @@ import type { ViewKit } from '../viewkit'
 import { IconChevronDown } from '../primitives'
 
 export interface TaskBoardProps {
-  /** Null when the team never composed — subagent delegations still board. */
   team: FleetTeam | null
-  /** The family forest; null (not landed yet) boards the team's tasks alone. */
   forest: AgentForest | null
   detailOf: (id: string) => { detail: FleetDetail | null } | undefined
-  /** The opened card's full read keyed by owner session id (unclipped report-back and brief); the entry always
-   * answers — no full read yet means `{ detail: null, pending: false }`, and the excerpt detailOf serves renders until it lands. */
   fullOf: (id: string) => { detail: FleetDetail | null; pending: boolean }
   onOpenOwner: (id: string) => void
   ownerFilter: string | null
@@ -47,8 +43,6 @@ interface WorkRow {
   subject: string
   status: TaskStatus
   dot: 'done' | 'ongoing' | 'idle' | 'warning'
-  /** The owner join key: a membership NAME (team rows), the subagent's session id (agent rows), undefined in the
-   * unowned pool — the group key, the owner filter's, and the pin's. */
   ownerKey?: string
   ownerLabel?: string
   teamTask?: FleetTeamTask
@@ -81,7 +75,6 @@ function rowOfAgent(node: AgentNode): WorkRow {
   }
 }
 
-/** Board order within a group: in-flight first, then the pending pool ready-first, then done. */
 function orderRows(rows: WorkRow[]): WorkRow[] {
   return STATUS_ORDER.flatMap(key =>
     key === 'pending'
@@ -89,7 +82,6 @@ function orderRows(rows: WorkRow[]): WorkRow[] {
       : rows.filter(row => row.status === key))
 }
 
-/** The Markdown body, memoized on (rich, text): a board-wide hover re-render never re-parses. */
 const MarkdownBody = memo(function MarkdownBody(props: { rich: RichKit; text: string }): ReactElement {
   return <props.rich.RichText text={props.text} mode="md" />
 })
@@ -107,14 +99,11 @@ function TaskTextSection(props: { label: string; text: string; rich: RichKit; me
   )
 }
 
-/** A group of rows under one owner; `label: null` is the unowned pool. A `stray` owner keeps its own band but no
- * icon and no pin target. Agent groups render headless: the single delegation row IS the agent. */
 interface OwnerGroup {
   key: string
   label: string | null
   hue: string
   role: 'lead' | 'teammate' | 'agent' | 'stray' | 'unowned'
-  /** The pin/hover target: the member's session id, or the subagent's own. */
   nodeId?: string
   rows: WorkRow[]
 }
@@ -127,7 +116,7 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
   const [status, setStatus] = useState<StatusFilter>('all')
   const boardRef = useRef<HTMLDivElement | null>(null)
   const rowOf = useCallback((id: string): HTMLElement | null => {
-    /* v8 ignore next 1 -- the row is mounted before either effect runs; the null arm is structural. */
+    /* v8 ignore next 1 */
     return boardRef.current?.querySelector<HTMLElement>(`[data-task="${CSS.escape(id)}"]`) ?? null
   }, [])
 
@@ -142,14 +131,12 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
     scrollIntoViewIfPossible(rowOf(focused), { block: 'nearest' })
   }, [focused, rowOf])
 
-  // An opened row takes the front of the task viewport: its expanded sections grow below and should not open off-screen.
-  // Bring the card into view first, then align the row to the top of its scroll body so the card's own header stays put.
   useEffect(() => {
     if (scrollTask === null) return
     const card = boardRef.current
     scrollIntoViewIfPossible(card, { block: 'start', behavior: 'smooth' })
     const row = rowOf(scrollTask)
-    /* v8 ignore start -- the clicked row is mounted before its open effect runs; the guard is structural. */
+    /* v8 ignore start */
     if (row === null) {
       setScrollTask(null)
       return
@@ -160,13 +147,12 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
     setScrollTask(null)
   }, [rowOf, scrollTask])
 
-  // The focused task's whole prerequisite chain (transitive blockedBy) lights along with it.
   const chain = useMemo(() => {
     if (focused === null) return null
     const out = new Set<string>()
     const queue = [focused]
     while (queue.length > 0) {
-      /* v8 ignore next 1 -- the pop is guarded by the length check. */
+      /* v8 ignore next 1 */
       const id = queue.pop() ?? ''
       for (const dep of byId.get(id)?.blockedBy ?? []) {
         if (!out.has(dep)) {
@@ -179,13 +165,11 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
     return out
   }, [focused, byId])
 
-  // The owner pick narrows the board to one agent's group; every other group boards only unfiltered.
   const ownerVisible = useMemo(
     () => props.ownerFilter === null ? rows : rows.filter(row => row.ownerKey === props.ownerFilter),
     [rows, props.ownerFilter],
   )
 
-  // The pick chip names a member by roster name, a subagent by its label — never a raw session id.
   const filterLabel = useMemo(() => {
     const key = props.ownerFilter
     if (key === null) return null
@@ -208,8 +192,6 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
   }
 
   const groups = useMemo((): OwnerGroup[] => {
-    // Roster order first (the lead carries the brand hue, teammates their stable roster hue), then owners the
-    // roster never served, then the subagent delegations in spawn order, and the unowned pool always last.
     const out: OwnerGroup[] = []
     const strays: string[] = []
     if (team !== null) {
@@ -267,7 +249,6 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
       else next.delete(row.key)
       return next
     })
-    // An unfold asks for the owner's full read; the fold-back never re-asking is the ledger's dedupe, not ours.
     if (opening) {
       setScrollTask(row.key)
       const ownerId = ownerSessionId(row)
@@ -276,11 +257,9 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
   }
 
   const flashTask = (id: string): void => {
-    // Toggle semantics: a second click on the same blocker releases the focus ring.
     props.onFocusTask(props.focusTaskId === id ? null : id)
   }
 
-  /** The row owner's session id — members via the roster's name join, subagents themselves. */
   const ownerSessionId = (row: WorkRow): string | undefined =>
     row.kind === 'team' ? memberIdByName(team, row.ownerKey) : row.node?.id
 
@@ -307,14 +286,12 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
     props.onHoverMember(ownerSessionId(row) ?? null)
   }
 
-  /** A row pick unfolds the card; picks landing on the row's own buttons and links keep their behavior. */
   const rowClick = (row: WorkRow) => (ev: MouseEvent) => {
     const target = ev.target as HTMLElement
     if (target.closest('button') !== null || target.closest('a') !== null) return
     toggleOpen(row)
   }
 
-  /** Keyboard mirrors the pick — on the ROW itself only: Enter on a nested button must keep activating that button. */
   const rowKeyDown = (row: WorkRow) => (ev: ReactKeyboardEvent) => {
     if (ev.target !== ev.currentTarget) return
     if (ev.key !== 'Enter' && ev.key !== ' ') return
@@ -322,8 +299,6 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
     toggleOpen(row)
   }
 
-  /** The opened card's sections: the brief, the agent, and the final report-back. The excerpt renders first; the
-   * full read replaces it on landing, and the section meta carries the load/unavailable state instead of the clock. */
   const renderOpenSections = (row: WorkRow, hue: string, desc: string | undefined): ReactElement => {
     const ownerId = ownerSessionId(row)
     const detail = ownerId !== undefined ? props.detailOf(ownerId)?.detail : undefined
@@ -384,8 +359,6 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
   const renderAgentRow = (row: WorkRow, hue: string): ReactElement => {
     const node = row.node as AgentNode
     const bits = runMetaOf(node, t)
-    // The briefing prompt is the task's description; the opened row adds the final report-back. Both render as
-    // Markdown, clamped to two lines when closed; the opened brief prefers the full read's unclipped prompt.
     const prompt = props.detailOf(node.id)?.detail?.initialPrompt
     const fullBrief = props.fullOf(node.id)
     const brief = !fullBrief.pending ? fullBrief.detail?.initialPrompt ?? prompt : prompt
@@ -405,7 +378,6 @@ export function TaskBoard(props: TaskBoardProps): ReactElement {
         onMouseLeave={() => { hoverOwner(null) }}
       >
         <div className="lc-team-task-head">
-          {/* The delegation's family hue rides its own icon, so the band needs no group head; the session id rides the tooltip. */}
           <span className="lc-member-icon" style={memberStyle(hue)}>
             <IconUserOutlineRegular size={13} />
           </span>

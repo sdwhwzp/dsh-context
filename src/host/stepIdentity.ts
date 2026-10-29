@@ -1,8 +1,3 @@
-/** Step-boundary message identity guard: the harness refuses to LOAD a session whose durable log carries a
- * `user/message` without a non-empty string `id`, while the runtime append path runs no such check — one unidentified
- * message persists silently and bricks the session at its next load. The prepended `agent/pre-step` listener sees the
- * final message list and fails open on any unexpected shape. */
-
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 
@@ -23,14 +18,12 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Whether the message fails the harness's restore-time identity check; non-object entries are unfixable. */
 function lacksId(message: unknown): boolean {
   if (typeof message !== 'object' || message === null) return false
   const id = (message as { id?: unknown }).id
   return typeof id !== 'string' || id === ''
 }
 
-/** Mint ids only for would-persist-unidentified messages; untouched entries pass by reference, undefined = none needed. */
 export function identifiedMessages(messages: readonly unknown[]): unknown[] | undefined {
   let copy: unknown[] | undefined
   for (const [index, message] of messages.entries()) {

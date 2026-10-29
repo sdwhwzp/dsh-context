@@ -17,12 +17,10 @@ function stateOf(partial: Partial<SettingsState> = {}): SettingsState {
   return { status: 'ready', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'count', insightsEntry: 'show', durationCurve: 'show', overviewAutoSteps: '100', overviewRange: '30d', fleetTab: 'show', promptPrefix: '', promptSuffix: '', writable: true, ...partial }
 }
 
-/** Menu items portaled into document.body while a select is open. */
 function menuItems(): HTMLElement[] {
   return queryAll(document.body, '[role="menu"] [role="menuitem"]')
 }
 
-/** The auto-overview row's option labels (the shared step-count template). */
 const stepsLabel = (n: number): string => DICT_EN['settings.overviewAutoSteps'].replace('{n}', String(n))
 
 const clearOf = (area: HTMLTextAreaElement): HTMLElement | null =>
@@ -87,7 +85,7 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
       DICT_EN['placement.sidebar'],
       DICT_EN['placement.hide'],
     ])
-    await click(placementItems[2]) // 'Sidebar'
+    await click(placementItems[2])
     commit('defaultPlacement', 'sidebar')
     assert.equal(selects[0].getAttribute('aria-expanded'), 'false')
     assert.equal(document.body.querySelector('[role="menu"]'), null)
@@ -97,7 +95,7 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
     await click(selects[1])
     const entryItems = menuItems()
     assert.deepEqual(entryItems.map(i => text(i)), [DICT_EN['showHide.show'], DICT_EN['showHide.hide']])
-    await click(entryItems[1]) // 'Hide'
+    await click(entryItems[1])
     commit('insightsEntry', 'hide')
 
     assert.ok(text(m.container).includes(DICT_EN['settings.fleetTab']))
@@ -105,7 +103,7 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
     await click(selects[2])
     const fleetItems = menuItems()
     assert.deepEqual(fleetItems.map(i => text(i)), [DICT_EN['showHide.show'], DICT_EN['showHide.hide']])
-    await click(fleetItems[1]) // 'Hide'
+    await click(fleetItems[1])
     commit('fleetTab', 'hide')
 
     assert.ok(text(m.container).includes(DICT_EN['settings.overviewRange']))
@@ -126,31 +124,31 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
     await click(selects[4])
     const items = menuItems()
     assert.deepEqual(items.map(i => text(i)), [DICT_EN['gran.step'], DICT_EN['gran.turn']])
-    await click(items[1]) // 'Turn'
+    await click(items[1])
     commit('defaultGranularity', 'turn')
 
     await click(selects[5])
     const modeItems = menuItems()
     assert.deepEqual(modeItems.map(i => text(i)), [DICT_EN['gran.total'], DICT_EN['gran.delta']])
-    await click(modeItems[1]) // 'Delta'
+    await click(modeItems[1])
     commit('defaultTrendMode', 'delta')
 
     await click(selects[6])
     const curveItems = menuItems()
     assert.deepEqual(curveItems.map(i => text(i)), [DICT_EN['showHide.show'], DICT_EN['showHide.hide']])
-    await click(curveItems[1]) // 'Hide'
+    await click(curveItems[1])
     commit('defaultDurationCurve', 'hide')
 
     await click(selects[7])
     const overviewItems = menuItems()
     assert.deepEqual(overviewItems.map(i => text(i)), [stepsLabel(100), stepsLabel(200), stepsLabel(300), DICT_EN['settings.overviewAutoOff']])
-    await click(overviewItems[3]) // 'Off'
+    await click(overviewItems[3])
     commit('overviewAutoSteps', 'off')
 
     await click(selects[8])
     const baseItems = menuItems()
     assert.deepEqual(baseItems.map(i => text(i)), [DICT_EN['browser.base.step'], DICT_EN['browser.base.turn']])
-    await click(baseItems[1]) // 'prev turn'
+    await click(baseItems[1])
     commit('defaultDeltaBase', 'turn')
 
     await click(selects[9])
@@ -160,7 +158,7 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
       DICT_EN['tool.sort.count'],
       DICT_EN['tool.sort.name'],
     ])
-    await click(toolItems[2]) // 'By name'
+    await click(toolItems[2])
     commit('defaultToolSort', 'name')
 
     await click(selects[10])
@@ -172,7 +170,7 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
       DICT_EN['files.sort.path'],
       DICT_EN['files.sort.name'],
     ])
-    await click(sortItems[4]) // 'By name'
+    await click(sortItems[4])
     commit('defaultFileSort', 'name')
 
     await click(selects[3])
@@ -183,7 +181,7 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
       DICT_EN['ov.range.30d'],
       DICT_EN['ov.range.all'],
     ])
-    await click(rangeItems[1]) // 'Last 7 days'
+    await click(rangeItems[1])
     commit('defaultOverviewRange', '7d')
     assert.equal(document.body.querySelector('[role="menu"]'), null)
 

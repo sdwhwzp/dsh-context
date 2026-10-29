@@ -1,5 +1,3 @@
-/** Step brief for one history bar; a request record's `seq` IS its response's surface `seq`. */
-
 import type { ContextTimeline, RequestRecord, SurfaceNode } from '../shared/types'
 
 export interface StepBrief {
@@ -32,7 +30,6 @@ export function briefOf(nodes: SurfaceNode[], requests: RequestRecord[], idx: nu
 
   const turnStart = idx === 0 || (requests[idx - 1].turn ?? 0) !== (req.turn ?? 0)
 
-  // The opener is the newest user message before this turn's first bar.
   let firstIdx = idx
   while (firstIdx > 0 && (requests[firstIdx - 1].turn ?? 0) === (req.turn ?? 0)) firstIdx--
   const upper = requests[firstIdx].seq
@@ -46,7 +43,6 @@ export function briefOf(nodes: SurfaceNode[], requests: RequestRecord[], idx: nu
 
   const inputs: SurfaceNode[] = []
   if (!turnStart) {
-    // A first bar is always a turn start, so idx > 0 here.
     const prevSeq = requests[idx - 1].seq
     for (let i = lowerBound(nodes, prevSeq + 1); i < nodes.length && nodes[i].seq < req.seq; i++) {
       inputs.push(nodes[i])

@@ -1,8 +1,3 @@
-// Fixture roots: committed homes under tests/host/fixtures/version/homes/* (resolve at the fixture level) and a
-// per-run scratch tree under os.tmpdir() for FAILURE cases; the scratch tree must sit outside the repository or a
-// failing probe would walk up into this package's node_modules. Every home SHADOWS probe packages because CJS
-// resolution consults NODE_PATH after the walk-up fails (a pnpm environment injects its virtual store there).
-
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -24,7 +19,6 @@ function ctxWithHome(homePath: unknown): Context {
   return ctx
 }
 
-/** The running anchor's URL resolver: real Node resolution from one fixture home's profiles dir. */
 function runningResolver(home: string, root: string = HOMES): (specifier: string) => string {
   const anchor = join(root, home, 'profiles', 'running-probe.cjs')
   return specifier => pathToFileURL(createRequire(anchor).resolve(specifier)).href
@@ -32,14 +26,12 @@ function runningResolver(home: string, root: string = HOMES): (specifier: string
 
 const NO_RUNNING = (): string => { throw new Error('no running module tree') }
 
-/** A plugin root holding no fixture tree; it sits beside (never above) the scratch root. */
 const ELSEWHERE = join(tmpdir(), 'dsh-context-plugin-root')
 
 const fixedUrl = (url: string) => (): string => url
 
 let scratch = ''
 
-/** Write one scratch probe home; `decoyManifest` is a mismatched manifest placed beside the exports entry. */
 function writeScratchHome(
   home: string,
   packageName: string,
@@ -62,9 +54,6 @@ function writeScratchHome(
 
 const scratchResolver = (home: string): (...segments: string[]) => string => resolverIn(join(scratch, home))
 
-/** A probe-package shadow: the package RESOLVES at the fixture level (the walk-up / NODE_PATH installs behind it
- * are never consulted) but answers NO version — the manifest subpath probe dies on the exports gate, the entry
- * ascend reads a versionless own manifest. */
 function shadow(home: string, packageName: string): void {
   writeScratchHome(home, packageName,
     JSON.stringify({ name: packageName, exports: { '.': './lib/index.js' } }),
@@ -82,7 +71,6 @@ beforeAll(() => {
   writeScratchHome('entry-nested', '@deepseek-ai/dsh',
     JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.1-rc.4', exports: { '.': './a/b/index.js' } }),
     { path: 'a/b/index.js', decoyManifest: JSON.stringify({ name: '@deepseek-ai/dsh-decoy', version: '9.9.9' }) })
-  // Odd manifests sit as DECOYS on the ascend path: only the direct manifest read (not a resolve) surfaces them.
   writeScratchHome('entry-badjson', '@deepseek-ai/dsh',
     JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.1-rc.5', exports: { '.': './a/index.js' } }),
     { path: 'a/index.js', decoyManifest: 'not json{' })
@@ -101,8 +89,6 @@ beforeAll(() => {
     { path: 'lib/index.js' })
   shadow('entry-orphan', '@deepseek-ai/dsh')
   shadow('entry-orphan', '@deepseek-ai/dsh-session-projection')
-  // The invalid-version homes: the manifest subpath probe reads the odd version and rejects it; the entry ascend
-  // resolves the shadowed entry and rejects the own manifest — nothing falls through to NODE_PATH.
   writeScratchHome('nonstring-version', '@deepseek-ai/dsh',
     JSON.stringify({ name: '@deepseek-ai/dsh', version: 42, exports: { '.': './lib/index.js' } }),
     { path: 'lib/index.js' })
@@ -120,14 +106,12 @@ beforeAll(() => {
   writeScratchHome('running-supported', '@deepseek-ai/dsh-session',
     JSON.stringify({ name: '@deepseek-ai/dsh-session', version: '0.2.0-rc.2', exports: { '.': './lib/index.js' } }),
     { path: 'lib/index.js' })
-  // The just-dropped line: below the baseline since the floor moved to 0.2.0-rc.2, so the gate must trip on it.
   writeScratchHome('running-old', '@deepseek-ai/dsh-session',
     JSON.stringify({ name: '@deepseek-ai/dsh-session', version: '0.1.7-rc.2', exports: { '.': './lib/index.js' } }),
     { path: 'lib/index.js' })
   writeScratchHome('running-decoy', '@deepseek-ai/dsh-session',
     JSON.stringify({ name: '@deepseek-ai/dsh-decoy', version: '9.9.9', exports: { '.': './lib/index.js' } }),
     { path: 'lib/index.js' })
-  // The decoy home's witness must resolve to NOTHING trusted: shadow the other spelling too, or an ambient install would answer.
   shadow('running-decoy', '@deepseek-ai/dsh-session-projection')
 })
 
@@ -142,11 +126,8 @@ describe('detectHarnessVersion — running anchor', () => {
   })
 
   test('discards a witness inside this package own closure and never probes the CLI package for the home anchor', () => {
-    // A `link:`-installed dev checkout resolves its own pinned devDependencies: that closure is not the harness, so
-    // the home mirror answers instead (the default package root performs the discard).
     const ctx = ctxWithHome(homeResolver('old'))
     assert.equal(detectHarnessVersion(ctx, runningResolver('module-skips-cli')), '0.1.7-rc.2')
-    // The fixture pins the CLI at 0.0.1 but the libraries at the baseline: only a library answer may come back.
     const empty = ctxWithHome(scratchResolver('empty'))
     assert.equal(detectHarnessVersion(empty, runningResolver('module-skips-cli'), ELSEWHERE), '0.2.0-rc.2')
   })
@@ -155,7 +136,6 @@ describe('detectHarnessVersion — running anchor', () => {
     const ctx = ctxWithHome(homeResolver('future'))
     assert.equal(detectHarnessVersion(ctx, runningResolver('running-decoy', scratch), ELSEWHERE), '0.3.0-rc.1')
     assert.equal(detectHarnessVersion(ctx, fixedUrl('data:text/javascript,'), ELSEWHERE), '0.3.0-rc.1')
-    // A witness equal to the plugin root is inside it (`relative` is empty); a witness one level above is reached through `..`.
     assert.equal(detectHarnessVersion(ctx, fixedUrl(pathToFileURL(ELSEWHERE).href), ELSEWHERE), '0.3.0-rc.1')
     assert.equal(detectHarnessVersion(ctx, fixedUrl(pathToFileURL(ELSEWHERE).href), join(ELSEWHERE, 'inner')), '0.3.0-rc.1')
   })
@@ -164,7 +144,6 @@ describe('detectHarnessVersion — running anchor', () => {
 describe('detectHarnessVersion — home anchor', () => {
   test('reads the CLI package manifest of the running installation', () => {
     const ctx = (home: string) => ctxWithHome(homeResolver(home))
-    // `old` is the just-dropped 0.1.7 line: still readable, but no longer accepted by the gate.
     assert.equal(detectHarnessVersion(ctx('old'), NO_RUNNING), '0.1.7-rc.2')
     assert.equal(detectHarnessVersion(ctx('baseline'), NO_RUNNING), '0.2.0-rc.2')
     assert.equal(detectHarnessVersion(ctx('future'), NO_RUNNING), '0.3.0-rc.1')
@@ -177,12 +156,11 @@ describe('detectHarnessVersion — home anchor', () => {
 
   test('ascends from the entry point, skipping mismatched, invalid, null, and primitive manifests', () => {
     const cases: [string, string | undefined][] = [
-      ['entry-only', '0.1.1-rc.1'], // the manifest subpath is not exported
-      ['entry-nested', '0.1.1-rc.4'], // a decoy manifest beside the exports entry is skipped
+      ['entry-only', '0.1.1-rc.1'],
+      ['entry-nested', '0.1.1-rc.4'],
       ['entry-badjson', '0.1.1-rc.5'],
       ['entry-null', '0.1.1-rc.6'],
       ['entry-primitive', '0.1.1-rc.7'],
-      // The entry resolve fails AT the fixture level (the promised file is absent): no ascend, no NODE_PATH fall-through.
       ['entry-gone', undefined],
     ]
     for (const [home, expected] of cases) {
@@ -202,8 +180,6 @@ describe('detectHarnessVersion — degradation arms (fail open)', () => {
   })
 
   test('the default running anchor discards this package own devDependencies', () => {
-    // In the repository the default anchor resolves the repo's pinned devDependencies, which live inside this
-    // package's tree: nothing is trusted, so the probe answers undefined (fail open).
     assert.equal(detectHarnessVersion(new Context()), undefined)
   })
 

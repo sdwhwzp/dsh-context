@@ -54,7 +54,6 @@ describe('dnaOf', () => {
     assert.equal('time' in items[1], false)
     assert.equal((items[0] as { node?: SurfaceNode }).node, a)
     assert.equal((items[1] as { node?: SurfaceNode }).node, b)
-    // dsh appends `request/header` at dispatch, after every message already in context: epoch-seq ordering would invert the bands.
     const refreshed = dnaOf(asm({
       system: system({ seq: 50 }),
       header: header({ seq: 50, tools: [tool('bash', 30)] }),
@@ -173,7 +172,6 @@ describe('deltaTotalsOf', () => {
     assert.deepEqual(deltaTotalsOf([band('a', 5)], null), { up: 0, down: 0 })
     assert.deepEqual(deltaTotalsOf([band('a', 5)], [band('a', 5)]), { up: 0, down: 0 }, 'an unchanged item is no churn')
     assert.deepEqual(deltaTotalsOf([band('a', -4)], [band('a', 0)]), { up: 0, down: 4 })
-    // A dropped negative token is an UP move (the step's zero sits above it); a dropped zero is no move at all.
     assert.deepEqual(deltaTotalsOf([], [band('a', -4)]), { up: 4, down: 0 })
     assert.deepEqual(deltaTotalsOf([], [band('a', 0)]), { up: 0, down: 0 })
   })

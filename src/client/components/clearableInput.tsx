@@ -6,7 +6,6 @@ export interface ClearableInputProps {
   onChange: (value: string) => void
   className: string
   placeholder: string
-  /** Accessible name; defaults to the placeholder. */
   label?: string
   clearLabel: string
   type?: 'search' | 'text'
@@ -27,7 +26,6 @@ export function isBareEscape(ev: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctrlKey
   return ev.key === 'Escape' && !ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey
 }
 
-/** ESC clears typed content and stays in the field; an empty field lets ESC reach the host overlay. */
 export function clearOnEscape(
   ev: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
   clear: () => void,
@@ -38,7 +36,6 @@ export function clearOnEscape(
   clear()
 }
 
-/** The shared clear control: its wrapper owns the position; the owner only supplies the label and action. */
 export function ClearButton(props: { label: string; onClick: () => void; className?: string }): ReactElement {
   return (
     <button
@@ -54,7 +51,6 @@ export function ClearButton(props: { label: string; onClick: () => void; classNa
   )
 }
 
-/** The wrapper is the flex item; base.css sizes it off the input class, so a new field needs its own wrapper rule. */
 export function ClearableInput(props: ClearableInputProps): ReactElement {
   const ownRef = useRef<HTMLInputElement>(null)
   const ref = props.inputRef ?? ownRef

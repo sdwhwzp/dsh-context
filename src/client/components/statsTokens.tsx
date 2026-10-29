@@ -37,11 +37,9 @@ export function makeStatsTokens(kit: ViewKit, Donut: (props: DonutProps) => Reac
       : 0
     const output = props.usage !== null ? numOf(props.usage.outputTokens) : 0
     const total = input + output
-    // Cache-hit share: cache reads over billed prompt-side input (the harness chat line's own formula).
     const hit = props.usage === null
       ? null
       : cacheHitPercent(numOf(props.usage.cacheReadTokens), input)
-    // Null usage (no provider report) takes the same zeroed split billedParts produces for a zero report.
     const parts = billedParts(props.current, props.breakdown, props.usage ?? NO_USAGE, {
       reasoning: props.generatedReasoning,
       answers: props.generatedAnswerTokens,

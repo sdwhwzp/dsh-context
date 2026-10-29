@@ -1,5 +1,3 @@
-// Shared rig for the backfill specs: the trigger route box, the log capture, and the fake cold-path faces.
-
 import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -36,7 +34,6 @@ export interface LogLine {
 
 export function captureLogs(ctx: Context): LogLine[] {
   const lines: LogLine[] = []
-  // Lift every source's threshold to debug: the default exporter drops warn/debug records before they reach the sink.
   ctx.logger.exporter({
     levels: { root: 3, 'dsh-context': 3 },
     export(message) {
@@ -46,8 +43,6 @@ export function captureLogs(ctx: Context): LogLine[] {
   return lines
 }
 
-/** One format-refusal face of the persistence seam: the format edge throws `SessionFormatUnsupportedMigrationError`,
- * translated (with the source-unchanged suffix) into `SessionFormatUnsupportedError`; the pass classifies BOTH alike. */
 export function unsupportedFormatError(name: string): Error {
   const error = new Error(
     'subagent/descriptor 0 uses unsupported descriptor version 2'
@@ -85,7 +80,6 @@ export interface ColdFaceOverrides {
   sessions?: unknown
 }
 
-/** The four cold-path services, each replaceable for the face-shape probes. */
 export function coldFaces(ctx: Context, state: FakeState, overrides: ColdFaceOverrides = {}): void {
   const face = (name: keyof ColdFaceOverrides, fallback: object): object =>
     name in overrides ? overrides[name] as object : fallback

@@ -78,7 +78,6 @@ describe('pricesBookOf', () => {
 describe('the price store', () => {
   let snaps: ModelPricesSnap[]
 
-  /** Drain the fire() promise chain (fake timers keep setTimeout inert). */
   async function settle(): Promise<void> {
     for (let i = 0; i < 10; i++) await Promise.resolve()
   }

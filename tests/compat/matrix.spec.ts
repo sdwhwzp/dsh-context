@@ -1,7 +1,3 @@
-// This project runs the plugin against the harness's ACTUAL sources at each baseline tag (the always-on lanes pin
-// the mirrored semantics); a failing probe names the SEAM. A missing dsh checkout / built plugin skips cleanly,
-// but a skip under CI fails the run.
-
 import assert from 'node:assert/strict'
 import { beforeAll, describe, test } from 'vitest'
 import { BASELINES } from '../baselines'
@@ -13,14 +9,9 @@ if (reasons.length > 0) {
   console.warn(`[compat] matrix skipped — ${reasons.join('; ')}`)
 }
 
-// Always runnable (no checkout needed): the fold's case labels must all be declared by a baseline vocabulary,
-// which the real-sources lane below then proves against each tag.
 describe('compat matrix — the per-baseline fold vocabularies', () => {
   test('every event family the fold switches on is declared by the baselines', () => {
     const folded = staging.foldEventTypesFromSource()
-    // A fold case must name a REAL event of some supported line (a typo lands here); a line-specific event
-    // (the job/* pair is 0.2.1-only) is declared on its own baseline — the per-tag vocabulary probe proves
-    // each declared family exists in that tag's real sources.
     const declared = new Set(BASELINES.flatMap(b => b.foldEventTypes))
     assert.deepEqual(
       folded.filter(type => !declared.has(type)),
@@ -30,9 +21,6 @@ describe('compat matrix — the per-baseline fold vocabularies', () => {
   })
 })
 
-// Always runnable (no checkout needed; lib/ must be built): every specifier the built bundle requires must be
-// seeded by each baseline's declared platform module table. The checkout-gated lane below proves the declared
-// table against the tag's real `PLATFORM_MODULES`.
 describe.skipIf(staging.artifactsMissing())('compat matrix — bundle requires vs the declared module tables', () => {
   test.each(BASELINES)('$id: the declared table answers every bundle require', (baseline) => {
     assert.deepEqual(
@@ -45,8 +33,6 @@ describe.skipIf(staging.artifactsMissing())('compat matrix — bundle requires v
 describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per baseline', () => {
   describe.each(BASELINES)('$id (tag $tag, cordis $cordis)', (baseline) => {
     let report: staging.DriverReport
-    // 60s: a cold stage dir (fresh clone, cache miss, dependency re-pin) runs a real npm install inside the hook,
-    // beyond the 10s default ceiling.
     beforeAll(() => {
       report = staging.runDriver(baseline)
     }, 60_000)
@@ -89,8 +75,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     })
 
     test('settings: the retired register face stays gone (the plugin never calls it)', () => {
-      // The V4+ Config-form generation derives forms from each entry's own Config schema; `settings.register`
-      // retired — the probe pins its absence so a resurrection names the seam.
       assert.equal(
         staging.dshHasString(baseline.tag, 'register(', baseline.settings.serviceFile),
         baseline.settings.register,
@@ -99,8 +83,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     })
 
     test('balance: the settings face and the DeepSeek provider row the facts fold reads', () => {
-      // The facts fold reads the platform's settings row off the Config-form `describe()` projection, redacted,
-      // falling back to dsh's stock entry ids; the retired `get(ns)` read is asserted absent.
       const balance = baseline.balance
       assert.equal(
         staging.dshHasString(baseline.tag, balance.settingsGetNeedle, balance.settingsFile),
@@ -123,7 +105,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
         'the llm provider directory face',
       )
       for (const id of balance.stockIds.ids) {
-        // The needle ends at the line end, so a longer id never answers for a shorter one.
         assert.equal(
           staging.dshHasString(baseline.tag, `id: ${id}$`, balance.stockIds.file),
           true,
@@ -138,8 +119,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     })
 
     test('host: the sliced cold fold faces exist (else the backfill falls back to whole-log blocks)', () => {
-      // Sessions over the slice threshold fold through these four faces; a missing one silently returns that
-      // session to the single-shot coldSnapshot path, so a removal must name itself here.
       const fold = baseline.backfillFold
       for (const [file, needle] of [
         [fold.registryFile, '  restore('],
@@ -159,8 +138,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     }
 
     test('client: the preferences card seat and transport match the generation', () => {
-      // The keyed slot the browser half's card registers on and the settings transport it rides, asserted BOTH
-      // ways so a moved seam cannot read as "unsupported here": an undeclared slot simply never receives it.
       const settings = baseline.settings
       assert.equal(
         settings.cardSlotFiles.some(pattern =>
@@ -176,8 +153,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     })
 
     test('client: the app frame carries the inline sidebar-leading grid track (modal dock seam, dockMeasure.ts)', () => {
-      // dockMeasure reads the LEADING `Npx` track off the frame's inline gridTemplateColumns; `px minmax(`
-      // pins a sidebar-first multi-track template without pinning the newer generations' center/right spellings.
       assert.equal(
         staging.dshHasString(baseline.tag, 'px minmax(', 'packages/client/ui-layout/src/client/AppFrame.tsx'),
         true,
@@ -194,7 +169,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
 
     test('client: the gateway history face of this generation', () => {
       assert.equal(staging.dshHasString(baseline.tag, "'remote.session'", 'packages/api/*/src/**'), true)
-      // `rowsOf` rejects any payload without the `records` envelope, so the transport's spelling is pinned too.
       assert.equal(
         staging.dshHasString(baseline.tag, 'records: frame.records', 'packages/api/session-controller/src/client/transport.ts'),
         true,
@@ -224,8 +198,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     })
 
     test('client: the session-jump seam of this generation (issue #90)', () => {
-      // The view owner's navigation verb with this line's signature; the retired sessions-service
-      // `open(id)` selection verb is probed staying gone.
       const nav = baseline.client.sessionNav
       assert.equal(
         staging.dshHasString(baseline.tag, nav.workspaceNeedle, nav.workspaceFile),
@@ -240,8 +212,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     })
 
     test('client: the subagent history-address resolver (issue #193)', () => {
-      // The sessions resolver every child history read names its direct parent through; its listed-summary arm is the
-      // extra evidence the 0.2.1 line added.
       const seam = baseline.client.subagentAddress
       assert.equal(
         staging.dshHasString(baseline.tag, seam.needle, seam.file),
@@ -256,8 +226,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     })
 
     test('client: the Plugins-panel navigator the settings jump rides', () => {
-      // The verb itself; then the tab reset that makes the jump land on the configuration page once a contributed
-      // `plugins.tab` has claimed the remembered selection — present only where that slot exists.
       const nav = baseline.client.pluginsNav
       assert.equal(
         staging.dshHasString(baseline.tag, nav.needle, nav.file),
@@ -334,8 +302,6 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     })
 
     test('host: the system-prompt injection seam', () => {
-      // The sections register through the prompt registry's ordered-section face, anchored on its centrally
-      // owned order names; preference edits ride the loader's volatile-only commit into the running references.
       const prompt = baseline.prompt
       assert.equal(
         staging.dshHasString(baseline.tag, prompt.sectionNeedle, prompt.serviceFile),

@@ -122,7 +122,6 @@ describe('EventList', () => {
     assert.equal(labels[0].getAttribute('title'), '')
     assert.equal(labels[1].getAttribute('title'), '')
 
-    // Newest first: labels[0] is the prune (the empty-text fallback arm), labels[1] the inject.
     Object.defineProperty(labels[0], 'scrollWidth', { value: 100, configurable: true })
     Object.defineProperty(labels[1], 'scrollWidth', { value: 100, configurable: true })
     labels[0].textContent = ''
@@ -141,7 +140,6 @@ describe('EventList', () => {
       window.dispatchEvent(new Event('resize'))
     })
     assert.ok(text(m.container).includes('No context events yet'))
-    // The same listener keeps working once rows arrive (root was null at mount).
     await m.update(h(EventList, { events: [ev({ seq: 1, kind: 'prune' })] }))
     assert.equal(queryAll(m.container, '.lc-event').length, 1)
     const label = query(m.container, '.lc-event-label')
@@ -164,8 +162,6 @@ describe('EventList', () => {
     const before = queryAll(m.container, '.lc-event')
     assert.equal(before.length, 2)
 
-    // A new event lands at the log tail, so the row list prepends it; every old row must stay the SAME DOM node
-    // (an index-bearing key would shift all keys and remount the whole list on every push).
     await m.update(h(EventList, { events: [...base, ev({ seq: 3, kind: 'model', from: 'a', to: 'b' })] }))
     const after = queryAll(m.container, '.lc-event')
     assert.equal(after.length, 3)

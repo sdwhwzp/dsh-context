@@ -1,13 +1,7 @@
-/** The Fleet comms hub's pure derivation: parties, channels (unordered pairs), their directional counts, plus the
- * display helpers the card shares. Kept free of React so the grouping rules stay testable. */
-
 import { type CommsRow, type SettledVariant } from './fleetDetail'
 
-/** A party key for a historical mailbox sender that attested only a name. */
 export const NAME_PARTY_PREFIX = '@name:'
-/** A party key for a row that attested neither an id nor a name. */
 export const UNKNOWN_PARTY = '@unknown'
-/** Fallback avatar hue for a party outside the family/roster. */
 export const NEUTRAL_HUE = 'var(--dsw-alias-label-secondary)'
 
 export type CommsRole = 'lead' | 'teammate' | 'subagent' | 'agent' | 'other'
@@ -16,7 +10,6 @@ export interface CommsAgent {
   id: string
   name: string
   role: CommsRole
-  /** The viewed session corresponds to this party. */
   self: boolean
   hue: string
   description?: string
@@ -26,12 +19,9 @@ export type CommsKindFilter = 'all' | 'message' | 'report'
 
 export interface CommsChannel {
   key: string
-  /** First party: the anchor when the channel holds it, else the party that sent more. */
   a: string
   b: string
-  /** Newest first. */
   rows: CommsRow[]
-  /** a → b / b → a. */
   out: number
   back: number
   lastTime: number
@@ -71,7 +61,6 @@ export function settledToneOf(variant: SettledVariant | null): 'done' | 'warning
   return 'idle'
 }
 
-/** Plain-text row preview: enough Markdown stripping to stop pipes and fences from dominating a clamped line. */
 export function previewOf(text: string): string {
   const plain = text
     .replace(/```[\s\S]*?```/g, ' ')
@@ -90,7 +79,6 @@ export function previewOf(text: string): string {
   return out.length > PREVIEW_MAX ? out.slice(0, PREVIEW_MAX) + '…' : out
 }
 
-/** Avatar initials: one CJK glyph, or the first letters of up to two words, otherwise the first glyph. */
 export function initialsOf(name: string): string {
   const trimmed = name.trim()
   if (trimmed === '') return '?'
@@ -105,8 +93,6 @@ export function initialsOf(name: string): string {
   return first.toUpperCase()
 }
 
-/** Group rows into unordered-party channels, newest activity first. The anchor (the tab's own session) leads its
- * channels; without one, the party that sent more leads. */
 export function channelsOf(rows: readonly CommsRow[], anchorId?: string): CommsChannel[] {
   const groups = new Map<string, CommsRow[]>()
   for (const row of rows) {

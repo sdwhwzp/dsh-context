@@ -11,15 +11,11 @@ import type { ViewKit } from '../viewkit'
 
 export interface AgentInspectorProps {
   node: AgentNode
-  /** Whether this inspector is stuck to a pin; false = hover-follow/current. */
   pinned: boolean
   team: FleetTeam | null
-  /** The node's fleet-detail read: undefined while in flight, null detail = the route served nothing. */
   detail: { detail: FleetDetail | null } | undefined
-  /** The lead's roster facts (duty descriptions ride these, not the projection). */
   roster: readonly FleetMemberInfo[]
   comms: CommsRow[]
-  /** Display label of any session id (forest label, else roster name, else raw id). */
   labelOf: (id: string) => string
   onOpen: (id: string) => void
   onPin: (id: string | null) => void
@@ -35,7 +31,6 @@ export function AgentInspector(props: AgentInspectorProps): ReactElement {
   const promptRef = useRef<HTMLDivElement | null>(null)
   const [promptClamped, setPromptClamped] = useState(false)
   const prompt = props.detail?.detail?.initialPrompt
-  // The expand toggle only earns its place when the clamp actually cut the prompt.
   useEffect(() => {
     setPromptOpen(false)
     const el = promptRef.current

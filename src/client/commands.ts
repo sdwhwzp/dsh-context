@@ -1,6 +1,3 @@
-/** The command panel's derivation: the served execution log joined with the archive's `gone` stamps, plus the display
- * reads (preview text, duration, filter/sort) the card maps over. */
-
 import type { CommandRecord, CommandStats, SurfaceNode } from '../shared/types'
 import { firstLineOf, headProgramOf, hideableCdPrefix, programsOfCommand, shapeOfCmd } from '../shared/commands'
 import type { CommandShape } from '../shared/commands'
@@ -9,16 +6,12 @@ export type Command = CommandRecord
 export type CommandFilter = 'all' | 'failed' | 'slow' | 'background'
 export type CommandSort = 'latest' | 'slowest'
 
-/** A run at or past this wall time earns the Slow chip. */
 export const SLOW_MS = 10_000
 
-/** The surface node the run's result lives on: a nested Code-Mode record reveals on its parent run_code result;
- * a run without a result yet has nothing to reveal. */
 export function surfaceSeqOf(rec: CommandRecord): number | undefined {
   return rec.parent ?? rec.resultSeq
 }
 
-/** `gone` joins off the archive exactly like the file-op log's (fileActivity.activityOfOps). */
 export function commandsOf(records: readonly CommandRecord[], archive: readonly SurfaceNode[]): Command[] {
   const goneBySeq = new Map<number, number>()
   for (const n of archive) if (n.gone !== undefined) goneBySeq.set(n.seq, n.gone)
@@ -33,18 +26,14 @@ export function durationOf(rec: CommandRecord): number | undefined {
   return rec.end === undefined ? undefined : Math.max(0, rec.end - rec.start)
 }
 
-/** The collapsed one-line display of a command text: first line, minus a leading `cd <workspace> && ` prefix. */
 export function previewTextOf(cmd: string, workspace: string | undefined): string {
   return firstLineOf(cmd.slice(hideableCdPrefix(cmd, workspace)))
 }
 
-/** The collapsed row's command text: the first line, minus a leading `cd <workspace> && ` prefix. */
 export function previewOf(rec: CommandRecord, workspace: string | undefined): string {
   return previewTextOf(rec.cmd, workspace)
 }
 
-/** One record's display facts, derived ONCE per served list: the shell parse, the preview and the shape badges all
- * scan the command text, and the panel re-renders on every keystroke and projection refresh. */
 export interface CommandView {
   rec: CommandRecord
   program: string
@@ -60,8 +49,6 @@ function viewOf(rec: CommandRecord, workspace: string | undefined): CommandView 
   return { rec, program, programs: allPrograms, preview: previewOf(rec, workspace), shape: shapeOfCmd(rec.cmd) }
 }
 
-/** A run's result text for the detail's result block; nested tool-result blocks (a Code-Mode parent's dispatch
- * result) flatten in. Null when the node carries no text. */
 export function resultTextOf(node: unknown): string | null {
   const out: string[] = []
   const walk = (blocks: readonly unknown[]): void => {
@@ -112,8 +99,6 @@ export function bySlowest(a: CommandRecord, b: CommandRecord): number {
   return (durationOf(b) ?? -1) - (durationOf(a) ?? -1) || byLatest(a, b)
 }
 
-/** The title tally's fallback when the host serves no whole-log stats (a pre-field row): count the retained list.
- * Mirrors the host's tally moments: runs/failed/ms settle at the terminal transition, background at the flag. */
 export function tallyOfCommands(records: readonly CommandRecord[]): CommandStats {
   const stats: CommandStats = { runs: 0, failed: 0, ms: 0, bg: 0 }
   for (const rec of records) {
@@ -127,7 +112,6 @@ export function tallyOfCommands(records: readonly CommandRecord[]): CommandStats
   return stats
 }
 
-/** A record's primary program identity for search: the shell head word (dialect-aware), the tool itself for code programs. */
 export function programOf(rec: CommandRecord): string {
   if (rec.tool === 'bash' || rec.tool === 'pwsh') {
     const head = headProgramOf(rec.cmd, rec.tool)
@@ -142,7 +126,6 @@ export interface ProgramCount {
   runs: number
 }
 
-/** The rail's program ranking: every invocation plus each containing run, most frequent first with a stable name tie-break. */
 export function programsOf(views: readonly CommandView[]): ProgramCount[] {
   const counts = new Map<string, { n: number; runs: number }>()
   for (const view of views) {
@@ -165,15 +148,10 @@ export function programsOf(views: readonly CommandView[]): ProgramCount[] {
     .sort((a, b) => (b.n - a.n) || (a.name < b.name ? -1 : 1))
 }
 
-/** The rail's Attention facts among the given views; each key drives a list lens in the card. */
 export interface CommandAttention {
-  /** The slowest settled run (only when it crossed the second mark). */
   slowest?: { cmd: string; ms: number }
-  /** The program with the most failed/killed runs. */
   failing?: { program: string; count: number }
-  /** The most repeated exact command. */
   repeats?: { cmd: string; count: number }
-  /** Background dispatches in the list. */
   background?: number
 }
 

@@ -1,6 +1,3 @@
-/** The Agent Teams plane: the experimental `agentTeam` projection rides the LEAD session's wire values.
- * Absent stays null (the panel hides); malformed entries drop alone. */
-
 import { asRecord } from './services'
 import type { AgentForest, AgentNode } from './agentTree'
 
@@ -8,7 +5,6 @@ export interface FleetTeamMember {
   id: string
   name: string
   role: 'lead' | 'teammate'
-  /** Durable lifecycle; the lead's row is always active. */
   phase: 'provisioning' | 'active' | 'failed'
   error?: string
 }
@@ -18,20 +14,16 @@ export interface FleetTeamTask {
   subject: string
   description: string
   status: 'pending' | 'in_progress' | 'completed'
-  /** Owner membership NAME (the wire view carries names, not ids — join by name). */
   ownerName?: string
   blockedBy: string[]
   writeScopes: string[]
-  /** Server-computed readiness: pending with every blocker completed. Readiness never auto-starts the owner. */
   ready: boolean
   warnings: string[]
 }
 
 export interface FleetTeam {
-  /** Lead first (the harness synthesizes its row), then roster order. */
   members: FleetTeamMember[]
   tasks: FleetTeamTask[]
-  /** The first rejected durable record; the board then sits at its last valid state. */
   failure?: string
 }
 
@@ -75,7 +67,6 @@ function taskOf(value: unknown): FleetTeamTask | null {
   }
 }
 
-/** A record without a sound member list degrades whole to null. */
 export function teamOf(value: unknown): FleetTeam | null {
   const rec = asRecord(value)
   if (rec === null || !Array.isArray(rec.members)) return null
@@ -110,14 +101,12 @@ export function teamMemberOf(team: FleetTeam | null, sessionId: string): FleetTe
   return null
 }
 
-/** Teammates only: the lead keeps the session title, the current card is the self card, outsiders keep their prompt. */
 export function teammateNameOf(team: FleetTeam | null, node: AgentNode): string | undefined {
   if (node.isCurrent) return undefined
   const member = teamMemberOf(team, node.id)
   return member !== null && member.role === 'teammate' ? member.name : undefined
 }
 
-/** A member's id off their roster NAME — the task board's ownership join key. */
 export function memberIdByName(team: FleetTeam | null, name: string | undefined): string | undefined {
   if (team === null || name === undefined) return undefined
   for (const member of team.members) {
@@ -131,7 +120,6 @@ export function tasksOfOwner(team: FleetTeam | null, ownerName: string | undefin
   return team.tasks.filter(task => task.ownerName === ownerName)
 }
 
-/** Family nodes outside the roster — plain subagents, ancestors, siblings; the current session never counts. */
 export function familyOthersOf(forest: AgentForest | null, team: FleetTeam | null): AgentNode[] {
   if (forest === null) return []
   return forest.nodes.filter(n => !n.isCurrent && teamMemberOf(team, n.id) === null)

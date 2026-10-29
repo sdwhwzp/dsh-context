@@ -7,7 +7,6 @@ import type { DonutProps } from './donut'
 import { tokenRowsOf } from './tokenRows'
 
 export function makeOverviewTokens(kit: ViewKit, Donut: (props: DonutProps) => ReactElement): (props: {
-  /** Category-folded billed split; null when nothing billed. */
   tokens: { parts: TokenPartTotal[]; total: number } | null
 }) => ReactElement {
   const { t, fmt } = kit
@@ -15,7 +14,6 @@ export function makeOverviewTokens(kit: ViewKit, Donut: (props: DonutProps) => R
     const [hoverKey, setHoverKey] = useState<string | null>(null)
     const tokens = props.tokens
     const total = tokens?.total ?? 0
-    // Zero categories hide once anything is billed (the per-session card's convention); nothing billed shows the empty note.
     const shown = tokens !== null && total > 0 ? tokens.parts.filter(p => p.value > 0) : []
     const rows = tokenRowsOf(kit, shown, total)
     return (

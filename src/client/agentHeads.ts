@@ -9,8 +9,6 @@ export interface AgentHeads {
   headOf(id: string): Promise<ContextTimeline | null>
 }
 
-/** One relative-agent head read: the detail route's `head: true` body serves the slim envelope (~1KB) instead of the
- * ~200× larger full detail the reader would discard. */
 export function makeHeadFetcher(sessionId: string): (() => Promise<ContextTimeline | null>) | undefined {
   if (sessionId === '') return undefined
   return async () => {
@@ -29,8 +27,6 @@ export function makeHeadFetcher(sessionId: string): (() => Promise<ContextTimeli
   }
 }
 
-/** Page-scope head cache bound: heads are ~1KB each, but an unbounded page-lifetime map still accumulates one entry
- * per session the Fleet/agent views ever touched; the least-recently-read entry is dropped at the cap. */
 const HEADS_MAX = 128
 
 export function makeAgentHeads(): AgentHeads {
@@ -54,11 +50,9 @@ export function makeAgentHeads(): AgentHeads {
 export function useSessionsSnapshot(face: SessionsFaceLike | null, coalesceMs = 0): unknown {
   const subscribe = useCallback((fn: () => void) => {
     if (face === null) return () => {}
-    /* v8 ignore next 2 -- unreachable: sessionsFaceOf proved list.subscribe before returning the face. */
+    /* v8 ignore next 2 */
     if (face.list === undefined) return () => {}
     if (coalesceMs <= 0) return face.list.subscribe(fn)
-    // A running session pushes on every event: one trailing notification per window keeps the dependent derivation
-    // off the event-loop burst while the snapshot read itself stays latest-wins.
     let timer: ReturnType<typeof setTimeout> | null = null
     const off = face.list.subscribe(() => {
       if (timer !== null) return
@@ -74,7 +68,7 @@ export function useSessionsSnapshot(face: SessionsFaceLike | null, coalesceMs = 
   }, [face, coalesceMs])
   const getSnapshot = useCallback(() => {
     if (face === null) return null
-    /* v8 ignore next 2 -- unreachable: sessionsFaceOf proved list before returning the face. */
+    /* v8 ignore next 2 */
     if (face.list === undefined) return null
     return face.list.getSnapshot()
   }, [face])

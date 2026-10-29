@@ -1,7 +1,3 @@
-/** The Fleet tab: one shared derivation feeds the overview strip, the graph/members/task cockpit row and the comms
- * timeline. Both boards stay up with guidance notes when the session never formed a team, so the page's shape never
- * jumps between session kinds; hover, pin, owner filter and task focus are all lifted here so every board steers. */
-
 import { createElement as h, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { AgentHeads } from '../agentHeads'
 import { agentSelfOf } from '../agentTree'
@@ -45,34 +41,25 @@ export function makeFleetView(
     const { source, data, pressure, breakdown, usage } = useContextSession(props)
     const rootRef = useRef<HTMLDivElement | null>(null)
     useConversationSurface(rootRef)
-    // Re-claim the top per session in a layout effect: the harness carries the chat's bottom-anchored scrollTop across
-    // tab switches, and no saved position would survive the page's late layout passes.
     useLayoutEffect(() => {
-      /* v8 ignore next 3 -- a layout effect body only runs while mounted and
-         both render paths attach rootRef, so the null arm cannot fire. */
+      /* v8 ignore next 3 */
       const scroller = rootRef.current !== null
         ? rootRef.current.closest('[data-conversation-scroll]')
         : null
       if (scroller !== null) scroller.scrollTop = 0
     }, [sessionId])
     const self = data !== null ? agentSelfOf(data, pressure, breakdown, usage) : undefined
-    // The model arms only once the tab's timeline landed: while the loading/failure screen stands, no subscription or read fires.
     const { forest, team: rowTeam, titles } = useFleetModel(ctx, heads, sessionId, self, data !== null, 120)
-    // The freshest team value is the tab's OWN projection when the viewed session leads; a teammate falls back to the lead row's copy.
     const teamDirect = projectionOf(props, 'agentTeam', teamOf)
     const team = teamDirect ?? rowTeam
     const details = useFleetDetails(undefined, { concurrency: 4, refreshDelayMs: 750 })
     const [hoverId, setHoverId] = useState<string | null>(null)
     const [pinnedId, setPinnedId] = useState<string | null>(null)
-    // The stats card's roster pick: the resting member highlight the graph renders until a hover takes over.
     const focusMember = useFleetMemberFocus(sessionId)
-    // The boards' cap rides the network card's NATURAL height: the stage's top (the header above it included) plus its
-    // visible height, never the card's stretched height or a scrolled canvas offset. Measuring the stretch would let the
-    // task card's own growth feed its cap; measuring the canvas top would shrink the cap whenever the graph scrolls.
     const colsRef = useRef<HTMLDivElement | null>(null)
     useEffect(() => {
       const row = colsRef.current
-      /* v8 ignore start -- jsdom has neither ResizeObserver nor layout; the caps are visual. */
+      /* v8 ignore start */
       if (row === null || typeof ResizeObserver !== 'function') return
       const graph = row.querySelector<HTMLElement>('.lc-col-graph')
       const members = row.querySelector<HTMLElement>('.lc-members')
@@ -103,7 +90,6 @@ export function makeFleetView(
       return () => { observer.disconnect() }
       /* v8 ignore stop */
     }, [forest, team])
-    /** The task board's owner filter and focus flash, shared with the members board. */
     const [ownerFilter, setOwnerFilter] = useState<string | null>(null)
     const [focusTaskId, setFocusTaskId] = useState<string | null>(null)
     const { book } = useModelPrices()
@@ -114,13 +100,10 @@ export function makeFleetView(
       [forest],
     )
 
-    // A pinned agent that left the family releases the pin instead of ringing a ghost.
     useEffect(() => {
       if (pinnedId !== null && !byId.has(pinnedId)) setPinnedId(null)
     }, [pinnedId, byId])
 
-    // The lead's detail feeds the members board's roster facts; every family node's detail rides too, so member/reply/
-    // briefing/comms rows fill in on first paint instead of after a scan.
     const leadId = team !== null ? team.members[0]?.id : undefined
     const detailStamp = forest === null ? '' : forest.nodes.map(n => `${n.id}@${n.updatedAt}`).join(',')
     useEffect(() => {
@@ -144,13 +127,9 @@ export function makeFleetView(
       [attestedNames, forest, leadDetail, team, t],
     )
 
-    /** A member card's open: the right Sidebar's subagent chat (the header catalog's own aside verb), addressed by the
-     * node's direct parent; a column that cannot take the resource, or a node without its parent edge, keeps the
-     * whole-view jump. */
     const open = (id: string): void => {
       const node = byId.get(id)
-      /* v8 ignore next 5 -- defensive arms: the opener only fires from a family card on a
-         session-scoped tab, so a family node always carries its direct parent edge. */
+      /* v8 ignore next 5 */
       if (openChildAsideVia(ctx, {
         childSessionId: id,
         parentSessionId: node?.parentId,
@@ -164,8 +143,6 @@ export function makeFleetView(
       openSessionVia(ctx, id)
     }
 
-    /** A graph-node or member-card pick rings the node and narrows the task board to that agent's work — members by
-     * roster name, plain subagents by their own session; picking again releases both. */
     const select = (id: string): void => {
       const next = pinnedId === id ? null : id
       setPinnedId(next)
@@ -174,9 +151,6 @@ export function makeFleetView(
       else if (ownerFilter === id || (member !== null && ownerFilter === member.name)) setOwnerFilter(null)
     }
 
-    // The picked agent's session id: a roster member joins by name, a plain subagent by its own — the one key the task
-    // board and the comms timeline both narrow by. A key neither can account for (a hostile snapshot's transient) rides
-    // raw: both boards name it on their chips and empty together, and the next sound snapshot restores them.
     const pickId = useMemo(() => {
       if (ownerFilter === null) return null
       return team?.members.find(m => m.name === ownerFilter)?.id ?? ownerFilter
@@ -192,10 +166,7 @@ export function makeFleetView(
       )
     }
 
-    // The baseline gate must not hide behind whichever tab the reader opened: the dismissal ledger is keyed by session.
     const gate = unsupportedOf(data.unsupported)
-    /** A task-board row pick toggles the pin; a release also lets go of a task-board narrowing still pointing at that
-     * agent (the same pair select() manages for graph and member picks). */
     const pinToggle = (id: string | null): void => {
       const releasing = pinnedId === id
       setPinnedId(releasing ? null : id)
@@ -225,10 +196,9 @@ export function makeFleetView(
         fmt={kit.fmt}
       />
     )
-    // The boards column's two cards stack; the network column is the graph alone, and either seat may be absent.
     const boardsColumn = forest !== null
       ? (
-        <div className="lc-col flex-1 min-w-[min(360px,100%)]">
+        <div className="lc-col lc-col-boards flex-1 min-w-[min(360px,100%)]">
           <MemberBoard
             team={team}
             forest={forest}
@@ -280,7 +250,7 @@ export function makeFleetView(
             </div>
           )
           : null}
-        {forest !== null && !forest.solo
+        {forest !== null
           ? (
             <CommsPanel
               details={details}

@@ -98,8 +98,6 @@ describe('system/message — the system prompt as a surface node', () => {
   })
 
   test('a system/message expires an armed shadow claim (the shadow-price protocol)', () => {
-    // The claim is armed by the metering event and consumed by the NEXT surface event: a system node settling
-    // in between must expire it, so a later APPEND does not silently remove the seqs the claim named.
     const { state } = driveTimeline([
       userMessage(1, text('a'), { kind: 'user' }),
       { type: 'compaction/summary', seq: 2, time: 2000, data: { shadowedSeqs: [1], shadowedTokenCount: 9 } },

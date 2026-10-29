@@ -95,14 +95,14 @@ describe('activityOf', () => {
     assert.equal(file.reads, 2)
     assert.equal(file.writes, 1)
     assert.equal(file.searches, 0)
-    assert.equal(file.added, 2) // edit new_string: 'x\nq'
-    assert.equal(file.removed, 3) // edit old_string: 'x\ny\nz'
+    assert.equal(file.added, 2)
+    assert.equal(file.removed, 3)
     assert.deepEqual(file.ops.map(o => o.seq), [7, 5, 3])
     assert.equal(file.ops[0].kind, 'read')
     assert.equal(file.ops[0].time, T0 + 7)
 
     const written = a.entries[2]
-    assert.equal(written.added, 2) // write content: 'one\ntwo\n'
+    assert.equal(written.added, 2)
     assert.equal(written.removed, 0)
 
     const searched = a.entries[1]
@@ -127,9 +127,9 @@ describe('activityOf', () => {
       op(5, 'read', { file_path: '/shots/logo.svg' }),
       op(7, 'grep', { pattern: 'x', path: '/src/' }),
     ])
-    assert.equal(a.entries[2].form, 'image') // read_image
-    assert.equal(a.entries[1].form, 'image') // .svg extension
-    assert.equal(a.entries[0].form, 'dir') // trailing slash
+    assert.equal(a.entries[2].form, 'image')
+    assert.equal(a.entries[1].form, 'image')
+    assert.equal(a.entries[0].form, 'dir')
     assert.deepEqual(a.totals.image, { files: 2, ops: 2 })
   })
 
@@ -158,7 +158,7 @@ describe('activityOf', () => {
       [
         { seq: 1, cat: 'user', tokens: 5 },
         { seq: 2, cat: 'assistant', tokens: 5 },
-        { seq: 3, cat: 'tool', tokens: 5 }, // no tool name at all
+        { seq: 3, cat: 'tool', tokens: 5 },
         { seq: 4, cat: 'tool', tokens: 5, tool: 'todo_write' },
       ],
       () => undefined,
@@ -171,8 +171,8 @@ describe('activityOf', () => {
 
   test('file-kind ops without a resolvable path are skipped — never counted, never rowed', () => {
     const a = run([
-      op(3, 'read', null), // the conversation join aged out
-      op(5, 'edit', {}), // args survived but name no target
+      op(3, 'read', null),
+      op(5, 'edit', {}),
       op(7, 'read', { file_path: '/a.ts' }),
     ])
     assert.equal(a.entries.length, 1)
@@ -183,7 +183,6 @@ describe('activityOf', () => {
   })
 
   test('a lost or hostile join never takes the walk down', () => {
-    // Regression: an aged window must make the fold skip the node, never dereference it and take the tab down.
     const lost = activityOf(
       [
         { seq: 3, cat: 'tool', tokens: 5, tool: 'read', time: T0 },
@@ -238,7 +237,6 @@ describe('activityOf', () => {
     assert.deepEqual(a.entries[7].ops[0].read, { start: 41, count: 30 })
     for (const i of [0, 1, 2, 6]) assert.deepEqual(a.entries[i].ops[0].read, { count: 80, est: true })
     for (const i of [3, 4, 5]) assert.equal(a.entries[i].ops[0].read, undefined)
-    // A nested read has no result meta in the join — it estimates from the limit.
     const nested = run([op(20, 'run_code', null, {}, { subCalls: [sub(15, 'read', { file_path: '/n.ts', limit: 50.9 })] })])
     assert.deepEqual(nested.entries[0].ops[0].read, { count: 50, est: true })
   })
@@ -308,10 +306,10 @@ describe('activityOf — str_replace_editor', () => {
     const b = a.entries[1]
     assert.equal(b.reads, 0)
     assert.equal(b.writes, 2)
-    assert.equal(b.added, 3) // create 'one\ntwo\n' + str_replace 'one'
-    assert.equal(b.removed, 2) // str_replace 'one\ntwo'
+    assert.equal(b.added, 3)
+    assert.equal(b.removed, 2)
     assert.equal(a.entries[2].reads, 1)
-    assert.equal(a.entries[0].added, 2) // insert 'x\ny'
+    assert.equal(a.entries[0].added, 2)
     assert.deepEqual(a.totals.read, { files: 1, ops: 1 })
     assert.deepEqual(a.totals.write, { files: 2, ops: 3 })
 
@@ -333,7 +331,6 @@ describe('activityOf — nested Code-Mode (PTC) calls', () => {
           sub(24, 'write', { file_path: '/src/b.ts', content: 'one\ntwo\n' }),
           sub(26, 'grep', { pattern: 'needle', path: '/src' }),
           sub(28, 'bash', { command: 'ls' }),
-          // A minimal settled block: no time, no error flag, no nested tree.
           { kind: 'tool-result', seq: 27, call: { name: 'read', argsRaw: JSON.stringify({ file_path: '/src/a.ts' }) } },
         ],
       }),
@@ -363,7 +360,7 @@ describe('activityOf — nested Code-Mode (PTC) calls', () => {
       sub(21, 'glob', { pattern: '**/*.md' }),
       sub(22, 'read_image', { file_path: '/ui.png' }),
     ] })])
-    assert.equal(b.entries[1].ops[0].detail, undefined) // the pattern IS the row path
+    assert.equal(b.entries[1].ops[0].detail, undefined)
     assert.equal(b.entries[2].ops[0].detail, 'needle')
     assert.equal(b.entries[0].form, 'image')
     assert.deepEqual(b.totals.image, { files: 1, ops: 1 })
@@ -380,7 +377,6 @@ describe('activityOf — nested Code-Mode (PTC) calls', () => {
     })])
     assert.deepEqual(a.entries.map(e => e.path), ['/b.ts', '/a.ts'])
     assert.equal(a.entries[1].ops[0].err, true)
-    // The parent's stamp locates the op; a failed program does not fail its earlier successful reads.
     const ok = a.entries[0].ops[0]
     assert.equal(ok.err, false)
     assert.equal(ok.gone, 40)
@@ -400,15 +396,15 @@ describe('activityOf — nested Code-Mode (PTC) calls', () => {
         'nope',
         null,
         42,
-        { call: { name: 'read', argsRaw: '{}' }, seq: 21 }, // no kind — still running
-        { kind: 'tool-result', seq: 22, call: null }, // unpaired result
-        { kind: 'tool-result', seq: 23, call: 'x' }, // call not an object
-        { kind: 'tool-result', seq: 24, call: { name: 'read' } }, // argsRaw missing
-        { kind: 'tool-result', seq: 25, call: { name: 9, argsRaw: '{}' } }, // name not a string
-        { kind: 'tool-result', call: { name: 'read', argsRaw: '{}' } }, // seq missing
-        { kind: 'tool-result', seq: Number.NaN, call: { name: 'read', argsRaw: '{}' } }, // non-finite seq
-        sub(26, 'read', 'not-json'), // unparseable args
-        sub(27, 'read', {}), // parsed but target-less
+        { call: { name: 'read', argsRaw: '{}' }, seq: 21 },
+        { kind: 'tool-result', seq: 22, call: null },
+        { kind: 'tool-result', seq: 23, call: 'x' },
+        { kind: 'tool-result', seq: 24, call: { name: 'read' } },
+        { kind: 'tool-result', seq: 25, call: { name: 9, argsRaw: '{}' } },
+        { kind: 'tool-result', call: { name: 'read', argsRaw: '{}' } },
+        { kind: 'tool-result', seq: Number.NaN, call: { name: 'read', argsRaw: '{}' } },
+        sub(26, 'read', 'not-json'),
+        sub(27, 'read', {}),
         sub(28, 'read', { file_path: '/ok.ts' }),
       ],
     })])
@@ -477,7 +473,7 @@ describe('activityOf — search meta attribution', () => {
     assert.deepEqual(a.entries.map(e => e.path), ['**/*.md', '/r.md', '/o.md', 'needle', '/a.ts'])
     const byPath = new Map(a.entries.map(e => [e.path, e]))
     assert.equal(byPath.get('/a.ts')!.ops[0].detail, 'needle (*.ts)')
-    assert.equal(byPath.get('/o.md')!.ops[0].hits, undefined) // a listed path matched no lines
+    assert.equal(byPath.get('/o.md')!.ops[0].hits, undefined)
     assert.equal(byPath.get('/o.md')!.ops[0].detail, '**/*.md')
     assert.equal(byPath.get('needle')!.ops[0].pattern, true, 'the pathless target is a pattern row')
   })
@@ -486,15 +482,15 @@ describe('activityOf — search meta attribution', () => {
     const metas: unknown[] = [
       'junk',
       42,
-      { truncated: false, paths: ['/a.ts'] }, // shape missing
-      { shape: 'other', truncated: false, paths: ['/a.ts'] }, // unknown shape
-      { shape: 'matches', truncated: false }, // files missing
-      { shape: 'matches', truncated: false, files: 'x' }, // files not a list
-      { shape: 'matches', truncated: false, files: [] }, // nothing retained
-      { shape: 'matches', truncated: false, files: [null, 7, { path: '' }, { path: '/a.ts' }, { path: '/a.ts', matches: 'x' }] }, // all groups malformed
-      { shape: 'paths', truncated: false }, // paths missing
-      { shape: 'paths', truncated: false, paths: [] }, // nothing listed
-      { shape: 'paths', paths: ['/a.ts'] }, // truncated flag missing
+      { truncated: false, paths: ['/a.ts'] },
+      { shape: 'other', truncated: false, paths: ['/a.ts'] },
+      { shape: 'matches', truncated: false },
+      { shape: 'matches', truncated: false, files: 'x' },
+      { shape: 'matches', truncated: false, files: [] },
+      { shape: 'matches', truncated: false, files: [null, 7, { path: '' }, { path: '/a.ts' }, { path: '/a.ts', matches: 'x' }] },
+      { shape: 'paths', truncated: false },
+      { shape: 'paths', truncated: false, paths: [] },
+      { shape: 'paths', paths: ['/a.ts'] },
     ]
     for (const [i, meta] of metas.entries()) {
       const a = run([op(10, 'grep', { pattern: 'needle', path: '/src' }, {}, { meta })])
@@ -717,7 +713,6 @@ describe('previewAddressOf', () => {
   })
 
   test('a path the encoder rejects degrades to no address, never a throw', () => {
-    // A lone surrogate is unrepresentable in URI encoding.
     assert.equal(previewAddressOf('\uD800', 'text', undefined, 's1', '/repo'), undefined)
   })
 })
@@ -768,7 +763,7 @@ describe('activityOfOps — the fold-derived op log', () => {
       { seq: 1, cat: 'tool' as const, tokens: 1, gone: 40 },
       { seq: 2, cat: 'tool' as const, tokens: 1, gone: 99 },
       { seq: 10, cat: 'tool' as const, tokens: 1, gone: 77 },
-      { seq: 30, cat: 'tool' as const, tokens: 1 }, // a live-window echo row: no stamp, joins nothing
+      { seq: 30, cat: 'tool' as const, tokens: 1 },
     ]
     const out = activityOfOps(ops, archive, null)
     const byPath = new Map(out.entries.map(e => [e.path, e]))

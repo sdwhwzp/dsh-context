@@ -10,7 +10,6 @@ export const kit = makeKit()
 export const settings = createContextSettings()
 export const Browser = makeContextBrowser(kit, makeStackedBar(kit), settings)
 
-// Failing-fetcher tests silence the production `console.warn` the failure legitimately emits.
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -19,7 +18,6 @@ export function silenceFetchWarn(): void {
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 }
 
-// Category row index follows the CATS order.
 export const ROW = { system: 0, tools: 1, user: 2, inject: 3, skill: 4, assistant: 5, tool: 6 } as const
 
 export function tl(over: Partial<ContextTimeline>): ContextTimeline {
@@ -51,7 +49,6 @@ export function filterStat(m: Mounted): string {
   return text(query(m.container, '.lc-br-filter-stat'))
 }
 
-/** Native setter + input event, so React's controlled-input tracker sees the change. */
 export async function typeToolSearch(m: Mounted, value: string): Promise<void> {
   await act(async () => {
     const input = query<HTMLInputElement>(m.container, '.lc-br-tool-search')
@@ -73,7 +70,6 @@ export function props(over: Partial<ContextBrowserProps>): ContextBrowserProps {
   return { data: tl({}), headers: null, ...over }
 }
 
-/** Metadata-only `headers` plus per-epoch content: the lazy-load contract the browser consumes. */
 export function withEpochContent(
   headers: ContextHeaders,
   contents: Record<number, HeaderEpochContent>,

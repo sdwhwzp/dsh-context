@@ -1,6 +1,3 @@
-/** The baseline-gate modal: when the host reports a harness below the supported baseline, the tab keeps rendering its
- * zeroed cards and this dialog names the detected version. Dismissal lives in a module-level per-session ledger. */
-
 import { useCallback, useState, type ReactElement } from 'react'
 import type { ViewKit } from '../viewkit'
 import { useEscapeClose } from './escapeClose'
@@ -9,7 +6,6 @@ const dismissed = new Set<string>()
 
 export interface UpgradeGateProps {
   sessionId?: string
-  /** The detected harness version, already re-proved. */
   current: string
   minimum: string
 }
@@ -18,7 +14,6 @@ export function makeUpgradeGate(kit: ViewKit): (props: UpgradeGateProps) => Reac
   const { t } = kit
   return function UpgradeGate(props: UpgradeGateProps): ReactElement | null {
     const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
-    // `closedFor` covers dismissals within one mount; the ledger covers remounts and in-place session switches.
     const [closedFor, setClosedFor] = useState<string | null>(null)
     const closed = closedFor === sessionId || dismissed.has(sessionId)
     const close = useCallback(() => {
@@ -26,7 +21,6 @@ export function makeUpgradeGate(kit: ViewKit): (props: UpgradeGateProps) => Reac
       setClosedFor(sessionId)
     }, [sessionId])
 
-    // The /context modal's overlay contract: capture-phase Escape, focus restored to the pre-open element.
     useEscapeClose(!closed, close)
 
     if (closed) return null

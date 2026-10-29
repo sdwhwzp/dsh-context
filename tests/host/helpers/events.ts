@@ -1,12 +1,8 @@
-// Durable session-event envelope builders; shapes mirror the harness's durable vocabulary (`SessionEventMap` plus
-// declaration-merged `compaction/*`), minus fields the fold never reads.
-
 import type { TimelineEvent } from '../../../src/host/fold'
 import type { ContentBlock, MessageSource } from '../../../src/host/pricing'
 
 let clock = 0
 
-/** Monotonic timestamps keep folded records time-ordered. */
 export function at(time?: number): number {
   clock += 1000
   return time ?? clock
@@ -29,7 +25,6 @@ export function requestContext(seq: number, data?: Record<string, unknown>): Tim
   return { type: 'request/context', seq, time: at(), ...(data === undefined ? {} : { data }) }
 }
 
-/** `user/message`: the durable payload IS the message (`deriveEventMessage` returns `data`). */
 export function userMessage(seq: number, content: ContentBlock[], source?: MessageSource | null, opts: {
   time?: number
   surfaceOp?: TimelineEvent['surfaceOp']
@@ -69,12 +64,9 @@ export function stepEnd(seq: number, opts: { time?: number } = {}): TimelineEven
   return { type: 'step/end', seq, time: at(opts.time) }
 }
 
-/** `tool/result`: the model-visible message rides `data.message` (lifted `toolCallId`/`isError`), whose tool
- * source carries the callId the fold pairs on. */
 export function toolResult(seq: number, opts: {
   callId: string
   content: ContentBlock[]
-  /** The durable error mark: `message.isError`. */
   error?: boolean
   meta?: unknown
   time?: number
@@ -91,12 +83,10 @@ export function toolResult(seq: number, opts: {
   return { type: 'tool/result', seq, time: at(opts.time), data, surfaceOp: 'append' }
 }
 
-/** assistant/message: the durable payload nests the message under `data.message`. */
 export function assistantMessage(seq: number, opts: {
   turn?: number
   step?: number
   content?: ContentBlock[]
-  /** Widened: hostile fixtures ride the same field (the fold re-proves every bucket). */
   usage?: Record<string, unknown>
   stream?: unknown
   time?: number
@@ -110,7 +100,6 @@ export function assistantMessage(seq: number, opts: {
   return { type: 'assistant/message', seq, time: at(opts.time), data, surfaceOp: opts.surfaceOp ?? 'append' }
 }
 
-/** assistant/attempt: a settled model attempt that committed no surface message. */
 export function assistantAttempt(seq: number, opts: {
   turn?: number
   step?: number
@@ -157,7 +146,6 @@ export function planMode(seq: number, data?: Record<string, unknown>): TimelineE
   return { type: 'plan/mode', seq, time: at(), ...(data === undefined ? {} : { data }) }
 }
 
-/** `session/end-seed`: the fork/seed boundary marker; `data` widened for hostile fixtures. */
 export function endSeed(seq: number, data?: unknown): TimelineEvent {
   return { type: 'session/end-seed', seq, time: at(), ...(data === undefined ? {} : { data }) as Record<string, unknown> }
 }
@@ -166,7 +154,6 @@ export function foreign(seq: number, type = 'todo/write'): TimelineEvent {
   return { type, seq, time: at(), data: {} }
 }
 
-/** A nested PTC (Code Mode) dispatch STARTING inside a run_code program. */
 export function codeDispatchStart(seq: number, opts: {
   rootCallId?: unknown
   parentCallId?: unknown
@@ -189,7 +176,6 @@ export function codeDispatchStart(seq: number, opts: {
   }
 }
 
-/** A job registration (the 0.2.1 line's precise spawn instant). */
 export function jobRegistered(seq: number, opts: {
   jobId?: unknown
   callId?: unknown
@@ -211,7 +197,6 @@ export function jobRegistered(seq: number, opts: {
   }
 }
 
-/** A job settlement (the 0.2.1 line's precise outcome). */
 export function jobSettled(seq: number, opts: {
   jobId?: unknown
   callId?: unknown
@@ -240,7 +225,6 @@ export function jobSettled(seq: number, opts: {
   }
 }
 
-/** A nested PTC (Code Mode) dispatch settling inside a run_code program. */
 export function codeDispatch(seq: number, opts: {
   rootCallId?: unknown
   parentCallId?: unknown

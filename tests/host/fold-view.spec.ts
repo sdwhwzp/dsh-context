@@ -10,7 +10,6 @@ const bucket = (uncached: number, cacheRead: number, cacheWrite: number, output:
 
 describe('buildTimelineView unknown-model shape', () => {
   test('optional scalars stay ABSENT keys until known, then ride their own keys (issue #29)', () => {
-    // A fold over events naming no model/provider/capacity: undefined-valued properties would fail the lossless-JSON push pipeline.
     const unknown = driveTimeline([
       userMessage(1, [{ type: 'text', text: 'aaaa' }]),
       assistantMessage(2, { turn: 1, step: 1 }),
@@ -152,7 +151,6 @@ describe('buildTimelineView copies', () => {
     assert.deepEqual(v1, v2)
     assert.notEqual(v1.requests[0], state.requests[0])
     assert.deepEqual(v1.requests[0], state.requests[0])
-    // Event copies are stamped with request attribution, so they differ by value — they must never alias.
     assert.notEqual(v1.events[0], state.events[0])
     assert.equal(v1.archive.length, 1)
     assert.notEqual(v1.archive[0], state.archived[0])
@@ -236,7 +234,6 @@ describe('buildTimelineView serving window', () => {
       toolCall(4, { callId: 'c1', name: 'skill' }),
       toolResult(5, { callId: 'c1', content: [{ type: 'text', text: '<skill_content name="pdf">body</skill_content>' }] }),
     ], { maxNodes: 2 })
-    // Surface nodes are 1, 2, 3 and 5 (the tool/call at 4 carries none); the catalog pins ahead, the dropped message sets the floor.
     assert.deepEqual((view.nodes as SurfaceNode[]).map(n => n.seq), [1, 3, 5])
     assert.equal(view.droppedNodes, 1)
     assert.equal(view.surfaceFloor, 2, 'the floor is the newest unserved non-skill seq')

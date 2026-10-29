@@ -1,6 +1,3 @@
-// The bundle smoke: the only check exercising the BUILT artifacts — `__ModuleLoader__`, the CSS data-plugin tags,
-// and platform-module requires only exist after tsdown. Skipped when lib/ is absent; real JSDOM + real React.
-
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -13,7 +10,6 @@ import * as staging from './staging'
 
 describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/client.js', () => {
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { pretendToBeVisual: true })
-  // The bundle evaluates against window-scoped globals; this spec owns its worker (per-file fork).
   const globals = globalThis as { window?: unknown; document?: unknown }
 
   let handoff: { id: string; factory: (require: (spec: string) => unknown) => unknown } | null = null
@@ -32,8 +28,6 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
     globals.window = dom.window
     globals.document = dom.window.document
 
-    // The primitives dist ships CSS modules Node cannot parse; the bundle references its components as React
-    // leaves, so inert stand-ins play the shell's role (real rendering is covered by the jsdom lane).
     const inert = (name: string) => {
       const C = (): null => null
       ;(C as { displayName?: string }).displayName = name
@@ -53,7 +47,6 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
     new Function(readFileSync(join(staging.REPO, 'lib', 'client.js'), 'utf8'))()
     assert.ok(handoff !== null, 'bundle must register through __ModuleLoader__.load')
 
-    // Faithful harness services (documented contracts, in-memory).
     const removeFrom = <T,>(list: T[]) => (item: T) => () => {
       const i = list.indexOf(item)
       if (i >= 0) list.splice(i, 1)
@@ -65,8 +58,6 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
         return undefined
       },
       inject(_deps: string[], cb: (c: unknown) => void) {
-        // Cordis fires the callback once every requested service exists; this fake answers every name up front,
-        // so it fires immediately. The configForms wiring guards on the absent service itself.
         cb(ctx)
       },
       effect(fn: () => (() => void) | void) {
@@ -83,8 +74,6 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
         },
       },
       slots: {
-        // The registry records every `register()` call and returns its idempotent disposer; an `inject` callback
-        // returns the declaration effect's own disposer, so the return value is never the registration.
         inject: (_name: string, fn: () => unknown) => fn(),
         register: (opts: (typeof state.slots)[number][1]) => {
           state.slots.push([opts.name ?? '', opts])

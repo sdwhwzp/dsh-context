@@ -9,9 +9,7 @@ import { click, flush, hover, mount, query, queryAll, settle, text, unhover, unt
 import { buttonByText, makeView, projectionsFor, T0, timeline } from './contextViewHarness'
 
 describe('ContextView — file activity card', () => {
-  // Chart hover previews after a short rest; a rapid sweep keeps only the trailing value (hover debounce).
   const rest = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 200))
-  /** Six steps with two file ops: a live read (seq 3) and an edit (seq 5) compacted away before seq 6 dispatched. */
   function fileTimeline(): ContextTimeline {
     const req = (seq: number, time: number, extra: Record<string, unknown> = {}) =>
       ({ seq, time, system: 10, tools: 20, user: 10, inject: 0, assistant: 20, tool: 10, total: 70, ...extra })
@@ -19,9 +17,9 @@ describe('ContextView — file activity card', () => {
       requests: [
         req(2, T0 + 1000, { turn: 1, step: 1 }),
         req(4, T0 + 3000, { turn: 1, step: 2 }),
-        req(6, T0 + 5000), // two turn-less mid-session steps form their own aggregate
+        req(6, T0 + 5000),
         req(7, T0 + 6000),
-        req(8, T0 + 7000, { turn: 2, step: 1 }), // a single-step turn, not the last bar
+        req(8, T0 + 7000, { turn: 2, step: 1 }),
         req(9, T0 + 8000, { turn: 3, step: 1 }),
       ],
       nodes: [
@@ -63,13 +61,11 @@ describe('ContextView — file activity card', () => {
     const { m, card } = await mountFiles('sv-files-scope')
     assert.ok(text(card).includes('+1') && text(card).includes('−2'))
 
-    // The first bar bounds the fold at the second request: the edit drops out.
     await hover(query(m.container, '.lc-bar[data-seq="2"]'))
     await rest()
     assert.equal(queryAll(card, '.lc-fa-meta-delta').length, 0)
     assert.equal(queryAll(card, '.lc-fa-row').length, 1)
 
-    // The turn-less mid step still bounds at the next request: both ops stay.
     await hover(query(m.container, '.lc-bar[data-seq="6"]'))
     await rest()
     assert.ok(text(card).includes('+1'))
@@ -77,7 +73,6 @@ describe('ContextView — file activity card', () => {
     await unhover(query(m.container, '.lc-chart'))
     assert.ok(text(card).includes('−2'))
 
-    // A rapid sweep keeps only the trailing preview: freeze the hover clock across both moves.
     const frozen = performance.now()
     const clock = vi.spyOn(performance, 'now').mockReturnValue(frozen)
     await hover(query(m.container, '.lc-bar[data-seq="2"]'))
@@ -86,7 +81,6 @@ describe('ContextView — file activity card', () => {
     clock.mockRestore()
     await until(() => text(card).includes('+1'), 'the trailing hover lands on the last bar')
 
-    // DNA mode waits for the pointer to rest before updating the preview.
     await click(buttonByText(m.container, DICT_EN['trend.dna']))
     await hover(query(m.container, '.lc-bar[data-seq="2"]'))
     await settle(80)
@@ -100,18 +94,14 @@ describe('ContextView — file activity card', () => {
     const { m, card } = await mountFiles('sv-files-locate')
     const pick = query<HTMLSelectElement>(m.container, 'select.lc-br-pick')
 
-    // The compacted edit (seq 5) has no viewing step, so its click is a no-op; the read (seq 3) reveals
-    // in step 4's surface.
     await click(query(card, '.lc-fa-row'))
     const ops = queryAll(card, '.lc-fa-op')
     assert.equal(ops.length, 2)
-    // The browser's own stamp: the read result (seq 3) is first carried by the seq-4 request (Turn 1 · Step 2);
-    // the compacted edit's carrying request is turn-less, so its row prints only a clock.
     assert.ok(text(query(ops[1], '.lc-fa-op-time')).includes('T1 S2'))
     assert.ok(/^\d{2}:\d{2}:\d{2}$/.test(text(query(ops[0], '.lc-fa-op-time'))))
-    await click(ops[0]) // edit, gone = 6: unlocatable
+    await click(ops[0])
     assert.equal(pick.value, 'live')
-    await click(ops[1]) // read at seq 3
+    await click(ops[1])
     assert.equal(pick.value, '4')
     assert.ok(text(query(m.container, '.lc-br-elem-on')).includes('/src/a.ts'))
     await m.unmount()
@@ -166,7 +156,6 @@ describe('ContextView — file activity card', () => {
     await m.unmount()
   })
 
-  /** A loopback ctx whose workspace-path RPCs record the opened paths; `sidebarRight` is the optional preview face. */
   function openCtx(sessionId: string, sidebarRight?: { openResource: (address: string) => void }) {
     const opened: string[] = []
     const calls: string[] = []
@@ -191,7 +180,6 @@ describe('ContextView — file activity card', () => {
     return { ctx, opened, calls }
   }
 
-  /** Mount the file card for one read op, once the loopback capability probe has settled. */
   async function mountOpen(sessionId: string, filePath: string, ctx: TestClientCtx) {
     const View = makeView(ctx)
     const conv = [
@@ -255,8 +243,6 @@ describe('ContextView — file activity card', () => {
   })
 
   test('a Sidebar that refuses the address falls back to the system opener', async () => {
-    // No preview type claims the address (or no surface is mounted): the throw is the face's own
-    // wiring-error report, so the card must fall back.
     const { ctx, opened } = openCtx('sv-preview-no', { openResource: () => { throw new Error('no registered tab type claims it') } })
     const { m, card } = await mountOpen('sv-preview-no', '/repo/src/a.ts', ctx)
     await click(query(query(card, '.lc-fa-row'), '.lc-fa-file'))
@@ -265,8 +251,6 @@ describe('ContextView — file activity card', () => {
   })
 
   test('an unencodable path skips the preview and still opens on the system', async () => {
-    // Parsing resilience: a lone surrogate in a log path is unrepresentable in a resource address (the
-    // encoder throws), so the preview opener is never asked and the system opener takes the resolved path.
     const previewed: string[] = []
     const { ctx, opened } = openCtx('sv-preview-bad', { openResource: (address: string) => { previewed.push(address) } })
     const { m, card } = await mountOpen('sv-preview-bad', '\uD800', ctx)
@@ -298,8 +282,6 @@ describe('ContextView — file activity card', () => {
 
   test('a ctx without service access degrades the card wiring, not the view', async () => {
     const View = makeView({} as unknown as TestClientCtx)
-    // No session id: the view stays on its loading screen; the workspace and opener wiring (both read
-    // ctx before the early return) resolve to nothing.
     const m = await mount(h(View, { sessionId: '' }))
     assert.ok(text(m.container).includes(DICT_EN.loading))
     await m.unmount()

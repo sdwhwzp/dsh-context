@@ -86,12 +86,10 @@ export function msgKindsOf(n: SurfaceNode, conv: ConversationNodeLike | undefine
   return {
     think,
     tool: tool || (Array.isArray(n.calls) && n.calls.length > 0),
-    // The fold stamps `text` exactly for non-blank replies, so the stamp itself is the reply bit.
     answer: typeof n.text === 'string' && n.text !== '',
   }
 }
 
-/** The only scan face for thinking blocks — the fold stamps no reasoning on the node. */
 export function reasoningTextOf(conv: ConversationNodeLike | undefined): string {
   if (conv === undefined) return ''
   let out = ''

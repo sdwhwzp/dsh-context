@@ -39,8 +39,6 @@ const OPEN = (): boolean => true
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
-  // The cold-start share (timelineSource.ts) is page-lifetime per session:
-  // drop it so one test's cold read never leaks its state into a later test that reuses the same session id.
   resetTimelineDetailStores()
 })
 
@@ -218,8 +216,6 @@ describe('ContextModal', () => {
     const ctx = new TestClientCtx({ services: { sessions } })
     const ContextModal = makeContextModal(asClientCtx(ctx), kit, settings)
     const sid = 'sm-dock'
-    // The shell frame: the plugin matches its INLINE grid template, the one
-    // host anchor carried by every supported baseline (dockMeasure.ts).
     const frame = document.createElement('div')
     frame.style.gridTemplateColumns = '280px minmax(400px, 1fr) minmax(0px, 360px)'
     const seat = document.createElement('div')
@@ -228,7 +224,6 @@ describe('ContextModal', () => {
 
     const disconnectSpy = vi.spyOn(MutationObserver.prototype, 'disconnect')
     const m = await mount(h(ContextModal, { sessionId: sid, useContextModal: boundModalHook(sid), useProjection: () => undefined, }))
-    // Relocate the mount container under the frame before opening, so the measure walks the real ancestor chain.
     seat.appendChild(m.container)
     await act(async () => {
       modalStoreOf(sid).set(true)
@@ -273,8 +268,6 @@ describe('ContextModal', () => {
     assert.equal(modalStoreOf(sid).getSnapshot(), false)
     assert.equal(document.body.querySelector('.lc-modal-backdrop'), null)
 
-    // Listener removed on close: another Escape must not run close() again —
-    // with a pending consume armed, a live listener would bail.
     setPendingConsume(sid, { kind: 'bare-token', token: '/context' })
     await keydown('Escape')
     assert.equal(sessions.bails.length, 0)
@@ -311,8 +304,6 @@ describe('ContextModal', () => {
     assert.ok(!document.contains(gone))
     await m2.unmount()
 
-    // Environment control (not a plugin fake): jsdom always reports body;
-    // the harness browser can report null before the body exists.
     modalStoreOf('sm-focus-null').set(true)
     vi.spyOn(document, 'activeElement', 'get').mockReturnValue(null)
     const m3 = await mount(h(ContextModal, { sessionId: 'sm-focus-null', useContextModal: boundModalHook('sm-focus-null'), useProjection: () => undefined, }))
@@ -365,7 +356,6 @@ describe('ContextModal — the split generation', () => {
     assert.ok(text(document.body).includes('1 Item'), 'the assistant section counts the served node')
     await m.unmount()
 
-    // A subagent message reads its full body under the durable parent address (issue #193).
     const calls: unknown[] = []
     const subCtx = new TestClientCtx({
       services: {
@@ -413,8 +403,6 @@ describe('ContextModal — the split generation', () => {
   })
 
   test('a mount that raced the declared inject heals when the face lands mid-open', async () => {
-    // The race: the modal mounts and its fetchers snapshot the face BEFORE `remote` composes, so the
-    // degraded note shows; when the inject fires, the open system section must auto-fetch.
     const calls: { sessionId: string; throughSeq: number; beforeSeq: number }[] = []
     const ctx = new TestClientCtx({ services: { sessions: new TestSessions() } })
     watchHistoryFaces(asClientCtx(ctx))
@@ -429,7 +417,6 @@ describe('ContextModal — the split generation', () => {
     await click(sysRow)
     assert.ok(text(document.body).includes(DICT_EN['browser.headerMetaOnly']), 'the faceless mount shows the static note')
 
-    // The face rides INSIDE the `remote` facade; the `remote.session` service key stays hostile.
     await act(async () => {
       ctx.setService('remote.session', { get page() { throw new Error('cannot get property "remote.session" without inject') } })
       ctx.setService('remote', {

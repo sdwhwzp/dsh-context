@@ -53,7 +53,6 @@ describe('headlineOf window and pct', () => {
     assert.equal(bare.window, undefined)
     assert.equal(bare.pct, null)
     assert.equal(headlineOf(timeline({ contextWindow: 0 }), null).pct, null)
-    // The kernel's contextOccupancy rounds this to 67; the plugin's own display grid keeps one decimal.
     assert.equal(headlineOf(timeline(), { projectedTokens: 200, contextWindow: 300 }).pct, 66.7)
     assert.equal(headlineOf(timeline(), { projectedTokens: 1, contextWindow: 1_000_000 }).pct, 0)
     assert.equal(headlineOf(timeline(), { projectedTokens: 250, contextWindow: 100 }).pct, 100)

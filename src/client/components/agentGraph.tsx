@@ -1,6 +1,3 @@
-/** The Agent network card: the sidebar mounts it with the inspector beside it (the `lc-card` query folds that split);
- * the Fleet tab passes its shared forest/team and selects on click instead of jumping. */
-
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from 'react'
 import { IconWorkspaceTreeOutlineRegular, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import { CATS } from '../categories'
@@ -31,23 +28,17 @@ import { memberStyle } from './memberBoard'
 export interface AgentGraphProps {
   sessionId?: string
   self?: AgentSelfStats
-  /** The Fleet tab's shared derivation; undefined = the card derives its own (the sidebar mount). */
   forest?: AgentForest | null
   team?: FleetTeam | null
   pinnedId?: string | null
-  /** Controlled hover (the Fleet tab lifts it so the list rows light graph nodes too). */
   hoverId?: string | null
-  /** A one-shot external highlight (the stats roster's member pick): the card and its lineage light until a hover takes over. */
   focusId?: string | null
   onHover?: (id: string | null) => void
-  /** Set on the Fleet tab: a card click selects (ring + cross-panel linkage) instead of jumping. */
   onSelect?: (id: string) => void
-  /** The preview pane beside the graph: the sidebar's compact mount keeps it, the Fleet tab paints the graph alone. */
   inspector?: boolean
 }
 
 const STAGGER_CAP = 8
-/** The graph's fold height, mirrored by the stage's max-height and Fleet flex-basis in agentGraph.css. */
 const STAGE_H = 560
 
 function linkPath(x1: number, y1: number, x2: number, y2: number): string {
@@ -58,15 +49,12 @@ function linkPath(x1: number, y1: number, x2: number, y2: number): string {
 export function makeAgentGraph(
   ctx: ClientCtx,
   kit: ViewKit,
-  /** The shared page-scope cold-head cache — the stats board's subagent-cost cell reads the same fetches. */
   heads: AgentHeads = makeAgentHeads(),
 ): (props: AgentGraphProps) => ReactElement | null {
   const { t, fmt, catLabel } = kit
 
   function AgentGraph(props: AgentGraphProps): ReactElement | null {
     const sessionId = props.sessionId
-    // The internal derivation runs only when the caller passes no forest in; the flag is a mount-stable prop split
-    // (the Fleet tab always passes one, the sidebar never does).
     const internal = useFleetModel(ctx, heads, sessionId, props.self, props.forest === undefined)
     const forest = props.forest !== undefined ? props.forest : internal.forest
     const team = props.team !== undefined ? props.team : internal.team
@@ -74,48 +62,38 @@ export function makeAgentGraph(
 
     const [internalHover, setInternalHover] = useState<string | null>(null)
     const [showAll, setShowAll] = useState(false)
-    // A new session starts collapsed; the expanded preference belongs to the family it was set on.
     useEffect(() => { setShowAll(false) }, [sessionId])
     const hoverId = props.hoverId !== undefined ? props.hoverId : internalHover
-    // The external focus is the resting highlight: any live hover takes precedence over it.
     const focusId = hoverId ?? (props.focusId ?? null)
     const onHover = props.onHover ?? setInternalHover
-    // The shared price book (the stats board's own store): a card's cost estimate appears once the book lands, never blocks it.
     const { book } = useModelPrices()
     const currency = displayCurrencyOf(ctx.locale)
 
-    // Re-layout whenever the stage's visible width changes (sidebar toggles, resizes, split views).
     const stageRef = useRef<HTMLDivElement | null>(null)
-    // A tall family scrolls inside the stage, so the externally focused card is brought into view before it lights.
     const heardFocus = props.focusId ?? null
     useEffect(() => {
       if (heardFocus === null) return
-      /* v8 ignore next 1 -- the stage seats before effects; a missing card is the no-layout path. */
+      /* v8 ignore next 1 */
       const card = stageRef.current?.querySelector<HTMLElement>(`[data-agent="${CSS.escape(heardFocus)}"]`) ?? null
       scrollIntoViewIfPossible(card, { block: 'center', behavior: 'smooth' })
     }, [heardFocus])
     const [stageWidth, setStageWidth] = useState(0)
     const [stageHeight, setStageHeight] = useState(0)
     useEffect(() => {
-      /* v8 ignore start -- jsdom has neither ResizeObserver nor layout; tests exercise the natural-pitch fallback (stageWidth 0). */
+      /* v8 ignore start */
       const el = stageRef.current
       if (el === null || typeof ResizeObserver !== 'function') return
-      // contentRect, not clientWidth: the stage's 4px side padding is breathing room for hover shadows, so clientWidth
-      // would overshoot the content box by that padding and arm a phantom horizontal scrollbar when the layout fits exactly.
       const observer = new ResizeObserver(([entry]) => {
         setStageWidth(entry.contentRect.width)
-        // Only the folded stage tells how much canvas is on screen; expanded, the stage IS the canvas.
         if (!showAll) setStageHeight(entry.contentRect.height)
       })
       observer.observe(el)
       return () => { observer.disconnect() }
       /* v8 ignore stop */
     }, [showAll])
-    // Keep a swipe off the stage from chaining into browser history (overscroll.ts covers the WebKit gap).
     useEffect(() => {
       const el = stageRef.current
-      /* v8 ignore next 1 -- the stage renders whenever the card does, and React
-         attaches refs before effects run; el is never null here. */
+      /* v8 ignore next 1 */
       if (el === null) return
       return containHorizontalOverscroll(el)
     }, [])
@@ -124,8 +102,6 @@ export function makeAgentGraph(
 
     if (forest === null || layout === null) return null
     const tallFamily = layout.height > STAGE_H
-    // The Fleet stage fills the stretched card, so the measured stage height, not the fold, decides whether the canvas
-    // clips; an expanded stage keeps the toggle reachable even when a resize brings the layout under the fold.
     const overflowsStage = showAll || (tallFamily && layout.height > stageHeight)
     const byId = new Map(forest.nodes.map(n => [n.id, n]))
     const hueOf = (node: AgentNode): string => {
@@ -135,7 +111,7 @@ export function makeAgentGraph(
           : node.isCurrent ? BRAND_HUE : familyHue(node.family)
     }
     const hues = new Map(forest.nodes.map(node => [node.id, hueOf(node)]))
-    /** v8 ignore next 1 -- agentForestOf anchors the forest at the current session, so a current node always exists. */
+    /* v8 ignore next 1 */
     const current = forest.nodes.find(n => n.isCurrent) ?? forest.nodes[0]
     const pinnedId = props.pinnedId ?? null
     const pinnedNode = pinnedId !== null ? byId.get(pinnedId) : undefined
@@ -151,7 +127,6 @@ export function makeAgentGraph(
       if (id === current.id) return
       openSessionVia(ctx, id)
     }
-    // Select mode (the Fleet tab): even the current card is pickable; the jump stays with the boards' own open buttons.
     const select = props.onSelect
     const keyOpen = (id: string) => (ev: KeyboardEvent) => {
       if (ev.key !== 'Enter' && ev.key !== ' ') return
@@ -270,7 +245,7 @@ export function makeAgentGraph(
                 </svg>
                 {forest.nodes.map((node, index) => {
                   const point = layout.points.find(p => p.id === node.id)
-                  /** v8 ignore next 2 -- layoutForest positions every forest node, so the lookup never misses. */
+                  /* v8 ignore next 2 */
                   if (point === undefined) return null
                   return (
                     <AgentCard
@@ -311,38 +286,31 @@ export function makeAgentGraph(
   return AgentGraph
 }
 
-/** The sidebar mount's inspector carries no fleet-detail read: a settled-empty detail hides those sections. */
 const nullDetail: { detail: FleetDetail | null } = { detail: null }
-/* v8 ignore next -- the sidebar's inspector never pins, so unpin/focus never fire. */
+/* v8 ignore next */
 const noopPin = (): void => {}
 
-/** The sidebar's inspector never lists comms, so sender labels fall back to the forest's own rows. */
-/* v8 ignore next 2 -- unreachable while the comms list is always empty. */
+/* v8 ignore next 2 */
 function fallbackLabel(byId: ReadonlyMap<string, AgentNode>): (id: string) => string {
   return id => byId.get(id)?.label ?? id
 }
 
 interface CardProps {
   node: AgentNode
-  /** Card center x and top y in canvas coordinates; the card box derives from them. */
   x: number
   y: number
   width: number
   hue: string
-  /** DFS order — the entrance stagger slot. */
   index: number
   hovered: boolean
-  /** The hovered card's lineage (ancestors + subtree): the focus dim spares these cards. */
   on: boolean
   pinned: boolean
   onHover: (id: string | null) => void
   onOpen: (id: string) => void
   onSelect?: (id: string) => void
   onKeyOpen: (ev: KeyboardEvent) => void
-  /** The price book and display currency for the cost estimate (null book → no estimate shown). */
   book: ModelBook | null
   currency: CostCurrency
-  /** The roster name when the node belongs to the team (undefined family outsiders and the self card). */
   memberName?: string
   t: ViewKit['t']
   fmt: ViewKit['fmt']
@@ -352,15 +320,12 @@ function AgentCard(props: CardProps): ReactElement {
   const { node, x, y, width } = props
   const pct = node.head !== null ? node.head.pct : null
   const segs = node.head !== null ? barSegments(node.head.parts, pct, pressureColorOf(pct)) : []
-  // The headline figure is the agent's CONSUMPTION: the tokenUsage tally, with the fold's own cost ledger standing in
-  // when the tally is absent (cold relatives).
   const consumed = node.billed !== null && node.billed > 0 ? node.billed
     : node.costUsage !== null ? billedTokensOf(node.costUsage) : null
   const cost = estimateSessionCost(node.costUsage, props.book, props.currency)
   const metricBits: string[] = []
   if (consumed !== null && consumed > 0) metricBits.push(props.fmt(consumed))
   if (cost !== null) metricBits.push(formatCost(cost, props.currency))
-  // Duration, then steps; either may be absent (a node that never ran has no steps, a cold one no timing).
   const meta: string[] = []
   if (node.durationMs !== null) meta.push(fmtDurationCompact(node.durationMs))
   if (node.requests > 0) meta.push(props.t('agents.steps', { n: node.requests }))
@@ -403,14 +368,11 @@ function AgentCard(props: CardProps): ReactElement {
               </>
             )}
         </div>
-        {/* The badge sits OUTSIDE the clamped label: an inline badge would be clipped whenever a long title claims
-            both lines. The lc-agent-self-badge class carries no rule of its own — it is the specs' self-marker anchor. */}
         {node.isCurrent ? <span className="lc-agents-badge lc-agent-self-badge">{props.t('agents.self')}</span> : null}
       </div>
       <div className="lc-agent-metric">
         <span className="lc-agent-tokens">{metricBits.length > 0 ? metricBits.join(' · ') : '—'}</span>
       </div>
-      {/* The free remainder is the bar's own track, so only occupied segments render. */}
       <div className="lc-agent-bar">
         {segs.filter(seg => !seg.free).map((seg, i) => (
           <i

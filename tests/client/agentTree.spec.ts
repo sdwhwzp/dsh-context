@@ -50,7 +50,6 @@ function snap(byId: Record<string, unknown>): unknown {
   return { byId }
 }
 
-/** Independent pin: LEVEL = card 116 + the 64px link channel, re-derived so a layout bug cannot mirror itself. */
 const LEVEL = 180
 
 describe('agentRowOf', () => {
@@ -165,7 +164,6 @@ describe('agentStatsOf', () => {
     assert.equal(providerModelLabelOf('deepseek', undefined, 'high'), 'deepseek')
     assert.equal(providerModelLabelOf(undefined, 'deepseek-flash', 'max'), 'deepseek-flash (max)')
     assert.equal(providerModelLabelOf(undefined, undefined, undefined), '')
-    // The fold admits empty-string model/provider scalars; they read as absent, never as a lone separator.
     assert.equal(providerModelLabelOf('', 'deepseek-flash', 'high'), 'deepseek-flash (high)')
     assert.equal(providerModelLabelOf('deepseek', '', 'high'), 'deepseek')
     assert.equal(providerModelLabelOf('', '', undefined), '')
@@ -407,7 +405,6 @@ describe('agentForestOf', () => {
   test('a forked session roots its own family and never joins the source it was cut from', () => {
     const byId = {
       source: row({ displayTitle: 'Source' }),
-      // The fork seed: parentId is source lineage, no origin (an ordinary forked Session).
       fork: row({ parentId: 'source', displayTitle: 'Source (1)' }),
       kid: row({ parentId: 'source', origin: 'subagent' }),
       forkKid: row({ parentId: 'fork', origin: 'subagent' }),
@@ -467,7 +464,6 @@ describe('agentForestOf', () => {
           ],
         },
       }),
-      // Insertion order a→b→c makes the sort compare cataloged ranks in both directions.
       a: row({ parentId: 'root', origin: 'subagent', updatedAt: 5 }),
       b: row({ parentId: 'root', origin: 'subagent', updatedAt: 1 }),
       c: row({ parentId: 'root', origin: 'subagent', running: true }),
@@ -616,7 +612,6 @@ describe('subagentCostFoldOf', () => {
 })
 
 describe('layoutForest', () => {
-  /** The natural cell pitch (SLOT_MAX) a roomy stage settles on. */
   const SLOT = 276
 
   function forestOf(ids: [string, string?][]): AgentForest {

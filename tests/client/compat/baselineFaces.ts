@@ -1,5 +1,3 @@
-// Per-baseline client faces: the in-memory services a dsh generation serves, driving the plugin's client half.
-
 import { TestClientCtx } from '../helpers/harness'
 import type { ConversationNodeLike, UseChatLike } from '../../../src/client/services'
 
@@ -22,18 +20,15 @@ function historyEvents(): unknown[] {
       time: 1,
       data: { content: [{ type: 'text', text: 'history node hello' }] },
     },
-    // The storage packs streaming deltas into chunk rows — unmappable noise here.
     { type: 'text-chunks', seq0: 5, time0: 2, members: [] },
   ]
 }
 
-/** Arm the ctx with the generation's faces: `remote` page facade, throwing `remote.session`, image loader. */
 export function baselineCtx(): { ctx: TestClientCtx; calls: { page: unknown[]; image: { sessionId: string; attachment: unknown }[] } } {
   const ctx = new TestClientCtx()
   const calls: { page: unknown[]; image: { sessionId: string; attachment: unknown }[] } = { page: [], image: [] }
   const events = historyEvents()
 
-  // The remote resolves the ClientResult itself; rows are `{type:'event', event}` records.
   const page = (request: unknown): Promise<unknown> => {
     calls.page.push(request)
     return Promise.resolve({ ok: true, value: { records: events.map(event => ({ type: 'event', event })) } })

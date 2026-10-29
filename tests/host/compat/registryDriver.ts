@@ -1,7 +1,3 @@
-// A driver over the session-projection registry's DOCUMENTED semantics, mirrored from dsh's
-// `packages/session/session-projection` at each supported tag; every supported line shares one contract.
-
-/** The plain-JSON persistence gate: the projection cache's own write precondition (mirrored in the fold helpers). */
 import { snapshotJson } from '../helpers/projection'
 
 interface ErasedDefinition {
@@ -30,7 +26,6 @@ interface UnitCell {
 export interface SessionLike {
   seq: number
   header: unknown
-  /** Inherited event count from pre-identity log compaction; the registry hands it to `init`. */
   inheritedEventCount: number
   events: unknown[]
 }
@@ -50,7 +45,6 @@ export interface CheckpointRow {
 
 export type Checkpoint = Record<string, CheckpointRow>
 
-/** Register-time rule violations: non-negative safe-integer `stateVersion`, and a shared key must agree on it. */
 export class RegistryViolationError extends Error {}
 
 export class RegistryDriver {
@@ -69,7 +63,6 @@ export class RegistryDriver {
     const def: ErasedDefinition = {
       key: definition.key,
       stateSchema: definition.stateSchema,
-      // The registry calls init(header, inheritedEventCount); the plugin's zero-argument init observes neither argument.
       init: (header, inheritedEventCount) => definition.init(header, inheritedEventCount),
       apply: (state, event) => definition.apply(state, event),
       wire,
@@ -90,7 +83,6 @@ export class RegistryDriver {
     this.listeners.add(listener)
   }
 
-  /** The `session/created` eager seeding (seq-0 sessions only). */
   sessionCreated(session: SessionLike): void {
     if (session.seq !== 0) return
     for (const { def, cells } of this.registrations.values()) {
@@ -131,7 +123,6 @@ export class RegistryDriver {
     return { asOfSeq: session.seq - 1, values }
   }
 
-  /** The persisted-cache write face: `ver/seq/val` rows, structurally cloned. */
   checkpoint(session: SessionLike): Checkpoint {
     const rows: Checkpoint = {}
     for (const { def, cells } of this.registrations.values()) {
@@ -146,13 +137,10 @@ export class RegistryDriver {
     return rows
   }
 
-  /** The projection cache's WRITE precondition: every row must be losslessly JSON-serializable or the whole write
-   * fails with a TypeError. Returns the detached JSON image. */
   checkpointJson(session: SessionLike): Record<string, unknown> | undefined {
     return snapshotJson(this.checkpoint(session)) as Record<string, unknown> | undefined
   }
 
-  /** Cold-read rung: schema-validated views of ver-matching rows; bad rows stay absent. */
   viewCheckpoint(checkpoint: Checkpoint): Record<string, unknown> {
     const values: Record<string, unknown> = {}
     for (const { def } of this.registrations.values()) {
@@ -170,7 +158,6 @@ export class RegistryDriver {
     return values
   }
 
-  /** The persisted-cache read anchor (one below the lowest usable watermark). */
   restoreFloor(checkpoint: Checkpoint): number | undefined {
     let floor: number | undefined
     for (const { def } of this.registrations.values()) {
@@ -181,7 +168,6 @@ export class RegistryDriver {
     return floor === undefined ? undefined : Math.max(floor - 1, 0)
   }
 
-  /** Cold read: seed usable rows through stateSchema.parse, refold the rest. */
   restore(checkpoint: Checkpoint, events: { seq: number }[], baseSeq: number, header: unknown, inheritedEventCount = 0): ProjectionSnapshot {
     const endSeq = events.at(-1)?.seq ?? baseSeq - 1
     const values: Record<string, unknown> = {}
@@ -204,7 +190,6 @@ export class RegistryDriver {
     return { asOfSeq: endSeq, values }
   }
 
-  /** Advance one cell through a contiguous log prefix (registry rule: no gaps). */
   private advanceCell(def: ErasedDefinition, cell: UnitCell, events: unknown[], throughSeq: number): void {
     if (cell.observedSeq >= throughSeq) return
     for (let seq = cell.observedSeq + 1; seq <= throughSeq; seq++) {

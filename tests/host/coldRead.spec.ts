@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { describe, test, vi } from 'vitest'
 import { type HeapReading, makeColdReadGate } from '../../src/host/coldRead'
 
-// The default reading is the process's own V8 meter; mock it so both sides of the ceiling are reachable.
 const v8Heap = vi.hoisted(() => ({ used: 100, limit: 1000, calls: 0 }))
 vi.mock('node:v8', () => ({
   getHeapStatistics: () => {
@@ -62,7 +61,6 @@ describe('makeColdReadGate', () => {
       ran++
       return 'b'
     })
-    // Let the first read actually START (its check passed), then let pressure rise while the second read waits.
     await new Promise(resolve => setTimeout(resolve, 10))
     assert.ok(started, 'the front read started under the low reading')
     reading = HIGH

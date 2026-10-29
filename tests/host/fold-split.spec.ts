@@ -40,11 +40,8 @@ function canonicalLog(): TimelineEvent[] {
 
 describe('the detailRev ledger', () => {
   test('bumps exactly on detail-mutating folds — never on working-slot or envelope folds — and on a real model switch', () => {
-    // Mutations: userMessage(5), assistantMessage(6), toolResult(8), stepEnd(9), assistantMessage(10),
-    // compaction(11), planMode(12) — seven in total.
     const { def, state } = driveTimeline(canonicalLog())
     assert.equal(state.detailRev, 7)
-    // step/start, tool/call, request/context, and a header with an UNCHANGED model leave the detail collections as-is.
     const workingSlot: TimelineEvent[] = [
       requestContext(13, { contextWindow: 256000 }),
       header(14, { model: 'deepseek-v4-flash', provider: 'deepseek', reason: 'change' }),
@@ -78,8 +75,6 @@ describe('buildTimelineHead', () => {
       ['deepseek-v4-flash', 'deepseek', 'max', 128000],
     )
     assert.ok(head.current.total > 0)
-    // `counts` are retained-record tallies; `humanInputs`/`answers` are whole-session tallies (one user
-    // message, two textual assistant replies).
     assert.deepEqual(head.counts, { turns: 1, steps: 2, injects: 0, compactions: 1, prunes: 0, skills: 0 })
     assert.equal(head.humanInputs, 1)
     assert.equal(head.answers, 2)
@@ -99,7 +94,7 @@ describe('buildTimelineHead', () => {
     const tallied = driveTimeline([
       userMessage(1, [{ type: 'text', text: 'ctx' }], { kind: 'plugin', form: 'context', plugin: 'dsh-test' }),
       compaction(2, 'prune', { shadowedTokenCount: 3 }),
-      assistantMessage(3, {}), // no turn: the replay shape folds as turn 0
+      assistantMessage(3, {}),
     ]).state
     assert.deepEqual(buildTimelineHead(tallied).counts, { turns: 1, steps: 1, injects: 1, compactions: 0, prunes: 1, skills: 0 })
     const anchorless = driveTimeline([
@@ -113,8 +108,6 @@ describe('buildTimelineHead', () => {
 
   test('the skills counter tallies DISTINCT loaded-skill names — the catalog digest never counts', () => {
     const { state } = driveTimeline([
-      // A `/name` invocation and a `skill`-tool load both load a skill; the available-skills catalog digest is
-      // the directory listing, not a load.
       userMessage(1, [{ type: 'text', text: 'run' }], { kind: 'skill-invocation', form: 'skill', name: 'grilling' }),
       toolCall(2, { callId: 'c1', name: 'skill' }),
       toolResult(3, { callId: 'c1', content: [{ type: 'text', text: '<skill_content name="grilling">instructions</skill_content>' }] }),
@@ -123,7 +116,6 @@ describe('buildTimelineHead', () => {
       userMessage(6, [{ type: 'text', text: 'once more' }], { kind: 'skill-invocation', form: 'skill', name: 'grilling' }),
     ])
     const head = buildTimelineHead(state)
-    // 'grilling' loaded twice counts once; the catalog digest rides an untagged inject event.
     assert.deepEqual(head.counts, { turns: 0, steps: 0, injects: 5, compactions: 0, prunes: 0, skills: 2 })
     assertPlainJson(head)
   })
@@ -142,7 +134,6 @@ describe('buildTimelineDetail', () => {
     const { state, view } = driveTimeline(canonicalLog())
     const detail = buildTimelineDetail(state, resolveBounds({}))
     assert.equal(detail.rev, 7)
-    // The slim head rides at the SAME cut: the composition the Agent network's cold-node ring fetch renders from.
     assert.ok(detail.head !== undefined)
     assert.deepEqual(detail.head.current, view.current)
     assertPlainJson(detail)

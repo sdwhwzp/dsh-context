@@ -14,7 +14,6 @@ const Jump = makeContextJumpButton(asClientCtx(new TestClientCtx()), kit, create
 
 const SESSION = 'sv-jump'
 
-/** The chat node seat; `nodes` is cast past the seat type so hostile shapes reach the guards. */
 function chatWith(nodes: unknown): { useChat?: UseChatLike } {
   return { useChat: (sel => sel({ legacy: { nodes: nodes as readonly ConversationNodeLike[] } })) as UseChatLike }
 }

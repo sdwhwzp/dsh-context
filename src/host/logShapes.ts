@@ -1,8 +1,3 @@
-/** Shape-driven readers over the durable session-event vocabulary — the ONE place the plugin's log spellings meet. Readers stay total
- * over untrusted input (the registry drives the fold with no error boundary), and the fold reads SHAPES, never a detected harness
- * version. */
-
-/** Whether a raw stream chunk carries a token delta; mirrors dsh-llm's `isTokenDelta`. */
 export function isTokenChunk(chunk: unknown): boolean {
   if (chunk === null || typeof chunk !== 'object') return false
   const c = chunk as { type?: unknown; text?: unknown; argumentsDelta?: unknown; name?: unknown }
@@ -31,8 +26,6 @@ export interface DecodeTally {
   blocks: Record<DecodeKind, number>
 }
 
-/** The first token's instant inside one PACKED delta run: base time plus accumulated inter-member deltas at the first qualifying member.
- * Mirrors dsh-llm's `runFirstTokenTime`; a non-finite delta yields undefined. */
 function runFirstTokenTime(record: Record<string, unknown>): number | undefined {
   const time0 = record.time0
   if (typeof time0 !== 'number' || !Number.isFinite(time0)) return undefined
@@ -59,11 +52,9 @@ export interface DecodeSpan {
 }
 
 export function firstTokenTimeOfStream(stream: unknown): number | undefined {
-  // A NaN endTime disables the marker decode, leaving exactly the token scan.
   return streamTimingOf(stream, Number.NaN).firstToken
 }
 
-/** Everything one assistant stream contributes to the metering. */
 export interface StreamTiming {
   firstToken?: number
   spans: DecodeSpan[]
@@ -75,7 +66,6 @@ export function streamTimingOf(stream: unknown, endTime: number): StreamTiming {
   const spans: DecodeSpan[] = []
   const result: StreamTiming = { spans, tally }
   if (!Array.isArray(stream)) return result
-  // A non-finite endTime leaves the decode readings empty; the token scan is independent of it.
   const markersReadable = Number.isFinite(endTime)
   let firstToken: number | undefined
   let kind: DecodeKind | undefined
@@ -100,7 +90,6 @@ export function streamTimingOf(stream: unknown, endTime: number): StreamTiming {
       } else if (firstToken === undefined && isTokenChunk(chunk)) {
         firstToken = time as number
       }
-      // A token-only read (no marker decode) is answered at the first token: nothing later can change it.
       if (!markersReadable && firstToken !== undefined) break
       continue
     }
@@ -112,8 +101,6 @@ export function streamTimingOf(stream: unknown, endTime: number): StreamTiming {
   return result
 }
 
-/** The inclusive surface range a replacement op covers, or null for `append` and any unrecognized/hostile op (which the fold treats as an
- * append). */
 export function replaceRangeOf(surfaceOp: unknown): { start: number; end: number } | null {
   if (surfaceOp === null || typeof surfaceOp !== 'object') return null
   const op = surfaceOp as { op?: unknown; startSeq?: unknown; endSeq?: unknown }

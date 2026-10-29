@@ -1,6 +1,3 @@
-/** The name-hash dot/bar palette for every per-name list (skills, program rankings, the stats command lane):
- * one stable color per name across every surface. */
-
 const NAME_COLORS = [
   'var(--color-blue-500)',
   'var(--color-green-500)',
@@ -12,7 +9,6 @@ const NAME_COLORS = [
   'var(--color-amber-500)',
 ] as const
 
-/** Stable name-hash color (djb2) — deterministic, so a name keeps its color across lists and sessions. */
 export function nameColorOf(name: string): string {
   let hash = 5381
   for (let i = 0; i < name.length; i++) hash = ((hash << 5) + hash + name.charCodeAt(i)) >>> 0

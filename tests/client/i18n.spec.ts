@@ -18,7 +18,6 @@ describe('dictionaries', () => {
 
   test('interpolation placeholders agree between locales for every key', () => {
     for (const key of Object.keys(DICT_EN) as DictKey[]) {
-      // 'block.line' is the documented asymmetry: en's singular is the fixed literal '1 line', zh keeps the {n} word.
       if (key === 'block.line') {
         assert.deepEqual(placeholders(DICT_ZH[key]), ['n'])
         assert.deepEqual(placeholders(DICT_EN[key]), [])

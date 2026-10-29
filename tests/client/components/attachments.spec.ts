@@ -44,7 +44,6 @@ describe('the attachment block', () => {
       ['dsh-context-标题.svg', '调研报告.docx', 'REPORT.md', 'result-image-1.jpg'],
     )
     assert.deepEqual(text(query(m.container, '.lc-ts-card-head')), 'Attachments4')
-    // Files show their extension badge; the image shows its resolved thumbnail.
     assert.deepEqual(queryAll(m.container, '.lc-att-ext').map(e => text(e)), ['SVG', 'DOCX', 'MD'])
     assert.equal(queryAll<HTMLImageElement>(m.container, '.lc-att-thumb img').length, 1)
     assert.ok(query<HTMLImageElement>(m.container, '.lc-att-thumb img').src.includes('blob:image-1'))
@@ -52,7 +51,6 @@ describe('the attachment block', () => {
     assert.ok(text(imageCard).includes('3462×1211'), 'raw dimensions')
     assert.ok(text(imageCard).includes('1568×1350 · 146.2 kB'), 'sent dimensions and size')
     assert.ok(text(imageCard).includes('Token') && text(imageCard).includes('≈325'))
-    // A file card keeps its size and handle price; the extension badge already names the type.
     assert.ok(!text(cards[0]).includes('Type'))
     assert.ok(text(cards[0]).includes('Size') && text(cards[0]).includes('2.6 kB'))
     assert.ok(text(cards[0]).includes('Token') && text(cards[0]).includes('≈58'), 'the handle price')
@@ -90,7 +88,6 @@ describe('the attachment block', () => {
     assert.ok(text(query(card, '.lc-att-name')).includes('File'))
     assert.equal(text(query(card, '.lc-att-ext')), 'File', 'the kind stands in for a missing extension')
     assert.ok(!text(card).includes('Size'))
-    // The handle names the file and its size, so an unproven reference prices nothing.
     assert.ok(!text(card).includes('Token'))
     await m.unmount()
 
@@ -108,7 +105,6 @@ describe('the attachment block', () => {
     const m = await mountSection({ load: counting, attachments: [{ kind: 'image', attachmentId: 'sha256:i1', name: 'a.png', width: 4, height: 4 }] })
     await flush()
     assert.equal(reads, 1)
-    // The same id re-proven into a NEW object (the fold's shape) must not trigger another read.
     await m.update(h(Attachments, { attachments: [{ kind: 'image', attachmentId: 'sha256:i1', name: 'a.png', width: 4, height: 4 }], load: counting }))
     await flush()
     assert.equal(reads, 1)
@@ -165,7 +161,6 @@ describe('the card click', () => {
     const cards = queryAll(m.container, '.lc-att-item')
     await click(cards[0])
     assert.equal(text(query(cards[0], '.lc-att-fail')), 'Preview unavailable')
-    // The state follows the newest refusal: one report at a time.
     await click(cards[3])
     assert.equal(queryAll(m.container, '.lc-att-fail').length, 1)
     assert.equal(queryAll(m.container, '.lc-att-item')[3].dataset.state, 'failed')
@@ -181,7 +176,6 @@ describe('the card click', () => {
     assert.equal(queryAll(m.container, '.lc-att-fail').length, 1)
     await m.update(h(Attachments, { attachments: [{ kind: 'file', attachmentId: 'sha256:new', name: 'new.md', bytes: 1 }] }))
     assert.equal(queryAll(m.container, '.lc-att-fail').length, 0)
-    // An open that lands AFTER the swap must not resurrect the state it belonged to.
     await click(queryAll(m.container, '.lc-att-item')[0])
     await m.update(h(Attachments, { attachments: [{ kind: 'file', attachmentId: 'sha256:other', name: 'other.md', bytes: 2 }] }))
     settle?.(false)
@@ -216,7 +210,6 @@ describe('the card click', () => {
     await click(cards[0])
     await click(cards[1])
     assert.equal(queryAll(m.container, '.lc-att-item')[1].dataset.state, 'opening')
-    // The first open lands while the second is pending: its clear must not touch the newer one.
     settles.get('sha256:f1')?.(true)
     await flush()
     assert.equal(queryAll(m.container, '.lc-att-item')[0].dataset.state, 'idle')

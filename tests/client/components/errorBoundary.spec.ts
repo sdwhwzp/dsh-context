@@ -1,5 +1,3 @@
-// React logs caught errors and replays the failed render as a fake DOM error; silence both.
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'

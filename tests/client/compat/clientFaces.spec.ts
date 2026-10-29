@@ -18,10 +18,8 @@ import { baselineCtx, chatSeat, convNodes } from './baselineFaces'
 
 const kit = makeKit()
 
-/** The plain-session resolver a non-subagent caller passes. */
 const plainOf = (sessionId: string) => () => ({ kind: 'session' as const, sessionId })
 
-// The plugin must hand EVERY markdown render a well-formed `labels` object (the primitives REQUIRE it).
 const captured = vi.hoisted(() => ({ markdownProps: undefined as Record<string, unknown> | undefined }))
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', async () => {
   const React = await import('react')
@@ -34,7 +32,6 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', async () => {
     IconCopyOutlineRegular: () => React.createElement('span', null),
     IconCheckOutlineRegular: () => React.createElement('span', null),
     IconSettingsOutlineMedium: () => React.createElement('span', null),
-    // The coloring hook's plain fallback: `undefined` runs render the command text uncolored.
     useCodeHighlighter: () => () => undefined,
     writeClipboard: async () => true,
   }
@@ -57,7 +54,6 @@ function timeline(): ContextTimeline {
   }
 }
 
-/** Mount the Context tab against one baseline ctx (a served timeline, the generation's conversation seat). */
 function mountTab(ctx: TestClientCtx) {
   const settings = createContextSettings()
   const View = makeContextView(asClientCtx(ctx), kit, settings, makeAgentHeads())
@@ -90,7 +86,6 @@ for (const baseline of BASELINES) {
 
     test('the targeted content fetch rides the gateway history face and envelope', async () => {
       const { ctx, calls } = baselineCtx()
-      // Arm the declared inject the way the client apply does; the slot is unloaded afterwards.
       watchHistoryFaces(asClientCtx(ctx))
       const fetcher = makeContentFetcher(plainOf('s-face'))
       assert.ok(fetcher !== undefined, 'the baseline history face serves a fetcher')
@@ -101,7 +96,6 @@ for (const baseline of BASELINES) {
       assert.deepEqual(node.content, [{ type: 'text', text: 'history node hello' }])
       assert.deepEqual(calls.page, [{ address: { kind: 'session', sessionId: 's-face' }, throughSeq: 4, beforeSeq: 5 }])
       await fetcher(4)
-      // History is immutable: a re-read never re-fetches.
       assert.equal(calls.page.length, 1)
       ctx.dispose()
       assert.equal(makeContentFetcher(plainOf('s-face')), undefined, 'the unloaded slot leaves no face behind')
@@ -125,7 +119,6 @@ for (const baseline of BASELINES) {
     })
 
     test('the session jump rides this generation\'s navigation seam (issue #90)', () => {
-      // The composition this line serves: the view-owner face always, the retired sessions verb only where declared.
       const { ctx } = baselineCtx()
       const nav = baseline.client.sessionNav
       const jumped: string[] = []

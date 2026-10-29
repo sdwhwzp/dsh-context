@@ -1,6 +1,3 @@
-/** The Fleet members board: the team's roster as full cards, then the family's other agents in the same form. The
- * toolbar's search/status/sort steer both sections; a pick pins the agent, a member's task chip filters the task board. */
-
 import { useMemo, useState, type CSSProperties, type ReactElement } from 'react'
 import { IconPanelLeftOutlineRegular, IconRightUpOutlineRegular, IconUserOutlineRegular, IconUsersOutlineRegular, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentForest, AgentNode } from '../agentTree'
@@ -11,32 +8,22 @@ import type { ViewKit } from '../viewkit'
 import { ClearableInput } from './clearableInput'
 
 export interface MemberBoardProps {
-  /** Null when the session never composed the agent-team plugin — the panel still lists the family. */
   team: FleetTeam | null
   forest: AgentForest
-  /** The lead session's landed fleet detail — the roster facts (duty descriptions) live there. */
   leadDetail: FleetDetail | null
   detailOf: (id: string) => { detail: FleetDetail | null } | undefined
   pinnedId: string | null
-  /** Controlled hover (the graph's or task rows' hovered agent lifts its member card too). */
   hoverId?: string | null
-  /** The card pick (click/keyboard) — reported raw; the parent owns the toggle and the
-   * task-board narrowing (the graph's select semantics). */
   onPin: (id: string) => void
   onHover: (id: string | null) => void
-  /** Enter the agent's session as the whole view, landing on this bundle's Context tab. */
   onEnter: (id: string) => void
-  /** Open the agent in the sidebar aside; the parent keeps its own whole-view fallback. */
   onOpen: (id: string) => void
-  /** The task board's owner filter, owned by the view so the boards interlock. */
   ownerFilter: string | null
   onOwnerFilter: (name: string | null) => void
   t: ViewKit['t']
   fmt: ViewKit['fmt']
 }
 
-/** One agent's hue shared by network, member and task cards: the lead carries the brand color, every other card a
- * golden-angled hue — teammates by roster order, other agents by their level-1 family (the graph's link hue). */
 export function memberStyle(hue: string): CSSProperties {
   return { '--lc-member-hue': hue } as CSSProperties
 }
@@ -83,8 +70,6 @@ export function MemberBoard(props: MemberBoardProps): ReactElement {
   const roster = new Map<string, FleetMemberInfo>()
   for (const info of props.leadDetail?.roster ?? []) roster.set(info.name, info)
 
-  // The other-agents section: family nodes outside the team roster, minus the current session
-  // (its own card already headlines the network graph).
   const othersAll = useMemo(() => familyOthersOf(forest, team), [forest, team])
   const others = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -93,12 +78,9 @@ export function MemberBoard(props: MemberBoardProps): ReactElement {
       if (needle !== '' && !node.label.toLowerCase().includes(needle) && !node.id.toLowerCase().includes(needle)) return false
       return true
     })
-    // Spawn order is the forest's own DFS order — the parent catalog's own sibling sequence.
     return sort === 'spawn' ? out : [...out].sort(SORTERS[sort])
   }, [othersAll, query, status, sort])
 
-  // The toolbar steers the member cards too: search by member name, status by their node's state
-  // (a member whose session left the list reads as idle).
   const members = useMemo(() => {
     if (team === null) return []
     const needle = query.trim().toLowerCase()
@@ -120,8 +102,6 @@ export function MemberBoard(props: MemberBoardProps): ReactElement {
     return c
   }, [forest])
 
-  // The toolbar earns its keep only with at least two entries to sift; a filtered-empty board keeps it so the reader
-  // can back out of the filter.
   const listTotal = (team?.members.length ?? 0) + othersAll.length
   const bare = query === '' && status === 'all'
 
@@ -337,7 +317,6 @@ export function MemberBoard(props: MemberBoardProps): ReactElement {
                     <span className="lc-member-icon">
                       <IconUserOutlineRegular size={13} />
                     </span>
-                    {/* A subagent's prompt title IS its identity and runs long: two clamped lines where a roster name is one. */}
                     <b className="lc-member-name lc-member-name-wrap" title={node.label}>{node.label}</b>
                     <StateDot
                       state={node.running ? 'ongoing' : node.completed ? 'done' : 'idle'}

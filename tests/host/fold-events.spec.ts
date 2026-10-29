@@ -99,8 +99,6 @@ describe('user/message injection records', () => {
     assert.equal(plain.events[0].form, 'context')
     assert.equal(plain.events[0].name, 'plugin')
     assert.equal(plain.surface[0].name, 'plugin')
-    // The harness validates a source's `kind` but not its `form`: a durable number must not ride the record into
-    // the strict wire/state schemas (the permanent per-session freeze class).
     const hostile = driveTimeline([
       userMessage(1, text('note'), { kind: 'plugin', plugin: 'dsh-x', form: 123 } as never),
     ]).state
@@ -182,7 +180,6 @@ describe('tool/result skill tagging', () => {
   })
 
   test('an untraced result (tool/call gone) tags from the wrapper alone and keeps its tool identity', () => {
-    // No tool/call armed: node.tool is undefined — the content wrapper is trusted (a missed tag is worse) and `skill` keeps it countable.
     const { state } = driveTimeline([toolResult(1, { callId: 'zz', content: skillBody('xlsx') })])
     const node = state.surface.at(-1)
     assert.deepEqual([node?.skill, node?.cat, node?.tool], ['xlsx', 'skill', 'skill'])
@@ -196,7 +193,6 @@ describe('tool/result skill tagging', () => {
     ]).state
     assert.equal(plain.surface.at(-1)?.skill, undefined)
     assert.equal(plain.events.length, 0)
-    // The wrapper rides the result's own first-level text blocks; a nested foreign block is unscanned.
     const nested = driveTimeline([{
       type: 'tool/result', seq: 1, time: at(),
       data: {
@@ -274,9 +270,9 @@ describe('the answers tally (assistant messages carrying text)', () => {
     const { state } = driveTimeline([
       assistantMessage(1, { content: [{ type: 'text', text: 'here is the answer' }] }),
       assistantMessage(2, { content: [{ type: 'tool-call', name: 'bash' }] }),
-      assistantMessage(3, { content: [] }), // usage-only: projects to no message
-      assistantMessage(4, { content: [{ type: 'text', text: '   ' }] }), // blank text is not a reply
-      assistantAttempt(5, {}), // a committed-no-message attempt is not a reply either
+      assistantMessage(3, { content: [] }),
+      assistantMessage(4, { content: [{ type: 'text', text: '   ' }] }),
+      assistantAttempt(5, {}),
       assistantMessage(6, { content: [{ type: 'text', text: 'done' }] }),
       assistantMessage(7, { content: [{ type: 'text', text: 'checking' }, { type: 'tool-call', name: 'bash' }] }),
     ])
@@ -308,7 +304,6 @@ describe('hostile provider usage (issue #44: stats must survive nonconforming fi
     const minority = driveTimeline([assistantMessage(1, { usage: { inputTokens: 'n/a', outputTokens: 9 } })]).state.requests[0]
     assert.equal(minority.prompt, 0)
     assert.equal(minority.output, 9)
-    // The sanitized figures are what the cost buckets bill, so the wire's nonnegative-int schema never sees a raw gateway value.
     const billed = driveTimeline([
       header(1, { model: 'deepseek-v4-flash', provider: 'deepseek-official' }),
       assistantMessage(2, {
@@ -351,8 +346,8 @@ describe('session/end-seed', () => {
     const { states, state } = driveTimeline([
       ...inherited,
       endSeed(3, { inherited: true }),
-      assistantMessage(4, { usage: { inputTokens: 7 } }), // the middle fork's own work
-      endSeed(5, { inherited: true }), // a fork of that fork: cuts its inherited work too
+      assistantMessage(4, { usage: { inputTokens: 7 } }),
+      endSeed(5, { inherited: true }),
       assistantMessage(6, { usage: { inputTokens: 2 } }),
     ])
     assert.deepEqual(states[3].cost, {})
@@ -470,8 +465,6 @@ describe('unknown event types', () => {
 
 describe('session-cost accumulation', () => {
   const usage = { inputTokens: 100 }
-  // DeepSeek peak windows: Beijing Time weekdays 09:00–12:00 and 14:00–18:00 (UTC 01:00–04:00 and 06:00–10:00);
-  // 02:00 UTC Monday is peak, the helpers' default clock (1970-01-01T00:00:01 UTC) is off-peak.
   const PEAK = Date.UTC(2024, 0, 1, 2, 0, 0)
   const at100 = (seq: number, time: number) => assistantMessage(seq, { usage, time })
 
@@ -513,7 +506,7 @@ describe('session-cost accumulation', () => {
   })
 
   test('only DeepSeek splits peak/off-peak; other providers always book list price', () => {
-    const night = Date.UTC(2024, 0, 3, 23, 0, 0) // Wed 23:00 UTC — off-peak for DeepSeek
+    const night = Date.UTC(2024, 0, 3, 23, 0, 0)
     const deepseek = driveTimeline([
       header(1, { provider: 'deepseek-official', model: 'deepseek-v4-flash' }),
       at100(2, night),
@@ -529,12 +522,12 @@ describe('session-cost accumulation', () => {
   test('DeepSeek peak-window boundaries and weekends split the periods', () => {
     const { state } = driveTimeline([
       header(1, { provider: 'deepseek-official', model: 'deepseek-v4-flash' }),
-      at100(2, Date.UTC(2024, 0, 1, 1, 0, 0)), // Mon 01:00 UTC — peak opens
-      at100(3, Date.UTC(2024, 0, 1, 4, 0, 0)), // Mon 04:00 UTC — peak closed
-      at100(4, Date.UTC(2024, 0, 1, 6, 0, 0)), // Mon 06:00 UTC — peak reopens
-      at100(5, Date.UTC(2024, 0, 1, 10, 0, 0)), // Mon 10:00 UTC — peak closed
-      at100(6, Date.UTC(2024, 0, 6, 2, 0, 0)), // Sat 02:00 UTC — weekend off-peak
-      at100(7, Date.UTC(2024, 0, 7, 2, 0, 0)), // Sun 02:00 UTC — weekend off-peak
+      at100(2, Date.UTC(2024, 0, 1, 1, 0, 0)),
+      at100(3, Date.UTC(2024, 0, 1, 4, 0, 0)),
+      at100(4, Date.UTC(2024, 0, 1, 6, 0, 0)),
+      at100(5, Date.UTC(2024, 0, 1, 10, 0, 0)),
+      at100(6, Date.UTC(2024, 0, 6, 2, 0, 0)),
+      at100(7, Date.UTC(2024, 0, 7, 2, 0, 0)),
     ])
     const flash = state.cost?.['deepseek-official']?.['deepseek-v4-flash']
     assert.equal(flash?.peak?.uncached, 200, 'two same-period samples accumulate (01:00 + 06:00 UTC)')
@@ -579,7 +572,6 @@ describe('hostile events', () => {
 
   test('null and primitive content blocks price and render as nothing', () => {
     const blocks = [null, 7, 'x', { type: 'text', text: 'hello' }] as never
-    // The tool/result has NO preceding tool/call: the unpaired lookup must not stamp an `undefined`-valued node.tool.
     const { state } = driveTimeline([
       userMessage(1, blocks),
       toolResult(2, { callId: 'c1', content: blocks }),

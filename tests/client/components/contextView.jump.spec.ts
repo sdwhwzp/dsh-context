@@ -9,7 +9,6 @@ import { buttonByText, eventLink, makeView, mountInScroller, mountRich, overflow
 
 describe('ContextView — chat→Context jump', () => {
   test('the relay flips the chart to turn bars, pins the reply\'s turn, and consumes itself', async () => {
-    // The clicked reply closed turn 1: its request seq (4) is that turn's LAST step — exactly the aggregate's record.
     requestContextFocus('sv-jump', 4)
     const m = await mountRich('sv-jump')
     assert.ok(buttonByText(m.container, DICT_EN['gran.turn']).className.includes('lc-gran-on'), 'granularity flips to turn')
@@ -40,7 +39,6 @@ describe('ContextView — chat→Context jump', () => {
   })
 
   test('a turn-less reply routes to the turn-0 bar', async () => {
-    // The trailing turn-less step: its group key derives to 0, the ?? 0 arm.
     requestContextFocus('sv-jump0', 6)
     const m = await mountRich('sv-jump0')
     assert.ok(query(m.container, '.lc-bar[data-seq="6"]').className.includes('lc-bar-selected'))
@@ -51,7 +49,6 @@ describe('ContextView — chat→Context jump', () => {
   test('a record landing after mount re-pins the mounted view (the sidebar repeat jump)', async () => {
     const m = await mountRich('sv-rejump')
     assert.ok(!query(m.container, '.lc-bar[data-seq="4"]').className.includes('lc-bar-selected'), 'nothing pinned at mount')
-    // The sidebar landing keeps this view mounted; a later jump must re-pin it.
     await act(async () => { requestContextFocus('sv-rejump', 4) })
     assert.ok(query(m.container, '.lc-bar[data-seq="4"]').className.includes('lc-bar-selected'), 'the later record re-pins')
     assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, '4')
@@ -69,16 +66,12 @@ describe('ContextView — chat→Context jump', () => {
     scroller1.scrollTop = 42
     await m1.unmount()
 
-    // jsdom lays out nothing: give the scroller and the composition card fixed
-    // viewport tops so the reveal's rect delta is deterministic (450 − 100).
     const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
       const top = this.hasAttribute('data-conversation-scroll') ? 100
         : this.hasAttribute('data-lc-current') ? 450 : 0
       return { top } as DOMRect
     })
 
-    // The remount restores 42, then the reveal scrolls the card to the scrollport top: 42 + 350.
-    // jsdom reports 0 for both, so the scroller must overflow to be operative.
     requestContextFocus('sv-jumpscroll', 4)
     const scroller2 = document.createElement('div')
     scroller2.setAttribute('data-conversation-scroll', '')
@@ -94,7 +87,6 @@ describe('ContextView — chat→Context jump', () => {
 })
 
 describe('ContextView — the stats board\'s pill jumps', () => {
-  /** One user message, one read and one write op, so both jump families have a landing spot. */
   function jumpTimeline(): ReturnType<typeof timeline> {
     return timeline({
       humanInputs: 1,
@@ -162,8 +154,6 @@ describe('ContextView — the stats board\'s pill jumps', () => {
     scroller.style.overflowY = 'auto'
     Object.defineProperty(scroller, 'scrollHeight', { value: 900 })
     Object.defineProperty(scroller, 'clientHeight', { value: 300 })
-    // jsdom lays out nothing: fixed viewport tops make each reveal's rect delta deterministic (450 − 100),
-    // shifted by the scroll the reveal itself applies (then 700 − 100).
     const gBCR = stubRevealRects(scroller, el => (el.classList.contains('lc-col-browser') ? 450
       : el.classList.contains('lc-fa-card') ? 700 : 0))
     try {
@@ -208,7 +198,6 @@ describe('ContextView — the stats board\'s pill jumps', () => {
 })
 
 describe('ContextView — the stats board\'s lower-lane jumps', () => {
-  /** Four programs on the bash tool: python3 tops by INVOCATIONS (three, two of them in one record), then git, node, npm. */
   function commandTimeline(): ReturnType<typeof timeline> {
     return timeline({
       commands: [
@@ -252,7 +241,6 @@ describe('ContextView — the stats board\'s lower-lane jumps', () => {
     })
     const scroller = overflowingScroller(1400)
     const rect = (w: number, top: number): DOMRect => ({ width: w, height: 0, top, left: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect)
-    // Layout for the fit AND for each reveal: a 260px lane folds to two chips plus the "+N" tail.
     const gBCR = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
       if (this.hasAttribute('data-conversation-scroll')) return rect(0, 100)
       if (this.classList.contains('lc-ledger-chips')) return rect(260, 0)
@@ -287,7 +275,6 @@ describe('ContextView — the stats board\'s lower-lane jumps', () => {
 
   test('a tool chip opens the bucket its results are filed in, seeding the name only in Tool Results', async () => {
     const base = richTimeline()
-    // The fold files a `skill` load's result under the skill bucket (src/host/fold.ts's tool-result arm).
     const skill = { seq: 7, cat: 'skill' as const, tool: 'skill', skill: 'code-review', tokens: 30, text: 'Skill instructions' }
     const cases = [
       { tool: 'bash', data: base, cat: DICT_EN['cat.tool'], lens: 'bash' },
@@ -372,9 +359,7 @@ describe('ContextView — the events card\'s boundary rows', () => {
       assert.equal(queryAll(m.container, '.lc-bar-selected').length, 0, 'nothing is pinned before the click')
 
       await click(compactionLink(m.container))
-      // The compaction (seq 3) contributes to the first request after it — the step the chart draws its ✂ marker on.
       assert.ok(query(m.container, '.lc-bar[data-seq="4"]').className.includes('lc-bar-selected'), 'the landed-on step is pinned')
-      // Bar index 1 centered: 1 * (BAR_W + BAR_GAP) + BAR_W / 2 − the jsdom client width (0).
       assert.equal(query<HTMLElement>(m.container, '.lc-chart-scroll').scrollLeft, 1 * 16 + 7, 'the trend scrolled to the landed bar')
       assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, '4', 'the browser aligns to the same step')
       assert.equal(scroller.scrollTop, 350, 'the trend card scrolled to the scrollport top')

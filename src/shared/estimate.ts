@@ -1,5 +1,3 @@
-/** Mirrors the harness token-meter's fixed density on both sides (docs/compatibility.md §4). */
-
 const CHARS_PER_TOKEN = 4
 const ROLE_OVERHEAD = 4
 const BLOCK_OVERHEAD = 4
@@ -9,12 +7,10 @@ export function estimateSystemTokens(text: unknown): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN) + ROLE_OVERHEAD
 }
 
-/** Price one text block exactly like the harness meter's text arm. */
 export function estimateTextTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
 }
 
-/** Mirrors the harness's `estimateSystemMessage`: text density over every block plus role framing, no per-block overhead. */
 export function estimateSystemContent(blocks: unknown): number {
   if (!Array.isArray(blocks) || blocks.length === 0) return 0
   let characters = 0
@@ -30,7 +26,6 @@ export function estimateSystemContent(blocks: unknown): number {
       const json: unknown = JSON.stringify(block)
       if (typeof json === 'string') characters += json.length
     } catch {
-      // A cyclic/hostile block contributes nothing instead of throwing the fold.
     }
   }
   return Math.ceil(characters / CHARS_PER_TOKEN) + ROLE_OVERHEAD

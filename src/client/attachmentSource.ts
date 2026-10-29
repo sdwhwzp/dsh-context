@@ -1,12 +1,9 @@
-/** On-click attachment plumbing: nothing is fetched while a row renders; one click resolves the named host path. */
-
 import { previewAddressOf } from './fileActivity'
 import type { AttachmentRef } from '../shared/attachment'
 import { ATTACHMENT_ROUTE } from './apiRoutes'
 import { asRecord, openResourceVia } from './services'
 import type { AttachmentLocator, AttachmentOpener, ClientCtx } from './services'
 
-/** Cache ceiling: cards are clicked one at a time, so a small FIFO holds a session's working set. */
 const CACHE_MAX = 32
 
 const paths = new Map<string, string>()
@@ -21,7 +18,6 @@ export function pathOfValue(value: unknown): string | null {
   return data !== null && typeof data.path === 'string' && data.path !== '' ? data.path : null
 }
 
-/** The session-authorized locator; a failed resolution resolves null and is never cached, so a retry re-reads. */
 export function makeAttachmentLocator(sessionId: string | undefined): AttachmentLocator | undefined {
   if (typeof sessionId !== 'string' || sessionId === '') return undefined
   return async (attachment: AttachmentRef) => {
@@ -41,7 +37,7 @@ export function makeAttachmentLocator(sessionId: string | undefined): Attachment
       if (path === null) return null
       if (paths.size >= CACHE_MAX) {
         const oldest = paths.keys().next().value
-        /* v8 ignore next 1 -- the cap fires only on a non-empty cache, so the key always exists. */
+        /* v8 ignore next 1 */
         if (oldest !== undefined) paths.delete(oldest)
       }
       paths.set(key, path)
@@ -52,7 +48,6 @@ export function makeAttachmentLocator(sessionId: string | undefined): Attachment
   }
 }
 
-/** Open through the File Activity card's own rungs: the route-named host path, then `dsh-resource://file/…`. */
 export function makeAttachmentOpener(
   ctx: ClientCtx,
   sessionId: string | undefined,
@@ -64,7 +59,6 @@ export function makeAttachmentOpener(
   return async (attachment: AttachmentRef) => {
     const path = await locate(attachment)
     if (path === null) return false
-    // The address layer only refuses directories; the preview column picks the viewer by path suffix.
     const address = previewAddressOf(path, 'text', false, sessionId, workspace)
     return address !== undefined && openPreview(address)
   }

@@ -32,7 +32,7 @@ describe('PluginInfo', () => {
     const fetchMock = stubFetchOk({ version: '9.9.9' })
     const opened: string[] = []
     const ctx = new TestClientCtx({ services: { pluginNavigation: { openBundle: (name: string) => { opened.push(name) } } } })
-    const PluginInfo = await loadPluginInfo(undefined, ctx) // PLUGIN_VERSION = 0.0.0-dev
+    const PluginInfo = await loadPluginInfo(undefined, ctx)
     const m = await mount(h(PluginInfo, {}))
     await flush()
     assert.equal(fetchMock.mock.calls.length, 0)

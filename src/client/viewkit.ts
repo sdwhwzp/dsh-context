@@ -15,7 +15,6 @@ export interface ViewKit {
   eventLabel: (ev: ContextEventRecord) => string
   eventLabelParts: (ev: ContextEventRecord) => EventLabelParts
   eventAt: (ev: ContextEventRecord) => string | null
-  /** Renders nothing — subscribes the caller to locale switches so memoized cards drop their stale strings. */
   useLocaleTick(): void
 }
 

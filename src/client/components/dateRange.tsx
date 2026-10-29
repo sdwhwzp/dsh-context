@@ -1,7 +1,3 @@
-/** The date-range picker: one pill carries both ends of the LIVE window, and two clicks make the range in any order —
- * the pair is SORTED, so every reader downstream only ever sees `from <= to`. The panel portals to <body> and fixes off
- * its trigger's rect (the `lc-ov` scroller would clip it); scroll, resize, outside press or Escape closes it. */
-
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { MONTH_KEY_RE, monthGridOf, shiftDayKey, shiftMonthKey } from '../../shared/days'
@@ -11,7 +7,6 @@ import { useEscapeClose } from './escapeClose'
 import { IconChevronDown } from '../primitives'
 
 export interface DateRangeProps {
-  /** The scope's day span: the picked range, else the preset's window as days (open end = today); null = unbounded. */
   value: DayRange | null
   picked: boolean
   onChange: (range: DayRange | null) => void
@@ -53,7 +48,6 @@ export function makeDateRange(kit: ViewKit): (props: DateRangeProps) => ReactEle
     const close = (): void => { setOpen(false) }
     useEscapeClose(open, close)
 
-    // Outside press closes; scroll and resize retract the panel instead of leaving it off its moved anchor.
     useEffect(() => {
       if (!open) return undefined
       const onDown = (ev: MouseEvent): void => {
@@ -72,8 +66,6 @@ export function makeDateRange(kit: ViewKit): (props: DateRangeProps) => ReactEle
       }
     }, [open])
 
-    // Re-seat the panel after every commit; the equality check makes a same-spot re-measure a no-op, so this
-    // every-render measurement cannot loop. Object.is, not ===: an unmeasurable anchor reads NaN, and NaN === NaN is false.
     useLayoutEffect(() => {
       const anchorEl = rootRef.current
       const panelEl = panelRef.current
@@ -133,7 +125,6 @@ export function makeDateRange(kit: ViewKit): (props: DateRangeProps) => ReactEle
     }
 
     const shown = spot !== null && open ? spot : null
-    // A first click with no hover yet has chosen only the start, so the end keeps its placeholder rather than echoing it.
     const from = draft?.from
     const to = anchor !== null && hover === null ? undefined : draft?.to
     return (
@@ -198,7 +189,6 @@ export function makeDateRange(kit: ViewKit): (props: DateRangeProps) => ReactEle
                       + (future ? ' lc-dp-future' : '')
                     const day = String(Number(key.slice(8, 10)))
                     if (future) {
-                      // The keyboard cursor never lands here, so this cell carries no activedescendant id.
                       return (
                         <span className={className} role="gridcell" aria-disabled="true" aria-label={key} key={d}>
                           {day}

@@ -1,6 +1,3 @@
-/** Attachment blocks in the message's OWN order. One click IS the preview: the card hands the attachment's named
- * host path to dsh's own preview column (`attachmentSource.ts`); a refused open leaves a note on that card alone. */
-
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { attachmentExtension } from '../../shared/attachment'
 import type { AttachmentRef } from '../../shared/attachment'
@@ -22,7 +19,6 @@ export interface AttachmentKit {
   open?: AttachmentOpener
 }
 
-/** The reference the harness's image loader consumes — only proven facts are handed over. */
 function imageRefOf(ref: AttachmentRef): ImageRefLike {
   return {
     attachmentId: ref.attachmentId,
@@ -44,21 +40,17 @@ interface Fact {
   tip?: string
 }
 
-/** The harness file card's own rule: the upper-cased extension, else the attachment's kind. */
 function typeOf(ref: AttachmentRef, t: ViewKit['t']): string {
   const ext = attachmentExtension(ref.name ?? '')
   if (ext !== '') return ext.toUpperCase().slice(0, 8)
   return ref.kind === 'image' ? t('attach.image') : t('attach.file')
 }
 
-/** Bytes through the harness's session-authorized loader, read once per id/loader. */
 function useImageSrc(attachment: AttachmentRef, load: ImageLoader | undefined): {
   src: string | null
   failed: boolean
 } {
   const [state, setState] = useState<{ src: string | null; failed: boolean }>({ src: null, failed: false })
-  // The reference is re-proven from the log on every render, so the read keys off the id and takes the current
-  // reference through a latest-ref: a row re-render must not re-read the bytes.
   const latest = useRef(attachment)
   latest.current = attachment
   const id = attachment.attachmentId
@@ -78,7 +70,6 @@ function useImageSrc(attachment: AttachmentRef, load: ImageLoader | undefined): 
   return state
 }
 
-/** The figures the chat and the harness's own file card show, as label/value rows. */
 function factsOf(ref: AttachmentRef, t: ViewKit['t'], fmt: ViewKit['fmt']): Fact[] {
   const dimsOf = (w: number | undefined, h: number | undefined): string | null =>
     w !== undefined && h !== undefined ? `${w}×${h}` : null
@@ -92,7 +83,6 @@ function factsOf(ref: AttachmentRef, t: ViewKit['t'], fmt: ViewKit['fmt']): Fact
     return rows
   }
   const rows: Fact[] = []
-  // No byte size is stored for the raw raster — dims only.
   const rawDims = ref.originalDimensions !== undefined
     ? dimsOf(ref.originalDimensions.width, ref.originalDimensions.height)
     : null
@@ -151,14 +141,12 @@ function AttachmentCard(props: {
               <span className="lc-att-ext">{typeOf(attachment, t)}</span>
             </>
           )}
-        {/* The invite rides the thumbnail as a chip over a scrim, so the facts beside it never move. */}
         <span className={'lc-att-hint' + (state === 'opening' ? ' lc-att-hint-on' : '')}>
           <span className="lc-att-hint-label">{state === 'opening' ? t('attach.loading') : hint}</span>
         </span>
       </span>
       <span className="lc-att-meta">
         <span className="lc-att-name" title={name}>{name}</span>
-        {/* An image has no extension badge on its tile, so its type keeps the row. */}
         {image ? (
           <span className="lc-att-row"><b className="lc-att-row-label">{t('attach.type')}</b>{typeOf(attachment, t)}</span>
         ) : null}
@@ -173,8 +161,6 @@ function AttachmentCard(props: {
   )
 }
 
-/** The ordered attachment block. `load`/`open` are optional: without them the cards stay metadata only (a harness
- * with no image face, a deployment with no preview column). */
 export function makeAttachmentSection(kit: ViewKit): AttachmentKit['Section'] {
   const { t, fmt } = kit
   return function AttachmentSection(props: {
@@ -185,7 +171,6 @@ export function makeAttachmentSection(kit: ViewKit): AttachmentKit['Section'] {
     const { attachments, load, open } = props
     const [pending, setPending] = useState<string | null>(null)
     const [failed, setFailed] = useState<string | null>(null)
-    // A content swap (another message's block) drops every stale state rather than acting on a stranger.
     const key = useMemo(() => attachments.map(a => a.attachmentId).join('\u0000'), [attachments])
     useEffect(() => {
       setPending(null)

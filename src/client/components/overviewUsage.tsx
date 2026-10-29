@@ -7,7 +7,6 @@ import type { ViewKit } from '../viewkit'
 export interface OverviewUsageProps {
   days: Record<string, DayTotals>
   currency: CostCurrency
-  /** Local today key — injected so specs can pin the calendar. */
   today: string
 }
 
@@ -39,7 +38,6 @@ export function makeOverviewUsage(kit: ViewKit): (props: OverviewUsageProps) => 
     }
     const heightOf = (value: number, max: number): string => (max <= 0 || value <= 0 ? '0%' : `${Math.max(4, Math.round((value / max) * 100))}%`)
     const tickOf = (percent: number): string => fmt(Math.round((maxTokens * percent) / 100))
-    // '—' while nothing prices (a zero rail would read as free); the 0 tick reads bare ("¥0.0" is odd).
     const costTickOf = (percent: number): string => {
       if (maxCost <= 0) return '—'
       return percent === 0 ? '0' : formatCost((maxCost * percent) / 100, props.currency)
@@ -59,7 +57,6 @@ export function makeOverviewUsage(kit: ViewKit): (props: OverviewUsageProps) => 
                 </div>
                 <div className="lc-ov-usage-grid">
                   <div className="lc-ov-usage-cols">
-                    {/* Gridlines resolve against the bars' box, so value-label headroom never shifts the scale. */}
                     {TICKS.map(p => (
                       <span
                         key={p}
@@ -71,7 +68,6 @@ export function makeOverviewUsage(kit: ViewKit): (props: OverviewUsageProps) => 
                     {columns.map((c) => {
                       const tokens = c.entry?.tokens ?? 0
                       const cost = c.entry?.cost ?? null
-                      // Tooltip reads the bare label; the legend's priced-models qualifier stays off the bubble.
                       const label = `${c.key}\n${t('ov.usage.tokens')} ${fmt(tokens)}\n${t('ov.usage.costTip')} ${cost === null ? '—' : formatCost(cost, props.currency)}`
                       return (
                         <div key={c.key} className="lc-ov-usage-col" data-lc-tip={label}>
@@ -95,7 +91,6 @@ export function makeOverviewUsage(kit: ViewKit): (props: OverviewUsageProps) => 
                 <div className="lc-ov-usage-rail lc-ov-usage-rail-r" aria-hidden="true">
                   {TICKS.map(p => <span key={p} className="lc-ov-usage-tick" style={{ top: `${100 - p}%` }}>{costTickOf(p)}</span>)}
                 </div>
-                {/* Day strip is the plot grid's row 2, so labels center under their columns by construction. */}
                 <div className="lc-ov-usage-days" aria-hidden="true">
                   {columns.map(c => <span key={c.key} className="lc-ov-usage-day">{c.key.slice(5)}</span>)}
                 </div>

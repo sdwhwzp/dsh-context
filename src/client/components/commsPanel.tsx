@@ -1,7 +1,3 @@
-/** The Fleet comms hub. Traffic is read automatically from the family's session logs (the same detail ledger the member
- * cards use): no scan step. Rows group into unordered channels — who talks to whom — and an opened event shows the full
- * record, its provenance, and the participant actions that used to be an unannounced pin. */
-
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { IconSendOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
@@ -24,17 +20,11 @@ import type { RichKit } from './richText'
 
 export interface CommsPanelProps {
   details: FleetDetailState
-  /** Merged comms rows, newest first. */
   comms: CommsRow[]
-  /** The family's display identities keyed by session id. */
   agents: ReadonlyMap<string, CommsAgent>
-  /** Session titles for parties outside the family (a fork's siblings, a stale roster), so no raw id is shown. */
   titles: ReadonlyMap<string, string>
-  /** Attested sender names for parties outside the family/roster. */
   attested: ReadonlyMap<string, string>
-  /** The viewed session: its channels lead with it. */
   anchorId?: string
-  /** The shared agent pick (graph/members board): narrows the hub; the toolbar's chip clears it. */
   pickId: string | null
   onPickClear: () => void
   pinnedId: string | null
@@ -84,7 +74,6 @@ export function CommsPanel(props: CommsPanelProps): ReactElement {
   const [openKey, setOpenKey] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(false)
 
-  // A new shared pick re-scopes the hub: a channel selected under the old pick would silently filter everything out.
   useEffect(() => {
     setChannelKey(null)
     setOpenKey(null)

@@ -20,13 +20,8 @@ export function rowWindowFor(
   return { from, to: Math.max(from, to) }
 }
 
-/** Nothing measured yet: the caller's spacers still reserve the list's full height, and the layout effect fills the
- *  window before the browser paints. */
 const UNMEASURED: RowRange = { from: 0, to: -1 }
 
-/** Renders only the rows a fixed-row-height scroller shows: full height via caller-owned spacers, every readout in the
- * model, and the window shifts only across row boundaries. Disabled or unmeasurable lists render in full; an enabled
- * one renders nothing but the spacers until the layout effect measures it. */
 export function useRowWindow(
   ref: RefObject<HTMLElement | null>,
   count: number,
@@ -36,8 +31,6 @@ export function useRowWindow(
 ): RowRange {
   const full: RowRange = { from: 0, to: Math.max(0, count - 1) }
   const [range, setRange] = useState<RowRange | null>(null)
-  // A LAYOUT effect: an enabled list must never commit in full first — one post-paint measure mounts every row of a
-  // long session's DNA feed (thousands of nodes) just to unmount them again, the toggle's dominant cost.
   useLayoutEffect(() => {
     const el = ref.current
     if (!enabled) {
@@ -58,7 +51,7 @@ export function useRowWindow(
       if (frame === 0) frame = requestAnimationFrame(update)
     }
     el.addEventListener('scroll', schedule, { passive: true })
-    /* v8 ignore start -- jsdom has neither a layout nor ResizeObserver; the live page covers a pane resize. */
+    /* v8 ignore start */
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
     observer?.observe(el)
     /* v8 ignore stop */
@@ -66,7 +59,7 @@ export function useRowWindow(
     return () => {
       el.removeEventListener('scroll', schedule)
       if (frame !== 0) cancelAnimationFrame(frame)
-      /* v8 ignore next -- the observer only exists where ResizeObserver is available (not jsdom). */
+      /* v8 ignore next */
       observer?.disconnect()
     }
   }, [ref, count, rowHeight, enabled, overscan, full.from, full.to])

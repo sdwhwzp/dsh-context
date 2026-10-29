@@ -19,7 +19,6 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
   return { promise, resolve, reject }
 }
 
-/** The panel plus the shared fill hook (the context view owns it in production). */
 function PagedPanel(props: { commands: Command[]; floor?: number; fetchOlder?: CommandPageFetcher }): ReactElement {
   const log = useCommandLog(props.commands, props.floor, props.fetchOlder)
   return h(Panel, { commands: log.records, floor: props.floor, fill: log })

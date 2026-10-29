@@ -193,8 +193,6 @@ describe('ContextBrowser message categories', () => {
     assert.equal(query(toolctl, '.lc-gran').getAttribute('title'), kit.t('browser.kindTip'))
     assert.equal(query<HTMLInputElement>(toolctl, '.lc-br-tool-search').placeholder, 'Filter by reply, calls, or thinking…')
     const chips = () => queryAll<HTMLButtonElement>(m.container, '.lc-br-toolctl .lc-gran-btn')
-    // Kinds classify the shown step's rows: reasoning rides the join's block, tools join calls plus an
-    // unjoined node's `calls` stamp, answers the nodes' own `text` stamps.
     assert.deepEqual(chips().map(c => text(c)), ['Thinking1', 'Tools5', 'Answer4'])
     const previews = () => elemRows(m).map(r => text(query(r, '.lc-br-preview')))
     assert.equal(elemRows(m).length, 8)
@@ -267,8 +265,6 @@ describe('ContextBrowser message categories', () => {
     const headers: ContextHeaders = { headers: [{ seq: 1, time: 1, systemTokens: 3, tools: [{ name: 'bash', tokens: 5 }, { name: 'write', tokens: 3 }] }] }
     const m = await mountBrowser({ headers })
     await click(catRow(m, 'assistant'))
-    // The breadcrumb capsule is plain text on the row button: a click bubbles to the row's own toggle —
-    // the row opens and nothing navigates to Tool Schemas.
     const crumbRow = elemRows(m).find(r => text(r).includes('done all')) as HTMLElement
     await click(query(crumbRow, '.lc-br-tag'))
     assert.ok(!text(query(m.container, '.lc-br-cat-open')).includes('Tool Schemas'), 'no category jump')
@@ -385,12 +381,9 @@ describe('ContextBrowser message categories', () => {
     const data = tl({
       current: { system: 0, tools: 0, user: 0, inject: 45, skill: 0, assistant: 0, tool: 0, total: 45 },
       nodes: [
-        // Stamped rows: the identity the events card names replaces the raw content preview (which stays one expand away).
         surfaceNode({ seq: 50, cat: 'inject', tokens: 9, form: 'snapshot', name: '@deepseek-ai/dsh-system-prompt', text: 'policy sections' }),
         surfaceNode({ seq: 51, cat: 'inject', tokens: 9, form: 'instructions', name: 'AGENTS.md', text: '<system-reminder> instructions' }),
-        // Unstamped (rows folded before the stamp existed): content stands.
         surfaceNode({ seq: 52, cat: 'inject', tokens: 9, form: 'snapshot', text: 'state' }),
-        // Hostile drift: a non-string / empty stamp degrades to the content.
         surfaceNode({ seq: 53, cat: 'inject', tokens: 9, name: 42 as never, text: 'drift body' }),
         surfaceNode({ seq: 54, cat: 'inject', tokens: 9, name: '', text: 'empty body' }),
       ],
@@ -423,9 +416,7 @@ describe('ContextBrowser message categories', () => {
         surfaceNode({ seq: 70, cat: 'skill', tokens: 9, skill: 'code-review', text: 'skill body' }),
         surfaceNode({ seq: 71, cat: 'skill', tokens: 9, form: 'catalog' }),
         surfaceNode({ seq: 72, cat: 'skill', tokens: 9, tool: 'skill', skill: 'grilling' }),
-        // Hostile drift: a skill node with neither a name nor a form.
         surfaceNode({ seq: 73, cat: 'skill', tokens: 4 }),
-        // A stamped catalog digest previews its source identity, not the digest text.
         surfaceNode({ seq: 74, cat: 'skill', tokens: 9, form: 'catalog', name: 'skill-catalog', text: 'digest body' }),
       ],
     })

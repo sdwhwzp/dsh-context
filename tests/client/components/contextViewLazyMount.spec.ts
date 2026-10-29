@@ -38,7 +38,6 @@ describe('ContextView below-fold lazy mount', () => {
       useChat: (selector => selector({ legacy: { nodes: [] } })) as UseChatLike,
     }))
     try {
-      // Two below-fold row skeletons, the command panel's, and the browser's.
       assert.equal(queryAll(m.container, '.lc-deferred-skeleton').length, 4)
       assert.equal(queryAll(m.container, '.lc-fa-card').length, 0)
       await act(async () => {

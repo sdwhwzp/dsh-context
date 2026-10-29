@@ -7,7 +7,6 @@ const top = (t: number): DOMRect => ({ top: t }) as DOMRect
 function mounted(oy: 'auto' | 'scroll', scrollerTop: number, anchorTop: number): { scroller: HTMLDivElement; anchor: HTMLDivElement } {
   const scroller = document.createElement('div')
   scroller.style.overflowY = oy
-  // jsdom reports 0 for both — an operative scroller must overflow its box.
   Object.defineProperty(scroller, 'scrollHeight', { value: 500 })
   Object.defineProperty(scroller, 'clientHeight', { value: 200 })
   scroller.getBoundingClientRect = () => top(scrollerTop)

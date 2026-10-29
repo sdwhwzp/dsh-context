@@ -26,7 +26,6 @@ describe('makeViewKit', () => {
   })
 
   test('useLocaleTick is inert without a locale service and re-renders on a locale change with one', async () => {
-    // No service: the noop tick renders fine.
     const plain = makeKit()
     const Plain = (): ReturnType<typeof h> => {
       plain.useLocaleTick()
@@ -36,7 +35,6 @@ describe('makeViewKit', () => {
     assert.ok(text(m.container).includes('File Activity'))
     await m.unmount()
 
-    // With a service: a subscribe notification flips the rendered dictionary.
     let active = 'en'
     const listeners = new Set<() => void>()
     const locale = {
@@ -45,7 +43,6 @@ describe('makeViewKit', () => {
       getLocale: () => ({ active }),
       subscribe: (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } },
     }
-    // The bound t reads the live locale: model the real service by rebinding on every call.
     const dicts: Record<'en' | 'zh', Record<string, string>> = { en: { 'files.title': 'File Activity' }, zh: { 'files.title': '文件活动' } }
     const liveT = (key: string, params?: Record<string, string | number>): string => {
       let s = dicts[active as 'en' | 'zh'][key] ?? key
@@ -64,7 +61,6 @@ describe('makeViewKit', () => {
     assert.ok(text(m2.container).includes('文件活动'))
     await m2.unmount()
 
-    // A face with subscribe but no getLocale: the snapshot reads as the empty string, never a throw.
     active = 'en'
     const bare = { subscribe: (_fn: () => void) => () => {} }
     const bareKit = makeViewKit(liveT, bare as never)

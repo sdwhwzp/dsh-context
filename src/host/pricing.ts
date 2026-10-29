@@ -1,7 +1,3 @@
-/** Token pricing: the harness token-meter's fixed-density heuristic (`dsh-token-meter/estimate.ts`) — 4 chars ≈ 1
- * token, +4 per content block, +4 role framing. One divergence: `image` blocks price by pixel dimensions through the
- * vision docs calculator (shared/imageTokens.ts), falling back to the meter's JSON price. */
-
 import { estimateTextTokens } from '../shared/estimate'
 import { estimateImageTokens } from '../shared/imageTokens'
 
@@ -22,19 +18,15 @@ export interface ContentBlock {
   arguments?: string
   content?: ContentBlock[]
   callId?: string
-  /** Durable image attachment ref; the log is untrusted, so the fold re-proves its shape. */
   attachment?: { width?: unknown; height?: unknown } | null
 }
 
-/** One text or reasoning block's price, the meter's shared text arm. */
 const textBlockPrice = (block: ContentBlock): number => estimateTextTokens(block.text || '')
 
-/** One tool-call block's price, the meter's tool-call arm. */
 const callBlockPrice = (block: ContentBlock): number =>
   Math.ceil((block.name || '').length / CHARS_PER_TOKEN)
   + Math.ceil((block.arguments || '').length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
 
-/** Sum one block arm over a message's content. */
 function sumBlocks(blocks: unknown, type: string, price: (block: ContentBlock) => number): number {
   let tokens = 0
   if (!Array.isArray(blocks)) return tokens
@@ -50,7 +42,6 @@ function estimateBlocks(blocks: unknown): number {
   let tokens = 0
   if (!Array.isArray(blocks)) return 0
   for (const item of blocks) {
-    // A null or primitive element prices as bare overhead instead of throwing the whole fold.
     if (item === null || typeof item !== 'object') {
       tokens += BLOCK_OVERHEAD
       continue
@@ -80,23 +71,18 @@ function estimateBlocks(blocks: unknown): number {
   return tokens
 }
 
-/** The reasoning-block share of a message's price (the meter's reasoning arm only) — a subset of `estimateMessage`. */
 export function estimateReasoningTokens(blocks: unknown): number {
   return sumBlocks(blocks, 'reasoning', textBlockPrice)
 }
 
-/** The tool-call share of a message's price (the meter's tool-call arm only) — a subset of `estimateMessage`. */
 export function estimateCallTokens(blocks: unknown): number {
   return sumBlocks(blocks, 'tool-call', callBlockPrice)
 }
 
-/** The text-block share of a message's price (the meter's text arm only) — a subset of `estimateMessage`. */
 export function estimateAnswerTokens(blocks: unknown): number {
   return sumBlocks(blocks, 'text', textBlockPrice)
 }
 
-/** Price one surface message exactly like dsh's meter: an empty-content assistant/developer event projects to NO message, so it prices 0.
- */
 export function estimateMessage(message: { content?: ContentBlock[] } | undefined | null, emptyIsZero = false): number {
   if (emptyIsZero && (message === null || message === undefined
     || !Array.isArray(message.content) || message.content.length === 0)) {
@@ -105,12 +91,10 @@ export function estimateMessage(message: { content?: ContentBlock[] } | undefine
   return estimateBlocks(message?.content) + ROLE_OVERHEAD
 }
 
-/** Per-tool price; the total uses the meter's whole-array price. */
 export function estimateToolSchema(tool: unknown): number {
   return Math.ceil(JSON.stringify(tool).length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
 }
 
-/** Count image blocks recursively; seeds each node's `imgs`, summed over the LIVE surface only. */
 export function imageCountOf(blocks: unknown): number {
   let count = 0
   if (!Array.isArray(blocks)) return 0
@@ -152,13 +136,10 @@ export interface MessageSource {
   name?: string
   plugin?: string
   summary?: string
-  // Entries stay nullable: any plugin may author a snapshot source, so the preview read must not trust the element shape.
   sections?: ({ name?: string } | null)[]
   changes?: ({ path?: string } | null)[]
 }
 
-/** Producer label for an injection event, mirroring the dsh transcript's context provenance: workspace instructions name their reconciled
- * files, a plugin source its id, any other producer its durable kind. */
 export function injectionSourceName(source: MessageSource | null | undefined): string {
   if (source?.kind === 'agent-instructions' && Array.isArray(source.changes)) {
     const paths: string[] = []
@@ -175,8 +156,6 @@ export function injectionSourceName(source: MessageSource | null | undefined): s
 }
 
 export function isInjection(source: MessageSource | null | undefined): source is MessageSource {
-  // Mirrors the dsh transcript's classification (conversation-nodes/message.ts): injected context is any durable source kind but 'user'
-  // ('user-rpc' keeps kind 'user'); the form check covers a foreign source with no kind.
   return source !== null && source !== undefined
     && ((typeof source.kind === 'string' && source.kind !== '' && source.kind !== 'user')
       || typeof source.form === 'string')

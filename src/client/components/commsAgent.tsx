@@ -14,13 +14,11 @@ export function roleLabelOf(agent: CommsAgent, t: ViewKit['t']): string {
   return t(roleKeyOf(agent.role))
 }
 
-/** The role only earns a chip when it is not already the display name (the Lead's name IS its role). */
 export function roleTextOf(agent: CommsAgent, t: ViewKit['t']): string {
   const label = roleLabelOf(agent, t)
   return label === agent.name ? '' : label
 }
 
-/** The pair's own hue pair dresses every surface that carries it (channel card, event sweep). */
 export function channelStyle(a: string, b: string): CSSProperties {
   return { '--lc-ch-a': a, '--lc-ch-b': b } as CSSProperties
 }

@@ -1,6 +1,3 @@
-/** The Context Insights page: registered on the layout's keyed `main` slot, so its mount IS its open. The page is the
- * `lc-ov` query container — unlike the shipped first-level 960px frame, the column spans the pane; tips portal to `body`. */
-
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement } from 'react'
 import { estimateSessionCost, formatCost, type CostCurrency, type ModelBook } from '../cost'
 import { fmt } from '../format'
@@ -12,7 +9,7 @@ import {
   UNGROUPED_KEY, workspacesSnapshotOf,
   type DayRange, type OverviewCoverage, type OverviewRange, type OverviewRow, type OverviewSort, type SkillSort,
 } from '../overview'
-import { openPluginSettings, openSessionVia, type ClientCtx } from '../services'
+import { openPluginSettings, openSessionVia, activeMsOf, type ClientCtx } from '../services'
 import { readSkillCatalog } from '../skills'
 import type { ContextSettings } from '../settings'
 import type { SkillInfo } from '../../shared/types'
@@ -62,7 +59,6 @@ export function makeOverviewPanel(
   const UpdatePill = makeUpdatePill(kit)
   const ErrorBoundary = makeErrorBoundary(t)
 
-  // Read per render: the slot outlet re-renders on a locale switch.
   function activeLocale(): string {
     const locale = ctx.locale
     return typeof locale.getLocale === 'function' ? locale.getLocale().active : 'en'
@@ -76,8 +72,6 @@ export function makeOverviewPanel(
     const { book } = useModelPrices()
     const snapshot = useDeferredValue(sessionsSnapshotOf(props))
     const wsSnapshot = useDeferredValue(workspacesSnapshotOf(props))
-    // The preset follows the served default until the reader picks one; a pick is written back as the new default where
-    // settings are writable, and a late-arriving section still lands while none is picked.
     const configuredRange = useSyncExternalStore(subscribeSettings, () => settings.defaultOverviewRange())
     const [picked, setPicked] = useState<OverviewRange | null>(null)
     const preset = picked ?? configuredRange
@@ -92,16 +86,12 @@ export function makeOverviewPanel(
     const [metric, setMetric] = useState<HeatMetric>('tokens')
     const [page, setPage] = useState(0)
     const { zoneProps, bubble } = useHoverTip()
-    // The session grid and heat/skills column mount after the KPI band's first paint; the placeholder keeps their
-    // grid slots so nothing above moves when they fill in.
     const [bodyRef, bodyMounted] = useLazyMount()
 
     const rows = useMemo(() => rowsOfSnapshot(snapshot, wsSnapshot), [snapshot, wsSnapshot])
     const groups = useMemo(() => sessionGroupsOf(wsSnapshot), [wsSnapshot])
     const [catalog, setCatalog] = useState<ReadonlyMap<string, SkillInfo> | null>(null)
 
-    // The skill catalogue resolves per SESSION (the workspace selects the project layer, the preset the discovery
-    // scope), so the current session anchors it; a switch re-reads, and a failed read leaves the card unenriched.
     const currentRow = (rows ?? []).find(row => row.current)
     const currentCwd = currentRow?.cwd
     const currentId = currentRow?.id
@@ -112,8 +102,6 @@ export function makeOverviewPanel(
       return () => { alive = false }
     }, [currentCwd, currentId])
 
-    // On mount (the panel's open): summon the host's projection warm-up (this page is the rows' only reader — one pass
-    // per host process) and re-pull the list once, so backfilled rows reach a long-connected page.
     useEffect(() => {
       requestActivityBackfill()
       refreshSessions(ctx)
@@ -125,27 +113,21 @@ export function makeOverviewPanel(
     const nowForCards = Date.now()
     const allRows = rows ?? []
     const covered = useMemo(() => coveredRowsOf(allRows, coverage), [allRows, coverage])
-    // The scope window every figure reads: the calendar's picked range (a malformed key keeps the preset), else the preset's floor.
     const scope = useMemo(
       () => (custom !== null ? dayRangeWindow(custom) : null) ?? rangeWindowOf(preset, nowForCards),
       [custom, preset, nowForCards],
     )
-    // The head's date span reads off that same window so the picker and presets can never disagree.
     const spanFrom = scope.start === null ? null : dayKeyOf(scope.start)
     const spanTo = scope.start === null ? null : dayKeyOf(scope.end ?? nowForCards)
     const span = spanFrom !== null && spanTo !== null ? { from: spanFrom, to: spanTo } : null
-    // The scope scopes the KPI band, composition donut and grid; the heatmap keeps its own fixed window.
     const ranged = useMemo(() => filterRows(covered, { scope, day: null, query: '' }), [covered, scope])
-    // Group chips count the day/query-scoped rows BEFORE the group filter, so selecting a chip never collapses its row.
     const scoped = useMemo(() => filterRows(ranged, { scope, day, query }), [ranged, scope, day, query])
     const counts = useMemo(() => groupCountsOf(scoped, wsSnapshot), [scoped, wsSnapshot])
-    // A selection whose group fell out of scope keeps a phantom chip (count 0) so the filter stays visible, one click out.
     const chips = group !== null && !counts.some(c => c.key === group)
       ? [...counts, { key: group, count: 0 }]
       : counts
     const visible = useMemo(() => sortRows(
       (group === null ? scoped : scoped.filter(row => inGroup(row, group, groups)))
-        // The skill row pin narrows the list to the skill's loaders within the card's own scope (scope window + pinned day).
         .filter(row => skill === null || rowLoadedSkill(row, skill, { scope, day })),
       sort,
     ), [scoped, group, groups, skill, scope, day, sort])
@@ -158,7 +140,6 @@ export function makeOverviewPanel(
       [covered, book, currency],
     )
     const skillStats = useMemo(() => skillLoadsOf(ranged, { scope, day, sort: skillSort }), [ranged, scope, day, skillSort])
-    /** A preset pick applies at once and becomes the stored default where the settings form is writable. */
     const pickPreset = (range: OverviewRange): void => {
       setPicked(range)
       setCustom(null)
@@ -166,10 +147,8 @@ export function makeOverviewPanel(
       if (state.status === 'ready' && state.writable) settings.set('defaultOverviewRange', range)
     }
     const openOne = (id: string): void => {
-      // The view owner's verb navigates the center column back to the conversation itself, so the page needs no close.
       openSessionVia(ctx, id)
     }
-    // The sessions card mirrors its coverage: All prices in the window's archived share; the narrow scopes name the full total.
     const sessionsLabel = coverage === 'archived' ? t('ov.kpi.archived') : coverage === 'active' ? t('ov.kpi.sessions') : t('ov.kpi.allSessions')
     const sessionsSub = coverage === 'all'
       ? t('ov.kpi.inclArchived', { n: ranged.filter(row => row.archived).length })
@@ -185,10 +164,8 @@ export function makeOverviewPanel(
               <button type="button" className="lc-ov-settings" title={t('plugin.settingsOpen')} onClick={() => { openPluginSettings(ctx) }}>
                 <IconSettings size={14} />{t('plugin.settings')}
               </button>
-              {/* Renders nothing until a live figure lands, so the heading row never reflows for it. */}
               <BalanceCapsule />
               <UpdatePill />
-              {/* One wrapper so the head's right cluster pushes once; a bare `.lc-gran` sibling would split the free space. */}
               <div className="lc-ov-headctl">
                 <DateRange
                   value={span}
@@ -214,7 +191,6 @@ export function makeOverviewPanel(
               <div className="lc-empty">{t('ov.unavailable')}</div>
             ) : (
               <>
-                {/* The range selector does not scope the usage chart; it reads the merged daily ledger. */}
                 <div className="lc-ov-first">
                   <div className="lc-ov-kpis">
                     <div className="lc-stat lc-ov-kpi">
@@ -240,11 +216,11 @@ export function makeOverviewPanel(
                     <div className="lc-stat lc-ov-kpi">
                       <span className="lc-stat-label">{t('stats.toolCalls')}</span>
                       <span className="lc-stat-value">{fmt(teamTiming?.toolCalls ?? 0)}</span>
-                      <span className="lc-stat-sub">{t('ov.kpi.toolSub', { dur: fmtDuration(teamTiming?.toolsMs ?? 0) })}</span>
+                      <span className="lc-stat-sub">{t('ov.kpi.toolSub', { dur: fmtDuration(teamTiming?.toolBusyMs ?? teamTiming?.toolsMs ?? 0) })}</span>
                     </div>
                     <div className="lc-stat lc-ov-kpi">
                       <span className="lc-stat-label">{t('timing.total')}</span>
-                      <span className="lc-stat-value">{fmtDuration(teamTiming?.wallMs ?? 0)}</span>
+                      <span className="lc-stat-value">{fmtDuration(activeMsOf(teamTiming))}</span>
                       <span className="lc-stat-sub">{t('ov.kpi.wallSub', { n: fmt(teamTiming?.calls ?? 0) })}</span>
                     </div>
                   </div>
@@ -276,7 +252,6 @@ export function makeOverviewPanel(
                         </div>
                         <Heatmap days={days} metric={metric} selected={day} onSelect={setDay} today={todayKey()} />
                       </div>
-                      {/* Scope: the range group plus the heatmap's pinned day; the list's search and group chips are list-local. */}
                       <OverviewSkills
                         stats={skillStats}
                         day={day}
@@ -412,7 +387,6 @@ export function makeOverviewPanel(
   }
 }
 
-/** One card's priced cost label at the team scope, or the dash (no book yet, nothing billed, unpriceable models). */
 function cardCostOf(row: OverviewRow, book: ModelBook | null, currency: CostCurrency): string {
   if (row.familyCost === null) return '—'
   const cost = estimateSessionCost(row.familyCost, book, currency)

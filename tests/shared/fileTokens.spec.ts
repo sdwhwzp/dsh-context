@@ -10,7 +10,6 @@ function file(over: { name?: string; bytes?: number; attachmentId?: string } = {
 
 describe('estimateFileTokens', () => {
   test('the price is the harness handle priced as one text block', () => {
-    // The handle the harness emits when the environment cannot read the stored copy, verbatim.
     const handle = '[File "notes.md" (120 bytes, sha256:01234567) was uploaded, but the current execution'
       + ' environment cannot access a readable path. Report that limitation if its contents are needed;'
       + ' do not claim to have read it.]'

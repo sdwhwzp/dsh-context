@@ -18,7 +18,6 @@ const NO_SUB = (): SubagentStats => ({ usage: null, count: 0 })
 const StatsContext = makeStatsContext(kit, NO_SUB)
 const StatsContextZh = makeStatsContext(kitZh, NO_SUB)
 
-/** A minimal real-shaped slice of the models.dev /api.json payload. */
 const PROVIDERS = {
   deepseek: { models: { 'deepseek-v4-flash': { cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
   zhipuai: { models: { 'glm-5.3-flash': { cost: { input: 0.075, output: 0.25, cache_read: 0.015, cache_write: 0 } } } },
@@ -31,12 +30,10 @@ const COST: SessionCostUsage = {
 const NO_FILES = { reads: 0, writes: 0, searches: 0, images: 0 }
 const NO_COUNTS = { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 }
 
-/** A lane's visible chips: the off-flow gauge (the fit's hidden measuring copy) never shows. */
 function visibleChipsOf(row: HTMLElement): HTMLElement[] {
   return queryAll(row, '.lc-ledger-chip').filter(el => el.closest('.lc-ledger-gauge') === null)
 }
 
-/** One lane's visible chips as 'label+figure' strings. */
 function chipsOf(row: HTMLElement): string[] {
   return visibleChipsOf(row)
     .map(el => (el.querySelector('.lc-ledger-chip-label')?.textContent ?? '') + (el.querySelector('b')?.textContent ?? ''))
@@ -63,8 +60,6 @@ afterEach(() => {
 })
 
 describe('StatsContext', () => {
-  /** jsdom has no layout, so the chips show the whole tally. Stubbing widths lets the fit run for real: a chip
-   *  is sized by its label's length, and the "+N" chip by its own. */
   function stubWidths(chipWidth: number, moreWidth: number, rowWidth: number): () => void {
     const real = Element.prototype.getBoundingClientRect
     const rect = (w: number): DOMRect => ({ width: w, height: 0, top: 0, left: 0, right: w, bottom: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect)
@@ -85,7 +80,6 @@ describe('StatsContext', () => {
       {
         selector: '.lc-ledger-out-chips',
         props: { tools: [['read', 8], ['bash', 3], ['grep', 2]] },
-        // At 320 the three chips fit alone but not beside a "+N" chip: they all show, with no zero chip after them.
         cases: [[260, ['read8', 'bash3', '+1 more']], [320, ['read8', 'bash3', 'grep2']], [900, ['read8', 'bash3', 'grep2']]],
       },
       {
@@ -169,7 +163,6 @@ describe('StatsContext', () => {
     assert.equal(queryAll(m.container, '.lc-core-kv-events .lc-kind.lc-ledger-chip-dim').length, 3, 'the zero event kinds dim too')
     await m.unmount()
 
-    // The tools total falls back to the tally sum on hosts too old to carry it.
     const tallied = await mount(h(StatsContext, { counts: NO_COUNTS, files: NO_FILES, tools: [['read', 8], ['bash', 3]], locale: 'en', }))
     await flush()
     assert.deepEqual(queryAll(tallied.container, '.lc-ledger-total').map(el => el.textContent)[1], '11')
@@ -594,7 +587,6 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     }
   }
 
-  /** A sessions face double with the list-feed contract (agentGraph.spec's shape). */
   class FakeSessions {
     private listeners = new Set<() => void>()
     state: unknown
@@ -702,7 +694,6 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     const calls: string[] = []
     vi.stubGlobal('fetch', async (_url: unknown, init: { body: string }) => {
       calls.push(String((JSON.parse(String(init?.body)) as { sessionId?: unknown }).sessionId))
-      // The head is optional on the payload; a null value answers absence.
       const headless = { rev: 1, requests: [], events: [], nodes: [], droppedNodes: 0, archive: [] }
       return {
         ok: true,
@@ -720,7 +711,6 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
     await flush()
     assert.deepEqual(calls, ['headless', 'absent'])
     assert.deepEqual(costCellsOf(m.container), ['Fleet?0/—', 'Current Agent?0/—', 'Subagents × 2?0/—'])
-    // A later tick re-attaches to the settled nulls without re-fetching.
     await act(async () => {
       face.setState({
         root: { running: false, updatedAt: 1 },

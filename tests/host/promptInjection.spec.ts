@@ -10,7 +10,6 @@ type RegisteredSection = {
   interpolate?: boolean
 }
 
-/** A capturing prompt-registry face with the harness's allocated order anchors. */
 function fakeSystemPrompt(): SystemPromptFace & { registered: RegisteredSection[] } {
   const registered: RegisteredSection[] = []
   return {

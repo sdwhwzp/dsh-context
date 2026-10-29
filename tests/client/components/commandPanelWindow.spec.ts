@@ -11,13 +11,10 @@ const Panel = makeCommandPanel(makeKit())
 const PITCH = 43
 const GAP = 2
 const T0 = 1_700_000_000_000
-/** Mixed and unlaid-out rows must keep the full list: spacers need uniform heights. */
 let mixedRows = false
 let zeroRows = false
 let originals: [string, PropertyDescriptor | undefined][] = []
 
-/** jsdom lays nothing out: give the list a 320px viewport and the rows a 43px pitch so the panel's own
- *  measurement → window path runs for real. */
 beforeAll(() => {
   vi.stubGlobal('ResizeObserver', class {
     observe = (): void => {}

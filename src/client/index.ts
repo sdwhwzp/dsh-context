@@ -1,5 +1,3 @@
-/** Client half bundle entry: the slim `contextTimeline` head, with heavy collections fetched on demand. */
-
 import { createElement as h } from 'react'
 import { DICT_EN, DICT_ZH } from './i18n'
 import { registerContextCommand } from './command'
@@ -21,7 +19,6 @@ import { watchPlacement } from './placement'
 import { watchSidebarContextTab } from './sidebar'
 import { makeViewKit } from './viewkit'
 
-// Import order IS cascade order among same-specificity rules: Tailwind utilities, then base, then per-component sheets.
 import './styles/tailwind.css'
 import './styles/base.css'
 import './styles/stats.css'
@@ -44,14 +41,10 @@ import './styles/dateRange.css'
 
 const NS = 'dsh-context'
 
-/** The chat→Context jump seat doubles as the mount marker: the seat is never gated (only its rendering follows the
- * panel placement), so a seated ledger means a mount is live. */
 const JUMP_SLOT = 'conversation.chat.assistant-actions'
 const JUMP_ID = 'context-jump'
 
 function apply(ctx: ClientCtx): void {
-  // One live mount per page: a seated marker means a mount is live; the runner's priority defeats the
-  // registry guard (docs/compatibility.md §5).
   if (entrySeated(ctx, JUMP_SLOT, JUMP_ID)) return
   ctx.effect(() => {
     return ctx.locale.register(NS, { zh: DICT_ZH, en: DICT_EN })
@@ -59,19 +52,15 @@ function apply(ctx: ClientCtx): void {
   const t = ctx.locale.bind(NS)
 
   const kit = makeViewKit(t, ctx.locale)
-  // A plugin unload clears any warm-up timer that outlived its session overlay.
   ctx.effect(() => resetSessionWarm, 'dsh-context: warm-up timers')
-  // History faces ride the DECLARED inject: an undeclared read of the traced proxy throws (historyPage.ts).
   watchHistoryFaces(ctx)
   const settings = createContextSettings()
-  // One page-scope cold-head cache for every agent-data reader: the Context view's cells and the Fleet card.
   const heads = makeAgentHeads()
   const ContextView = makeContextView(ctx, kit, settings, heads)
   const FleetView = makeFleetView(ctx, kit, heads)
 
   ctx.effect(() => watchPlacement(settings, {
     tab: () => ctx.slots.inject('conversation.view', () => ctx.slots.register(
-      // order 20 renders right of Chat (0) and Trajectory (10).
       { name: 'conversation.view', id: CONTEXT_VIEW_ID, order: 20, locale: NS, label: () => t('tab.context') },
       props => h(ContextView, props),
     )),
@@ -86,11 +75,9 @@ function apply(ctx: ClientCtx): void {
     NS,
   ), 'dsh-context: fleet tab')
 
-  // Chat → Context jump: the right Sidebar tab pinned to the reply's turn where served, else the conversation tab.
   const ContextJump = makeContextJumpButton(ctx, kit, settings)
   ctx.slots.inject(JUMP_SLOT, () => {
     return ctx.slots.register(
-      // After the shipped feedback entry (10), still inside the icon row.
       { name: JUMP_SLOT, id: JUMP_ID, order: 20, locale: NS },
       props => h(ContextJump, props),
     )
@@ -109,12 +96,10 @@ function apply(ctx: ClientCtx): void {
     )
   })
 
-  // Context Insights: the keyed `main` panel and its `sidebar.panellist` entry, gated by `insightsEntry`.
   const OverviewPanel = makeOverviewPanel(ctx, kit, settings)
   ctx.effect(() => watchInsightPage(
     ctx,
     settings,
-    // Root-scope seats: the owner props (the standard kit) arrive untyped.
     props => h(OverviewPanel, props as unknown as Parameters<typeof OverviewPanel>[0]),
     t,
     NS,
@@ -128,7 +113,6 @@ function apply(ctx: ClientCtx): void {
     set: (field, value) => { settings.set(field, value) },
   })
 
-  // Preferences ride configForms and the Plugins page's keyed slot; without the service the schema defaults stay.
   ctx.inject(['configForms'], (raw) => {
     const c = raw as ClientCtx & { configForms?: ConfigFormsFace }
     const forms = c.configForms
@@ -136,7 +120,6 @@ function apply(ctx: ClientCtx): void {
     c.effect(() => settings.attach(forms.get(NS)), 'dsh-context: config forms')
     const PluginConfigCard = makePluginConfigCard(kit)
     c.effect(() => forms.whileServed([NS], () => {
-      // slots.inject's disposer is the registration's disposer.
       return c.slots.inject('plugins.bundle.config', () => {
         return c.slots.register(
           { name: 'plugins.bundle.config', key: NS, locale: NS, inject: cardFace },

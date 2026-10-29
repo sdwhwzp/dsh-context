@@ -9,8 +9,6 @@ import { buttonByText, makeView, mountRich, projectionsFor, richTimeline, T0, ti
 
 describe('ContextView — interactions', () => {
   test('the browser column caps at the left cards\' full extent, flush with the column, live', async () => {
-    // jsdom has no layout: stand in rects for the two left cards only, laid out card + 7px gap, then
-    // grow them so the re-measure arm runs.
     const orig = Element.prototype.getBoundingClientRect
     let cardH = 100
     Element.prototype.getBoundingClientRect = function (this: Element) {
@@ -170,7 +168,6 @@ describe('ContextView — interactions', () => {
     assert.equal(text(query(m.container, '.lc-axis-top')), '420', 'unfocused: the axis tops at the largest whole-bar total')
     assert.equal(queryAll(m.container, '.lc-bar[data-seq="4"] .lc-bar-stack > .lc-cat-seg').length, 5)
 
-    // Row 5 is assistant (row 4 the empty skill bucket); focusing it rescales the axis to its own max.
     await click(queryAll(m.container, '.lc-br-cat-row')[5])
     assert.equal(text(query(m.container, '.lc-axis-top')), '80')
     const segs = queryAll(m.container, '.lc-bar .lc-bar-stack > .lc-cat-seg')
@@ -229,7 +226,6 @@ describe('ContextView — interactions', () => {
     assert.ok(dnaBtn().className.includes('lc-gran-on'))
     assert.equal(queryAll(m.container, '.lc-bar-dna').length, 3)
 
-    // The strip reads in the model's read order: the tool schema leads, then the messages by seq.
     const g = query(m.container, '.lc-bar[data-seq="4"] .lc-bar-dna').style.background
     const amberAt = g.indexOf('color-amber-500')
     const greenAt = g.indexOf('color-green-500')
@@ -237,8 +233,6 @@ describe('ContextView — interactions', () => {
     const tealAt = g.indexOf('color-teal-500')
     assert.ok(amberAt >= 0 && greenAt > amberAt && blueAt > greenAt && tealAt > blueAt, g)
 
-    // DNA + Delta: the mode switch stays live and each bar diffs its bands against the previous one —
-    // the first bar carries no change, and the axis turns signed around a zero line.
     await click(buttonByText(m.container, DICT_EN['gran.delta']))
     assert.equal(queryAll(m.container, '.lc-bar-dna').length, 2)
     assert.ok(text(query(m.container, '.lc-axis-mid')).includes('0'), 'the delta zero line label rides the axis')
@@ -260,14 +254,10 @@ describe('ContextView — interactions', () => {
 
   test('clicking a DNA band reveals that item in the Context browser', async () => {    const m = await mountRich('sv-dna-reveal')
     await click(buttonByText(m.container, DICT_EN['trend.dna']))
-    // Give the strip a real 112px stack area, then click its very top: the hit is the LAST band of
-    // bar seq 4, the 'file output' tool result (system and the header lead the strip below it).
     const dnaDiv = query(m.container, '.lc-bar[data-seq="4"] .lc-bar-dna')
     dnaDiv.getBoundingClientRect = () => ({ top: 0, left: 0, right: 14, bottom: 112, width: 14, height: 112, x: 0, y: 0, toJSON: () => null }) as DOMRect
     await act(async () => { dnaDiv.dispatchEvent(new MouseEvent('click', { bubbles: true, clientY: 0 })) })
     await flush()
-    // The browser left the live surface for the bar's step and opened the node's row — the pin alone
-    // would only select the step (accordion reset), so the open row is the reveal.
     assert.equal(query<HTMLSelectElement>(m.container, 'select.lc-br-pick').value, '4')
     assert.ok(text(query(m.container, '.lc-br-elem-on')).includes('file output'))
     await m.unmount()
@@ -277,9 +267,7 @@ describe('ContextView — interactions', () => {
     const m = await mountRich('sv-delta')
     const chart = query(m.container, '.lc-chart')
     await click(buttonByText(m.container, DICT_EN['gran.delta']))
-    // Default active bar is the newest: detail is the signed change vs its predecessor.
     assert.ok(queryAll(m.container, '.lc-detail-tag').some(el => text(el) === DICT_EN['gran.delta']))
-    // Hovering the FIRST bar pairs it with null (change from zero).
     await hover(query(m.container, '.lc-bar[data-seq="2"]'))
     assert.ok(query(m.container, '.lc-bar[data-seq="2"]').className.includes('lc-bar-hovered'))
     assert.ok(queryAll(m.container, '.lc-detail-tag').some(el => text(el) === DICT_EN['gran.delta']))
@@ -294,7 +282,6 @@ describe('ContextView — interactions', () => {
     const countEvents = () => queryAll(m.container, '.lc-event').length
     const kindBtn = (k: string) => query(m.container, `.lc-kinds [data-kind="${k}"]`) as HTMLElement
     assert.equal(countEvents(), 2)
-    // The buttons carry their per-kind tallies (richTimeline: 1 inject, 1 compaction, 0 prunes).
     assert.deepEqual(
       queryAll(m.container, '.lc-kinds .lc-kind-n').map(el => text(el)),
       ['1', '1', '0'],

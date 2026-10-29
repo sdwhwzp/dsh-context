@@ -25,7 +25,6 @@ function bubble(): HTMLElement | null {
   return document.querySelector('#lc-skilltip-bubble')
 }
 
-/** Pin a row's anchor geometry for the measure assertions (jsdom rects are all zero). */
 function mockRect(row: Element, rect: { left: number; top: number; width: number; bottom: number }): void {
   Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ ...rect, right: rect.left + rect.width, height: 20 }) })
 }
@@ -55,7 +54,6 @@ describe('OverviewSkills', () => {
     assert.equal(text(query(rows[0], '.lc-ov-skill-count')), '×12')
     assert.equal(text(query(rows[0], '.lc-ov-skill-last')), '3h ago')
     assert.equal(text(query(rows[1], '.lc-ov-skill-last')), 'just now')
-    // jsdom's CSSOM drops var() from the shorthand property read — the attribute string is the truth.
     assert.ok(query<HTMLElement>(rows[0], '.lc-ov-skill-dot').getAttribute('style')?.includes(skillColorOf('tdd')))
     assert.ok(query<HTMLElement>(rows[0], '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(100% - 12px)'))
     assert.ok(query<HTMLElement>(rows[1], '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(25% - 3px)'), 'the share of the heaviest row')
@@ -68,8 +66,6 @@ describe('OverviewSkills', () => {
   })
 
   test('the share bar scales to the heaviest row wherever the ordering puts it — never past the content edge', async () => {
-    // A recent ordering can lead with a lighter row: the bar denominator is always the heaviest tally,
-    // and the width subtracts the row's insets so 100% stops at the content edge.
     const m = await mount(h(Skills, { stats: [stat('light', 1, NOW), stat('heavy', 2, NOW)], now: NOW }))
     const rows = queryAll<HTMLElement>(m.container, 'button.lc-ov-skill')
     assert.ok(query(rows[0], '.lc-ov-skill-bar').getAttribute('style')?.includes('calc(50% - 6px)'))
@@ -178,20 +174,17 @@ describe('OverviewSkills', () => {
   test('the card measures against the row, retracts on scroll/resize/blur, and drops content on a scope change', async () => {
     const m = await mount(h(Skills, { stats: [stat('tdd', 1, NOW)], now: NOW }))
     const row = query(m.container, 'button.lc-ov-skill')
-    // jsdom's zero rect flips below and clamps to the left margin.
     await hover(row)
     let style = bubble()?.getAttribute('style') ?? ''
     assert.ok(style.includes('left: 8px'), style)
     assert.ok(style.includes('top: 6px'), style)
     await unhover(row)
-    // Mid-viewport: centered on the row, above it (jsdom bubbles measure 0×0).
     mockRect(row, { left: 500, top: 200, width: 100, bottom: 220 })
     await hover(row)
     style = bubble()?.getAttribute('style') ?? ''
     assert.ok(style.includes('left: 550px'), style)
     assert.ok(style.includes('top: 194px'), style)
     await unhover(row)
-    // Off the right edge: clamped to the viewport margin (jsdom innerWidth 1024).
     mockRect(row, { left: 2000, top: 200, width: 100, bottom: 220 })
     await hover(row)
     style = bubble()?.getAttribute('style') ?? ''
@@ -203,7 +196,6 @@ describe('OverviewSkills', () => {
     assert.ok(bubble())
     await act(async () => { window.dispatchEvent(new Event('resize')) })
     assert.equal(bubble(), null, 'a resize retracts')
-    // React implements onFocus/onBlur over the bubbling focusin/focusout pair.
     await act(async () => { row.dispatchEvent(new FocusEvent('focusin', { bubbles: true })) })
     assert.ok(bubble(), 'keyboard focus raises the card')
     await act(async () => { row.dispatchEvent(new FocusEvent('focusout', { bubbles: true })) })

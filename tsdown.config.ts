@@ -223,8 +223,7 @@ export default defineConfig([
     target: 'es2024',
     fixedExtension: false,
     minify: !WATCH,
-    // Local diagnosis only: the npm package never ships a .map (the `files` allowlist), so this stays a repo artifact.
-    sourcemap: !WATCH,
+    sourcemap: false,
     // The host half's Config/projection types are the integration contract other plugins compile against.
     dts: !WATCH,
     clean: true,
@@ -246,7 +245,7 @@ export default defineConfig([
     target: 'es2024',
     // A .d.cts would wrap the banner/footer and break parsing; profiling consumes the bundle's own sourcemap instead.
     dts: false,
-    sourcemap: !WATCH,
+    sourcemap: false,
     clean: false,
     minify: !WATCH,
     deps: {

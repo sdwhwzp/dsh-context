@@ -12,7 +12,6 @@ export interface CommsChannelCardProps {
   t: ViewKit['t']
 }
 
-/** One unordered pair: who the two parties are, how much each sent, and when they last spoke. */
 export function CommsChannelCard(props: CommsChannelCardProps): ReactElement {
   const { channel, t } = props
   const a = props.agentOf(channel.a)

@@ -336,7 +336,6 @@ describe('client entry: placement gating', () => {
 
   test('a registry that hands back no disposer unwinds the tab mount without a throw', () => {
     const ctx = new TestClientCtx()
-    // A registry whose registration disposer is absent: the mount's own disposer must skip it.
     ;(ctx.slots as unknown as { register: () => unknown }).register = () => undefined
     applyTo(ctx)
     ctx.dispose()
@@ -421,7 +420,6 @@ describe('client entry: second-mount guard', () => {
     const first = ctx.slots.of('conversation.view').length
     assert.ok(first > 0, 'the first mount registers')
     assert.equal(sources.length, 1, 'the first mount registers the /context source')
-    // The second mount of the same bundle — the static profile bundle plus a dynamic-runner run in one page.
     applyTo(ctx)
     assert.equal(ctx.slots.of('conversation.view').length, first, 'no second tab is seated')
     assert.equal(ctx.slots.of('conversation.chat.assistant-actions').length, 1)

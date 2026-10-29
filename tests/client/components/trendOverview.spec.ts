@@ -28,7 +28,6 @@ function propsOf(requests: RequestRecord[], over: Partial<TrendOverviewProps> = 
   }
 }
 
-/** jsdom has no layout: give the fit surface a real 400px plot so pointer fractions read true. */
 function stubSurfaceRect(el: HTMLElement, width = 400): void {
   el.getBoundingClientRect = () => ({ top: 0, left: 0, right: width, bottom: 130, width, height: 130, x: 0, y: 0, toJSON: () => null }) as DOMRect
 }
@@ -49,8 +48,6 @@ async function clickX(el: HTMLElement, clientX: number): Promise<void> {
   await clickXY(el, clientX, 0)
 }
 
-// The delta fixture: the second record grows every category by exactly 8 (up churn 56), and replaying the base gives
-// 56 down, so the 112px area splits evenly and px-per-token is 1.
 const deltaBase = req(1)
 const deltaGrown = req(2, { system: 108, tools: 58, user: 38, inject: 28, skill: 8, assistant: 48, tool: 68, total: 346 })
 
@@ -215,7 +212,6 @@ describe('TrendOverview flags and markers', () => {
     assert.equal(flags.length, 4)
     const idx = [12, 23, 35]
     flags.slice(0, 3).forEach((f, i) => assert.ok(Math.abs(parseFloat(f.style.left) - idx[i] / 46 * 100) < 1e-9, f.style.left))
-    // The full-span pole hugs inside the pane's right edge (left 100% falls wholly past the scroller's clip).
     assert.equal(flags[3].style.left, 'calc(100% - 1px)')
     assert.deepEqual(flags.map(f => query(f, '.lc-trend-flag-label').textContent), ['13', '24', '36', '47'])
     await m.unmount()
@@ -232,7 +228,6 @@ describe('TrendOverview flags and markers', () => {
     assert.deepEqual(flags.map(f => query(f, '.lc-trend-flag-label').textContent), ['2', '3'])
     assert.equal(flags[0].style.left, '50%')
     await three.unmount()
-    // The sole record IS both edges: no pole (its label would hang past the left clip).
     const one = await mount(h(TrendOverview, propsOf([req(1, { turn: 1, step: 0 })])))
     assert.equal(queryAll(one.container, '.lc-trend-flag').length, 0)
     await one.unmount()
@@ -397,7 +392,6 @@ describe('TrendOverview pointer interaction', () => {
     assert.deepEqual(spies.select, [3, 3, null, 1], 'a fresh record pins')
     await m.unmount()
 
-    // The hit test interpolates the painted bands between records: record 1 is user-heavy, record 2 system-only.
     const r1 = req(1, { user: 200, tools: 0, inject: 0, assistant: 0, tool: 0, total: 300 })
     const r2 = req(2, { tools: 0, user: 0, inject: 0, assistant: 0, tool: 0, total: 100 })
     const interpolated = await mount(h(TrendOverview, propsOf([r1, r2])))
@@ -451,7 +445,6 @@ describe('TrendOverview pointer interaction', () => {
       kit.t('tip.step', { t: 1, s: 2, n: 5 }),
       kit.t('tip.total', { n: '300' }),
     ])
-    // jsdom tips measure 0 wide, so the clamp is pure x: idx 2 of u 4 over the 400px wrap → 200.
     assert.equal(tip.style.transform, 'translate(200px, 0)')
     const cursor = query(m.container, '.lc-fit-cursor')
     assert.equal(cursor.style.left, '50%')
@@ -522,7 +515,6 @@ describe('TrendOverview turn strip', () => {
     assert.equal(washes2[1].style.width, '0%')
     assert.match(queryAll(m.container, '.lc-turn')[1].className, /lc-turn-on/)
 
-    // An unknown turn matches nothing: no wash, no lit block — the plot keeps the dim (the bars' parity).
     await m.update(h(TrendOverview, propsOf(reqs, { activeTurn: 999, ...handlers })))
     assert.equal(queryAll(m.container, '.lc-fit-wash').length, 0)
     assert.equal(queryAll(m.container, '.lc-turn-on').length, 0)

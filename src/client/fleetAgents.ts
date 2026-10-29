@@ -1,6 +1,3 @@
-/** The comms hub's agent identities: roster names outrank a sender's framing line, while an attested name still names a
- * party the roster/projection cannot (a fork's siblings). Pure derivation, so the precedence rules stay testable. */
-
 import { BRAND_HUE, familyHue, type AgentNode } from './agentTree'
 import {
   NEUTRAL_HUE,
@@ -13,7 +10,6 @@ import type { FleetTeam } from './fleetTeam'
 import type { ViewKit } from './viewkit'
 import type { FleetMemberInfo } from '../shared/types'
 
-/** A sender's own framing line names a party the roster/projection cannot; the newest attestation per id wins. */
 export function attestedNamesOf(rows: readonly CommsRow[]): Map<string, string> {
   const names = new Map<string, string>()
   for (const row of rows) {
@@ -63,7 +59,6 @@ export function commsAgentsOf(
       ...(description !== '' && description !== shown ? { description } : {}),
     })
   }
-  // A roster member whose session left the list still names its traffic.
   for (const [index, member] of members.entries()) {
     if (map.has(member.id)) continue
     const lead = member.role === 'lead'
@@ -84,7 +79,6 @@ function shortIdOf(id: string): string {
   return id.length > 12 ? id.slice(0, 8) + '…' : id
 }
 
-/** A party outside the family/roster: its mailbox name, its session title, or a short id — never a bare UUID. */
 export function fallbackAgentOf(
   party: string,
   titles: ReadonlyMap<string, string>,
@@ -108,7 +102,6 @@ export function fallbackAgentOf(
   }
 }
 
-/** One resolver for known family/roster parties and everything outside them. */
 export function agentResolverOf(
   agents: ReadonlyMap<string, CommsAgent>,
   titles: ReadonlyMap<string, string>,
