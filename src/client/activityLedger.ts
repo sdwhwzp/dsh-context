@@ -49,6 +49,8 @@ function dayEntryOf(key: string, raw: unknown): ActivityDay | undefined {
   const wallMs = nonNegativeOf(entry.wallMs)
   const clean = costWellFormed(entry.cost)
     && skillTalliesWellFormed(entry.skills)
+    && skillTalliesWellFormed(entry.tools)
+    && skillTalliesWellFormed(entry.cmds)
     && (entry.turns === undefined || turns !== undefined)
     && (entry.toolCalls === undefined || toolCalls !== undefined)
     && (entry.toolsMs === undefined || toolsMs !== undefined)
@@ -57,6 +59,8 @@ function dayEntryOf(key: string, raw: unknown): ActivityDay | undefined {
   const costRaw = costOf(entry.cost)
   const cost = costRaw !== undefined && Object.keys(costRaw).length > 0 ? costRaw : undefined
   const skills = skillTalliesOf(entry.skills)
+  const tools = skillTalliesOf(entry.tools)
+  const cmds = skillTalliesOf(entry.cmds)
   return {
     tokens,
     requests,
@@ -66,6 +70,8 @@ function dayEntryOf(key: string, raw: unknown): ActivityDay | undefined {
     ...(toolsMs !== undefined ? { toolsMs } : {}),
     ...(wallMs !== undefined ? { wallMs } : {}),
     ...(skills !== undefined ? { skills } : {}),
+    ...(tools !== undefined ? { tools } : {}),
+    ...(cmds !== undefined ? { cmds } : {}),
   }
 }
 

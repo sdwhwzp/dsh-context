@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import {
+  activityOf,
   contextBreakdownOf,
   contextPressureOf,
   conversationNodesOf,
@@ -843,6 +844,51 @@ describe('sessionAddressOf — the address a history read must carry', () => {
   })
 })
 
+
+describe('activityOf', () => {
+  const dayOf = (out: unknown, key = '2026-09-16'): Record<string, unknown> =>
+    (out as { days: Record<string, Record<string, unknown>> }).days[key]
+
+  test('the tool and command tables repair like the skill table', () => {
+    const clean = {
+      days: {
+        '2026-09-16': {
+          tokens: 1,
+          requests: 1,
+          tools: { read: { n: 2, last: 5 } },
+          cmds: { git: { n: 1, last: 6 } },
+        },
+      },
+    }
+    assert.ok(activityOf(clean) === (clean as never), 'clean tables ride the pass-through')
+    const dirty = activityOf({
+      days: {
+        '2026-09-16': {
+          tokens: 1,
+          requests: 1,
+          tools: { read: { n: 1 }, 'bad-name': { n: -1, last: 2 } },
+          cmds: { git: { n: 2, last: 3 } },
+        },
+        '2026-09-17': { tokens: 1, requests: 1, tools: { read: { n: 2, last: 4 } }, cmds: [1] },
+      },
+    })
+    assert.deepEqual(dayOf(dirty).tools, undefined, 'no readable tool tally leaves no table')
+    assert.deepEqual(dayOf(dirty).cmds, { git: { n: 2, last: 3 } })
+    assert.deepEqual(dayOf(dirty, '2026-09-17'), { tokens: 1, requests: 1, tools: { read: { n: 2, last: 4 } } }, 'a malformed command table drops alone')
+  })
+
+  test('the daily tallies ride the pass-through and the sanitized copy; malformed figures drop alone', () => {
+    const tallies = { turns: 2, toolCalls: 3, toolsMs: 4.5, wallMs: 5 }
+    const wire = { days: { '2026-09-16': { tokens: 15, requests: 1, ...tallies } } }
+    assert.ok(activityOf(wire) === wire, 'a clean payload keeps its reference')
+    const dirty = { days: { '2026-09-16': { tokens: 15, requests: 1, ...tallies }, bad: { tokens: 1, requests: 1 } } }
+    assert.deepEqual(activityOf(dirty), { days: { '2026-09-16': { tokens: 15, requests: 1, ...tallies } } })
+    const out = activityOf({
+      days: { '2026-09-16': { tokens: 15, requests: 1, turns: 'x', toolCalls: -1, toolsMs: Number.NaN, wallMs: Number.POSITIVE_INFINITY } },
+    })
+    assert.deepEqual(out, { days: { '2026-09-16': { tokens: 15, requests: 1 } } }, 'each malformed tally drops, the day survives')
+  })
+})
 
 describe('entrySeated — the slot-ledger second-mount guard', () => {
   const ctxWith = (entries: unknown): ClientCtx => ({ slots: { entries: () => entries } } as unknown as ClientCtx)

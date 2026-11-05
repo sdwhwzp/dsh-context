@@ -84,11 +84,13 @@ describe('ContextView — the sidebar host', () => {
     const tab = await mount(h(View, { useProjection: projections }))
     assert.equal(queryAll(tab.container, '.lc-stats').length, 1, 'the tab keeps the context stats')
     assert.equal(queryAll(tab.container, '.lc-pi-grid').length, 1, 'the tab keeps the plugin info')
+    assert.equal(queryAll(tab.container, '.lc-recom').length, 1, 'the tab keeps the recom card')
     await tab.unmount()
 
     const panel = await mount(h(View, { host: 'sidebar', useProjection: projections }))
     assert.equal(queryAll(panel.container, '.lc-stats').length, 0, 'the panel drops the context stats')
     assert.equal(queryAll(panel.container, '.lc-pi-grid').length, 0, 'the panel drops the plugin info')
+    assert.equal(queryAll(panel.container, '.lc-recom').length, 0, 'the panel drops the recom card')
     assert.equal(queryAll(panel.container, '.lc-head > .lc-card').length, 2, 'the head row keeps its two donut cards')
     assert.equal(queryAll(panel.container, '.lc-head > .lc-col-donut').length, 2, 'token usage and timing')
     await panel.unmount()

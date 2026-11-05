@@ -67,6 +67,7 @@ export interface AgentForest {
 }
 
 export const AGENT_CARD_H = 116
+export const AGENT_CARD_COMPACT_H = 92
 const SLOT_MAX = 276
 const SLOT_MIN = 190
 const CARD_GUTTER = 12
@@ -422,7 +423,13 @@ export interface AgentLayout {
   links: AgentLink[]
 }
 
-export function layoutForest(forest: AgentForest, stageWidth = 0): AgentLayout {
+export function layoutForest(forest: AgentForest, stageWidth = 0, compact = false): AgentLayout {
+  const cardH = compact ? AGENT_CARD_COMPACT_H : AGENT_CARD_H
+  const slotMax = compact ? 232 : SLOT_MAX
+  const slotMin = compact ? 160 : SLOT_MIN
+  const gutter = compact ? 10 : CARD_GUTTER
+  const levelH = compact ? cardH + 44 : LEVEL_H
+  const padY = compact ? 32 : PAD_Y
   const childrenOf = new Map<string, AgentNode[]>()
   for (const n of forest.nodes) {
     if (n.parentId === undefined) continue
@@ -455,17 +462,17 @@ export function layoutForest(forest: AgentForest, stageWidth = 0): AgentLayout {
   /* v8 ignore next 1 */
   if (forest.nodes.length > 0) place(forest.nodes[0])
 
-  const perLevel = stageWidth > 0 ? Math.max(1, Math.floor(stageWidth / SLOT_MIN)) : 0
+  const perLevel = stageWidth > 0 ? Math.max(1, Math.floor(stageWidth / slotMin)) : 0
 
   if (perLevel > 0 && leafSlots > perLevel) {
-    const bandSlot = Math.min(SLOT_MAX, stageWidth / perLevel)
+    const bandSlot = Math.min(slotMax, stageWidth / perLevel)
     const width = perLevel * bandSlot
     const points: AgentPoint[] = []
     let row = 0
     const emitBand = (nodes: AgentNode[], depth: number): void => {
       const inset = (width - nodes.length * bandSlot) / 2
       nodes.forEach((node, i) => {
-        points.push({ id: node.id, x: inset + (i + 0.5) * bandSlot, y: PAD_Y + row * LEVEL_H, depth })
+        points.push({ id: node.id, x: inset + (i + 0.5) * bandSlot, y: padY + row * levelH, depth })
       })
       row++
       let band: AgentNode[] = []
@@ -490,28 +497,28 @@ export function layoutForest(forest: AgentForest, stageWidth = 0): AgentLayout {
     if (forest.nodes.length > 0) emitBand([forest.nodes[0]], 0)
     return {
       width,
-      height: PAD_Y + (row - 1) * LEVEL_H + AGENT_CARD_H + 24,
-      cardW: bandSlot - CARD_GUTTER,
+      height: padY + (row - 1) * levelH + cardH + 24,
+      cardW: bandSlot - gutter,
       points,
-      links: linksOf(forest, points),
+      links: linksOf(forest, points, cardH),
     }
   }
 
-  const slot = stageWidth > 0 && leafSlots > 1 ? Math.min(SLOT_MAX, stageWidth / leafSlots) : SLOT_MAX
+  const slot = stageWidth > 0 && leafSlots > 1 ? Math.min(slotMax, stageWidth / leafSlots) : slotMax
   const points: AgentPoint[] = forest.nodes.map(node => ({
     id: node.id,
     /* v8 ignore next 1 */
     x: (slotOf.get(node.id) ?? 0) * slot + slot / 2,
-    y: PAD_Y + node.depth * LEVEL_H,
+    y: padY + node.depth * levelH,
     depth: node.depth,
   }))
   const maxDepth = points.reduce((max, p) => Math.max(max, p.depth), 0)
   return {
     width: leafSlots * slot,
-    height: PAD_Y + maxDepth * LEVEL_H + AGENT_CARD_H + 24,
-    cardW: slot - CARD_GUTTER,
+    height: padY + maxDepth * levelH + cardH + 24,
+    cardW: slot - gutter,
     points,
-    links: linksOf(forest, points),
+    links: linksOf(forest, points, cardH),
   }
 }
 
@@ -519,9 +526,9 @@ export function familyHue(index: number): string {
   return `hsl(${Math.round(index * 137.508) % 360} 58% 52%)`
 }
 
-export const BRAND_HUE = 'var(--dsw-alias-brand-primary, var(--color-blue-500))'
+export const LEAD_HUE = 'var(--dsw-alias-state-business-primary, rgb(65, 118, 230))'
 
-function linksOf(forest: AgentForest, points: AgentPoint[]): AgentLink[] {
+function linksOf(forest: AgentForest, points: AgentPoint[], cardH: number): AgentLink[] {
   const pointOf = new Map(points.map(p => [p.id, p]))
   const nodeOf = new Map(forest.nodes.map(n => [n.id, n]))
   const runningIds = new Set(forest.nodes.filter(n => n.running).map(n => n.id))
@@ -537,7 +544,7 @@ function linksOf(forest: AgentForest, points: AgentPoint[]): AgentLink[] {
       /* v8 ignore next 1 */
       color: familyHue(nodeOf.get(edge.to)?.family ?? 0),
       x1: from.x,
-      y1: from.y + AGENT_CARD_H,
+      y1: from.y + cardH,
       x2: to.x,
       y2: to.y,
     })
@@ -545,32 +552,19 @@ function linksOf(forest: AgentForest, points: AgentPoint[]): AgentLink[] {
   return links
 }
 
-export function lineageOf(forest: AgentForest, id: string | null): Set<string> | null {
+export function neighborhoodOf(forest: AgentForest, id: string | null): Set<string> | null {
   if (id === null) return null
-  const byId = new Map(forest.nodes.map(n => [n.id, n]))
-  const start = byId.get(id)
-  if (start === undefined) return null
-  const childrenOf = new Map<string, string[]>()
+  const related = new Set<string>([id])
+  let found = false
   for (const n of forest.nodes) {
-    if (n.parentId === undefined) continue
-    const kids = childrenOf.get(n.parentId) ?? []
-    kids.push(n.id)
-    childrenOf.set(n.parentId, kids)
-  }
-  const lit = new Set<string>()
-  let cur: AgentNode | undefined = start
-  while (cur !== undefined) {
-    lit.add(cur.id)
-    cur = cur.parentId !== undefined ? byId.get(cur.parentId) : undefined
-  }
-  const queue = [id]
-  for (let i = 0; i < queue.length; i++) {
-    for (const kid of childrenOf.get(queue[i]) ?? []) {
-      lit.add(kid)
-      queue.push(kid)
+    if (n.id === id) {
+      found = true
+      if (n.parentId !== undefined) related.add(n.parentId)
+    } else if (n.parentId === id) {
+      related.add(n.id)
     }
   }
-  return lit
+  return found ? related : null
 }
 
 export interface BarSeg {

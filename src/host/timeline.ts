@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { Config } from './config'
+import type { Config, FoldBounds } from './config'
 import { resolveBounds } from './config'
 import type { WiredProjection } from './projection'
 import type { ContextTimeline } from '../shared/types'
@@ -46,12 +46,12 @@ const requestRecordSchema = z.object({
   step: z.number().optional(),
   time: z.number(),
   seq: z.number(),
-  system: z.number().int().nonnegative(),
-  tools: z.number().int().nonnegative(),
-  user: z.number().int().nonnegative(),
-  inject: z.number().int().nonnegative(),
-  assistant: z.number().int().nonnegative(),
-  tool: z.number().int().nonnegative(),
+  system: z.number().int().nonnegative().optional(),
+  tools: z.number().int().nonnegative().optional(),
+  user: z.number().int().nonnegative().optional(),
+  inject: z.number().int().nonnegative().optional(),
+  assistant: z.number().int().nonnegative().optional(),
+  tool: z.number().int().nonnegative().optional(),
   total: z.number().int().nonnegative(),
   prompt: z.number().int().nonnegative().optional(),
   skill: z.number().int().nonnegative().optional(),
@@ -105,7 +105,7 @@ const commandSchema = z.object({
   resultSeq: z.number().int().nonnegative().optional(),
   time: z.number(),
   tool: z.string(),
-  cmd: z.string(),
+  cmd: z.string().optional(),
   cmdTruncated: z.literal(true).optional(),
   description: z.string().optional(),
   cwd: z.string().optional(),
@@ -323,17 +323,20 @@ const timelineStateSchema = z.object({
   pendingCodeOps: z.record(z.string(), z.array(fileOpSchema)).optional(),
 }) as unknown as z.ZodType<TimelineState>
 
+export const TIMELINE_STATE_VERSION = 37
+
 export function createContextTimelineDefinition(config: Config, slim: () => boolean): WiredProjection<'contextTimeline', TimelineState> {
   const bounds = resolveBounds(config)
+  const headBounds: FoldBounds = { ...bounds, headOnly: true }
   const view = (state: TimelineState): ContextTimeline =>
     slim() ? buildTimelineHead(state) : buildTimelineView(state, bounds)
   const definition: WiredProjection<'contextTimeline', TimelineState> = {
     key: 'contextTimeline',
     stateSchema: timelineStateSchema,
-    wire: { viewSchema: contextTimelineSchema, view },
+    wire: { viewSchema: contextTimelineSchema, view, summary: false },
     init: () => createTimelineState(),
-    apply: (state: TimelineState, event: SessionEvent) => applyTimeline(state, event as Parameters<typeof applyTimeline>[1], bounds),
-    stateVersion: 36,
+    apply: (state: TimelineState, event: SessionEvent) => applyTimeline(state, event as Parameters<typeof applyTimeline>[1], headBounds),
+    stateVersion: TIMELINE_STATE_VERSION,
   }
   return definition
 }

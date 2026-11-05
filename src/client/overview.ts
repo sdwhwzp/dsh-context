@@ -1,13 +1,13 @@
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
 import { dayKeyOf, endOfDayKey, startOfDayKey } from '../shared/days'
-import { BACKFILL_ROUTE } from './apiRoutes'
+import { BACKFILL_ROUTE, SNAPSHOT_ROUTE } from './apiRoutes'
 import { billedParts, RING_ORDER } from './categories'
 import { cacheHitPercent } from './format'
 import { estimateSessionCost, mergeCostUsage } from './cost'
 import type { CostCurrency, ModelBook } from './cost'
 import { agentRowOf, familyChildrenOf, type AgentRow } from './agentTree'
 import { activityOf, asRecord, costFullyQuantified, numOf, timelineOf, type ClientCtx, type SessionsFace } from './services'
-import type { ActivityDay, ContextActivity, ContextTimeline, DefaultOverviewRange, SessionCostUsage, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
+import type { ActivityDay, ActivityTally, ContextActivity, ContextTimeline, DefaultOverviewRange, SessionCostUsage, TimingTotals, TokenUsage, ToolTimingTotals } from '../shared/types'
 
 export interface OverviewRow {
   id: string
@@ -143,15 +143,38 @@ interface BaseRow {
   activity: ContextActivity | null
 }
 
-const baseCache = new WeakMap<object, BaseRow>()
+interface BaseCacheEntry {
+  row: BaseRow
+  batch: unknown
+}
 
-function baseRowOf(rec: Record<string, unknown>, id: string): BaseRow {
+const baseCache = new WeakMap<object, BaseCacheEntry>()
+
+export type OverviewBatch = ReadonlyMap<string, { contextTimeline?: unknown; contextActivity?: unknown }>
+
+const BATCH_KEYS = ['contextTimeline', 'contextActivity'] as const
+
+function valuesWithBatch(
+  values: Record<string, unknown> | null | undefined,
+  id: string,
+  batched: OverviewBatch | undefined,
+): Record<string, unknown> | undefined {
+  const fill = batched?.get(id)
+  if (fill === undefined) return values ?? undefined
+  const merged: Record<string, unknown> = { ...values }
+  for (const key of BATCH_KEYS) {
+    if (merged[key] === undefined && fill[key] !== undefined) merged[key] = fill[key]
+  }
+  return merged
+}
+
+function baseRowOf(rec: Record<string, unknown>, id: string, batched: OverviewBatch | undefined): BaseRow {
   const cached = baseCache.get(rec)
-  if (cached !== undefined && cached.id === id) return cached
+  if (cached !== undefined && cached.batch === batched && cached.row.id === id) return cached.row
   const displayTitle = typeof rec.displayTitle === 'string' && rec.displayTitle !== '' ? rec.displayTitle : undefined
   const title = typeof rec.title === 'string' && rec.title !== '' ? rec.title : undefined
   const cwd = typeof rec.cwd === 'string' && rec.cwd !== '' ? rec.cwd : undefined
-  const values = asRecord(rec.projectionValues)
+  const values = valuesWithBatch(asRecord(rec.projectionValues), id, batched)
   const row: BaseRow = {
     id,
     title: displayTitle ?? title ?? id,
@@ -161,7 +184,7 @@ function baseRowOf(rec: Record<string, unknown>, id: string): BaseRow {
     timeline: timelineOf(values?.contextTimeline),
     activity: activityOf(values?.contextActivity),
   }
-  baseCache.set(rec, row)
+  baseCache.set(rec, { row, batch: batched })
   return row
 }
 
@@ -189,7 +212,11 @@ function childlessRowOf(base: BaseRow, current: boolean, archived: boolean): Ove
   return row
 }
 
-export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): OverviewRow[] | null {
+export function rowsOfSnapshot(
+  snapshot: unknown,
+  workspaces?: unknown,
+  batched?: OverviewBatch,
+): OverviewRow[] | null {
   const state = asRecord(snapshot)
   if (state === null) return null
   if (!Array.isArray(state.ids)) return null
@@ -204,7 +231,7 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
       if (row === null) continue
       if (row.blank === true) continue
       if (row.origin === 'subagent') continue
-      bases.push(baseRowOf(row, id))
+      bases.push(baseRowOf(row, id, batched))
     } catch {
     }
   }
@@ -235,7 +262,7 @@ export function rowsOfSnapshot(snapshot: unknown, workspaces?: unknown): Overvie
     const queue = [row.id]
     for (let i = 0; i < queue.length; i++) {
       for (const kid of childrenOf.get(queue[i]) ?? []) {
-        const values = kid.row.projections
+        const values = valuesWithBatch(kid.row.projections, kid.id, batched)
         timelines.push(timelineOf(values?.contextTimeline))
         activities.push(activityOf(values?.contextActivity))
         queue.push(kid.id)
@@ -280,6 +307,8 @@ function mergeActivity(members: (ContextActivity | null)[]): ContextActivity | n
           ...(entry.toolsMs !== undefined ? { toolsMs: entry.toolsMs } : {}),
           ...(entry.wallMs !== undefined ? { wallMs: entry.wallMs } : {}),
           ...(entry.skills !== undefined ? { skills: entry.skills } : {}),
+          ...(entry.tools !== undefined ? { tools: entry.tools } : {}),
+          ...(entry.cmds !== undefined ? { cmds: entry.cmds } : {}),
         }
       } else {
         prev.tokens += entry.tokens
@@ -296,21 +325,23 @@ function mergeActivity(members: (ContextActivity | null)[]): ContextActivity | n
           /* v8 ignore next 1 */
           prev.cost = mergeCostUsage(prev.cost, entry.cost) ?? entry.cost
         }
-        if (entry.skills !== undefined) prev.skills = mergeSkillTallies(prev.skills, entry.skills)
+        if (entry.skills !== undefined) prev.skills = mergeTallies(prev.skills, entry.skills)
+        if (entry.tools !== undefined) prev.tools = mergeTallies(prev.tools, entry.tools)
+        if (entry.cmds !== undefined) prev.cmds = mergeTallies(prev.cmds, entry.cmds)
       }
     }
   }
   return any ? { days } : null
 }
 
-function mergeSkillTallies(a: ActivityDay['skills'], b: NonNullable<ActivityDay['skills']>): NonNullable<ActivityDay['skills']> {
-  const out: Record<string, { n: number; last: number } | undefined> = { ...a }
+function mergeTallies(a: Record<string, ActivityTally> | undefined, b: Record<string, ActivityTally>): Record<string, ActivityTally> {
+  const out: Record<string, ActivityTally | undefined> = { ...a }
   for (const name of Object.keys(b)) {
     const tally = b[name]
     const prev = out[name]
     out[name] = prev === undefined ? tally : { n: prev.n + tally.n, last: Math.max(prev.last, tally.last) }
   }
-  return out as NonNullable<ActivityDay['skills']>
+  return out as Record<string, ActivityTally>
 }
 
 export type OverviewRange = DefaultOverviewRange
@@ -441,65 +472,69 @@ export function pageOf<T>(rows: readonly T[], page: number): { items: T[]; index
   return { items: rows.slice(index * OVERVIEW_PAGE_SIZE, (index + 1) * OVERVIEW_PAGE_SIZE), index, count }
 }
 
-export interface SkillLoadStat {
+export type TallyField = 'skills' | 'tools' | 'cmds'
+
+export interface TallyStat {
   name: string
-  loads: number
+  n: number
   sessions: number
   last: number
 }
 
-export type SkillSort = 'loads' | 'recent'
-
-function skillDayPredicate(opts: { scope: RangeWindow; day: string | null }): (key: string) => boolean {
+function dayPredicate(opts: { scope: RangeWindow; day: string | null }): (key: string) => boolean {
   if (opts.day !== null) return key => key === opts.day
   return key => dayInScope(key, opts.scope)
 }
 
-export function skillLoadsOf(
+export function tallyStatsOf(
   rows: readonly OverviewRow[],
-  opts: { scope: RangeWindow; day: string | null; sort?: SkillSort },
-): SkillLoadStat[] {
-  const admit = skillDayPredicate(opts)
-  const stats = new Map<string, SkillLoadStat>()
+  opts: { scope: RangeWindow; day: string | null; field: TallyField },
+): TallyStat[] {
+  const admit = dayPredicate(opts)
+  const stats = new Map<string, TallyStat>()
   for (const row of rows) {
     const days = row.activity?.days
     if (days === undefined) continue
-    const rowLoaded = new Set<string>()
+    const rowHas = new Set<string>()
     for (const key of Object.keys(days)) {
       if (!admit(key)) continue
-      const skills = days[key].skills
-      if (skills === undefined) continue
-      for (const name of Object.keys(skills)) {
-        const tally = skills[name]
+      const table = days[key][opts.field]
+      if (table === undefined) continue
+      for (const name of Object.keys(table)) {
+        const tally = table[name]
         const prev = stats.get(name)
-        if (prev === undefined) stats.set(name, { name, loads: tally.n, sessions: 1, last: tally.last })
+        if (prev === undefined) stats.set(name, { name, n: tally.n, sessions: 1, last: tally.last })
         else {
-          prev.loads += tally.n
+          prev.n += tally.n
           prev.last = Math.max(prev.last, tally.last)
-          if (!rowLoaded.has(name)) prev.sessions += 1
+          if (!rowHas.has(name)) prev.sessions += 1
         }
-        rowLoaded.add(name)
+        rowHas.add(name)
       }
     }
   }
-  const byName = (a: SkillLoadStat, b: SkillLoadStat): number => (a.name < b.name ? -1 : 1)
-  const out = [...stats.values()]
-  switch (opts.sort ?? 'loads') {
-    case 'recent': return out.sort((a, b) => (b.last - a.last) || (b.loads - a.loads) || byName(a, b))
-    default: return out.sort((a, b) => (b.loads - a.loads) || (b.last - a.last) || byName(a, b))
-  }
+  const byName = (a: TallyStat, b: TallyStat): number => (a.name < b.name ? -1 : 1)
+  return [...stats.values()].sort((a, b) => (b.n - a.n) || (b.last - a.last) || byName(a, b))
 }
 
-export function rowLoadedSkill(
+export function skillLoadsOf(
+  rows: readonly OverviewRow[],
+  opts: { scope: RangeWindow; day: string | null },
+): TallyStat[] {
+  return tallyStatsOf(rows, { ...opts, field: 'skills' })
+}
+
+export function rowHasTally(
   row: OverviewRow,
+  field: TallyField,
   name: string,
   opts: { scope: RangeWindow; day: string | null },
 ): boolean {
-  const admit = skillDayPredicate(opts)
+  const admit = dayPredicate(opts)
   const days = row.activity?.days
   if (days === undefined) return false
   for (const key of Object.keys(days)) {
-    if (admit(key) && days[key].skills?.[name] !== undefined) return true
+    if (admit(key) && days[key][field]?.[name] !== undefined) return true
   }
   return false
 }
@@ -876,6 +911,24 @@ export function requestActivityBackfill(): void {
   try {
     void fetch(BACKFILL_ROUTE, { method: 'POST' }).catch(() => {})
   } catch {}
+}
+
+export async function fetchOverviewBatch(): Promise<OverviewBatch> {
+  const response = await fetch(SNAPSHOT_ROUTE, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  if (!response.ok) throw new Error(`dsh-context: snapshot route HTTP ${response.status}`)
+  const r = asRecord(await response.json())
+  if (r === null || r.ok !== true) throw new Error('dsh-context: snapshot read failed')
+  const value = asRecord(r.value)
+  const batch: [string, { contextTimeline?: unknown; contextActivity?: unknown }][] = []
+  for (const id of Object.keys(value ?? {})) {
+    const entry = asRecord(value?.[id])
+    if (entry !== null && Object.keys(entry).length > 0) batch.push([id, entry])
+  }
+  return new Map(batch)
 }
 
 export function relativeTime(t: (key: string, params?: Record<string, string | number>) => string, updatedAt: number, now: number): string {

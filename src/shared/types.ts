@@ -40,6 +40,11 @@ export interface TimelineLast {
   prompt?: number
 }
 
+export interface ActivityTally {
+  n: number
+  last: number
+}
+
 export interface ActivityDay {
   tokens: number
   requests: number
@@ -48,7 +53,9 @@ export interface ActivityDay {
   toolCalls?: number
   toolsMs?: number
   wallMs?: number
-  skills?: Record<string, { n: number; last: number }>
+  skills?: Record<string, ActivityTally>
+  tools?: Record<string, ActivityTally>
+  cmds?: Record<string, ActivityTally>
 }
 
 export interface ContextActivity {
@@ -93,11 +100,20 @@ export interface FleetMemberInfo {
   context?: 'fresh' | 'fork'
 }
 
+export interface FleetDelegation {
+  seq: number
+  time: number
+  to: string
+  mode: 'one-shot' | 'continuable' | 'external'
+  label?: string
+}
+
 export interface FleetDetail {
   descriptor?: FleetDescriptor
   initialPrompt?: string
   lastReply?: { time: number; text: string }
   roster?: FleetMemberInfo[]
+  delegations?: FleetDelegation[]
   messages: FleetMessage[]
   messagesTotal?: number
   truncated: boolean
@@ -238,7 +254,7 @@ export interface CommandRecord {
   resultSeq?: number
   time: number
   tool: string
-  cmd: string
+  cmd?: string
   cmdTruncated?: true
   description?: string
   cwd?: string
@@ -378,23 +394,26 @@ export interface SurfaceNode {
   calls?: string[]
 }
 
-export interface RequestRecord {
+export interface SlimRequestRecord {
   turn?: number
   step?: number
   time: number
   seq: number
+  total: number
+  prompt?: number
+  activeMs?: number
+}
+
+export interface RequestRecord extends SlimRequestRecord {
   system: number
   tools: number
   user: number
   inject: number
   assistant: number
   tool: number
-  total: number
-  prompt?: number
   skill?: number
   cacheRead?: number
   output?: number
-  activeMs?: number
   stepCount?: number
   net?: number
 }

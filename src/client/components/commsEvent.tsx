@@ -1,11 +1,10 @@
-import { useEffect, useRef, type ReactElement, type ReactNode } from 'react'
+import { type ReactElement, type ReactNode } from 'react'
 import { StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import { IconPanelLeftOutlineRegular, IconRightUpOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { fromPartyOf, previewOf, settledToneOf, type CommsAgent } from '../commsModel'
 import { settledVariantOf, type CommsRow } from '../fleetDetail'
 import { fmtDateTime, fmtTime } from '../format'
 import { IconChevronDown, IconChevronUp, IconClose } from '../primitives'
-import { scrollIntoViewIfPossible } from '../revealScroll'
 import type { ViewKit } from '../viewkit'
 import type { FleetMessage } from '../../shared/types'
 import { AgentAvatar, channelStyle, roleTextOf } from './commsAgent'
@@ -39,16 +38,9 @@ export function CommsEvent(props: CommsEventProps): ReactElement {
     ? row.report !== undefined ? previewOf(row.report) : ''
     : previewOf(props.full?.text ?? row.text)
   const kindClass = `lc-comms-kind-${row.kind}` + (variant !== null ? ` lc-comms-tone-${tone}` : '')
-  const itemRef = useRef<HTMLLIElement | null>(null)
-
-  useEffect(() => {
-    if (!props.open) return
-    scrollIntoViewIfPossible(itemRef.current, { block: 'nearest', behavior: 'smooth' })
-  }, [props.open])
 
   return (
     <li
-      ref={itemRef}
       className={`lc-comms-event ${kindClass}` + (props.open ? ' lc-comms-event-open' : '')}
       style={channelStyle(from.hue, to.hue)}
       data-comms-key={row.key}
@@ -159,52 +151,17 @@ export function CommsEventDetail(props: CommsEventDetailProps): ReactElement {
         </span>
       </div>
 
-      {row.kind === 'settled' ? (
-        <div className="lc-comms-detail-note">{t('fleet.comms.detail.settledNote')}</div>
-      ) : null}
-
-      {resolvedVariant !== null ? (
-        <div className={`lc-comms-outcome lc-comms-tone-${resolvedTone}`}>
-          <StateDot state={resolvedTone} size={10} />
-          <b>{t(`fleet.settled.${resolvedVariant}`)}</b>
-        </div>
-      ) : resolvedSummary !== undefined ? (
-        <div className="lc-comms-outcome">{resolvedSummary}</div>
-      ) : null}
-
-      {loadingNote !== null ? <div className="lc-comms-detail-loading">{loadingNote}</div> : null}
-
-      <div className="lc-comms-detail-body">
-        {body !== ''
-          ? <props.rich.RichText text={body} mode="md" />
-          : <div className="lc-comms-detail-empty">
-            {t(row.kind === 'settled' ? 'fleet.comms.detail.noReport' : 'fleet.comms.detail.noBody')}
-          </div>}
-      </div>
-
-      {structured !== undefined ? (
-        <section className="lc-comms-detail-section">
-          <div className="lc-comms-detail-caption">{t('fleet.comms.detail.structured')}</div>
-          <props.rich.RichText text={structured} mode={jsonOf(structured) !== null ? 'json' : 'md'} />
-        </section>
-      ) : null}
-
-      {diagnostic !== undefined ? (
-        <section className="lc-comms-detail-section">
-          <div className="lc-comms-detail-caption">{t('fleet.comms.detail.diagnostic')}</div>
-          <pre className="lc-comms-detail-diagnostic">{diagnostic}</pre>
-        </section>
-      ) : null}
-
-      <section className="lc-comms-detail-section">
+      <section className="lc-comms-detail-section lc-comms-participants">
         <div className="lc-comms-detail-caption">{t('fleet.comms.detail.participants')}</div>
-        <div className="lc-comms-people">
-          {people.map((person) => {
+        <div className={'lc-comms-people' + (from.id === to.id ? ' lc-comms-people-self' : '')}>
+          {people.map((person, index) => {
             const role = roleTextOf(person, t)
+            const party = index === 0 ? 'from' : 'to'
             return (
-              <div className="lc-comms-person" key={person.id}>
+              <div className={`lc-comms-person lc-comms-party-${party}`} data-party={party} key={person.id}>
                 <AgentAvatar agent={person} size="lg" t={t} />
                 <div className="lc-comms-person-main">
+                  <div className="lc-comms-person-direction">{t(`fleet.comms.detail.${party === 'from' ? 'sender' : 'recipient'}`)}</div>
                   <div className="lc-comms-person-name">
                     <b>{person.name}</b>
                     {role !== '' ? <span className="lc-agents-badge">{role}</span> : null}
@@ -253,6 +210,43 @@ export function CommsEventDetail(props: CommsEventDetailProps): ReactElement {
           })}
         </div>
       </section>
+
+      {row.kind === 'settled' ? (
+        <div className="lc-comms-detail-note">{t('fleet.comms.detail.settledNote')}</div>
+      ) : null}
+
+      {resolvedVariant !== null ? (
+        <div className={`lc-comms-outcome lc-comms-tone-${resolvedTone}`}>
+          <StateDot state={resolvedTone} size={10} />
+          <b>{t(`fleet.settled.${resolvedVariant}`)}</b>
+        </div>
+      ) : resolvedSummary !== undefined ? (
+        <div className="lc-comms-outcome">{resolvedSummary}</div>
+      ) : null}
+
+      {loadingNote !== null ? <div className="lc-comms-detail-loading">{loadingNote}</div> : null}
+
+      <div className="lc-comms-detail-body">
+        {body !== ''
+          ? <props.rich.RichText text={body} mode="md" />
+          : <div className="lc-comms-detail-empty">
+            {t(row.kind === 'settled' ? 'fleet.comms.detail.noReport' : 'fleet.comms.detail.noBody')}
+          </div>}
+      </div>
+
+      {structured !== undefined ? (
+        <section className="lc-comms-detail-section">
+          <div className="lc-comms-detail-caption">{t('fleet.comms.detail.structured')}</div>
+          <props.rich.RichText text={structured} mode={jsonOf(structured) !== null ? 'json' : 'md'} />
+        </section>
+      ) : null}
+
+      {diagnostic !== undefined ? (
+        <section className="lc-comms-detail-section">
+          <div className="lc-comms-detail-caption">{t('fleet.comms.detail.diagnostic')}</div>
+          <pre className="lc-comms-detail-diagnostic">{diagnostic}</pre>
+        </section>
+      ) : null}
     </div>
   )
 }

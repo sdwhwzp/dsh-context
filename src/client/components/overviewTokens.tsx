@@ -5,6 +5,7 @@ import type { ViewKit } from '../viewkit'
 import { SliceList } from './sliceList'
 import type { DonutProps } from './donut'
 import { tokenRowsOf } from './tokenRows'
+import { IconDatabase } from '../primitives'
 
 export function makeOverviewTokens(kit: ViewKit, Donut: (props: DonutProps) => ReactElement): (props: {
   tokens: { parts: TokenPartTotal[]; total: number } | null
@@ -19,7 +20,10 @@ export function makeOverviewTokens(kit: ViewKit, Donut: (props: DonutProps) => R
     return (
       <div className="lc-card lc-col-donut flex-1 min-w-[min(360px,100%)]">
         <div className="lc-card-title">
-          <span className="lc-card-title-text">{t('tokens.title')}</span>
+          <span className="lc-card-title-text">
+            <IconDatabase size={14} />
+            {t('tokens.title')}
+          </span>
         </div>
         {shown.length === 0
           ? <div className="lc-empty">{t('ov.stats.empty')}</div>

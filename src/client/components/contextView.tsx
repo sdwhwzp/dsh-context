@@ -34,6 +34,7 @@ import { makeCommandPanel } from './commandPanel'
 import { makeCommandPager } from '../commandPages'
 import { useCommandLog } from './useCommandLog'
 import { makePluginInfo } from './pluginInfo'
+import { makeRecomCard } from './recomCard'
 import { makeUpgradeGate } from './upgradeGate'
 import { makeRequestDetail } from './requestDetail'
 import { countsOfRecords, makeStatsContext, makeSubagentCost, toolTallyOf } from './statsContext'
@@ -107,6 +108,7 @@ export function makeContextView(
   const StatsTiming = makeStatsTiming(kit, Donut)
   const StatsTokens = makeStatsTokens(kit, Donut)
   const PluginInfo = makePluginInfo(kit, ctx)
+  const RecomCard = makeRecomCard(kit, ctx)
   const UpgradeGate = makeUpgradeGate(kit)
   const DetailNote = makeDetailNote(kit)
   const ContextBrowser = makeContextBrowser(kit, StackedBar, settings)
@@ -806,7 +808,10 @@ export function makeContextView(
               onCommandPick={hasCommands ? setCommandFocus : undefined}
               onCommandMore={hasCommands ? onCommandMore : undefined}
               onEventsClick={onEventsClick} />
-            <PluginInfo />
+            <div className="lc-col">
+              <PluginInfo />
+              <RecomCard />
+            </div>
           </div>
         )}
         <div className="lc-cols lc-head">

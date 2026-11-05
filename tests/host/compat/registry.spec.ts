@@ -95,9 +95,15 @@ describe('registry contract — the semantics every supported line shares', () =
   })
 
   test('the local unit contract stays assignable to the harness projection contract', () => {
-    const timeline: ProjectionDefinition<'contextTimeline', TimelineState> = createContextTimelineDefinition({}, () => false)
-    const headers: ProjectionDefinition<'contextHeaders', HeadersState> = createContextHeadersDefinition()
-    const activity: ProjectionDefinition<'contextActivity', ActivityState> = createContextActivityDefinition()
+    const rawTimeline = createContextTimelineDefinition({}, () => false)
+    const rawHeaders = createContextHeadersDefinition()
+    const rawActivity = createContextActivityDefinition()
+    assert.equal(rawHeaders.wire.summary, false, 'list rows stay header-epoch free (issue #225)')
+    assert.equal(rawTimeline.wire.summary, false, 'list rows stay timeline-head free; the overview fetches its batch')
+    assert.equal(rawActivity.wire.summary, false, 'list rows stay activity-ledger free; the overview fetches its batch')
+    const timeline: ProjectionDefinition<'contextTimeline', TimelineState> = rawTimeline
+    const headers: ProjectionDefinition<'contextHeaders', HeadersState> = rawHeaders
+    const activity: ProjectionDefinition<'contextActivity', ActivityState> = rawActivity
     for (const definition of [timeline, headers, activity]) {
       assert.ok(definition.wire !== undefined, 'every unit serves a client view')
       const state = (definition.init as () => unknown)()
@@ -127,7 +133,7 @@ describe('registry contract — the semantics every supported line shares', () =
     assert.ok(rows !== undefined, 'checkpoint rows are losslessly JSON-serializable')
     for (const key of ['contextTimeline', 'contextHeaders']) {
       const row = rows[key] as { ver: number; seq: number }
-      assert.equal(row.ver, key === 'contextTimeline' ? 36 : 1)
+      assert.equal(row.ver, key === 'contextTimeline' ? 37 : 1)
       assert.equal(row.seq, 12)
     }
   })
@@ -174,11 +180,14 @@ describe('registry contract — the semantics every supported line shares', () =
     assert.equal(viewed.contextTimeline, undefined)
     assert.ok(viewed.contextHeaders !== undefined, 'the untouched row still serves')
     const restored = driver.restore(stale, log, 0, session.header)
-    const timeline = restored.values.contextTimeline as { requests: { seq: number; prompt?: number; cacheRead?: number; output?: number }[] }
-    assert.deepEqual(timeline.requests.map(r => r.seq), [6, 10, 13, 14, 15])
+    const timeline = restored.values.contextTimeline as { current: { total: number }; nodes: unknown[] }
+    assert.ok(timeline.current.total > 0, 'the refold serves the wire view')
+    const refolded = (driver.checkpoint(session).contextTimeline as { val: { requests: { seq: number; prompt?: number }[] } }).val
+    assert.deepEqual(refolded.requests.map(r => r.seq), [6, 10, 13, 14, 15], 'the refold re-tracks every step')
     assert.deepEqual(
-      timeline.requests.filter(r => r.seq >= 13).map(r => [r.prompt, r.cacheRead, r.output]),
-      [[151, 151, 22], [undefined, undefined, undefined], [12, undefined, undefined]],
+      refolded.requests.filter(r => r.seq >= 13).map(r => r.prompt ?? null),
+      [151, null, 12],
+      'the persisted records keep the sanitized prompt figure (issue #44)',
     )
 
     const currentLog = fullLog()
@@ -189,9 +198,10 @@ describe('registry contract — the semantics every supported line shares', () =
     rolledBack.register(createContextHeadersDefinition())
     assert.equal(rolledBack.viewCheckpoint(rows).contextTimeline, undefined)
     const rolled = rolledBack.restore(rows, currentLog, 0, current.session.header)
-    const rolledTimeline = rolled.values.contextTimeline as { current: { total: number }; requests: unknown[] }
+    const rolledTimeline = rolled.values.contextTimeline as { current: { total: number } }
     assert.ok(rolledTimeline.current.total > 0)
-    assert.equal(rolledTimeline.requests.length, 2)
+    const rolledVal = (rolledBack.checkpoint(current.session).contextTimeline as { val: { requests: unknown[] } }).val
+    assert.equal(rolledVal.requests.length, 2)
   })
 
   test('the change gate keeps an uninteresting event inert; malformed committed events never throw the drive', () => {

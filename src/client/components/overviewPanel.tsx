@@ -3,11 +3,12 @@ import { estimateSessionCost, formatCost, type CostCurrency, type ModelBook } fr
 import { fmt } from '../format'
 import { useModelPrices } from '../modelPrices'
 import {
-  coveredRowsOf, DayAggregator, dayRangeWindow, filterRows, groupCountsOf, inGroup, kpisOf,
+  coveredRowsOf, DayAggregator, dayRangeWindow, fetchOverviewBatch, filterRows, groupCountsOf, inGroup, kpisOf,
   pageOf, rangeWindowOf, refreshSessions, requestActivityBackfill, rowsOfSnapshot,
-  rowLoadedSkill, sessionGroupsOf, sessionsSnapshotOf, skillLoadsOf, sortRows,
-  UNGROUPED_KEY, workspacesSnapshotOf,
-  type DayRange, type OverviewCoverage, type OverviewRange, type OverviewRow, type OverviewSort, type SkillSort,
+  rowHasTally, sessionGroupsOf, sessionsSnapshotOf, skillLoadsOf, sortRows,
+  tallyStatsOf, UNGROUPED_KEY, workspacesSnapshotOf,
+  type DayRange, type OverviewBatch, type OverviewCoverage, type OverviewRange, type OverviewRow, type OverviewSort,
+  type TallyField, type TallyStat,
 } from '../overview'
 import { openPluginSettings, openSessionVia, activeMsOf, type ClientCtx } from '../services'
 import { readSkillCatalog } from '../skills'
@@ -27,9 +28,11 @@ import { makeOverviewUsage } from './overviewUsage'
 import { makeStatsTiming } from './statsTiming'
 import { makeOverviewCard } from './overviewCard'
 import { makeOverviewSkills } from './overviewSkills'
+import { makeOverviewTally } from './overviewTally'
+import type { TallyCardKind } from './overviewTally'
 import { makeUpdatePill } from './updatePill'
 import { useLazyMount } from './useLazyMount'
-import { IconSettings } from '../primitives'
+import { IconGauge, IconSettings } from '../primitives'
 
 export interface OverviewPanelProps {
   useSessions?: unknown
@@ -40,6 +43,12 @@ const RANGES: readonly OverviewRange[] = ['today', '7d', '30d', 'all']
 const SORTS: readonly OverviewSort[] = ['recent', 'tokens', 'context']
 const COVERAGE: readonly OverviewCoverage[] = ['all', 'active', 'archived']
 const METRICS: readonly HeatMetric[] = ['sessions', 'tokens']
+const OVERVIEW_SNAPSHOT_POLL_MS = 30_000
+const PICK_FILTER: Record<TallyField, { label: string; clear: string }> = {
+  skills: { label: 'node.skillTag', clear: 'ov.list.skillClear' },
+  tools: { label: 'ov.list.toolFilter', clear: 'ov.list.toolClear' },
+  cmds: { label: 'ov.list.commandFilter', clear: 'ov.list.commandClear' },
+}
 
 export function makeOverviewPanel(
   ctx: ClientCtx,
@@ -56,6 +65,7 @@ export function makeOverviewPanel(
   const StatsTiming = makeStatsTiming(kit, Donut)
   const OverviewUsage = makeOverviewUsage(kit)
   const OverviewSkills = makeOverviewSkills(kit)
+  const OverviewTally = makeOverviewTally(kit)
   const UpdatePill = makeUpdatePill(kit)
   const ErrorBoundary = makeErrorBoundary(t)
 
@@ -80,15 +90,15 @@ export function makeOverviewPanel(
     const [day, setDay] = useState<string | null>(null)
     const [query, setQuery] = useState('')
     const [group, setGroup] = useState<string | null>(null)
-    const [skill, setSkill] = useState<string | null>(null)
-    const [skillSort, setSkillSort] = useState<SkillSort>('loads')
+    const [pick, setPick] = useState<{ field: TallyField; name: string } | null>(null)
     const [sort, setSort] = useState<OverviewSort>('recent')
     const [metric, setMetric] = useState<HeatMetric>('tokens')
     const [page, setPage] = useState(0)
     const { zoneProps, bubble } = useHoverTip()
     const [bodyRef, bodyMounted] = useLazyMount()
 
-    const rows = useMemo(() => rowsOfSnapshot(snapshot, wsSnapshot), [snapshot, wsSnapshot])
+    const [batched, setBatched] = useState<OverviewBatch | null>(null)
+    const rows = useMemo(() => rowsOfSnapshot(snapshot, wsSnapshot, batched ?? undefined), [snapshot, wsSnapshot, batched])
     const groups = useMemo(() => sessionGroupsOf(wsSnapshot), [wsSnapshot])
     const [catalog, setCatalog] = useState<ReadonlyMap<string, SkillInfo> | null>(null)
 
@@ -103,11 +113,26 @@ export function makeOverviewPanel(
     }, [currentCwd, currentId])
 
     useEffect(() => {
+      let alive = true
+      const load = (): void => {
+        void fetchOverviewBatch().then((next) => {
+          if (alive) setBatched(next)
+        }).catch(() => {})
+      }
+      load()
+      const timer = setInterval(load, OVERVIEW_SNAPSHOT_POLL_MS)
+      return () => {
+        alive = false
+        clearInterval(timer)
+      }
+    }, [])
+
+    useEffect(() => {
       requestActivityBackfill()
       refreshSessions(ctx)
     }, [])
 
-    useEffect(() => { setPage(0) }, [preset, custom, coverage, day, query, group, skill, sort])
+    useEffect(() => { setPage(0) }, [preset, custom, coverage, day, query, group, pick, sort])
 
     const currency = activeCurrency()
     const nowForCards = Date.now()
@@ -128,9 +153,9 @@ export function makeOverviewPanel(
       : counts
     const visible = useMemo(() => sortRows(
       (group === null ? scoped : scoped.filter(row => inGroup(row, group, groups)))
-        .filter(row => skill === null || rowLoadedSkill(row, skill, { scope, day })),
+        .filter(row => pick === null || rowHasTally(row, pick.field, pick.name, { scope, day })),
       sort,
-    ), [scoped, group, groups, skill, scope, day, sort])
+    ), [scoped, group, groups, pick, scope, day, sort])
     const paged = pageOf(visible, page)
     const kpi = useMemo(() => kpisOf(ranged, book, currency, scope), [ranged, book, currency, scope])
     const teamTiming = kpi.timing
@@ -139,7 +164,13 @@ export function makeOverviewPanel(
       () => (dayAggregator.current ??= new DayAggregator()).aggregate(covered, book, currency),
       [covered, book, currency],
     )
-    const skillStats = useMemo(() => skillLoadsOf(ranged, { scope, day, sort: skillSort }), [ranged, scope, day, skillSort])
+    const skillStats = useMemo(() => skillLoadsOf(ranged, { scope, day }), [ranged, scope, day])
+    const toolStats = useMemo(() => tallyStatsOf(ranged, { scope, day, field: 'tools' }), [ranged, scope, day])
+    const commandStats = useMemo(() => tallyStatsOf(ranged, { scope, day, field: 'cmds' }), [ranged, scope, day])
+    const tallyCards: readonly { kind: TallyCardKind; field: TallyField; stats: TallyStat[] }[] = [
+      { kind: 'tool', field: 'tools', stats: toolStats },
+      { kind: 'command', field: 'cmds', stats: commandStats },
+    ]
     const pickPreset = (range: OverviewRange): void => {
       setPicked(range)
       setCustom(null)
@@ -232,10 +263,13 @@ export function makeOverviewPanel(
                 </div>
                 <div className="lc-ov-body" ref={bodyRef}>
                   {bodyMounted ? (<>
-                    <div className="lc-ov-left">
-                      <div className="lc-card lc-ov-heat-card">
+                    <div className="lc-ov-tiles">
+                      <div className="lc-card lc-ov-tile lc-ov-heat-card">
                         <div className="lc-card-title">
-                          <span className="lc-card-title-text">{t('ov.heat.title')}</span>
+                          <span className="lc-card-title-text">
+                            <IconGauge size={14} />
+                            {t('ov.heat.title')}
+                          </span>
                           <span className="lc-heat-ctl">
                             <span className="lc-card-sub">{t('ov.heat.sub')}</span>
                             <div className="lc-gran" role="group" aria-label={t('ov.heat.metric')}>
@@ -255,16 +289,23 @@ export function makeOverviewPanel(
                       <OverviewSkills
                         stats={skillStats}
                         day={day}
-                        selected={skill}
-                        onSelect={setSkill}
-                        sort={skillSort}
-                        onSort={setSkillSort}
+                        selected={pick?.field === 'skills' ? pick.name : null}
+                        onSelect={(name) => { setPick(name === null ? null : { field: 'skills', name }) }}
                         catalog={catalog}
-                        now={nowForCards}
                       />
+                      {tallyCards.map(card => (
+                        <OverviewTally
+                          key={card.kind}
+                          kind={card.kind}
+                          stats={card.stats}
+                          day={day}
+                          selected={pick?.field === card.field ? pick.name : null}
+                          onSelect={(name) => { setPick(name === null ? null : { field: card.field, name }) }}
+                        />
+                      ))}
                     </div>
 
-                    <div className="lc-ov-right">
+                    <div className="lc-ov-list">
                       <div className="lc-ov-list-head">
                         <span className="lc-ov-list-title">{t('ov.list.title')}</span>
                         <span className="lc-ov-list-count">{visible.length}</span>
@@ -273,9 +314,9 @@ export function makeOverviewPanel(
                             {t('ov.list.dayFilter', { day })} ×
                           </button>
                         )}
-                        {skill !== null && (
-                          <button type="button" className="lc-ov-day-chip" title={t('ov.list.skillClear')} onClick={() => { setSkill(null) }}>
-                            {t('node.skillTag', { name: skill })} ×
+                        {pick !== null && (
+                          <button type="button" className="lc-ov-day-chip" title={t(PICK_FILTER[pick.field].clear)} onClick={() => { setPick(null) }}>
+                            {t(PICK_FILTER[pick.field].label, { name: pick.name })} ×
                           </button>
                         )}
                         <ClearableInput
@@ -365,13 +406,13 @@ export function makeOverviewPanel(
                       )}
                     </div>
                   </>) : (<>
-                    <div className="lc-ov-left">
-                      <div className="lc-card lc-deferred-skeleton" style={{ minHeight: 230 }} aria-hidden="true" />
-                      <div className="lc-card lc-deferred-skeleton" style={{ minHeight: 230 }} aria-hidden="true" />
+                    <div className="lc-ov-tiles">
+                      <div className="lc-card lc-deferred-skeleton lc-ov-tile" aria-hidden="true" />
+                      <div className="lc-card lc-deferred-skeleton lc-ov-tile" aria-hidden="true" />
+                      <div className="lc-card lc-deferred-skeleton lc-ov-tile" aria-hidden="true" />
+                      <div className="lc-card lc-deferred-skeleton lc-ov-tile" aria-hidden="true" />
                     </div>
-                    <div className="lc-ov-right">
-                      <div className="lc-card lc-deferred-skeleton" style={{ minHeight: 520 }} aria-hidden="true" />
-                    </div>
+                    <div className="lc-card lc-deferred-skeleton" style={{ minHeight: 320 }} aria-hidden="true" />
                   </>)}
                 </div>
               </>

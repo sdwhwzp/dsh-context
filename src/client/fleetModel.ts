@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentHeads } from './agentHeads'
 import { useSessionsSnapshot } from './agentHeads'
-import { agentForestOf, sessionTitlesOf, sessionsFaceOf, type AgentForest, type AgentSelfStats } from './agentTree'
+import type { AgentForest, AgentSelfStats } from './agentTree'
+import { agentForestOf, sessionTitlesOf, sessionsFaceOf } from './agentTree'
 import { FleetDetailCache } from './fleetDetail'
 import { lruTrim } from './lru'
 import { teamOf, type FleetTeam } from './fleetTeam'
-import type { ClientCtx } from './services'
-import { asRecord } from './services'
+import { asRecord, type ClientCtx } from './services'
 import type { ContextTimeline, FleetDetail } from '../shared/types'
 
 export interface FleetModel {
@@ -72,54 +72,92 @@ export function useFleetModel(
 
 export interface FleetDetailState {
   landed: ReadonlyMap<string, { detail: FleetDetail | null; updatedAt: number }>
+  historyLanded: ReadonlyMap<string, { detail: FleetDetail | null; updatedAt: number }>
   fullLanded: ReadonlyMap<string, FleetDetail | null>
   pending: ReadonlySet<string>
+  historyPending: ReadonlySet<string>
   fullPending: ReadonlySet<string>
   request(id: string, updatedAt: number): void
+  requestHistory(id: string, updatedAt: number): void
   requestFull(id: string): void
 }
-
-const sharedCache = new FleetDetailCache()
-const FULL_STATE_MAX = 8
 
 export interface FleetDetailOptions {
   concurrency?: number
   refreshDelayMs?: number
+  scopeKey?: string
 }
 
-export function useFleetDetails(cache: FleetDetailCache = sharedCache, options: FleetDetailOptions = {}): FleetDetailState {
+interface QueueTask {
+  id: string
+  stamp: number
+  history: boolean
+}
+
+const FULL_STATE_MAX = 8
+
+export function useFleetDetails(cache?: FleetDetailCache, options: FleetDetailOptions = {}): FleetDetailState {
+  const owned = useMemo(() => (cache === undefined ? new FleetDetailCache() : null), [cache])
+  const ledger = cache ?? owned as FleetDetailCache
   const maxInflight = options.concurrency ?? Number.POSITIVE_INFINITY
   const refreshDelay = options.refreshDelayMs ?? 0
+  const scopeKey = options.scopeKey
   const [landed, setLanded] = useState<ReadonlyMap<string, { detail: FleetDetail | null; updatedAt: number }>>(new Map())
+  const [historyLanded, setHistoryLanded] = useState<ReadonlyMap<string, { detail: FleetDetail | null; updatedAt: number }>>(new Map())
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
+  const [historyPending, setHistoryPending] = useState<ReadonlySet<string>>(new Set())
   const requested = useRef(new Map<string, number>())
+  const historyRequested = useRef(new Map<string, number>())
   const mounted = useRef(true)
   const active = useRef(0)
-  const queue = useRef<Array<{ id: string; stamp: number }>>([])
+  const queue = useRef<QueueTask[]>([])
   const refreshTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
 
   const drain = (): void => {
     while (active.current < maxInflight && queue.current.length > 0) {
-      const task = queue.current.shift() as { id: string; stamp: number }
+      const task = queue.current.shift() as QueueTask
+      const valid = task.history ? historyRequested.current.get(task.id) === task.stamp : requested.current.get(task.id) === task.stamp
       /* v8 ignore next 1 */
-      if (requested.current.get(task.id) !== task.stamp) continue
+      if (!valid) continue
       active.current++
-      void cache.fetch(task.id, task.stamp).then((detail) => {
-        if (!mounted.current || requested.current.get(task.id) !== task.stamp) return
-        setLanded(prev => new Map(prev).set(task.id, { detail, updatedAt: task.stamp }))
-        setPending((prev) => {
+      const pending = task.history ? ledger.fetchHistory(task.id, task.stamp) : ledger.fetch(task.id, task.stamp)
+      void pending.then((detail) => {
+        const currentValid = task.history
+          ? historyRequested.current.get(task.id) === task.stamp
+          : requested.current.get(task.id) === task.stamp
+        if (!mounted.current || !currentValid) return
+        if (task.history) setHistoryLanded(prev => new Map(prev).set(task.id, { detail, updatedAt: task.stamp }))
+        else {
+          setLanded(prev => new Map(prev).set(task.id, { detail, updatedAt: task.stamp }))
+          /* v8 ignore next 1 */
+          if (detail !== null && detail.messagesTotal !== undefined) requestHistory(task.id, task.stamp)
+        }
+        const clear = task.history ? setHistoryPending : setPending
+        clear((prev) => {
           const next = new Set(prev)
           next.delete(task.id)
           return next
         })
       }).catch(() => {
+        const currentValid = task.history
+          ? historyRequested.current.get(task.id) === task.stamp
+          : requested.current.get(task.id) === task.stamp
         /* v8 ignore next 1 */
-        if (!mounted.current || requested.current.get(task.id) !== task.stamp) return
-        setPending((prev) => {
+        if (!mounted.current || !currentValid) return
+        const clear = task.history ? setHistoryPending : setPending
+        clear((prev) => {
           const next = new Set(prev)
           next.delete(task.id)
           return next
         })
+        if (task.history) {
+          const key = `history:${task.id}`
+          refreshTimers.current.set(key, setTimeout(() => {
+            refreshTimers.current.delete(key)
+            if (!mounted.current || historyRequested.current.get(task.id) !== task.stamp) return
+            enqueue(task.id, task.stamp, false, true)
+          }, Math.max(1_000, refreshDelay)))
+        }
       }).finally(() => {
         active.current--
         drain()
@@ -127,14 +165,14 @@ export function useFleetDetails(cache: FleetDetailCache = sharedCache, options: 
     }
   }
 
-  const enqueue = (id: string, stamp: number, silent = false): void => {
-    if (!silent) setPending(prev => prev.has(id) ? prev : new Set(prev).add(id))
-    const at = queue.current.findIndex(task => task.id === id)
-    if (at >= 0) {
-      queue.current[at] = { id, stamp }
-    } else {
-      queue.current.push({ id, stamp })
+  const enqueue = (id: string, stamp: number, silent: boolean, history: boolean): void => {
+    if (!silent) {
+      const set = history ? setHistoryPending : setPending
+      set(prev => prev.has(id) ? prev : new Set(prev).add(id))
     }
+    const at = queue.current.findIndex(task => task.id === id && task.history === history)
+    if (at >= 0) queue.current[at] = { id, stamp, history }
+    else queue.current.push({ id, stamp, history })
     drain()
   }
 
@@ -143,20 +181,59 @@ export function useFleetDetails(cache: FleetDetailCache = sharedCache, options: 
     if (known !== undefined && known >= updatedAt) return
     requested.current.set(id, updatedAt)
     if (refreshDelay > 0 && landed.has(id)) {
-      const armed = refreshTimers.current.get(id)
+      const key = `preview:${id}`
+      const armed = refreshTimers.current.get(key)
       if (armed !== undefined) clearTimeout(armed)
-      refreshTimers.current.set(id, setTimeout(() => {
-        refreshTimers.current.delete(id)
+      refreshTimers.current.set(key, setTimeout(() => {
+        refreshTimers.current.delete(key)
         /* v8 ignore next 1 */
         if (!mounted.current) return
         const target = requested.current.get(id)
         /* v8 ignore next 1 */
-        if (target !== undefined) enqueue(id, target, true)
+        if (target !== undefined) enqueue(id, target, true, false)
       }, refreshDelay))
       return
     }
-    enqueue(id, updatedAt)
+    enqueue(id, updatedAt, false, false)
   }
+
+  const requestHistory = (id: string, updatedAt: number): void => {
+    const known = historyRequested.current.get(id)
+    if (known !== undefined && known >= updatedAt) return
+    historyRequested.current.set(id, updatedAt)
+    if (refreshDelay > 0 && historyLanded.has(id)) {
+      const key = `history:${id}`
+      const armed = refreshTimers.current.get(key)
+      if (armed !== undefined) clearTimeout(armed)
+      refreshTimers.current.set(key, setTimeout(() => {
+        refreshTimers.current.delete(key)
+        /* v8 ignore next 1 */
+        if (!mounted.current) return
+        /* v8 ignore next 1 */
+        enqueue(id, historyRequested.current.get(id) ?? 0, true, true)
+      }, refreshDelay))
+      return
+    }
+    enqueue(id, updatedAt, false, true)
+  }
+
+  useEffect(() => {
+    queue.current = []
+    requested.current.clear()
+    historyRequested.current.clear()
+    owned?.clear()
+    fullRequested.current.clear()
+    fullKnown.current = new Set()
+    fullInFlight.current.clear()
+    for (const timer of refreshTimers.current.values()) clearTimeout(timer)
+    refreshTimers.current.clear()
+    setLanded(new Map())
+    setHistoryLanded(new Map())
+    setPending(new Set())
+    setHistoryPending(new Set())
+    setFullLanded(new Map())
+    setFullPending(new Set())
+  }, [scopeKey])
 
   useEffect(() => {
     mounted.current = true
@@ -181,7 +258,7 @@ export function useFleetDetails(cache: FleetDetailCache = sharedCache, options: 
     fullRequested.current.set(id, stamp)
     fullInFlight.current.add(id)
     setFullPending(prev => prev.has(id) ? prev : new Set(prev).add(id))
-    void cache.fetch(id, stamp, true).then((detail) => {
+    void ledger.fetch(id, stamp, true).then((detail) => {
       if (!mounted.current || fullRequested.current.get(id) !== stamp) return
       fullInFlight.current.delete(id)
       setFullLanded((prev) => {
@@ -200,5 +277,5 @@ export function useFleetDetails(cache: FleetDetailCache = sharedCache, options: 
     })
   }
 
-  return { landed, fullLanded, pending, fullPending, request, requestFull }
+  return { landed, historyLanded, fullLanded, pending, historyPending, fullPending, request, requestHistory, requestFull }
 }

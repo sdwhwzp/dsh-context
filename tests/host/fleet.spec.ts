@@ -68,12 +68,13 @@ async function call(captured: { fetch?: RouteFetch }, body: unknown): Promise<Re
   return await response.json() as Record<string, unknown>
 }
 
-function observing(events: unknown): { observeSession(id: string, options: unknown): Promise<unknown>; wasDisposed(): boolean } {
+function observing(events: unknown, inheritedEventCount?: number): { observeSession(id: string, options: unknown): Promise<unknown>; wasDisposed(): boolean } {
   let disposed = false
   return {
     wasDisposed: () => disposed,
     observeSession: () => Promise.resolve({
       events,
+      ...(inheritedEventCount !== undefined ? { inheritedEventCount } : {}),
       get disposed() { return disposed },
       [Symbol.dispose]() { disposed = true },
     }),
@@ -151,6 +152,14 @@ describe('watchFleetChannel gating', () => {
     assert.equal(junk.value.lastReply.text.length, 301)
   })
 
+  test('a history body uses the complete-event mode rather than full text mode', async () => {
+    const long = { type: 'assistant/message', seq: 1, time: 1, data: { message: { content: [{ type: 'text', text: 'z'.repeat(400) }] } } }
+    const { captured } = armed({ sessionQuery: observing([long]) })
+    const history = await call(captured, { sessionId: 's1', history: true }) as { value: { lastReply: { text: string }; truncated: boolean } }
+    assert.equal(history.value.lastReply.text.length, 301)
+    assert.equal(history.value.truncated, true)
+  })
+
   test('an observation without a dispose method still serves', async () => {
     const { captured } = armed({
       sessionQuery: {
@@ -213,6 +222,58 @@ describe('fleetDetailOfEvents — the descriptor', () => {
   })
 })
 
+describe('fleetDetailOfEvents — durable delegations', () => {
+  test('accepts only versioned catalog and activated Team records, with catalog taking precedence', () => {
+    const detail = fleetDetailOfEvents([
+      { type: 'subagent/catalog', seq: 4, time: 40, data: { version: 1, childId: 'unknown', childCreatedAt: 400, mode: 'unknown' } },
+      { type: 'subagent/catalog', seq: 2, time: 20, data: { version: 0, childId: 'one', childCreatedAt: 200, mode: 'one-shot', label: 'Inspect' } },
+      { type: 'subagent/catalog', seq: 1, time: 10, data: { version: 0, childId: 'continuable', childCreatedAt: 100, mode: 'continuable', label: 'Continue' } },
+      { type: 'subagent/catalog', seq: 3, time: 30, data: { version: 2, childId: 'external', childCreatedAt: 300, mode: 'external', label: 'Remote' } },
+      { type: 'subagent/catalog', seq: 5, time: 50, data: { version: 0, childId: 'bad', childCreatedAt: 500, mode: 'mystery' } },
+      { type: 'subagent/catalog', seq: 6, time: 60, data: { version: 0, childId: '', childCreatedAt: 600, mode: 'one-shot' } },
+      { type: 'subagent/catalog', seq: 7, time: 70, data: { version: 0, childId: 'bad-time', childCreatedAt: 'no', mode: 'one-shot' } },
+      { type: 'subagent/catalog', seq: 8, time: 80, data: null },
+      { type: 'subagent/catalog', seq: 9, time: 90, data: { version: 2, childId: 'bad-version', childCreatedAt: 900, mode: 'continuable', label: 'Wrong version' } },
+      { type: 'subagent/catalog', seq: 10, time: 100, data: { version: 0, childId: 'missing-label', childCreatedAt: 1000, mode: 'continuable' } },
+      { type: 'team/member', seq: 11, time: 1100, data: { teamId: 'root', member: { id: 'mate', name: 'mate', description: 'Team duty', phase: 'provisioning' } } },
+      { type: 'team/member', seq: 12, time: 1200, data: { teamId: 'root', member: { id: 'mate', name: 'mate', description: 'Changed', phase: 'active' } } },
+      { type: 'team/member', seq: 13, time: 1300, data: { teamId: 'root', member: { id: 'failed', name: 'failed', description: 'Failed', phase: 'failed' } } },
+      { type: 'subagent/catalog', seq: 14, time: 1400, data: { version: 1, childId: 'mate', childCreatedAt: 1400, mode: 'continuable', label: 'Catalog wins' } },
+      { type: 'team/member', seq: 15, time: 1500, data: { teamId: 'root', member: { id: 'root', name: 'lead', description: 'Lead', phase: 'active' } } },
+      { type: 'team/member', seq: 16, time: 1600, data: { teamId: 'root', member: { id: '', name: 'bad', description: 'Bad', phase: 'active' } } },
+      { type: 'team/member', seq: 17, time: 1700, data: { teamId: 'root', member: { id: 'empty', name: 'empty', description: '', phase: 'active' } } },
+      { type: 'team/member', seq: 18, time: 1800, data: { teamId: 'root', member: { id: 'numeric', name: 'numeric', description: 42, phase: 'active' } } },
+      { type: 'subagent/catalog', seq: 19, time: 1900, data: { version: 0, childId: 'bare-one', childCreatedAt: 1900, mode: 'one-shot' } },
+      { type: 'subagent/catalog', seq: 20, time: 2000, data: { version: 2, childId: 'bare-external', childCreatedAt: 2000, mode: 'external' } },
+    ])
+    assert.deepEqual(detail.delegations, [
+      { seq: 1, time: 100, to: 'continuable', mode: 'continuable', label: 'Continue' },
+      { seq: 2, time: 200, to: 'one', mode: 'one-shot', label: 'Inspect' },
+      { seq: 3, time: 300, to: 'external', mode: 'external', label: 'Remote' },
+      { seq: 14, time: 1400, to: 'mate', mode: 'continuable', label: 'Catalog wins' },
+      { seq: 17, time: 1700, to: 'empty', mode: 'continuable' },
+      { seq: 18, time: 1800, to: 'numeric', mode: 'continuable' },
+      { seq: 19, time: 1900, to: 'bare-one', mode: 'one-shot' },
+      { seq: 20, time: 2000, to: 'bare-external', mode: 'external' },
+    ])
+    assert.deepEqual(detail.messages, [])
+  })
+
+  test('the route excludes inherited catalog and Team creation records', async () => {
+    const { captured } = armed({
+      sessionQuery: observing([
+        { type: 'subagent/catalog', seq: 1, time: 100, data: { version: 0, childId: 'inherited', childCreatedAt: 100, mode: 'one-shot' } },
+        { type: 'team/member', seq: 2, time: 200, data: { teamId: 'root', member: { id: 'inherited-team', name: 'inherited-team', description: 'Inherited', phase: 'active' } } },
+        { type: 'subagent/catalog', seq: 3, time: 300, data: { version: 1, childId: 'own', childCreatedAt: 300, mode: 'continuable', label: 'Own' } },
+      ], 3),
+    })
+    const r = await call(captured, { sessionId: 's1' })
+    assert.deepEqual((r.value as { delegations?: unknown[] }).delegations, [
+      { seq: 3, time: 300, to: 'own', mode: 'continuable', label: 'Own' },
+    ])
+  })
+})
+
 describe('fleetDetailOfEvents — the delegation prompt', () => {
   test('the first plain user message is the prompt (minus the teammate reminder); injections and later prompts are not', () => {
     const detail = fleetDetailOfEvents([
@@ -229,7 +290,7 @@ describe('fleetDetailOfEvents — the delegation prompt', () => {
     assert.equal(detail.initialPrompt, 'build it')
   })
 
-  test('the full read lifts the prompt and reply caps to the hostile-payload bounds', () => {
+  test('the full read removes prompt and reply caps while previews stay bounded', () => {
     const events = [
       { type: 'user/message', seq: 1, time: 1, data: { content: [{ type: 'text', text: 'x'.repeat(80_000) }] } },
       { type: 'assistant/message', seq: 2, time: 2, data: { message: { content: [{ type: 'text', text: 'z'.repeat(120_000) }] } } },
@@ -238,10 +299,10 @@ describe('fleetDetailOfEvents — the delegation prompt', () => {
     assert.equal(excerpt.initialPrompt?.length, 1601)
     assert.equal(excerpt.lastReply?.text.length, 301)
     assert.equal(excerpt.truncated, true)
-    const full = fleetDetailOfEvents(events, true)
+    const full = fleetDetailOfEvents(events, 'full')
     assert.equal(full.initialPrompt?.length, 80_000)
-    assert.equal(full.lastReply?.text.length, 100_001, 'the bound stands even in full mode')
-    assert.equal(full.truncated, true)
+    assert.equal(full.lastReply?.text.length, 120_000)
+    assert.equal(full.truncated, false)
   })
 })
 
@@ -420,12 +481,18 @@ describe('fleetDetailOfEvents — inter-agent messages', () => {
     assert.equal(detail.messages[0].clipped, true)
     assert.equal(detail.messagesTotal, 85)
     assert.equal(detail.truncated, true)
-    const full = fleetDetailOfEvents(events, true)
+    const full = fleetDetailOfEvents(events, 'full')
     assert.equal(full.messages.length, 85)
     assert.equal(full.messages[0].text.length, 500)
     assert.equal(full.messages[0].clipped, undefined)
     assert.equal(full.messagesTotal, undefined)
     assert.equal(full.truncated, false)
+    const history = fleetDetailOfEvents(events, 'history')
+    assert.equal(history.messages.length, 85)
+    assert.equal(history.messages[0].text.length, 401)
+    assert.equal(history.messages[0].clipped, true)
+    assert.equal(history.messagesTotal, undefined)
+    assert.equal(history.truncated, true)
   })
 
   test('hostile rows drop or zero out instead of rejecting: non-finite seq/time, no content array, non-text blocks', () => {

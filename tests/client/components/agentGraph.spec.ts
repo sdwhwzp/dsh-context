@@ -1,10 +1,10 @@
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
-import { afterEach, beforeEach, describe, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { makeAgentGraph } from '../../../src/client/components/agentGraph'
 import { DICT_EN } from '../../../src/client/i18n'
 import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
-import { familyHue, type AgentSelfStats } from '../../../src/client/agentTree'
+import { LEAD_HUE, agentForestOf, familyHue, type AgentNode, type AgentSelfStats } from '../../../src/client/agentTree'
 import { TestClientCtx, asClientCtx } from '../helpers/harness'
 import { blur, click, flush, focus, hover, makeKit, mount, query, queryAll, text, unhover, until, wheel } from '../helpers/kit'
 
@@ -274,7 +274,7 @@ describe('AgentGraph — the family tree', () => {
     const focused = await mount(h(View, { sessionId: 'root', self: selfStats(), focusId: 'done' }))
     const done = query(focused.container, '[data-agent="done"]')
     assert.ok(done.classList.contains('lc-agent-hover'), 'the focused card lights like a pointed-at one')
-    assert.ok(done.classList.contains('lc-agent-on'), 'its lineage lights too')
+    assert.ok(done.classList.contains('lc-agent-on'), 'its direct relations light too')
     assert.ok(query(focused.container, '[data-agent="root"]').classList.contains('lc-agent-on'))
     assert.ok(query(focused.container, '.lc-agents-canvas').classList.contains('lc-agents-focus'))
     assert.equal(queryAll(focused.container, 'g.lc-agents-on').length, 1)
@@ -438,16 +438,20 @@ describe('AgentGraph — the Fleet seat', () => {
     const face = new FakeSessions(family())
     const View = makeView(face)
     const team = { ...TEAM, members: [...TEAM.members, { id: 'worker', name: 'architect', role: 'teammate' as const, phase: 'active' as const }] }
-    const m = await mount(h(View, { sessionId: 'root', self: selfStats(), team, pinnedId: 'worker', inspector: false }))
+    const m = await mount(h(View, { sessionId: 'root', self: selfStats(), team, pinnedId: 'worker', inspector: false, compact: true }))
+    assert.ok(query(m.container, '.lc-agents').classList.contains('lc-agents-compact'))
     assert.ok(text(m.container).includes('2 members'))
     assert.ok(query(m.container, '[data-agent="worker"]').className.includes('lc-agent-pinned'))
     const worker = query(m.container, '[data-agent="worker"]')
     assert.ok(worker.getAttribute('style')?.includes('--lc-member-hue'))
-    assert.equal(text(query(worker, '.lc-agent-member')), 'architect')
+    assert.equal(text(query(worker, '.lc-agent-label')), 'architect')
     assert.equal(text(query(worker, '.lc-agent-duty')), 'worker-bee')
+    assert.equal(text(query(worker, '.lc-comms-avatar')), 'AR', 'the card wears the roster initials')
     const self = query(m.container, '.lc-agent-card.lc-agent-self')
-    assert.ok(self.getAttribute('style')?.includes('--lc-member-hue: var(--dsw-alias-brand-primary'))
+    assert.ok(self.getAttribute('style')?.includes(`--lc-member-hue: ${LEAD_HUE}`))
     assert.equal(queryAll(self, '.lc-agent-duty').length, 0)
+    assert.equal(text(query(self, '.lc-comms-avatar')), 'LE', 'the lead card wears the shared role initials')
+    assert.ok(query(self, '.lc-comms-avatar')?.className.includes('lc-comms-avatar-self'), 'the self card rings its avatar')
     const done = query(m.container, '[data-agent="done"]')
     assert.ok(done.getAttribute('style')?.includes('--lc-member-hue'))
     assert.equal(text(query(done, '.lc-agent-label')), 'done')
@@ -456,6 +460,7 @@ describe('AgentGraph — the Fleet seat', () => {
     await m.unmount()
 
     const m2 = await mount(h(View, { sessionId: 'root', self: selfStats(), team: null }))
+    assert.ok(!query(m2.container, '.lc-agents').classList.contains('lc-agents-compact'))
     assert.ok(!text(m2.container).includes('members ·'))
     assert.ok(query(m2.container, '.lc-inspector') !== null)
     await m2.unmount()
@@ -471,6 +476,22 @@ describe('AgentGraph — the Fleet seat', () => {
     const targetHues = ['worker', 'done'].map(id => query(m.container, `[data-agent="${id}"]`).style.getPropertyValue('--lc-member-hue'))
     assert.deepEqual(queryAll(m.container, 'path.lc-agents-link').map(el => el.getAttribute('stroke')), targetHues)
     await m.unmount()
+  })
+
+  test('a controlled forest and hover stay independent of the internal model', async () => {
+    const face = new FakeSessions(family())
+    const View = makeView(face)
+    const forest = agentForestOf({ byId: family() }, 'root', selfStats())
+    const onHover = vi.fn()
+    const m = await mount(h(View, { sessionId: 'root', forest, hoverId: 'done', onHover, inspector: false }))
+    assert.ok(query(m.container, '[data-agent="done"]').className.includes('lc-agent-hover'))
+    await hover(query(m.container, '[data-agent="worker"]'))
+    expect(onHover).toHaveBeenCalledWith('worker')
+    assert.ok(query(m.container, '[data-agent="done"]').className.includes('lc-agent-hover'))
+    await m.unmount()
+    const hidden = await mount(h(View, { sessionId: 'root', forest: null }))
+    assert.equal(text(hidden.container), '')
+    await hidden.unmount()
   })
 
   test('select mode highlights instead of jumping, while open mode keeps the jump copy and the inert current card', async () => {
@@ -674,5 +695,64 @@ describe('AgentGraph — cold-relative composition fetch', () => {
     assert.equal(composed.querySelectorAll('.lc-agent-bar-seg').length, 6, 'six category segments (no pressure fill)')
     assert.ok(text(composed).includes('60%'), 'the fold total prices against the head window')
     await m.unmount()
+  })
+})
+
+describe('AgentGraph — viewport windowing', () => {
+  function chain(count: number): { nodes: AgentNode[]; edges: { from: string; to: string }[] } {
+    const nodes: AgentNode[] = []
+    const edges: { from: string; to: string }[] = []
+    for (let index = 0; index < count; index++) {
+      const id = `step-${index}`
+      nodes.push({
+        id,
+        label: id,
+        ...(index > 0 ? { parentId: `step-${index - 1}` } : {}),
+        depth: index,
+        family: 0,
+        isCurrent: index === 0,
+        running: false,
+        completed: true,
+        subagent: index > 0,
+        updatedAt: index,
+        head: null,
+        requests: 0,
+        billed: null,
+        costUsage: null,
+        durationMs: null,
+        identity: null,
+      })
+      if (index > 0) edges.push({ from: `step-${index - 1}`, to: id })
+    }
+    return { nodes, edges }
+  }
+
+  test('renders only the cards in the stage band and reveals deeper cards on scroll', async () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length })
+    try {
+      const { nodes, edges } = chain(70)
+      const Graph = makeAgentGraph(asClientCtx(new TestClientCtx()), kit)
+      const m = await mount(h(Graph, { forest: { nodes, edges, solo: false }, team: null }))
+      assert.equal(queryAll(m.container, '.lc-agent-card').length, 70, 'an unmeasured stage keeps every card')
+      const stage = query<HTMLElement>(m.container, '.lc-agents-stage')
+      Object.defineProperty(stage, 'clientHeight', { configurable: true, value: 560 })
+      let scrollTop = 0
+      Object.defineProperty(stage, 'scrollTop', { configurable: true, get: () => scrollTop, set: (next: number) => { scrollTop = next } })
+      await act(async () => { stage.dispatchEvent(new Event('scroll')) })
+      await act(async () => { for (const frame of frames.splice(0)) frame(0) })
+      const visible = queryAll(m.container, '.lc-agent-card').length
+      assert.ok(visible < 70, 'the measured stage bounds the cards')
+      assert.ok(query(m.container, '[data-agent="step-0"]') !== null)
+      assert.equal(queryAll(m.container, '[data-agent="step-60"]').length, 0)
+      scrollTop = 10600
+      await act(async () => { stage.dispatchEvent(new Event('scroll')) })
+      await act(async () => { for (const frame of frames.splice(0)) frame(0) })
+      assert.ok(query(m.container, '[data-agent="step-60"]') !== null, 'a deep card appears after scrolling')
+      assert.equal(queryAll(m.container, '[data-agent="step-0"]').length, 0)
+      await m.unmount()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

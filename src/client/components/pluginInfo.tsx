@@ -28,7 +28,7 @@ export function makePluginInfo(kit: ViewKit, ctx: ClientCtx): () => ReactElement
     const nameValue: ReactNode[] = [nameText]
     if (update) nameValue.push(<span key="update" className="lc-pi-update">{'↑ v' + update}</span>)
     return (
-      <div className="lc-card flex-1 min-w-[min(240px,100%)]">
+      <div className="lc-card">
         <div className="lc-card-title">
           <span className="lc-card-title-text">
             <IconPlugin size={14} />

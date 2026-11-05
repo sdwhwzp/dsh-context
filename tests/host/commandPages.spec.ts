@@ -8,7 +8,7 @@ import { toolCall, toolResult } from './helpers/events'
 
 const BOUNDS = resolveBounds({})
 
-type RouteFetch = (request: Request) => Promise<Response>
+type RouteFetch = (request: Request, principal?: unknown) => Promise<Response>
 
 interface Captured {
   path?: string
@@ -19,6 +19,7 @@ interface CtxSpec {
   connection?: unknown
   sessionQuery?: unknown
   sessionPersistence?: unknown
+  principalAccess?: unknown
 }
 
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: Captured; disposers: (() => void)[] } {
@@ -27,6 +28,7 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: Captured; disposers: ((
   const services = new Map<string, unknown>()
   if ('connection' in spec) services.set('connection', spec.connection)
   if ('sessionQuery' in spec) services.set('sessionQuery', spec.sessionQuery)
+  if ('principalAccess' in spec) services.set('principalAccess', spec.principalAccess)
   const ctx = {
     get: (name: string) => (name === 'sessionPersistence' ? spec.sessionPersistence : services.get(name)),
     effect(fn: () => unknown) {
@@ -51,13 +53,13 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: Captured; disposers: ((
   return { ctx: ctx as unknown as Context, captured, disposers }
 }
 
-async function call(captured: Captured, body: unknown): Promise<unknown> {
+async function call(captured: Captured, body: unknown, principal?: unknown): Promise<unknown> {
   const request = new Request(`http://dsh.test${COMMANDS_ROUTE}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
   })
-  return await captured.fetch!(request).then(r => r.json())
+  return await captured.fetch!(request, principal).then(r => r.json())
 }
 
 function bashCall(seq: number, callId: string, cmd: string): TimelineEvent {
@@ -116,6 +118,23 @@ function routeWith(
 }
 
 describe('watchCommandPageChannel gating', () => {
+  test('command history checks the current account grant before observing or serving cached commands', async () => {
+    const observe = vi.fn(async () => observationOf(logOf(1)))
+    let allowed = true
+    const { ctx, captured } = ctxOf({
+      connection: { fetch: { register: () => () => {} } },
+      sessionQuery: { observeSession: observe },
+      principalAccess: { resolve: async () => ({ readableSessionIds: new Set(allowed ? ['own'] : []) }) },
+    })
+    watchCommandPageChannel(ctx, BOUNDS)
+    assert.equal((await call(captured, { sessionId: 'own' }, {}) as PageValue).ok, true)
+    allowed = false
+    for (const sessionId of ['own', 'foreign']) {
+      const denied = await call(captured, { sessionId }, {}) as PageValue
+      assert.equal(denied.error?.code, 'gateway/forbidden')
+    }
+    assert.equal(observe.mock.calls.length, 1)
+  })
   test('the route stays unregistered without its faces or when the registry refuses', () => {
     const none = ctxOf({})
     watchCommandPageChannel(none.ctx, BOUNDS)

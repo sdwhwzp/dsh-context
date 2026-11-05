@@ -1,15 +1,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { FoldBounds } from './config'
+import { asRecord } from './record'
 import { type ColdReadGate, makeColdReadGate } from './coldRead'
 import { canReadAccountSession, type ConnectionHostFace, registerPostRoute } from './connection'
-import { applyTimeline } from './fold'
-import { type TimelineState, createTimelineState } from './foldState'
+import type { TimelineState } from './foldState'
 import { buildTimelineDetail, buildTimelineHead } from './foldWire'
+import { DetailShadow, foldLog, observeFaceOf } from './detailShadow'
 import type { ContextTimelineDetail, Snapshot } from '../shared/types'
 
 export const DETAIL_ROUTE = '/api/dsh-context/detail'
-
-const FOLD_YIELD_EVENTS = 1_000
 
 const PAYLOAD_CACHE_MAX = 4
 
@@ -33,15 +32,48 @@ function headPayloadOf(state: TimelineState): { rev: number; head: Snapshot } {
 }
 
 export interface DetailChannelGate {
-  readonly live: boolean
+  live: boolean
+  retain(key: string, registration: unknown): void
+  stateOf(session: unknown, key: string): unknown
+}
+
+interface ProjectionHandleLike {
+  stateOf(session: unknown): unknown
+}
+
+function handleOf(value: unknown): ProjectionHandleLike | undefined {
+  if (value === null || typeof value !== 'object') return undefined
+  const stateOf = (value as { stateOf?: unknown }).stateOf
+  return typeof stateOf === 'function' ? value as ProjectionHandleLike : undefined
+}
+
+export function createDetailGate(ctx: Context): DetailChannelGate {
+  const handles = new Map<string, ProjectionHandleLike>()
+  return {
+    live: false,
+    retain(key: string, registration: unknown): void {
+      if (registration === null || (typeof registration !== 'object' && typeof registration !== 'function')) return
+      const then = (registration as { then?: unknown }).then
+      if (typeof then !== 'function') return
+      void Promise.resolve(registration as Promise<unknown>).then(
+        (handle) => {
+          const retained = handleOf(handle)
+          if (retained !== undefined) handles.set(key, retained)
+        },
+        (error: unknown) => { ctx.logger.error(error) },
+      )
+    },
+    stateOf(session: unknown, key: string): unknown {
+      const handle = handles.get(key)
+      if (handle !== undefined) return handle.stateOf(session)
+      const projections = ctx.sessionProjections as unknown as { stateOf?(session: unknown, key: string): unknown } | undefined
+      return typeof projections?.stateOf === 'function' ? projections.stateOf(session, key) : undefined
+    },
+  }
 }
 
 interface SessionsHostFace {
   get?(id: string): unknown
-}
-
-interface SessionQueryFace {
-  observeSession?(id: string, options: unknown): Promise<unknown>
 }
 
 function reply(value: unknown): Response {
@@ -52,14 +84,18 @@ function failure(code: string, message: string): Response {
   return reply({ ok: false, error: { code, message } })
 }
 
-export function watchDetailChannel(ctx: Context, bounds: FoldBounds, coldReads: ColdReadGate = makeColdReadGate()): DetailChannelGate {
-  const gate = { live: false }
+export function watchDetailChannel(
+  ctx: Context,
+  bounds: FoldBounds,
+  coldReads: ColdReadGate = makeColdReadGate(),
+  gate: DetailChannelGate = createDetailGate(ctx),
+): DetailChannelGate {
   const payloads = new Map<string, ColdPayload>()
+  const shadow = new DetailShadow(ctx, bounds, coldReads, () => observeFaceOf(ctx))
   ctx.inject(['connection', 'sessions'], (c) => {
     const sessions = c.get('sessions') as SessionsHostFace | undefined
     const getSession = typeof sessions?.get === 'function' ? sessions.get.bind(sessions) : undefined
     if (getSession === undefined) return
-    const projections = ctx.sessionProjections
 
     const handler = async (request: Request, principal?: unknown): Promise<Response> => {
       let sessionId: unknown
@@ -82,16 +118,14 @@ export function watchDetailChannel(ctx: Context, bounds: FoldBounds, coldReads: 
         signal.throwIfAborted()
         const session = getSession(sessionId)
         if (session !== undefined && session !== null) {
-          const state = projections.stateOf(session as never, 'contextTimeline')
+          const state = gate.stateOf(session, 'contextTimeline') as TimelineState | undefined
           if (state === undefined) return reply({ ok: true, value: null })
-          // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- rc.3 erases keyed reads; rc.2 types them.
-          const ownedState = state as TimelineState
-          return reply({ ok: true, value: headOnly ? headPayloadOf(ownedState) : buildTimelineDetail(ownedState, bounds) })
+          if (headOnly) return reply({ ok: true, value: headPayloadOf(state) })
+          const detailState = await shadow.stateOf(sessionId)
+          if (detailState === null) return reply({ ok: true, value: null })
+          return reply({ ok: true, value: buildTimelineDetail(detailState, bounds) })
         }
-        const query = ctx.get('sessionQuery') as SessionQueryFace | undefined
-        const observe = typeof query?.observeSession === 'function'
-          ? query.observeSession.bind(query)
-          : undefined
+        const observe = observeFaceOf(ctx)
         if (observe === undefined) return reply({ ok: true, value: null })
         const value = await coldReads.admit(async () => {
           const observation = await observe(sessionId, { projectionMode: 'none' })
@@ -106,14 +140,9 @@ export function watchDetailChannel(ctx: Context, bounds: FoldBounds, coldReads: 
                 return headOnly ? headOfDetail(hit.value) : hit.value
               }
             }
-            const events = (observation as { events?: unknown } | null)?.events
+            const events = asRecord(observation)?.events
             if (!Array.isArray(events)) return null
-            let state = createTimelineState()
-            let folded = 0
-            for (const ev of events) {
-              state = applyTimeline(state, ev as never, bounds)
-              if (++folded % FOLD_YIELD_EVENTS === 0) await new Promise(resolve => setTimeout(resolve, 0))
-            }
+            const state = (await foldLog(events, bounds)).state
             if (revision !== undefined) {
               const detail = buildTimelineDetail(state, bounds)
               payloads.delete(sessionId)

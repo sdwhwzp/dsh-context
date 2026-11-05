@@ -7,13 +7,16 @@ import { watchActivityBackfill } from './backfill'
 import { makeColdReadGate } from './coldRead'
 import { watchCommandPageChannel } from './commandPages'
 import { Config, resolveBounds } from './config'
-import { watchDetailChannel } from './detail'
+import { watchDetailChannel, createDetailGate } from './detail'
 import { createFallbackActivityDefinition, createFallbackHeadersDefinition, createFallbackTimelineDefinition } from './fallback'
 import { watchFleetChannel } from './fleet'
 import { createContextHeadersDefinition } from './headers'
 import { watchPromptInjection } from './promptInjection'
 import { watchStepIdentity } from './stepIdentity'
 import { watchSkillCatalog } from './skills'
+import { watchRecomChannel } from './recoms'
+import { watchSnapshotRoute } from './snapshotRoute'
+import { watchTimelineRowSweep } from './sweep'
 import { createContextTimelineDefinition } from './timeline'
 import { detectHarnessVersion } from './version'
 import { meetsBaseline } from '../shared/version'
@@ -26,6 +29,7 @@ export { Config } from './config'
 export function apply(ctx: Context, config: Config): void {
   const coldReads = makeColdReadGate()
   watchBalanceChannel(ctx)
+  watchRecomChannel(ctx)
   watchSkillCatalog(ctx, coldReads)
   watchFleetChannel(ctx, coldReads)
   watchAttachmentChannel(ctx, coldReads)
@@ -38,12 +42,15 @@ export function apply(ctx: Context, config: Config): void {
   }
   const attribution = createToolAttribution(ctx)
   watchStepIdentity(ctx)
-  const gate = watchDetailChannel(ctx, resolveBounds(config), coldReads)
+  const gate = createDetailGate(ctx)
+  watchDetailChannel(ctx, resolveBounds(config), coldReads, gate)
   watchCommandPageChannel(ctx, resolveBounds(config), coldReads)
-  ctx.sessionProjections.register(createContextTimelineDefinition(config, () => gate.live))
+  gate.retain('contextTimeline', ctx.sessionProjections.register(createContextTimelineDefinition(config, () => gate.live)))
   ctx.sessionProjections.register(createContextHeadersDefinition(name => attribution.ownerOf(name)))
   ctx.sessionProjections.register(createContextActivityDefinition())
+  watchTimelineRowSweep(ctx)
   watchActivityBackfill(ctx, coldReads)
+  watchSnapshotRoute(ctx)
   watchPromptInjection(ctx, config)
 }
 

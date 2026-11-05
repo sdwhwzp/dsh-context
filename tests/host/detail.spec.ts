@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, test, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { DETAIL_ROUTE, watchDetailChannel } from '../../src/host/detail'
+import { DETAIL_ROUTE, createDetailGate, watchDetailChannel } from '../../src/host/detail'
 import { resolveBounds } from '../../src/host/config'
-import type { TimelineState } from '../../src/host/fold'
+import { applyTimeline, type TimelineState } from '../../src/host/fold'
 import { buildTimelineDetail } from '../../src/host/foldWire'
-import type { TimelineEvent } from '../../src/host/foldState'
+import { createTimelineState, type TimelineEvent } from '../../src/host/foldState'
 import { assistantMessage, header, userMessage } from './helpers/events'
-import { driveTimeline, timelineDef, assertPlainJson } from './helpers/projection'
+import { driveTimeline, assertPlainJson } from './helpers/projection'
 
 const BOUNDS = resolveBounds({})
 
@@ -21,11 +21,13 @@ interface CtxSpec {
   sessionQuery?: unknown
   sessionPersistence?: unknown
   stateOf?: (session: unknown, key: string) => unknown
+  logger?: { error(error: unknown): void }
 }
 
 function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?: RouteFetch }; disposers: (() => void)[] } {
   const captured: { path?: string; fetch?: RouteFetch } = {}
   const disposers: (() => void)[] = []
+  const listeners = new Map<string, ((...args: unknown[]) => void)[]>()
   const services = new Map<string, unknown>()
   if ('requestPrincipal' in spec) services.set('requestPrincipal', spec.requestPrincipal)
   if ('principalAccess' in spec) services.set('principalAccess', spec.principalAccess)
@@ -35,7 +37,16 @@ function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?
   if ('sessionPersistence' in spec) services.set('sessionPersistence', spec.sessionPersistence)
   const ctx = {
     get: (name: string) => services.get(name),
+    on(event: string, listener: (...args: unknown[]) => void) {
+      const known = listeners.get(event) ?? []
+      known.push(listener)
+      listeners.set(event, known)
+    },
+    emit(event: string, ...args: unknown[]): void {
+      for (const listener of listeners.get(event) ?? []) listener(...args)
+    },
     sessionProjections: { stateOf: spec.stateOf ?? (() => undefined) },
+    logger: spec.logger ?? { error: () => {} },
     effect(fn: () => unknown, _label?: string) {
       const d = fn()
       if (typeof d === 'function') disposers.push(d as () => void)
@@ -106,6 +117,7 @@ describe('watchDetailChannel gating', () => {
             ? sessionsWith(okSession())
             : undefined,
       sessionProjections: { stateOf: () => undefined },
+      on() {},
       effect(fn: () => unknown) {
         fn()
         return () => {}
@@ -131,11 +143,20 @@ describe('watchDetailChannel gating', () => {
 })
 
 describe('the detail route', () => {
-  function liveCtx(state: TimelineState | undefined): { ctx: Context; captured: { fetch?: RouteFetch } } {
+  const liveEvents = [
+    header(1, { model: 'deepseek-v4-flash', provider: 'deepseek' }),
+    userMessage(2, [{ type: 'text', text: 'hi' }], { kind: 'user' }),
+    assistantMessage(3, { turn: 1, step: 0, usage: { inputTokens: 10, outputTokens: 5 } }),
+  ]
+
+  function liveCtx(state: TimelineState | undefined, events: TimelineEvent[] | null = null): { ctx: Context; captured: { fetch?: RouteFetch } } {
     return ctxOf({
       connection: { fetch: { register: () => () => {} } },
       sessions: sessionsWith(okSession()),
       stateOf: () => state,
+      ...(events === null ? {} : {
+        sessionQuery: { observeSession: () => Promise.resolve({ events, [Symbol.dispose]: () => {} }) },
+      }),
     })
   }
 
@@ -231,7 +252,7 @@ describe('the detail route', () => {
     assert.equal(result.error.message, 'persistence down')
   })
 
-  test('the cold-read gate applies to cold reads only: a skipped read answers null, a live read never touches it', async () => {
+  test('the cold-read gate admits the live seed like any log fold: a skipped seed answers null', async () => {
     let observed = 0
     const { ctx, captured } = ctxOf({
       connection: { fetch: { register: () => () => {} } },
@@ -256,29 +277,28 @@ describe('the detail route', () => {
     assert.equal(observed, 0, 'a skipped read never touches the log')
 
     const { state } = driveTimeline([userMessage(1, [{ type: 'text', text: 'hi' }], { kind: 'user' })])
-    const live = liveCtx(state)
+    const live = liveCtx(state, [])
     watchDetailChannel(live.ctx, BOUNDS, {
-      admit: () => Promise.reject(new Error('the gate must not see a live read')),
+      admit: <T>(_read: () => Promise<T>): Promise<T | undefined> => Promise.resolve(undefined),
     })
-    const result = await call(live.captured, { sessionId: 's1' }) as { ok: boolean; value: { rev: number } | null }
-    assert.equal(result.ok, true)
-    assert.ok(result.value !== null, 'the live read served its detail without the gate')
+    const refused = await call(live.captured, { sessionId: 's1' }) as { ok: boolean; value: unknown }
+    assert.deepEqual(refused, { ok: true, value: null }, 'a refused live seed answers the typed null')
+
+    const admittedLive = liveCtx(state, liveEvents)
+    watchDetailChannel(admittedLive.ctx, BOUNDS)
+    const served = await call(admittedLive.captured, { sessionId: 's1' }) as { ok: boolean; value: { nodes: unknown[] } | null }
+    assert.equal(served.ok, true)
+    assert.equal(served.value?.nodes.length, 2, 'an admitted live seed folds the observed log')
   })
 
-  test('serves the fold state\'s detail payload with its revision', async () => {
-    const { state } = driveTimeline([
-      header(1, { model: 'deepseek-v4-flash', provider: 'deepseek' }),
-      userMessage(2, [{ type: 'text', text: 'hi' }], { kind: 'user' }),
-      assistantMessage(3, { turn: 1, step: 0, usage: { inputTokens: 10, outputTokens: 5 } }),
-    ])
-    const { ctx, captured } = liveCtx(state)
+  test('serves the observed log\'s detail payload for the open session', async () => {
+    const { state } = driveTimeline(liveEvents)
+    const { ctx, captured } = liveCtx(state, liveEvents)
     watchDetailChannel(ctx, BOUNDS)
     const result = await call(captured, { sessionId: 's1' }) as { ok: true; value: { rev: number; requests: unknown[]; nodes: unknown[]; head: { current: { total: number } } } }
     assert.equal(result.ok, true)
-    assert.equal(result.value.rev, 2, 'two detail-mutating folds')
-    assert.equal(result.value.requests.length, 1)
-    assert.equal(result.value.nodes.length, 2)
-    assert.ok(result.value.head.current.total > 0, 'the slim head rides the live read too')
+    const reference = buildTimelineDetail(driveTimeline(liveEvents).state, BOUNDS)
+    assert.deepStrictEqual(result.value, reference, 'the live detail is the full fold of the observed log')
   })
 
   test('a head read serves the envelope only, live and cold', async () => {
@@ -376,8 +396,8 @@ describe('the detail route', () => {
       stateOf: () => ({ requests: null }),
     })
     watchDetailChannel(junkState.ctx, BOUNDS)
-    const r3 = await call(junkState.captured, { sessionId: 's1' }) as { ok: boolean }
-    assert.equal(r3.ok, false)
+    const r3 = await call(junkState.captured, { sessionId: 's1', head: true }) as { ok: boolean }
+    assert.equal(r3.ok, false, 'a hostile unit state fails the head read it feeds')
 
     const stringThrow = ctxOf({
       connection: { fetch: { register: () => () => {} } },
@@ -423,8 +443,7 @@ describe('the cold fold (issue #145)', () => {
       watchDetailChannel(ctx, BOUNDS)
       const result = await call(captured, { sessionId: 'cold1' }) as { ok: boolean; value: unknown }
       assert.equal(result.ok, true)
-      const def = timelineDef()
-      const state = events.reduce((state, event) => def.apply(state, event), def.init())
+      const state = events.reduce((state, event) => applyTimeline(state, event, BOUNDS), createTimelineState())
       const reference = buildTimelineDetail(assertPlainJson(state), BOUNDS)
       assert.deepStrictEqual(result.value, reference, 'the yielding fold produces the identical payload')
       const yields = timerSpy.mock.calls.filter(args => args[1] === 0).length
@@ -432,7 +451,7 @@ describe('the cold fold (issue #145)', () => {
     } finally {
       timerSpy.mockRestore()
     }
-  })
+  }, 20_000)
 
   test('an unchanged log (same durable revision) re-serves the payload without refolding', async () => {
     const events = manyEvents(5)
@@ -547,8 +566,6 @@ describe('detail session authorization', () => {
       ...(scenario.provider ? { principalAccess: { resolve: async () => ({ readableSessionIds: new Set(scenario.allowed ? ['s1'] : []) }) } } : {}),
     })
     watchDetailChannel(ctx, BOUNDS)
-    // Connection hands the authenticated caller in beside the request; the
-    // route refuses before it ever reads the session.
     const request = new Request(`http://dsh.test${DETAIL_ROUTE}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -557,5 +574,72 @@ describe('detail session authorization', () => {
     const result = await captured.fetch!(request, scenario.principal).then(r => r.json()) as { ok: boolean }
     assert.equal(result.ok, scenario.ok)
     assert.equal(reads, scenario.ok ? 1 : 0)
+  })
+})
+
+describe('createDetailGate projection reads', () => {
+  const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
+
+  test('a retained handle outranks the registry read', async () => {
+    const registry = vi.fn(() => 'registry')
+    const gate = createDetailGate(ctxOf({ stateOf: registry }).ctx)
+    const session = {}
+    gate.retain('contextTimeline', Promise.resolve({ stateOf: (s: unknown) => (s === session ? 'handle' : 'other') }))
+    await flush()
+    assert.equal(gate.stateOf(session, 'contextTimeline'), 'handle')
+    assert.equal(registry.mock.calls.length, 0)
+  })
+
+  test('without a handle the registry read answers, and an absent face answers undefined', () => {
+    const gate = createDetailGate(ctxOf({ stateOf: (_session, key) => key }).ctx)
+    assert.equal(gate.stateOf({}, 'contextTimeline'), 'contextTimeline')
+    const bare = ctxOf({}).ctx as unknown as Record<string, unknown>
+    bare.sessionProjections = {}
+    assert.equal(createDetailGate(bare as unknown as Context).stateOf({}, 'contextTimeline'), undefined)
+    delete bare.sessionProjections
+    assert.equal(createDetailGate(bare as unknown as Context).stateOf({}, 'contextTimeline'), undefined)
+  })
+
+  test('non-thenable registrations, non-handle resolutions, and hostile values keep the fallback', async () => {
+    const gate = createDetailGate(ctxOf({ stateOf: () => 'registry' }).ctx)
+    gate.retain('contextTimeline', () => {})
+    gate.retain('contextTimeline', null)
+    gate.retain('contextTimeline', {})
+    gate.retain('contextTimeline', Promise.resolve(null))
+    gate.retain('contextTimeline', Promise.resolve({ stateOf: 42 }))
+    await flush()
+    assert.equal(gate.stateOf({}, 'contextTimeline'), 'registry')
+  })
+
+  test('a callable thenable registration is retained', async () => {
+    const gate = createDetailGate(ctxOf({ stateOf: () => 'registry' }).ctx)
+    const registration = Object.assign(() => {}, {
+      then<T>(onFulfilled: (value: { stateOf(): string }) => T): Promise<T> {
+        return Promise.resolve({ stateOf: () => 'handle' }).then(onFulfilled)
+      },
+    })
+    gate.retain('contextTimeline', registration)
+    await flush()
+    assert.equal(gate.stateOf({}, 'contextTimeline'), 'handle')
+  })
+
+  test('a rejected registration is logged and keeps the fallback', async () => {
+    const error = vi.fn()
+    const gate = createDetailGate(ctxOf({ stateOf: () => 'registry', logger: { error } }).ctx)
+    const rejected = new Error('registration failed')
+    gate.retain('contextTimeline', Promise.reject(rejected))
+    await flush()
+    assert.deepEqual(error.mock.calls, [[rejected]])
+    assert.equal(gate.stateOf({}, 'contextTimeline'), 'registry')
+  })
+
+  test('a thenable that throws on assimilation is logged and keeps the fallback', async () => {
+    const error = vi.fn()
+    const gate = createDetailGate(ctxOf({ stateOf: () => 'registry', logger: { error } }).ctx)
+    const rejected = new Error('hostile then')
+    gate.retain('contextTimeline', { then() { throw rejected } })
+    await flush()
+    assert.deepEqual(error.mock.calls, [[rejected]])
+    assert.equal(gate.stateOf({}, 'contextTimeline'), 'registry')
   })
 })

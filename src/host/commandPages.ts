@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandPage } from '../shared/types'
 import { type ColdReadGate, makeColdReadGate } from './coldRead'
-import { type ConnectionHostFace, registerPostRoute } from './connection'
+import { canReadAccountSession, type ConnectionHostFace, registerPostRoute } from './connection'
 import type { FoldBounds } from './config'
 import { applyTimeline } from './fold'
 import { createTimelineState } from './foldState'
@@ -126,7 +126,7 @@ export function watchCommandPageChannel(
     const query = c.get('sessionQuery') as SessionQueryFace | undefined
     const observe = typeof query?.observeSession === 'function' ? query.observeSession.bind(query) : undefined
     if (observe === undefined) return
-    const handler = async (request: Request): Promise<Response> => {
+    const handler = async (request: Request, principal?: unknown): Promise<Response> => {
       let sessionId: unknown
       let beforeSeq: unknown
       let limit: unknown
@@ -150,6 +150,9 @@ export function watchCommandPageChannel(
         ? Math.min(PAGE_LIMIT_MAX, Math.max(1, Math.floor(limit)))
         : PAGE_LIMIT
       try {
+        if (!await canReadAccountSession(c, principal, sessionId, request.signal)) {
+          return failure('gateway/forbidden', 'session access denied')
+        }
         const persistence: unknown = c.get('sessionPersistence')
         const value = await coldReads.admit(async () => {
           const observation = await observe(sessionId, { projectionMode: 'none' }) as CommandObservation | null

@@ -3,6 +3,7 @@ import { formatCost, type CostCurrency } from '../cost'
 import { type DayTotals } from '../overview'
 import { shiftDayKey } from '../../shared/days'
 import type { ViewKit } from '../viewkit'
+import { IconData } from '../primitives'
 
 export interface OverviewUsageProps {
   days: Record<string, DayTotals>
@@ -45,7 +46,10 @@ export function makeOverviewUsage(kit: ViewKit): (props: OverviewUsageProps) => 
     return (
       <div className="lc-card lc-ov-usage">
         <div className="lc-card-title">
-          <span className="lc-card-title-text">{t('ov.usage.title')}</span>
+          <span className="lc-card-title-text">
+            <IconData size={14} />
+            {t('ov.usage.title')}
+          </span>
         </div>
         {empty || window.length === 0
           ? <div className="lc-empty">{t('ov.usage.empty')}</div>

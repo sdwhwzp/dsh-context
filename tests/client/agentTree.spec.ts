@@ -14,7 +14,7 @@ import {
   familyParentOf,
   fmtDurationCompact,
   layoutForest,
-  lineageOf,
+  neighborhoodOf,
   pressureColorOf,
   providerModelLabelOf,
   sessionTitlesOf,
@@ -786,9 +786,36 @@ describe('layoutForest', () => {
     assert.equal(partial.links.find(l => l.to === 'k2a')?.color, familyHue(1))
     assert.equal(partial.links.find(l => l.to === 'k1')?.color, familyHue(0))
   })
+
+  test('compact geometry tightens cards and links without changing parent centering or band placement', () => {
+    const natural = layoutForest(forestOf([['root'], ['a', 'root'], ['b', 'root'], ['g', 'a']]), 0, true)
+    const naturalPoint = new Map(natural.points.map(p => [p.id, p]))
+    assert.equal(natural.width, 464)
+    assert.equal(natural.cardW, 222)
+    assert.equal(naturalPoint.get('root')?.x, 232)
+    assert.equal(naturalPoint.get('a')?.x, 116)
+    assert.equal(naturalPoint.get('b')?.x, 348)
+    assert.equal(naturalPoint.get('root')?.y, 32)
+    assert.equal(naturalPoint.get('a')?.y, 168)
+    assert.equal(naturalPoint.get('g')?.y, 304)
+    assert.equal(natural.links.find(l => l.to === 'g')?.y1, 260)
+    assert.equal(natural.height, 420)
+
+    const band = layoutForest(forestOf([['root'], ['a', 'root'], ['b', 'root'], ['c', 'root']]), 400, true)
+    const bandPoint = new Map(band.points.map(p => [p.id, p]))
+    assert.equal(band.cardW, 190)
+    assert.equal(bandPoint.get('root')?.x, 200)
+    assert.equal(bandPoint.get('a')?.x, 100)
+    assert.equal(bandPoint.get('b')?.x, 300)
+    assert.equal(bandPoint.get('c')?.x, 200)
+    assert.equal(bandPoint.get('a')?.y, 168)
+    assert.equal(bandPoint.get('c')?.y, 304)
+    assert.equal(band.links.find(l => l.to === 'c')?.y1, 124)
+    assert.equal(band.height, 420)
+  })
 })
 
-describe('lineageOf', () => {
+describe('neighborhoodOf', () => {
   const forest = agentForestOf(snap({
     root: row({}),
     a: row({ parentId: 'root', origin: 'subagent' }),
@@ -798,20 +825,20 @@ describe('lineageOf', () => {
   assert.ok(forest !== null)
 
   test('null or unknown id lights nothing', () => {
-    assert.equal(lineageOf(forest, null), null)
-    assert.equal(lineageOf(forest, 'ghost'), null)
+    assert.equal(neighborhoodOf(forest, null), null)
+    assert.equal(neighborhoodOf(forest, 'ghost'), null)
   })
 
-  test('a leaf lights its ancestor chain only; the root and a mid node light both directions; a parentage cycle terminates', () => {
-    assert.deepEqual([...lineageOf(forest, 'g') ?? []].sort(), ['a', 'g', 'root'])
-    assert.deepEqual([...lineageOf(forest, 'root') ?? []].sort(), ['a', 'b', 'g', 'root'])
-    assert.deepEqual([...lineageOf(forest, 'a') ?? []].sort(), ['a', 'g', 'root'])
+  test('lights the node with its parent and direct children only; a parentage cycle terminates', () => {
+    assert.deepEqual([...neighborhoodOf(forest, 'g') ?? []].sort(), ['a', 'g'])
+    assert.deepEqual([...neighborhoodOf(forest, 'root') ?? []].sort(), ['a', 'b', 'root'])
+    assert.deepEqual([...neighborhoodOf(forest, 'a') ?? []].sort(), ['a', 'g', 'root'])
     const cycle = agentForestOf(snap({
       a: row({ parentId: 'b', origin: 'subagent' }),
       b: row({ parentId: 'a', origin: 'subagent' }),
     }), 'a')
     assert.ok(cycle !== null)
-    assert.deepEqual([...lineageOf(cycle, 'a') ?? []].sort(), ['a', 'b'])
+    assert.deepEqual([...neighborhoodOf(cycle, 'a') ?? []].sort(), ['a', 'b'])
   })
 })
 

@@ -5,6 +5,7 @@ import {
   fleetDetailOf,
   makeFleetDetailFetcher,
   mergeComms,
+  mergeDelegations,
   settledVariantOf,
 } from '../../src/client/fleetDetail'
 import type { FleetDetail } from '../../src/shared/types'
@@ -73,6 +74,27 @@ describe('fleetDetailOf — the sanitizing parse', () => {
     assert.equal(fleetDetailOf({ lastReply: 'nope' })?.lastReply, undefined)
     assert.equal(fleetDetailOf({ roster: 'nope' })?.roster, undefined)
   })
+
+  test('delegations sanitize without becoming messages', () => {
+    const detail = fleetDetailOf({
+      delegations: [
+        null,
+        { seq: 1, time: 10, to: 'one', mode: 'one-shot', label: 'Inspect' },
+        { seq: 2, time: 20, to: 'continuable', mode: 'continuable' },
+        { seq: 3, time: 30, to: 'external', mode: 'external' },
+        { seq: 4, time: 40, to: 'unknown', mode: 'unknown' },
+        { seq: 5, time: 50, to: 'bad', mode: 'mystery' },
+        { seq: 6, time: 60, to: '', mode: 'one-shot' },
+      ],
+    })
+    assert.deepEqual(detail?.delegations, [
+      { seq: 1, time: 10, to: 'one', mode: 'one-shot', label: 'Inspect' },
+      { seq: 2, time: 20, to: 'continuable', mode: 'continuable' },
+      { seq: 3, time: 30, to: 'external', mode: 'external' },
+    ])
+    assert.deepEqual(detail?.messages, [])
+    assert.equal(fleetDetailOf({ delegations: 'nope' })?.delegations, undefined)
+  })
 })
 
 function stubRoute(handler: (body: Record<string, unknown>) => unknown): void {
@@ -98,7 +120,8 @@ describe('makeFleetDetailFetcher', () => {
     })
     await makeFleetDetailFetcher('s1', true)!()
     await makeFleetDetailFetcher('s1')!()
-    assert.deepEqual(bodies, [{ full: true, sessionId: 's1' }, { sessionId: 's1' }])
+    await makeFleetDetailFetcher('s1', false, true)!()
+    assert.deepEqual(bodies, [{ full: true, sessionId: 's1' }, { sessionId: 's1' }, { history: true, sessionId: 's1' }])
 
     assert.equal(makeFleetDetailFetcher(''), undefined)
     vi.stubGlobal('fetch', () => Promise.resolve({ ok: false, status: 503 } as Response))
@@ -177,6 +200,88 @@ describe('FleetDetailCache', () => {
     await Promise.all([cache.fetch('s1', 6), cache.fetch('s1', 6, true)])
     assert.equal(routes.length, 4, 'a newer stamp refreshes each ledger on its own')
   })
+
+  test('history has an independent complete-event ledger and empty ids stay offline', async () => {
+    const bodies: Record<string, unknown>[] = []
+    vi.stubGlobal('fetch', (_url: unknown, init: { body: string }) => {
+      const body = JSON.parse(init.body) as Record<string, unknown>
+      bodies.push(body)
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, value: null }) } as Response)
+    })
+    const cache = new FleetDetailCache()
+    assert.equal(await cache.fetchHistory('', 1), null)
+    assert.equal(bodies.length, 0)
+    await Promise.all([cache.fetchHistory('s1', 2), cache.fetchHistory('s1', 2)])
+    assert.equal(bodies.length, 1)
+    await cache.fetchHistory('s1', 1)
+    assert.equal(bodies.length, 1)
+    await cache.fetchHistory('s1', 3)
+    assert.equal(bodies.length, 2)
+    assert.ok(bodies.every(body => body.history === true))
+    await cache.fetch('s1', 3)
+    assert.equal(bodies.length, 3)
+    assert.equal(bodies[2].full, undefined)
+    assert.equal(bodies[2].history, undefined)
+  })
+
+  test('a failing history read rejects and can retry at the same stamp', async () => {
+    let reads = 0
+    vi.stubGlobal('fetch', () => {
+      reads += 1
+      return Promise.resolve({ ok: false, status: 503 } as Response)
+    })
+    const cache = new FleetDetailCache()
+    await assert.rejects(cache.fetchHistory('s1', 1), /503/)
+    await assert.rejects(cache.fetchHistory('s1', 1), /503/)
+    assert.equal(reads, 2)
+    await assert.rejects(cache.fetchHistory('s1', 2), /503/)
+    assert.equal(reads, 3)
+  })
+
+  test('an obsolete history failure does not discard the replacement cache entry', async () => {
+    let reject!: (reason: Error) => void
+    vi.stubGlobal('fetch', vi.fn()
+      .mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true, value: null }) }))
+    const cache = new FleetDetailCache()
+    const stale = cache.fetchHistory('s1', 1)
+    const fresh = cache.fetchHistory('s1', 2)
+    assert.equal(await fresh, null)
+    reject(new Error('offline'))
+    await assert.rejects(stale, /offline/)
+    assert.equal(cache.fetchHistory('s1', 2), fresh)
+  })
+
+  test('clear drops every ledger so a reused instance reads fresh', async () => {
+    let reads = 0
+    vi.stubGlobal('fetch', () => {
+      reads += 1
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, value: null }) } as Response)
+    })
+    const cache = new FleetDetailCache()
+    await Promise.all([cache.fetch('s1', 5), cache.fetch('s1', 5, true), cache.fetchHistory('s1', 5)])
+    assert.equal(reads, 3)
+    cache.clear()
+    await Promise.all([cache.fetch('s1', 5), cache.fetch('s1', 5, true), cache.fetchHistory('s1', 5)])
+    assert.equal(reads, 6)
+  })
+
+  test('the byte budget evicts the oldest oversized entries and keeps the newest read', async () => {
+    const reads: string[] = []
+    const text = 'x'.repeat(600_000)
+    vi.stubGlobal('fetch', (_url: unknown, init: { body: string }) => {
+      const id = String((JSON.parse(init.body) as { sessionId: string }).sessionId)
+      reads.push(id)
+      const value = { messages: [{ seq: 1, time: 1, kind: 'relay', text }], truncated: false }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, value }) } as Response)
+    })
+    const cache = new FleetDetailCache()
+    for (let i = 0; i < 20; i++) await cache.fetch(`s${i}`, 1)
+    await cache.fetch('s19', 1)
+    assert.equal(reads.length, 20, 'the newest entry replays from the ledger')
+    await cache.fetch('s0', 1)
+    assert.equal(reads.length, 21, 'an entry evicted by bytes refetches')
+  })
 })
 
 describe('settledVariantOf', () => {
@@ -188,6 +293,20 @@ describe('settledVariantOf', () => {
     assert.equal(settledVariantOf('Background subagent x declined the task.'), 'declined')
     assert.equal(settledVariantOf('Background subagent x failed before it finished.'), 'failed')
     assert.equal(settledVariantOf('some future phrasing'), null)
+  })
+})
+
+describe('mergeDelegations', () => {
+  test('keeps the parent log owner as the delegation source', () => {
+    const rows = mergeDelegations(new Map<string, FleetDetail>([
+      ['root', {
+        delegations: [{ seq: 4, time: 100, to: 'child', mode: 'continuable', label: 'Inspect' }],
+        messages: [],
+        truncated: false,
+      }],
+      ['child', { messages: [], truncated: false }],
+    ]))
+    assert.deepEqual(rows, [{ key: 'root:4:child', seq: 4, time: 100, from: 'root', to: 'child', mode: 'continuable', label: 'Inspect' }])
   })
 })
 

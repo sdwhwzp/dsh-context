@@ -1,4 +1,4 @@
-import type { FleetDetail, FleetDescriptor, FleetMemberInfo, FleetMessage } from '../shared/types'
+import type { FleetDelegation, FleetDetail, FleetDescriptor, FleetMemberInfo, FleetMessage } from '../shared/types'
 import { FLEET_ROUTE } from './apiRoutes'
 import { asRecord, numOf } from './services'
 import { lruTouch, lruTrim } from './lru'
@@ -60,6 +60,23 @@ function rosterMemberOf(value: unknown): FleetMemberInfo | null {
   }
 }
 
+function delegationOf(value: unknown): FleetDelegation | null {
+  const rec = asRecord(value)
+  if (rec === null) return null
+  const to = strings(rec.to)
+  if (to === undefined) return null
+  const mode = rec.mode
+  if (mode !== 'one-shot' && mode !== 'continuable' && mode !== 'external') return null
+  const label = strings(rec.label)
+  return {
+    seq: numOf(rec.seq),
+    time: numOf(rec.time),
+    to,
+    mode,
+    ...(label !== undefined ? { label } : {}),
+  }
+}
+
 export function fleetDetailOf(value: unknown): FleetDetail | null {
   const rec = asRecord(value)
   if (rec === null) return null
@@ -81,11 +98,19 @@ export function fleetDetailOf(value: unknown): FleetDetail | null {
       if (member !== null) roster.push(member)
     }
   }
+  const delegations: FleetDelegation[] = []
+  if (Array.isArray(rec.delegations)) {
+    for (const entry of rec.delegations) {
+      const delegation = delegationOf(entry)
+      if (delegation !== null) delegations.push(delegation)
+    }
+  }
   return {
     ...(descriptor !== undefined ? { descriptor } : {}),
     ...(initialPrompt !== undefined ? { initialPrompt } : {}),
     ...(replyText !== undefined ? { lastReply: { time: numOf(reply?.time), text: replyText } } : {}),
     ...(roster.length > 0 ? { roster } : {}),
+    ...(delegations.length > 0 ? { delegations } : {}),
     messages,
     ...(numOf(rec.messagesTotal) > messages.length ? { messagesTotal: numOf(rec.messagesTotal) } : {}),
     truncated: rec.truncated === true,
@@ -95,13 +120,14 @@ export function fleetDetailOf(value: unknown): FleetDetail | null {
 export function makeFleetDetailFetcher(
   sessionId: string,
   full = false,
+  history = false,
 ): (() => Promise<FleetDetail | null>) | undefined {
   if (sessionId === '') return undefined
   return async () => {
     const response = await fetch(FLEET_ROUTE, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...(full ? { full: true } : {}), sessionId }),
+      body: JSON.stringify({ ...(full ? { full: true } : {}), ...(history ? { history: true } : {}), sessionId }),
     })
     if (!response.ok) throw new Error(`dsh-context: fleet route HTTP ${response.status}`)
     const r = asRecord(await response.json())
@@ -116,14 +142,30 @@ export function makeFleetDetailFetcher(
 interface FleetDetailEntry {
   updatedAt: number
   pending: Promise<FleetDetail | null>
+  size: number
 }
 
 const FLEET_LEDGER_MAX = 64
 const FULL_LEDGER_MAX = 4
+const LEDGER_BYTES_MAX = 4 * 1024 * 1024
+
+function detailBytes(detail: FleetDetail | null): number {
+  if (detail === null) return 0
+  let bytes = (detail.initialPrompt?.length ?? 0) + (detail.lastReply?.text.length ?? 0)
+  for (const message of detail.messages) bytes += message.text.length + (message.report?.length ?? 0) + (message.summary?.length ?? 0)
+  return bytes
+}
 
 export class FleetDetailCache {
   private readonly entries = new Map<string, FleetDetailEntry>()
   private readonly fullEntries = new Map<string, FleetDetailEntry>()
+  private readonly historyEntries = new Map<string, FleetDetailEntry>()
+
+  clear(): void {
+    this.entries.clear()
+    this.fullEntries.clear()
+    this.historyEntries.clear()
+  }
 
   fetch(id: string, updatedAt: number, full = false): Promise<FleetDetail | null> {
     const ledger = full ? this.fullEntries : this.entries
@@ -136,15 +178,69 @@ export class FleetDetailCache {
     const pending = fetcher !== undefined
       ? fetcher().catch((): FleetDetail | null => null)
       : Promise.resolve(null)
-    ledger.set(id, { updatedAt, pending })
-    lruTrim(ledger, full ? FULL_LEDGER_MAX : FLEET_LEDGER_MAX)
+    const entry: FleetDetailEntry = { updatedAt, pending, size: 0 }
+    ledger.set(id, entry)
+    void pending.then((detail) => {
+      entry.size = detailBytes(detail)
+      this.trim(ledger, full ? FULL_LEDGER_MAX : FLEET_LEDGER_MAX)
+    })
+    this.trim(ledger, full ? FULL_LEDGER_MAX : FLEET_LEDGER_MAX)
     return pending
+  }
+
+  fetchHistory(id: string, updatedAt: number): Promise<FleetDetail | null> {
+    const known = this.historyEntries.get(id)
+    if (known !== undefined && known.updatedAt >= updatedAt) {
+      lruTouch(this.historyEntries, id)
+      return known.pending
+    }
+    const fetcher = makeFleetDetailFetcher(id, false, true)
+    const pending = fetcher !== undefined
+      ? fetcher()
+      : Promise.resolve(null)
+    const entry: FleetDetailEntry = { updatedAt, pending, size: 0 }
+    this.historyEntries.set(id, entry)
+    void pending.then((detail) => {
+      entry.size = detailBytes(detail)
+      this.trim(this.historyEntries, FLEET_LEDGER_MAX)
+    }, () => {
+      if (this.historyEntries.get(id) === entry) this.historyEntries.delete(id)
+    })
+    this.trim(this.historyEntries, FLEET_LEDGER_MAX)
+    return pending
+  }
+
+  private trim(ledger: Map<string, FleetDetailEntry>, max: number): void {
+    lruTrim(ledger, max)
+    let total = 0
+    for (const entry of ledger.values()) total += entry.size
+    if (total <= LEDGER_BYTES_MAX) return
+    for (const [key, entry] of ledger) {
+      if (total <= LEDGER_BYTES_MAX || ledger.size <= 1) return
+      ledger.delete(key)
+      total -= entry.size
+    }
   }
 }
 
 export interface CommsRow extends FleetMessage {
   key: string
   to: string
+}
+
+export interface FleetDelegationRow extends FleetDelegation {
+  key: string
+  from: string
+}
+
+export function mergeDelegations(details: ReadonlyMap<string, FleetDetail>): FleetDelegationRow[] {
+  const rows: FleetDelegationRow[] = []
+  for (const [from, detail] of details) {
+    for (const delegation of detail.delegations ?? []) {
+      rows.push({ ...delegation, key: `${from}:${delegation.seq}:${delegation.to}`, from })
+    }
+  }
+  return rows
 }
 
 export type SettledVariant = 'finished' | 'finishedFinal' | 'stopped' | 'outOfRoom' | 'declined' | 'failed'
