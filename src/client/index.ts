@@ -1,13 +1,15 @@
 import { createElement as h } from 'react'
-import { DICT_EN, DICT_ZH } from './i18n'
+import { DICTS } from './i18n'
 import { registerContextCommand } from './command'
 import { makeContextModal } from './components/contextModal'
 import { makeOverviewPanel } from './components/overviewPanel'
 import { resetSessionWarm } from './prefetch'
+import { disposeRetention } from './retention'
+import { resetClientScope } from './timelineSource'
 import { makePluginConfigCard } from './components/settingsCard'
 import { watchInsightPage } from './insightPage'
 import { modalStoreOf } from './modalStore'
-import { CONTEXT_VIEW_ID, entrySeated, type ClientCtx } from './services'
+import { CONTEXT_VIEW_ID, asRecord, connectionGenerationStoreOf, entrySeated, type ClientCtx } from './services'
 import { createContextSettings, type ConfigFormsFace, type SettingsField } from './settings'
 import { makeContextView } from './components/contextView'
 import { makeContextJumpButton } from './components/contextJump'
@@ -15,6 +17,8 @@ import { makeFleetView } from './components/fleetView'
 import { watchFleetTab } from './fleetTab'
 import { makeAgentHeads } from './agentHeads'
 import { watchHistoryFaces } from './historyPage'
+import { resetVersionSource } from './versionSource'
+import { registerCostRefresh, resetCostRefresh } from './costRefresh'
 import { watchPlacement } from './placement'
 import { watchSidebarContextTab } from './sidebar'
 import { makeViewKit } from './viewkit'
@@ -43,18 +47,56 @@ import './styles/recom.css'
 
 const NS = 'dsh-context'
 
+function refreshCostDependents(ctx: ClientCtx): void {
+  try {
+    const sessions = ctx.get('sessions') as {
+      refresh?(): unknown
+      getSnapshot?(): unknown
+      refreshProjections?(id: string): unknown
+    } | undefined
+    if (sessions === undefined) return
+    void Promise.resolve(sessions.refresh?.()).catch(() => {})
+    const state = asRecord(sessions.getSnapshot?.())
+    const current = typeof state?.current === 'string' ? state.current : undefined
+    if (current !== undefined) void Promise.resolve(sessions.refreshProjections?.(current)).catch(() => {})
+  } catch {
+  }
+}
+
 const JUMP_SLOT = 'conversation.chat.assistant-actions'
 const JUMP_ID = 'context-jump'
 
 function apply(ctx: ClientCtx): void {
   if (entrySeated(ctx, JUMP_SLOT, JUMP_ID)) return
   ctx.effect(() => {
-    return ctx.locale.register(NS, { zh: DICT_ZH, en: DICT_EN })
+    return ctx.locale.register(NS, DICTS)
   }, 'dsh-context: dictionaries')
   const t = ctx.locale.bind(NS)
 
   const kit = makeViewKit(t, ctx.locale)
-  ctx.effect(() => resetSessionWarm, 'dsh-context: warm-up timers')
+  ctx.effect(() => {
+    const connection = connectionGenerationStoreOf(ctx)
+    let generation = connection.getSnapshot()
+    resetClientScope(generation !== null)
+    const stop = connection.subscribe(() => {
+      const next = connection.getSnapshot()
+      if (next === generation) return
+      generation = next
+      resetSessionWarm()
+      resetClientScope(next !== null)
+    })
+    return () => {
+      stop()
+      resetSessionWarm()
+      resetClientScope(false)
+    }
+  }, 'dsh-context: connection generation')
+  ctx.effect(() => () => {
+    resetVersionSource()
+    resetCostRefresh()
+    disposeRetention()
+  }, 'dsh-context: warm-up timers')
+  ctx.effect(() => registerCostRefresh(() => { refreshCostDependents(ctx) }), 'dsh-context: cost refresh')
   watchHistoryFaces(ctx)
   const settings = createContextSettings()
   const heads = makeAgentHeads()

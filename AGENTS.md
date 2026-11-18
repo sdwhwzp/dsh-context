@@ -10,13 +10,9 @@ This `sdwhwzp/dsh-context` fork follows the [DSH fork synchronization rules](../
   - an open-source agent harness developed by DeepSeek AI.
   - Github: https://github.com/deepseek-ai/deepseek-harness
   - NPM: @deepseek-ai/dsh
-  - MUST ensure the full clone of the DeepSeek Harness repository is available locally, before any work.
-  - MUST always dive deep into the details of dsh source code and dependencies, for its mechanisms, lifecycles, and modules. Ensure every decision is based on the full and actual truth of the dsh source code.
-  - Local clone at `~/dev/deepseek-harness`: `git pull` on `main` to update, and run `pnpm install` after pulling or switching commit/tag. Commits and version tags are available for reference and diff.
-
-- DeepSeek Harness Plugin:
-  - Reference docs: https://deepseek-harness.github.io/deepseek-harness/en/reference/
-  - Example plugins: GitHub topic `dsh-plugin` — https://github.com/topics/dsh-plugin
+  - MUST ensure the full clone of the DeepSeek Harness repository is available locally. Otherwise, stop all the work and refuse to continue any question or task.
+  - MUST always dive deep into the details and full diffs of dsh source code and dependencies, for its mechanisms, lifecycles, and modules. Ensure every decision is based on the full and actual truth of the dsh source code.
+  - Local clone at `~/dev/deepseek-harness`: `git pull` on `master` to update, and run `pnpm install` after pulling or switching commit/tag. Commits and version tags are available for reference and diff.
 
 ## Coding Standard
   
@@ -67,6 +63,9 @@ This `sdwhwzp/dsh-context` fork follows the [DSH fork synchronization rules](../
   
   - Every source and test file stays under 1000 lines.
 
+  ### Memory and Performance
+  - Carefully follow every instructions in `docs/host-client-principles.md`.
+
 
 ## Pre-commit checks
 
@@ -76,9 +75,10 @@ Complete ALL of these before ANY commit:
 - Review the full diff independently: every change necessary, correct, and not over-engineered.
 - Clean up generated temporary files and temporary or unhelpful comments.
 - Load the [code-review](https://github.com/mattpocock/skills/blob/main/skills/engineering/code-review/SKILL.md) skill, run it to review all the changes.
-  - Independently verify or follow each of its suggestions after its multi-axis analysis done. 
+  - Replace the "Under 400 words" with "Under 1000 words" in the prompt for subagents.
+  - Independently verify or follow each of its suggestions until ALL of its multi-axis analysis are done.
   - Tell its subagents to skip typecheck, lint, and test coverage, which the main agent covers.
-  - Tell its subagent about background information and related files (and line numbers if collected), in order to skip time for re-collecting them.
+  - Tell its subagent about background information and related files (and line numbers if collected), eg. user's purposes / intention, untouched but related in-project files, or the facts or related evidences in dsh, in order to skip time for re-collecting them.
 - Run `pnpm run check`: it runs `pnpm run lint`, `pnpm run typecheck` and `pnpm run coverage` concurrently, prints each tool's COMPLETE output, and fails when any of them does (the same logs stay in `.tmp/check-logs/`).
   - Fix every lint and type error, and ensure 100% per-file coverage. Please capture the ALL content of the full output without truncation or tailing.
     - Example for per-file 100% coverage output:
@@ -104,8 +104,8 @@ Complete ALL of these before ANY commit:
 - **Watch**: run `pnpm run watch` to hot-reload the local plugin in dsh while developing in the browser. The watch build is the lean profile — unminified JavaScript, no source maps, no declaration file — which keeps the watcher's resident set low; `pnpm run build` emits the full release artifacts.
 - **Windows**: `pnpm run watch` and `pnpm run web` are pure Node; the bash-backed scripts locate Git for Windows automatically, and `DSH_CTX_BASH` overrides the `bash.exe` path.
 - **Web server**: it may already be running at `http://127.0.0.1:3080/`. To restart, run `pnpm run web` (kills the running `dsh web`, then starts `dsh web --no-open`).
-- **Tokenized URL**: always open the full URL printed at startup, `http://127.0.0.1:3080/?token=XXXXXXXXX`. Save it to `.tmp/dsh-web-url.txt` and read it from there for later browser runs; each restart prints a new token and the old URL stops working, so overwrite the file every time.
-- **Auth-token errors**: kill the dsh process, restart with `dsh web --no-open`, and open the newly printed tokenized URL.
+- **Tokenized URL**: always open the full URL printed at startup, `http://127.0.0.1:3080/?token=XXXXXXXXX`, and read it from `.tmp/dsh-web-url.txt` for later browser runs — `pnpm run web` writes the URL there and removes the file when the server stops or restarts.
+- **Auth-token errors**: restart with `pnpm run web` and open the newly printed tokenized URL.
 
 ## Compatibility - Important!
 - MUST install and work correctly on every supported `@deepseek-ai/dsh` release, with no regressions in runtime dependencies, message parsing, or any user-visible behavior.
@@ -113,9 +113,22 @@ Complete ALL of these before ANY commit:
 - Consider updating dependencies to the latest version where possible — deepseek-harness evolves rapidly.
 
 ## I18n
-- Chinese (Simplified) and English are supported for UI elements.
-- Update all the supported languages translations when adding or modifying the UI elements.
-- Do not keep the deprecated or unused language keys.
+- Be concise and clear in all languages, and avoid unnecessary verbosity.
+- Prefer similar terms or phasing used by DeepSeek Harness.
+- Drop the deprecated or unused language keys.
+- Must ensure all the supported languages are fully translated.
+- Supported languages for UI elements and README
+  - Primarily source languages:
+    - zh: Chinese (Simplified)
+    - en: English
+  - Fallback: English for any unsupported language
+  - Other supported languages, use en as source for translation
+    - ja: Japanese, use zh as source for translation, prefer Kanji(漢字) over Hiragana(ひらがな) and Katakana(カタカナ)
+    - es: Español
+    - fr: Français
+    - de: Deutsch
+    - ru: Русский
+    - pt: Português
 
 ## Docs
 - `docs` directory contains only end-user faced documents.

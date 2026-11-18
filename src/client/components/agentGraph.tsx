@@ -1,11 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from 'react'
 import { IconWorkspaceTreeOutlineRegular, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import { CATS } from '../categories'
 import type { AgentHeads } from '../agentHeads'
 import { makeAgentHeads } from '../agentHeads'
-import { billedTokensOf, displayCurrencyOf, estimateSessionCost, formatCost, type CostCurrency, type ModelBook } from '../cost'
+import { billedTokensOf, displayCurrencyOf, formatCost, toCurrency, type CostCurrency } from '../cost'
 import { avatarLabelsOf, avatarNameOf, type CommsAgent, type CommsRole } from '../commsModel'
-import { useModelPrices } from '../modelPrices'
 import { containHorizontalOverscroll } from '../overscroll'
 import { scrollIntoViewIfPossible, scrollToPos } from '../revealScroll'
 import { openSessionVia, type ClientCtx } from '../services'
@@ -27,6 +26,7 @@ import {
 } from '../agentTree'
 import { AgentInspector } from './agentInspector'
 import { AgentAvatar } from './commsAgent'
+import { useElementSize, useScrollMetrics } from './useElementMetrics'
 function memberStyle(hue: string): CSSProperties {
   return { '--lc-member-hue': hue } as CSSProperties
 }
@@ -90,25 +90,12 @@ export function makeAgentGraph(
     const pinnedId = props.pinnedId ?? null
     const litId = hoverId ?? pinnedId ?? props.focusId ?? null
     const onHover = props.onHover ?? setInternalHover
-    const { book } = useModelPrices()
     const currency = displayCurrencyOf(ctx.locale)
 
     const stageRef = useRef<HTMLDivElement | null>(null)
     const heardFocus = props.focusId ?? null
-    const [stageWidth, setStageWidth] = useState(0)
-    const [stageHeight, setStageHeight] = useState(0)
-    useEffect(() => {
-      /* v8 ignore start */
-      const el = stageRef.current
-      if (el === null || typeof ResizeObserver !== 'function') return
-      const observer = new ResizeObserver(([entry]) => {
-        setStageWidth(entry.contentRect.width)
-        if (!showAll) setStageHeight(entry.contentRect.height)
-      })
-      observer.observe(el)
-      return () => { observer.disconnect() }
-      /* v8 ignore stop */
-    }, [showAll])
+    const stageSize = useElementSize(stageRef, 'content', forest !== null)
+    const stageScroll = useScrollMetrics(stageRef, forest !== null)
     useEffect(() => {
       const el = stageRef.current
       /* v8 ignore next 1 */
@@ -117,8 +104,8 @@ export function makeAgentGraph(
     }, [])
 
     const layout = useMemo(
-      () => (forest !== null ? layoutForest(forest, stageWidth, props.compact === true) : null),
-      [forest, props.compact, stageWidth],
+      () => (forest !== null ? layoutForest(forest, stageSize.width, props.compact === true) : null),
+      [forest, props.compact, stageSize.width],
     )
     const avatarLabels = useMemo(
       () => forest === null
@@ -126,35 +113,11 @@ export function makeAgentGraph(
         : avatarLabelsOf(forest.nodes.map(node => ({ id: node.id, name: avatarIdentityOf(team, node, t).name }))),
       [forest, team, t],
     )
-    const [stageView, setStageView] = useState<{ top: number; height: number; measured: boolean }>({ top: 0, height: 0, measured: false })
-    useLayoutEffect(() => {
-      /* v8 ignore start */
-      const el = stageRef.current
-      if (el === null) return undefined
-      let frame = 0
-      const update = (): void => {
-        frame = 0
-        setStageView(current => (current.top === el.scrollTop && current.height === el.clientHeight && current.measured
-          ? current
-          : { top: el.scrollTop, height: el.clientHeight, measured: true }))
-      }
-      const schedule = (): void => { if (frame === 0) frame = requestAnimationFrame(update) }
-      update()
-      el.addEventListener('scroll', schedule, { passive: true })
-      const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
-      observer?.observe(el)
-      return () => {
-        el.removeEventListener('scroll', schedule)
-        if (frame !== 0) cancelAnimationFrame(frame)
-        observer?.disconnect()
-      }
-      /* v8 ignore stop */
-    }, [layout?.height, showAll])
     const cardHeight = props.compact === true ? AGENT_CARD_COMPACT_H : AGENT_CARD_H
-    const seededHeight = !stageView.measured && forest !== null && forest.nodes.length > GRAPH_WINDOW_SEED ? STAGE_H : 0
-    const viewportHeight = stageView.height > 0 ? stageView.height : seededHeight
+    const seededHeight = !stageScroll.measured && forest !== null && forest.nodes.length > GRAPH_WINDOW_SEED ? STAGE_H : 0
+    const viewportHeight = stageScroll.height > 0 ? stageScroll.height : seededHeight
     const band = viewportHeight > 0
-      ? { from: stageView.top - GRAPH_OVERSCAN, to: stageView.top + viewportHeight + GRAPH_OVERSCAN }
+      ? { from: stageScroll.scrollTop - GRAPH_OVERSCAN, to: stageScroll.scrollTop + viewportHeight + GRAPH_OVERSCAN }
       : null
     const graph = useMemo(() => {
       if (forest === null || layout === null) return null
@@ -192,7 +155,7 @@ export function makeAgentGraph(
 
     if (forest === null || layout === null || graph === null) return null
     const tallFamily = layout.height > STAGE_H
-    const overflowsStage = showAll || (tallFamily && layout.height > stageHeight)
+    const overflowsStage = showAll || (tallFamily && layout.height > stageSize.height)
     const byId = graph.nodes
     /* v8 ignore next 1 */
     const current = forest.nodes.find(n => n.isCurrent) ?? forest.nodes[0]
@@ -346,7 +309,6 @@ export function makeAgentGraph(
                       onOpen={open}
                       onSelect={select}
                       onKeyOpen={keyOpen(node.id)}
-                      book={book}
                       currency={currency}
                       memberName={teammateNameOf(team, node)}
                       avatar={{
@@ -399,7 +361,6 @@ interface CardProps {
   onOpen: (id: string) => void
   onSelect?: (id: string) => void
   onKeyOpen: (ev: KeyboardEvent) => void
-  book: ModelBook | null
   currency: CostCurrency
   memberName?: string
   avatar: CommsAgent
@@ -413,10 +374,12 @@ function AgentCard(props: CardProps): ReactElement {
   const segs = node.head !== null ? barSegments(node.head.parts, pct, pressureColorOf(pct)) : []
   const consumed = node.billed !== null && node.billed > 0 ? node.billed
     : node.costUsage !== null ? billedTokensOf(node.costUsage) : null
-  const cost = estimateSessionCost(node.costUsage, props.book, props.currency)
+  const costRead = node.costRead ?? null
+  const usd = costRead !== null && costRead.ready && costRead.usd !== null ? costRead.usd : null
+  const cost = usd === null ? null : formatCost(toCurrency(usd, props.currency), props.currency)
   const metricBits: string[] = []
   if (consumed !== null && consumed > 0) metricBits.push(props.fmt(consumed))
-  if (cost !== null) metricBits.push(formatCost(cost, props.currency))
+  if (cost !== null) metricBits.push(cost)
   const meta: string[] = []
   if (node.durationMs !== null) meta.push(fmtDurationCompact(node.durationMs))
   if (node.requests > 0) meta.push(props.t('agents.steps', { n: node.requests }))

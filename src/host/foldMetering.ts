@@ -1,6 +1,6 @@
 import type { CostBucketTotals, CostModelUsage, SessionCostUsage, TimingSpan, TimingTotals, ToolTimingTotals } from '../shared/types'
 import { isDeepSeekProvider } from '../shared/providers'
-import type { DecodeKind } from './logShapes'
+import type { DecodeKind, DecodeSpan } from './logShapes'
 import type { TimelineState } from './foldState'
 
 export interface UsageLike {
@@ -24,6 +24,15 @@ export function tokenCountOf(value: unknown): number | null {
   return null
 }
 
+function addBuckets(previous: BilledUsage | undefined, usage: BilledUsage): BilledUsage {
+  return {
+    uncached: (previous?.uncached ?? 0) + usage.uncached,
+    cacheRead: (previous?.cacheRead ?? 0) + usage.cacheRead,
+    cacheWrite: (previous?.cacheWrite ?? 0) + usage.cacheWrite,
+    output: (previous?.output ?? 0) + usage.output,
+  }
+}
+
 const BEIJING_OFFSET_MS = 8 * 3_600_000
 
 export function isBeijingPeak(time: number): boolean {
@@ -44,14 +53,7 @@ export function addBilledUsage(
   const period = isDeepSeekProvider(provider) && !isBeijingPeak(time) ? 'off' : 'peak'
   const models = prev?.[provider] ?? {}
   const periods = models[model] ?? {}
-  const b = periods[period] ?? { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
-  const nextPeriods: CostModelUsage = { ...periods }
-  nextPeriods[period] = {
-    uncached: b.uncached + usage.uncached,
-    cacheRead: b.cacheRead + usage.cacheRead,
-    cacheWrite: b.cacheWrite + usage.cacheWrite,
-    output: b.output + usage.output,
-  }
+  const nextPeriods: CostModelUsage = { ...periods, [period]: addBuckets(periods[period], usage) }
   const nextModels: Record<string, CostModelUsage> = { ...models, [model]: nextPeriods }
   return { ...(prev ?? {}), [provider]: nextModels }
 }
@@ -72,7 +74,8 @@ export function copyCostUsage(cost: SessionCostUsage): SessionCostUsage {
   return copy
 }
 
-export function accumulateCost(st: TimelineState, time: number, usage: BilledUsage): void {
+export function accumulateUsage(st: TimelineState, time: number, usage: BilledUsage): void {
+  st.billedUsage = addBuckets(st.billedUsage, usage)
   const model = st.model
   if (model === undefined) return
   st.cost = addBilledUsage(st.cost, st.provider ?? '', model, time, usage)
@@ -80,18 +83,65 @@ export function accumulateCost(st: TimelineState, time: number, usage: BilledUsa
 
 const TOOL_TIMING_CAP = 16
 
-export const DECODE_KINDS: readonly DecodeKind[] = ['reasoning', 'text', 'toolarg']
-
 export function durOf(from: number, to: number): number {
   if (!Number.isFinite(from) || !Number.isFinite(to)) return 0
   return Math.max(0, to - from)
 }
 
-export function ensureTiming(st: TimelineState): TimingTotals {
-  if (st.timing === undefined) {
-    st.timing = { wallMs: 0, ttftMs: 0, genMs: 0, calls: 0, toolsMs: 0, toolBusyMs: 0, toolCalls: 0, tools: {} }
-  }
-  return st.timing
+function timingCopy(previous: TimingTotals | undefined): TimingTotals {
+  return previous === undefined
+    ? { wallMs: 0, ttftMs: 0, genMs: 0, calls: 0, toolsMs: 0, toolBusyMs: 0, toolCalls: 0, tools: {} }
+    : { ...previous, tools: { ...previous.tools } }
+}
+
+function bookTiming(
+  st: TimelineState,
+  book: (timing: TimingTotals, seedSeq?: number) => void,
+  startSeq?: number,
+): void {
+  st.timing = timingCopy(st.timing)
+  book(st.timing)
+  const postSeed = st.postSeed
+  if (postSeed === undefined || (startSeq !== undefined && startSeq <= postSeed.seq)) return
+  const timing = timingCopy(postSeed.timing)
+  book(timing, postSeed.seq)
+  st.postSeed = { ...postSeed, timing }
+}
+
+export function bookStepTiming(st: TimelineState, wallMs: number, toolBusyMs: number, idleMs: number): void {
+  bookTiming(st, (timing) => {
+    timing.wallMs += wallMs
+    if (timing.toolBusyMs !== undefined) timing.toolBusyMs += toolBusyMs
+    if (idleMs > 0) timing.idleMs = (timing.idleMs ?? 0) + idleMs
+  }, st.stepStart?.seq)
+}
+
+export function bookResponseTiming(
+  st: TimelineState, end: number, output: number | null, firstToken: number | undefined, spans: readonly DecodeSpan[],
+): void {
+  const start = st.stepStart
+  bookTiming(st, (timing, seedSeq) => {
+    timing.calls += 1
+    if (start === undefined || firstToken === undefined
+      || (seedSeq !== undefined && start.seq !== undefined && start.seq <= seedSeq)) return
+    const decodeMs = durOf(firstToken, end)
+    timing.ttftMs += durOf(start.time, firstToken)
+    timing.genMs += decodeMs
+    if (output !== null) {
+      timing.speedMs = (timing.speedMs ?? 0) + decodeMs
+      timing.speedTokens = (timing.speedTokens ?? 0) + output
+    }
+    for (const span of spans) addDecodeSpan(timing, span.kind, durOf(span.start, span.end))
+  })
+}
+
+export function bookToolTiming(st: TimelineState, name: string, start: number, end: number, startSeq?: number): void {
+  const elapsed = durOf(start, end)
+  bookTiming(st, (timing) => {
+    timing.toolsMs += elapsed
+    timing.toolCalls += 1
+    bumpToolTotals(timing, name, elapsed)
+  }, startSeq)
 }
 
 const DECODE_FIELDS: Record<DecodeKind, { ms: 'reasoningMs' | 'textMs' | 'toolArgMs'; n: 'reasoningBlocks' | 'textBlocks' | 'toolArgBlocks' }> = {
@@ -100,13 +150,13 @@ const DECODE_FIELDS: Record<DecodeKind, { ms: 'reasoningMs' | 'textMs' | 'toolAr
   toolarg: { ms: 'toolArgMs', n: 'toolArgBlocks' },
 }
 
-export function addDecode(timing: TimingTotals, kind: DecodeKind, ms: number, blocks: number): void {
+function addDecodeSpan(timing: TimingTotals, kind: DecodeKind, ms: number): void {
   const field = DECODE_FIELDS[kind]
-  if (ms > 0) timing[field.ms] = (timing[field.ms] ?? 0) + ms
-  if (blocks > 0) timing[field.n] = (timing[field.n] ?? 0) + blocks
+  timing[field.ms] = (timing[field.ms] ?? 0) + ms
+  timing[field.n] = (timing[field.n] ?? 0) + 1
 }
 
-export function bumpToolTotals(timing: TimingTotals, name: string, ms: number): void {
+function bumpToolTotals(timing: TimingTotals, name: string, ms: number): void {
   if (name === '__proto__') return
   if (!Object.hasOwn(timing.tools, name)) {
     if (Object.keys(timing.tools).length >= TOOL_TIMING_CAP) {
@@ -131,9 +181,9 @@ export function bumpToolTotals(timing: TimingTotals, name: string, ms: number): 
   timing.tools[name] = { calls: cur.calls + 1, ms: cur.ms + ms }
 }
 
-export const IDLE_MIN_MS = 120_000
+const IDLE_MIN_MS = 120_000
 
-export interface IdleWindow {
+interface IdleWindow {
   start: number
   end: number
 }

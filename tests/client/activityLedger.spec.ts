@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { activityOf, costFullyQuantified } from '../../src/client/activityLedger'
+import { activityOf, costFullyQuantified } from '../../src/client/wire'
 
 describe('activityOf', () => {
   test('absent or non-record values stay null (an older host serves no such key)', () => {

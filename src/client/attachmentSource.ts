@@ -1,16 +1,16 @@
 import { previewAddressOf } from './fileActivity'
 import type { AttachmentRef } from '../shared/attachment'
 import { ATTACHMENT_ROUTE } from './apiRoutes'
+import { postRoute, RouteError } from './route'
 import { asRecord, openResourceVia } from './services'
 import type { AttachmentLocator, AttachmentOpener, ClientCtx } from './services'
+import { clientScopeOf } from './timelineSource'
 
-const CACHE_MAX = 32
+let pending = new AbortController()
 
-const paths = new Map<string, string>()
-
-/** Drop every cached location (tests and account-page teardown). */
 export function clearAttachmentPaths(): void {
-  paths.clear()
+  pending.abort()
+  pending = new AbortController()
 }
 
 export function pathOfValue(value: unknown): string | null {
@@ -21,28 +21,14 @@ export function pathOfValue(value: unknown): string | null {
 export function makeAttachmentLocator(sessionId: string | undefined): AttachmentLocator | undefined {
   if (typeof sessionId !== 'string' || sessionId === '') return undefined
   return async (attachment: AttachmentRef) => {
-    const key = JSON.stringify([sessionId, attachment.attachmentId])
-    const cached = paths.get(key)
-    if (cached !== undefined) return cached
+    const scope = clientScopeOf()
+    if (scope === null) return null
+    const signal = AbortSignal.any([scope, pending.signal])
     try {
-      const response = await fetch(ATTACHMENT_ROUTE, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sessionId, attachmentId: attachment.attachmentId }),
-      })
-      if (!response.ok) return null
-      const body = asRecord(await response.json())
-      if (body === null || body.ok !== true) return null
-      const path = pathOfValue(body.value)
-      if (path === null) return null
-      if (paths.size >= CACHE_MAX) {
-        const oldest = paths.keys().next().value
-        /* v8 ignore next 1 */
-        if (oldest !== undefined) paths.delete(oldest)
-      }
-      paths.set(key, path)
-      return path
-    } catch {
+      const path = await postRoute(ATTACHMENT_ROUTE, { sessionId, attachmentId: attachment.attachmentId }, pathOfValue, { signal })
+      return signal.aborted ? null : path
+    } catch (error) {
+      if (!signal.aborted && error instanceof RouteError && (error.status === 401 || error.status === 403)) clearAttachmentPaths()
       return null
     }
   }
@@ -57,8 +43,10 @@ export function makeAttachmentOpener(
   const openPreview = openResourceVia(ctx)
   if (locate === undefined || openPreview === undefined) return undefined
   return async (attachment: AttachmentRef) => {
+    const scope = clientScopeOf()
+    const signal = pending.signal
     const path = await locate(attachment)
-    if (path === null) return false
+    if (path === null || scope === null || scope.aborted || signal.aborted) return false
     const address = previewAddressOf(path, 'text', false, sessionId, workspace)
     return address !== undefined && openPreview(address)
   }

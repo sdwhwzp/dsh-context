@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
-import { commandRecordsOf, isCommandRecord } from '../../src/client/commandRecords'
+import { commandRecordsOf, isCommandRecord, pageCommandOf } from '../../src/client/commandRecords'
 import { collectionsOf, timelineOf } from '../../src/client/services'
 import type { CommandRecord } from '../../src/shared/types'
 
@@ -18,13 +18,16 @@ test('command wire entries retain valid records and discard malformed siblings i
   assert.deepEqual(timelineOf({ ...full, commands: [...malformed, command] })?.commands, [command])
   assert.deepEqual(timelineOf({ ...full, commands: 'bad' })?.commands, [])
   assert.deepEqual(commandRecordsOf(undefined), [])
+  assert.deepEqual(malformed.map(pageCommandOf), malformed.map(() => null))
+  assert.deepEqual(pageCommandOf(command), command)
 })
 
 test('command fields reject wrong types and nonfinite numbers without rejecting optional omissions', () => {
   assert.equal(isCommandRecord(command), true)
-  for (const field of ['seq', 'time', 'start', 'tool', 'cmd', 'err', 'status']) {
+  for (const field of ['seq', 'time', 'start', 'tool', 'err', 'status']) {
     assert.equal(isCommandRecord({ ...command, [field]: undefined }), false, field)
   }
+  assert.equal(isCommandRecord({ ...command, cmd: undefined }), true)
   assert.equal(isCommandRecord({ ...command, status: 'missing' }), false)
   for (const status of ['completed', 'failed', 'killed']) assert.equal(isCommandRecord({ ...command, status }), true)
   for (const field of ['seq', 'time', 'start', 'resultSeq', 'timeoutMs', 'parent', 'turn', 'step', 'end', 'exit', 'outChars', 'gone']) {

@@ -1,5 +1,7 @@
 import type { PartsPart } from './categories'
-import type { ContextBreakdown, ContextPressure, ContextTimeline, SessionCostUsage, TokenUsage } from '../shared/types'
+import type {
+  ContextBreakdown, ContextPressure, ContextTimeline, SessionCostRead, SessionCostUsage, TokenUsage,
+} from '../shared/types'
 import { mergeCostUsage } from './cost'
 import { headlineOf, occupancyPercent, type Headline } from './headline'
 import { asRecord, contextBreakdownOf, contextPressureOf, numOf, timelineOf, tokenUsageOf, activeMsOf } from './services'
@@ -23,16 +25,17 @@ export interface AgentRow {
   projections?: Record<string, unknown>
 }
 
-export interface AgentIdentity {
+interface AgentIdentity {
   mode: 'one-shot' | 'continuable'
   label?: string
 }
 
-export interface AgentStats {
+interface AgentStats {
   head: Headline | null
   requests: number
   billed: number | null
   costUsage: SessionCostUsage | null
+  costRead?: SessionCostRead | null
   durationMs: number | null
   identity: AgentIdentity | null
   model?: string
@@ -44,6 +47,7 @@ export interface AgentSelfStats {
   billed: number | null
   requests: number
   costUsage?: SessionCostUsage | null
+  costRead?: SessionCostRead | null
   durationMs?: number | null
 }
 
@@ -168,6 +172,7 @@ export function agentStatsOf(values: Record<string, unknown> | undefined): Agent
     requests: timeline !== null ? (timeline.counts?.steps ?? timeline.requests.length) : 0,
     billed: billedOf(usage),
     costUsage: timeline?.cost ?? null,
+    costRead: timeline?.costRead ?? null,
     durationMs: agentDurationOf(values?.subagentTiming),
     identity: agentIdentityOf(values?.subagent),
     ...(timeline !== null && typeof timeline.model === 'string' ? { model: timeline.model } : {}),
@@ -192,11 +197,12 @@ export function agentSelfOf(
     billed: billedOf(usage),
     requests: timeline.counts?.steps ?? timeline.requests.length,
     costUsage: timeline.cost ?? null,
+    costRead: timeline.costRead ?? null,
     durationMs: timeline.timing != null && timeline.timing.wallMs > 0 ? activeMsOf(timeline.timing) : null,
   }
 }
 
-export function catalogOrderOf(values: Record<string, unknown> | undefined): Map<string, number> | null {
+function catalogOrderOf(values: Record<string, unknown> | undefined): Map<string, number> | null {
   const cat = values?.subagentCatalog
   if (!Array.isArray(cat)) return null
   const order = new Map<string, number>()
@@ -208,7 +214,7 @@ export function catalogOrderOf(values: Record<string, unknown> | undefined): Map
   return order.size > 0 ? order : null
 }
 
-export interface AgentChild {
+interface AgentChild {
   id: string
   row: AgentRow
 }
@@ -289,6 +295,7 @@ export function agentForestOf(
       stats.billed = self.billed ?? stats.billed
       stats.requests = self.requests > 0 ? self.requests : stats.requests
       stats.costUsage = self.costUsage ?? stats.costUsage
+      stats.costRead = self.costRead ?? stats.costRead
       stats.durationMs = self.durationMs ?? stats.durationMs
     }
     const subagent = row.origin === 'subagent' || identity !== null
@@ -355,10 +362,11 @@ export function sessionTitlesOf(snapshot: unknown): Map<string, string> {
   return titles
 }
 
-export interface SubagentCostFold {
+interface SubagentCostFold {
   usage: SessionCostUsage | null
   cold: string[]
   count: number
+  costRead: SessionCostRead | null
 }
 
 export function subagentCostFoldOf(
@@ -367,7 +375,9 @@ export function subagentCostFoldOf(
   landed?: ReadonlyMap<string, ContextTimeline>,
 ): SubagentCostFold {
   const byId = asRecord(asRecord(snapshot)?.byId)
-  if (byId === null || currentId === undefined || currentId === '') return { usage: null, cold: [], count: 0 }
+  if (byId === null || currentId === undefined || currentId === '') {
+    return { usage: null, cold: [], count: 0, costRead: null }
+  }
   const rows = new Map<string, AgentRow>()
   for (const key of Object.keys(byId)) {
     const row = agentRowOf(byId[key])
@@ -378,6 +388,11 @@ export function subagentCostFoldOf(
   const cold: string[] = []
   const seen = new Set<string>([currentId])
   const queue = [currentId]
+  let usd = 0
+  let usdAny = false
+  let complete = true
+  let sawRead = false
+  const reads: SessionCostRead[] = []
   for (let i = 0; i < queue.length; i++) {
     const id = queue[i]
     for (const kid of childrenOf.get(id) ?? []) {
@@ -385,27 +400,46 @@ export function subagentCostFoldOf(
       seen.add(kid.id)
       const head = landed?.get(kid.id)
       const values = kid.row.projections
+      let timeline: ContextTimeline | null = null
       if (values?.contextTimeline === undefined) {
         if (head === undefined) cold.push(kid.id)
-        else if (head.cost !== undefined) parts.push(head.cost)
+        else timeline = head
       } else {
-        const cost = timelineOf(values.contextTimeline)?.cost
-        if (cost !== undefined) parts.push(cost)
+        timeline = timelineOf(values.contextTimeline)
+      }
+      if (timeline?.cost !== undefined) parts.push(timeline.cost)
+      const read = timeline?.costRead
+      if (read !== undefined) {
+        sawRead = true
+        reads.push(read)
+        if (!read.ready) complete = false
+        if (read.usd !== null) {
+          usd += read.usd
+          usdAny = true
+        }
       }
       queue.push(kid.id)
     }
   }
-  return { usage: parts.length > 0 ? mergeCostUsage(...parts) : null, cold, count: seen.size - 1 }
+  const costRead: SessionCostRead | null = sawRead || cold.length === 0
+    ? {
+      usd: usdAny ? usd : null,
+      ready: complete && cold.length === 0,
+      ...(reads.some(read => read.faces !== undefined) ? { faces: reads.flatMap(read => read.faces ?? []) } : {}),
+      ...(reads.some(read => read.misses !== undefined) ? { misses: reads.flatMap(read => read.misses ?? []) } : {}),
+    }
+    : null
+  return { usage: parts.length > 0 ? mergeCostUsage(...parts) : null, cold, count: seen.size - 1, costRead }
 }
 
-export interface AgentPoint {
+interface AgentPoint {
   id: string
   x: number
   y: number
   depth: number
 }
 
-export interface AgentLink {
+interface AgentLink {
   to: string
   running: boolean
   color: string
@@ -415,7 +449,7 @@ export interface AgentLink {
   y2: number
 }
 
-export interface AgentLayout {
+interface AgentLayout {
   width: number
   height: number
   cardW: number
@@ -567,7 +601,7 @@ export function neighborhoodOf(forest: AgentForest, id: string | null): Set<stri
   return found ? related : null
 }
 
-export interface BarSeg {
+interface BarSeg {
   key: string
   color: string
   share: number
@@ -606,6 +640,7 @@ export function barSegments(parts: PartsPart[], pct: number | null, fallbackColo
 }
 
 export function sessionsFaceOf(ctx: { get(name: string): unknown }): SessionsFaceLike | null {
+  if (typeof ctx.get !== 'function') return null
   const rec = asRecord(ctx.get('sessions'))
   if (rec === null) return null
   const list = asRecord(rec.list)

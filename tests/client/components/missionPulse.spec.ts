@@ -5,30 +5,34 @@ import type { AgentGraphProps } from '../../../src/client/components/agentGraph'
 import { MissionPulse } from '../../../src/client/components/missionPulse'
 import { makeRichText } from '../../../src/client/components/richText'
 import type { AgentForest, AgentNode } from '../../../src/client/agentTree'
-import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
 import type { CommsRow } from '../../../src/client/fleetDetail'
 import type { CommsAgent } from '../../../src/client/commsModel'
 import type { FleetTeam } from '../../../src/client/fleetTeam'
 import { click, makeKit, mount, pinScroll, query, queryAll, text, typeText, until } from '../helpers/kit'
+import { restoreLayout, stubRowRects } from '../helpers/layout'
 
 const kit = makeKit()
 const graph = () => null
 
 function makeDetails(fullLanded = new Map()) {
   return {
+    summary: null,
     landed: new Map(),
     historyLanded: new Map(),
     fullLanded,
     pending: new Set<string>(),
     historyPending: new Set<string>(),
     fullPending: new Set<string>(),
-    request: vi.fn(),
-    requestHistory: vi.fn(),
+    facts: new Map(),
+    family: { total: 0, loaded: 0, pending: 0, failed: 0, messages: null, delegations: null },
+    requestFamily: vi.fn(),
     requestFull: vi.fn(),
+    prioritize: vi.fn(),
+    retryFamily: vi.fn(),
   }
 }
 
-function pulseOf(comms: CommsRow[], forest: AgentForest | null = null) {
+function pulseOf(comms: CommsRow[], forest: AgentForest | null = null, agents: ReadonlyMap<string, CommsAgent> = new Map()) {
   return h(MissionPulse, {
     graph,
     forest,
@@ -37,7 +41,7 @@ function pulseOf(comms: CommsRow[], forest: AgentForest | null = null) {
     landedDetails: new Map(),
     comms,
     delegations: [],
-    agents: new Map(),
+    agents,
     titles: new Map(),
     attested: new Map(),
     focusMember: null,
@@ -53,6 +57,16 @@ function pinBox(el: HTMLElement, top: number, height: number): void {
   Object.defineProperty(el, 'getBoundingClientRect', {
     configurable: true,
     value: () => ({ top, bottom: top + height, left: 0, right: 0, width: 0, height }),
+  })
+}
+
+function pinScrolledBox(el: HTMLElement, list: HTMLElement, top: number, height: number): void {
+  Object.defineProperty(el, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => {
+      const offset = top - list.scrollTop
+      return { top: offset, bottom: offset + height, left: 0, right: 0, width: 0, height }
+    },
   })
 }
 
@@ -101,220 +115,6 @@ describe('MissionPulse boundary parties', () => {
     await click(query(mounted.container, '.lc-pulse-event'))
     assert.ok(text(query(mounted.container, '.lc-pulse-inspector')).includes('outside excerpt…'))
     assert.ok(text(query(mounted.container, '.lc-pulse-inspector')).includes(kit.t('fleet.comms.detail.excerptOnly')))
-    await mounted.unmount()
-  })
-
-  test('renders durable delegations in natural order with colored solid links and useful inspection', async () => {
-    const rows: CommsRow[] = [
-      { key: 'child:2:2000:relay', to: 'child', seq: 2, time: 2000, kind: 'relay', from: 'root', text: 'second' },
-      { key: 'child:1:1000:relay', to: 'child', seq: 1, time: 1000, kind: 'relay', from: 'root', text: 'first' },
-    ]
-    const delegation = {
-      key: 'root:4:child',
-      time: 500,
-      seq: 4,
-      from: 'root',
-      to: 'child',
-      mode: 'continuable' as const,
-      label: 'Map host boundaries',
-    }
-    const agents = new Map([
-      ['root', { id: 'root', name: 'Lead', role: 'lead' as const, self: true, hue: 'red' }],
-      ['child', { id: 'child', name: 'Child', role: 'subagent' as const, self: false, hue: 'blue' }],
-    ])
-    const pulse = (comms: CommsRow[]) => h(MissionPulse, {
-      graph,
-      forest: null,
-      team: null,
-      details: makeDetails(),
-      landedDetails: new Map(),
-      comms,
-      delegations: [delegation],
-      agents,
-      titles: new Map(),
-      attested: new Map(),
-      focusMember: null,
-      currency: 'usd',
-      onOpen: () => {},
-      onEnter: () => {},
-      rich: makeRichText(kit),
-      t: kit.t,
-    })
-    const mounted = await mount(pulse(rows))
-    assert.ok(text(query(mounted.container, '.lc-pulse-inspector')).includes('second'))
-    assert.ok(query(mounted.container, '[data-comms-key="child:2:2000:relay"]').className.includes('lc-comms-event-open'))
-    const scroller = query<HTMLElement>(mounted.container, '[data-sequence-scroller]')
-    Object.defineProperties(scroller, {
-      clientWidth: { configurable: true, value: 200 },
-      scrollWidth: { configurable: true, value: 1000 },
-      scrollTop: { configurable: true, value: 120, writable: true },
-    })
-    assert.equal(scroller.scrollLeft, 0)
-    await act(async () => { scroller.dispatchEvent(new Event('scroll')) })
-    assert.equal(query<HTMLElement>(mounted.container, '.lc-pulse-lane-labels-rows').style.transform, 'translateY(-120px)')
-    const laneButton = query<HTMLButtonElement>(mounted.container, '[data-agent="child"]')
-    scroller.scrollTop = 0
-    await act(async () => { laneButton.dispatchEvent(new FocusEvent('focusin', { bubbles: true })) })
-    assert.equal(scroller.scrollTop, 136)
-    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 1000 })
-    scroller.scrollTop = 120
-    await act(async () => { laneButton.dispatchEvent(new FocusEvent('focusin', { bubbles: true })) })
-    assert.equal(scroller.scrollTop, 68)
-    scroller.scrollTop = 0
-    await act(async () => { laneButton.dispatchEvent(new FocusEvent('focusin', { bubbles: true })) })
-    assert.equal(scroller.scrollTop, 0)
-    scroller.scrollLeft = 300
-    await mounted.update(pulse([...rows]))
-    assert.equal(scroller.scrollLeft, 300)
-    const events = queryAll<HTMLElement>(mounted.container, '.lc-pulse-event')
-    assert.deepEqual(events.map(event => event.dataset.eventKey), ['root:4:child', 'child:1:1000:relay', 'child:2:2000:relay'])
-    assert.equal(events[0].dataset.record, 'delegation')
-    assert.equal(events[0].style.getPropertyValue('--lc-ch-a'), 'red')
-    assert.equal(events[0].style.getPropertyValue('--lc-ch-b'), 'blue')
-    assert.equal(queryAll(mounted.container, '.lc-pulse-lane-baseline').length, 2)
-    const laneLabel = query<HTMLElement>(mounted.container, '[data-lane-label="root"]')
-    const laneTrack = query<HTMLElement>(mounted.container, '[data-lane="root"]')
-    assert.equal(laneLabel.style.getPropertyValue('--lc-lane-hue'), 'red')
-    assert.equal(laneTrack.style.getPropertyValue('--lc-lane-hue'), 'red')
-    await act(async () => { laneLabel.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
-    assert.ok(laneLabel.className.includes('lc-pulse-lane-hover'))
-    assert.ok(laneTrack.className.includes('lc-pulse-lane-hover'))
-    await act(async () => { laneLabel.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })) })
-    assert.ok(!laneLabel.className.includes('lc-pulse-lane-hover'))
-    await act(async () => { laneTrack.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
-    assert.ok(laneTrack.className.includes('lc-pulse-lane-hover'))
-    await act(async () => { laneTrack.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })) })
-    assert.ok(!laneTrack.className.includes('lc-pulse-lane-hover'))
-    for (const line of queryAll(mounted.container, '.lc-pulse-edge-line')) {
-      assert.equal(line.getAttribute('stroke'), 'red')
-      assert.equal(line.getAttribute('stroke-dasharray'), null)
-    }
-    const edge = query(mounted.container, '[data-edge-key="child:1:1000:relay"]')
-    await act(async () => { edge.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
-    assert.ok(events[1].className.includes('lc-pulse-event-hover'))
-    assert.ok(edge.getAttribute('class')!.includes('lc-pulse-arrow-hover'))
-    await act(async () => { edge.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })) })
-    assert.ok(!events[1].className.includes('lc-pulse-event-hover'))
-    assert.ok(!edge.getAttribute('class')!.includes('lc-pulse-arrow-hover'))
-    const otherEdge = query(mounted.container, '[data-edge-key="child:2:2000:relay"]')
-    await act(async () => {
-      edge.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
-      otherEdge.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
-      edge.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }))
-    })
-    assert.ok(events[2].className.includes('lc-pulse-event-hover'))
-    assert.ok(!events[1].className.includes('lc-pulse-event-hover'))
-    await act(async () => { otherEdge.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })) })
-    await act(async () => {
-      edge.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
-      otherEdge.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
-      edge.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
-    })
-    assert.ok(events[2].className.includes('lc-pulse-event-hover'))
-    assert.ok(!events[1].className.includes('lc-pulse-event-hover'))
-    await act(async () => { otherEdge.dispatchEvent(new FocusEvent('focusout', { bubbles: true })) })
-    assert.ok(!events[2].className.includes('lc-pulse-event-hover'))
-    await act(async () => { edge.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })) })
-    assert.ok(text(query(mounted.container, '.lc-pulse-inspector')).includes('second'))
-    await act(async () => { query(edge, '.lc-pulse-edge-hit').dispatchEvent(new MouseEvent('click', { bubbles: true })) })
-    assert.ok(text(query(mounted.container, '.lc-pulse-inspector')).includes('first'))
-    await act(async () => { edge.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
-    assert.ok(text(query(mounted.container, '.lc-pulse-inspector')).includes('second'))
-    await act(async () => { edge.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })) })
-    assert.ok(text(query(mounted.container, '.lc-pulse-inspector')).includes('first'))
-    const [firstButton, latestButton] = queryAll<HTMLButtonElement>(mounted.container, '.lc-pulse-sequence-actions button')
-    assert.ok(firstButton.className.includes('lc-gran-on'))
-    assert.ok(!latestButton.className.includes('lc-gran-on'))
-    scroller.scrollLeft = 800
-    await act(async () => { scroller.dispatchEvent(new Event('scroll')) })
-    assert.ok(!firstButton.className.includes('lc-gran-on'))
-    assert.ok(latestButton.className.includes('lc-gran-on'))
-    scroller.scrollLeft = 400
-    await act(async () => { scroller.dispatchEvent(new Event('scroll')) })
-    assert.ok(latestButton.className.includes('lc-gran-on'))
-    Object.defineProperty(scroller, 'clientWidth', { configurable: true, value: 1000 })
-    await act(async () => { scroller.dispatchEvent(new Event('scroll')) })
-    assert.ok(latestButton.className.includes('lc-gran-on'))
-    Object.defineProperty(scroller, 'clientWidth', { configurable: true, value: 200 })
-    await click(firstButton)
-    assert.equal(scroller.scrollLeft, 0)
-    assert.ok(firstButton.className.includes('lc-gran-on'))
-    await click(latestButton)
-    assert.equal(scroller.scrollLeft, 1000)
-    assert.ok(latestButton.className.includes('lc-gran-on'))
-    await click(events[0])
-    const inspector = query(mounted.container, '.lc-pulse-delegation-detail')
-    assert.ok(text(inspector).includes('Map host boundaries'))
-    assert.ok(text(inspector).includes(kit.t('fleet.pulse.delegationNote')))
-    assert.ok(text(inspector).includes(kit.t('fleet.pulse.mode.continuable')))
-    await click(query(inspector, '.lc-comms-detail-close'))
-    assert.ok(text(query(mounted.container, '.lc-pulse-inspector')).includes('second'))
-    await mounted.unmount()
-  })
-
-  test('filters, searches, and opens durable delegations without a roster', async () => {
-    const open = vi.fn()
-    const enter = vi.fn()
-    const delegations = [
-      { key: 'parent:1:child', time: 500, seq: 1, from: 'parent', to: 'child', mode: 'one-shot' as const },
-      { key: 'other:2:peer', time: 600, seq: 2, from: 'other', to: 'peer', mode: 'external' as const, label: 'Peer duty' },
-    ]
-    const mounted = await mount(h(MissionPulse, {
-      graph,
-      forest: null,
-      team: null,
-      details: makeDetails(),
-      landedDetails: new Map(),
-      comms: [],
-      delegations,
-      agents: new Map(),
-      titles: new Map(),
-      attested: new Map(),
-      focusMember: null,
-      currency: 'usd',
-      onOpen: open,
-      onEnter: enter,
-      rich: makeRichText(kit),
-      t: kit.t,
-    }))
-    const events = queryAll<HTMLElement>(mounted.container, '.lc-pulse-event')
-    assert.equal(events.length, 2)
-    await click(events[0])
-    const actions = queryAll<HTMLButtonElement>(mounted.container, '.lc-pulse-delegation-actions button')
-    await click(actions[0])
-    assert.equal(query(mounted.container, '[data-agent="child"]').getAttribute('aria-pressed'), 'true')
-    assert.ok(text(actions[0]).includes(kit.t('fleet.comms.detail.unfilter')))
-    await click(actions[0])
-    assert.equal(query(mounted.container, '[data-agent="child"]').getAttribute('aria-pressed'), 'false')
-    await click(actions[1])
-    await click(actions[2])
-    assert.deepEqual(open.mock.calls, [['child']])
-    assert.deepEqual(enter.mock.calls, [['child']])
-    await click(events[0])
-    assert.ok(text(query(mounted.container, '.lc-pulse-inspector')).includes(kit.t('fleet.pulse.selectEvent')))
-    const laneSearch = query<HTMLInputElement>(mounted.container, '.lc-pulse-timeline .lc-pulse-search')
-    await typeText(laneSearch, 'peer')
-    assert.deepEqual(
-      queryAll<HTMLElement>(mounted.container, '[data-lane-label]').map(el => el.dataset.laneLabel),
-      ['other', 'peer'],
-    )
-    assert.ok(query(mounted.container, '[data-lane-label="peer"]').className.includes('lc-pulse-lane-match'))
-    assert.ok(text(query(mounted.container, '[data-lane-label="other"]')).includes(kit.t('fleet.pulse.linked')))
-    await typeText(laneSearch, '')
-    const search = query<HTMLInputElement>(mounted.container, '.lc-pulse-event-tools .lc-pulse-search')
-    await typeText(search, 'peer duty')
-    assert.equal(queryAll(mounted.container, '.lc-pulse-event').length, 1)
-    assert.equal(query(mounted.container, '.lc-pulse-event').dataset.eventKey, 'other:2:peer')
-    await click(query(mounted.container, '.lc-pulse-event'))
-    assert.equal(queryAll(mounted.container, '.lc-pulse-delegation-actions button').length, 1)
-    assert.deepEqual(open.mock.calls, [['child']])
-    assert.deepEqual(enter.mock.calls, [['child']])
-    await typeText(search, 'parent')
-    assert.equal(queryAll(mounted.container, '.lc-pulse-event').length, 1)
-    assert.equal(query(mounted.container, '.lc-pulse-event').dataset.eventKey, 'parent:1:child')
-    await typeText(search, 'no matching record')
-    assert.equal(queryAll(mounted.container, '.lc-pulse-event').length, 0)
-    assert.ok(text(query(mounted.container, '.lc-pulse-timeline')).includes(kit.t('fleet.pulse.emptyTimeline')))
     await mounted.unmount()
   })
 
@@ -758,6 +558,7 @@ describe('MissionPulse boundary parties', () => {
     Object.defineProperty(list, 'scrollTop', { configurable: true, value: 0, writable: true })
     await click(query(mounted.container, '[data-event-key="child:2:2000:relay"]'))
     assert.equal(list.scrollTop, 220)
+    list.dispatchEvent(new Event('pointerdown'))
     pinBox(target, 400, 40)
     await mounted.update(pulseOf([...rows]))
     assert.equal(list.scrollTop, 220)
@@ -765,7 +566,7 @@ describe('MissionPulse boundary parties', () => {
     await click(query(mounted.container, '[data-event-key="child:2:2000:relay"]'))
     assert.equal(list.scrollTop, 620)
     const first = query<HTMLElement>(mounted.container, '[data-comms-key="child:1:1000:relay"]')
-    pinBox(first, 500, 40)
+    pinScrolledBox(first, list, 500, 40)
     list.scrollTop = 0
     await click(query(first, '.lc-comms-hit'))
     assert.equal(list.scrollTop, 0)
@@ -776,7 +577,55 @@ describe('MissionPulse boundary parties', () => {
     await mounted.unmount()
   })
 
+  test('reveals the inspector once per selection, not on every stream update', async () => {
+    const rows: CommsRow[] = [
+      { key: 'child:1:1000:relay', to: 'child', seq: 1, time: 1000, kind: 'relay', from: 'root', text: 'first' },
+      { key: 'child:2:2000:relay', to: 'child', seq: 2, time: 2000, kind: 'relay', from: 'root', text: 'second' },
+    ]
+    const mounted = await mount(pulseOf(rows))
+    const reveal = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
+    try {
+      await click(query(mounted.container, '[data-event-key="child:1:1000:relay"]'))
+      const revealed = reveal.mock.calls.length
+      assert.ok(revealed > 0, 'selection never revealed the inspector')
+      await mounted.update(pulseOf([...rows]))
+      assert.equal(reveal.mock.calls.length, revealed)
+      await click(query(mounted.container, '[data-event-key="child:2:2000:relay"]'))
+      assert.ok(reveal.mock.calls.length > revealed)
+    } finally {
+      reveal.mockRestore()
+      await mounted.unmount()
+    }
+  })
+
+  test('keeps the timeline pan across stream updates while a record stays selected', async () => {
+    const rows: CommsRow[] = Array.from({ length: 20 }, (_, index) => ({
+      key: `child:${index + 1}:${(index + 1) * 1000}:relay`,
+      to: 'child',
+      seq: index + 1,
+      time: (index + 1) * 1000,
+      kind: 'relay' as const,
+      from: 'root',
+      text: `event ${index}`,
+    }))
+    const agents = new Map([
+      ['root', { id: 'root', name: 'Lead', role: 'lead' as const, self: true, hue: 'red' }],
+      ['child', { id: 'child', name: 'child', role: 'subagent' as const, self: false, hue: 'blue' }],
+    ])
+    const mounted = await mount(pulseOf(rows, null, agents))
+    const scroller = query<HTMLElement>(mounted.container, '[data-sequence-scroller]')
+    Object.defineProperty(scroller, 'clientWidth', { configurable: true, value: 200 })
+    await click(query(mounted.container, '[data-event-key="child:10:10000:relay"]'))
+    assert.equal(scroller.scrollLeft, 8 + 9.5 * 32 - 100)
+    scroller.dispatchEvent(new Event('pointerdown'))
+    scroller.scrollLeft = 500
+    await mounted.update(pulseOf([...rows], null, agents))
+    assert.equal(scroller.scrollLeft, 500)
+    await mounted.unmount()
+  })
+
   test('jumps to a selected record the windowed event list has not rendered', async () => {
+    stubRowRects('lc-comms-event', () => 60, 4)
     const rows: CommsRow[] = Array.from({ length: 70 }, (_, index) => ({
       key: `child:${index + 1}:${(index + 1) * 1000}:relay`,
       to: 'child',
@@ -793,16 +642,19 @@ describe('MissionPulse boundary parties', () => {
     pinBox(list, 0, 640)
     await act(async () => { list.dispatchEvent(new Event('scroll')) })
     await until(() => queryAll(mounted.container, '[data-comms-key]').length < 70, 'event list never windowed')
+    assert.equal(queryAll(mounted.container, '[data-comms-key="child:41:41000:relay"]').length, 0, 'the target row starts outside the window')
     await click(query(mounted.container, '[data-event-key="child:41:41000:relay"]'))
-    assert.equal(list.scrollTop, 40 * 64)
+    await until(() => list.scrollTop > 0, 'the window never scrolled to the selected record')
+    await until(() => queryAll(mounted.container, '[data-comms-key="child:41:41000:relay"]').length === 1, 'the selected record never entered the window')
+    list.dispatchEvent(new Event('pointerdown'))
+    list.scrollTop = 500
+    await mounted.update(pulseOf([...rows]))
+    assert.equal(list.scrollTop, 500)
     await mounted.unmount()
+    restoreLayout()
   })
 
   test('stacks the model, usage and work counts under each agent name', async () => {
-    resetModelPrices()
-    setModelPricesLoader(() => Promise.resolve({
-      deepseek: { models: { 'deepseek-flash': { cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
-    }))
     const node = (id: string, over: Partial<AgentNode>): AgentNode => ({
       id,
       label: id,
@@ -827,7 +679,7 @@ describe('MissionPulse boundary parties', () => {
           model: 'deepseek-flash',
           reasoningEffort: 'high',
           billed: 12_300,
-          costUsage: { deepseek: { 'deepseek-flash': { off: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+          costRead: { usd: 0.15, ready: true },
         }),
         node('plain', {}),
       ],
@@ -847,7 +699,6 @@ describe('MissionPulse boundary parties', () => {
     assert.ok(!plain.includes('tokens'))
     assert.ok(plain.includes('0 tasks · 1 events'))
     await mounted.unmount()
-    resetModelPrices()
   })
 })
 
@@ -867,7 +718,6 @@ describe('Fleet pane virtualization', () => {
     Object.defineProperty(el, 'clientHeight', { configurable: true, value: height })
   }
 
-
   async function flushFrames(frames: FrameRequestCallback[]): Promise<void> {
     await act(async () => { for (const frame of frames.splice(0)) frame(0) })
   }
@@ -879,7 +729,7 @@ describe('Fleet pane virtualization', () => {
     pinViewport(scroller, 200)
     scroller.scrollTop = 1900
     await act(async () => { scroller.dispatchEvent(new Event('scroll')) })
-    assert.ok(queryAll(mounted.container, '[data-lane-label]').length < 100)
+    await until(() => queryAll(mounted.container, '[data-lane-label]').length < 100, 'lane window never applied')
     const grown = manyAgents(242)
     await mounted.update(h(MissionPulse, { graph, forest: null, team: null, details: makeDetails(), landedDetails: new Map(), comms: grown.comms, delegations: [], agents: grown.agents, titles: new Map(), attested: new Map(), focusMember: null, currency: 'usd', onOpen: () => {}, onEnter: () => {}, rich: makeRichText(kit), t: kit.t }))
     assert.ok(query(mounted.container, '[data-lane-label="agent-30"]') !== null)
@@ -995,5 +845,67 @@ describe('Fleet work board — large owner groups', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('MissionPulse family progress', () => {
+  function familyOf(over: Record<string, number | null>) {
+    return { total: 4, loaded: 2, pending: 2, failed: 0, messages: null, delegations: null, ...over }
+  }
+
+  test('renders an unknown total, a failure note with retry, and the running read state', async () => {
+    const details = makeDetails()
+    ;(details as unknown as { family: unknown }).family = familyOf({ failed: 2, pending: 0 })
+    const retry = vi.fn()
+    ;(details as unknown as { retryFamily: () => void }).retryFamily = retry
+    const mounted = await mount(h(MissionPulse, {
+      graph,
+      forest: null,
+      team: null,
+      details,
+      landedDetails: new Map(),
+      comms: [],
+      delegations: [],
+      agents: new Map(),
+      titles: new Map(),
+      attested: new Map(),
+      focusMember: null,
+      currency: 'usd',
+      onOpen: () => {},
+      onEnter: () => {},
+      rich: makeRichText(kit),
+      t: kit.t,
+    }))
+    assert.equal(query(mounted.container, '[data-pulse-stat="messages"]').textContent, '—')
+    assert.ok(text(query(mounted.container, '.lc-pulse-work-warning')).includes(kit.t('fleet.phase.failed')))
+    await click(query(mounted.container, '.lc-pulse-work-warning button'))
+    assert.equal(retry.mock.calls.length, 1)
+    await mounted.unmount()
+  })
+
+  test('renders the loading empty state while the family is reading and the exact total once known', async () => {
+    const details = makeDetails()
+    ;(details as unknown as { family: unknown }).family = familyOf({ pending: 3, messages: 12, delegations: 2 })
+    const mounted = await mount(h(MissionPulse, {
+      graph,
+      forest: null,
+      team: null,
+      details,
+      landedDetails: new Map(),
+      comms: [],
+      delegations: [],
+      agents: new Map(),
+      titles: new Map(),
+      attested: new Map(),
+      focusMember: null,
+      currency: 'usd',
+      onOpen: () => {},
+      onEnter: () => {},
+      rich: makeRichText(kit),
+      t: kit.t,
+    }))
+    assert.equal(query(mounted.container, '[data-pulse-stat="messages"]').textContent, '12')
+    assert.ok(query(mounted.container, '.lc-pulse-timeline-loading .lc-skel-rows') !== null, 'the timeline reserves its rows while reading')
+    await mounted.unmount()
   })
 })

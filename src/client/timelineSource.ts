@@ -1,8 +1,133 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
-import type { ContextTimeline, ContextTimelineDetail } from '../shared/types'
-import { DETAIL_ROUTE } from './apiRoutes'
+import type { ContextTimeline, ContextTimelineDetail, HeaderRecord, HeaderTool, RequestRecord, SurfaceNode, SurfaceNodeWindow, SystemPromptNode } from '../shared/types'
+import { CATS } from '../shared/categories'
+import type { ContextDelta } from '../shared/delta'
+import type { IncrementCat } from '../shared/increment'
+import { DELTA_ROUTE, DETAIL_ROUTE, FACTS_ROUTE } from './apiRoutes'
+import { subscribeInvalidations } from './invalidation'
+import { noteCostPending } from './costRefresh'
+import { makeRetentionCache } from './retention'
+import { postRoute, postRouteQuietly, RouteError } from './route'
 import type { SessionStandardProps } from './services'
 import { asRecord, collectionsOf, projectionOf, timelineOf } from './services'
+import { commandRecordsOf } from './commandRecords'
+
+export type FactPart = 'requests' | 'nodes' | 'events' | 'files' | 'commands' | 'spans'
+
+export interface FactWindow {
+  requestsTail?: number
+  nodesTail?: number
+  eventsTail?: number
+  filesTail?: number
+  commandsTail?: number
+  spansTail?: number
+}
+
+interface FactParts {
+  head?: ContextTimeline
+  series?: RequestRecord[]
+  requests?: RequestRecord[]
+  nodes?: SurfaceNodeWindow
+  events?: ContextTimeline['events']
+  files?: { fileOps: NonNullable<ContextTimeline['fileOps']>; fileOpsFloor?: number }
+  commands?: { commands: NonNullable<ContextTimeline['commands']>; commandsFloor?: number; commandStats?: ContextTimeline['commandStats'] }
+  spans?: NonNullable<ContextTimeline['spans']>
+}
+
+export interface FactsRead {
+  rev: number
+  live: boolean
+  asOfSeq?: number
+  parts: FactParts
+  missing?: readonly string[]
+}
+
+function numOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function rowsOf(value: unknown): Record<string, unknown>[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return value.filter((entry): entry is Record<string, unknown> => entry !== null && typeof entry === 'object')
+}
+
+function nodesPartOf(value: unknown): SurfaceNodeWindow | undefined {
+  const data = asRecord(value)
+  if (data === null) return undefined
+  const nodes = rowsOf(data.nodes) as SurfaceNode[] | undefined
+  const archive = rowsOf(data.archive) as SurfaceNode[] | undefined
+  if (nodes === undefined || archive === undefined) return undefined
+  return {
+    nodes,
+    archive,
+    droppedNodes: numOf(data.droppedNodes) ?? 0,
+    ...(numOf(data.surfaceFloor) === undefined ? {} : { surfaceFloor: numOf(data.surfaceFloor) }),
+    ...(numOf(data.archiveFloor) === undefined ? {} : { archiveFloor: numOf(data.archiveFloor) }),
+  }
+}
+
+export function factsOf(value: unknown): FactsRead | null {
+  const data = asRecord(value)
+  if (data === null) return null
+  const rev = numOf(data.rev)
+  if (rev === undefined) return null
+  const parts = asRecord(data.parts)
+  if (parts === null) return null
+  const head = parts.head === undefined ? undefined : timelineOf(parts.head)
+  const series = rowsOf(parts.series) as RequestRecord[] | undefined
+  const requests = rowsOf(parts.requests) as RequestRecord[] | undefined
+  const events = rowsOf(parts.events) as ContextTimeline['events'] | undefined
+  const spans = rowsOf(parts.spans) as NonNullable<ContextTimeline['spans']> | undefined
+  const files = asRecord(parts.files)
+  const fileOps = files === null ? undefined : rowsOf(files.fileOps) as NonNullable<ContextTimeline['fileOps']> | undefined
+  const commands = asRecord(parts.commands)
+  const commandRows = commands !== null && Array.isArray(commands.commands) ? commandRecordsOf(commands.commands) : undefined
+  const stats = asRecord(commands?.commandStats)
+  const nodes = nodesPartOf(parts.nodes)
+  const fileOpsFloor = files === null ? undefined : numOf(files.fileOpsFloor)
+  const commandsFloor = commands === null ? undefined : numOf(commands.commandsFloor)
+  const missing = Array.isArray(data.missing) ? data.missing.filter((entry): entry is string => typeof entry === 'string') : undefined
+  return {
+    rev,
+    live: data.live === true,
+    ...(numOf(data.asOfSeq) === undefined ? {} : { asOfSeq: numOf(data.asOfSeq) }),
+    parts: {
+      ...(head === null || head === undefined ? {} : { head }),
+      ...(series === undefined ? {} : { series }),
+      ...(requests === undefined ? {} : { requests }),
+      ...(nodes === undefined ? {} : { nodes }),
+      ...(events === undefined ? {} : { events }),
+      ...(fileOps === undefined
+        ? {}
+        : {
+          files: {
+            fileOps,
+            ...(fileOpsFloor === undefined ? {} : { fileOpsFloor }),
+          },
+        }),
+      ...(commandRows === undefined
+        ? {}
+        : {
+          commands: {
+            commands: commandRows,
+            ...(commandsFloor === undefined ? {} : { commandsFloor }),
+            ...(stats === null
+              ? {}
+              : {
+                commandStats: {
+                  runs: numOf(stats.runs) ?? 0,
+                  failed: numOf(stats.failed) ?? 0,
+                  ms: numOf(stats.ms) ?? 0,
+                  bg: numOf(stats.bg) ?? 0,
+                },
+              }),
+          },
+        }),
+      ...(spans === undefined ? {} : { spans }),
+    },
+    ...(missing === undefined || missing.length === 0 ? {} : { missing }),
+  }
+}
 
 export function detailOf(value: unknown): ContextTimelineDetail | null {
   const data = asRecord(value)
@@ -18,31 +143,120 @@ export function detailOf(value: unknown): ContextTimelineDetail | null {
 
 export function makeDetailFetcher(
   sessionId: string,
-): (() => Promise<ContextTimelineDetail | null>) | undefined {
+): CoreFetcher | undefined {
   if (sessionId === '') return undefined
-  return async () => {
-    const response = await fetch(DETAIL_ROUTE, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionId }),
-    })
-    if (!response.ok) throw new Error(`dsh-context: detail route HTTP ${response.status}`)
-    const r = asRecord(await response.json())
-    if (r === null || r.ok !== true) throw new Error('dsh-context: detail read failed')
-    if (r.value === null) return null
-    const detail = detailOf(r.value)
-    if (detail === null) throw new Error('dsh-context: detail read malformed')
-    return detail
+  return signal => postRoute(DETAIL_ROUTE, { sessionId }, detailOf, { label: 'detail', signal })
+}
+
+export type DeltaFetcher = (seq: number | null, baseSeq: number | null) => Promise<ContextDelta | null>
+
+function countRecordOf(value: unknown): Record<IncrementCat, number> | null {
+  const record = asRecord(value)
+  if (record === null) return null
+  const out = {} as Record<IncrementCat, number>
+  for (const cat of CATS) {
+    const n = numOf(record[cat.key])
+    if (n === undefined) return null
+    out[cat.key] = n
+  }
+  return out
+}
+
+function nullableOf(value: unknown): Record<string, unknown> | null | undefined {
+  if (value === null) return null
+  return asRecord(value) ?? undefined
+}
+
+export function deltaOf(value: unknown): ContextDelta | null {
+  const data = asRecord(value)
+  if (data === null) return null
+  const added = rowsOf(data.added) as SurfaceNode[] | undefined
+  const viewNodes = rowsOf(data.viewNodes) as SurfaceNode[] | undefined
+  const viewHeader = nullableOf(data.viewHeader)
+  const viewSystem = nullableOf(data.viewSystem)
+  const system = nullableOf(data.system)
+  const tools = rowsOf(data.tools) as HeaderTool[] | undefined
+  const header = nullableOf(data.header)
+  const counts = countRecordOf(data.counts)
+  const tokens = countRecordOf(data.tokens)
+  const removedCounts = countRecordOf(data.removedCounts)
+  const tokenUp = countRecordOf(data.tokenUp)
+  const tokenDown = countRecordOf(data.tokenDown)
+  const items = numOf(data.items)
+  const total = numOf(data.total)
+  if (added === undefined || viewNodes === undefined
+    || viewHeader === undefined || viewSystem === undefined || system === undefined
+    || tools === undefined || header === undefined
+    || counts === null || tokens === null || removedCounts === null
+    || tokenUp === null || tokenDown === null
+    || items === undefined || total === undefined) return null
+  return {
+    added,
+    viewNodes,
+    viewHeader: viewHeader as HeaderRecord | null,
+    viewSystem: viewSystem as SystemPromptNode | null,
+    system: system as SystemPromptNode | null,
+    tools,
+    header: header as HeaderRecord | null,
+    counts,
+    tokens,
+    removedCounts,
+    tokenUp,
+    tokenDown,
+    items,
+    total,
   }
 }
 
-export interface DetailSnap {
+export function makeDeltaFetcher(sessionId: string): DeltaFetcher | undefined {
+  if (sessionId === '') return undefined
+  return async (seq, baseSeq) => {
+    const signal = clientScopeOf()
+    if (signal === null) return null
+    const delta = await postRouteQuietly(DELTA_ROUTE, { sessionId, seq, baseSeq }, deltaOf, { label: 'delta', signal })
+    return signal.aborted ? null : delta
+  }
+}
+
+type CoreRead = FactsRead | ContextTimelineDetail
+
+export interface FactsFetchers {
+  core: (signal?: AbortSignal) => Promise<CoreRead | null>
+  part: (part: FactPart, window: FactWindow, signal?: AbortSignal) => Promise<CoreRead | null>
+  legacy?: CoreFetcher
+}
+
+export function makeFactsFetchers(sessionId: string): FactsFetchers | undefined {
+  if (sessionId === '') return undefined
+  const read = (parts: readonly (FactPart | 'head' | 'series')[], signal?: AbortSignal, window?: FactWindow): Promise<CoreRead | null> => postRoute(
+    FACTS_ROUTE,
+    { sessionId, parts, ...(window === undefined ? {} : { window }) },
+    value => factsOf(value) ?? detailOf(value),
+    { label: 'facts', signal },
+  )
+  return {
+    core: signal => read(['head', 'series'], signal),
+    part: (part, window, signal) => read([part], signal, window),
+    legacy: makeDetailFetcher(sessionId) as CoreFetcher,
+  }
+}
+
+type CoreFetcher = (signal?: AbortSignal) => Promise<ContextTimelineDetail | null>
+
+type StoreFetcher = CoreFetcher | FactsFetchers
+
+function accessDenied(error: unknown): boolean {
+  return error instanceof RouteError && (error.status === 401 || error.status === 403)
+}
+
+interface DetailSnap {
   detail: ContextTimelineDetail | null
   failed: boolean
   pending: boolean
+  denied: boolean
 }
 
-const EMPTY_SNAP: DetailSnap = { detail: null, failed: false, pending: false }
+const EMPTY_SNAP: DetailSnap = { detail: null, failed: false, pending: false, denied: false }
 
 const DETAIL_DEBOUNCE_MS = 300
 
@@ -50,15 +264,120 @@ const EAGER_DELAY_MS = 16
 
 const CATCH_UP_MS = 1_000
 
+const PART_RETRY_MS = 1_000
+
+const PART_RETRY_LIMIT = 3
+
+function emptyDetail(rev: number, head?: ContextTimeline, requests?: RequestRecord[]): ContextTimelineDetail {
+  return {
+    rev,
+    ...(head === undefined ? {} : { head }),
+    requests: requests ?? [],
+    events: [],
+    nodes: [],
+    droppedNodes: 0,
+    archive: [],
+  }
+}
+
+function seriesHasBreakdown(series: readonly RequestRecord[]): boolean {
+  return series.every(request => typeof request.system === 'number' || typeof request.assistant === 'number' || typeof request.tool === 'number')
+}
+
+function sameWindow(a: FactWindow, b: FactWindow): boolean {
+  return a.requestsTail === b.requestsTail && a.nodesTail === b.nodesTail && a.eventsTail === b.eventsTail
+    && a.filesTail === b.filesTail && a.commandsTail === b.commandsTail && a.spansTail === b.spansTail
+}
+
+function carriedDetail(prev: ContextTimelineDetail, facts: FactsRead): ContextTimelineDetail {
+  return {
+    ...prev,
+    rev: facts.rev,
+    head: facts.parts.head ?? prev.head,
+    requests: facts.parts.series ?? prev.requests,
+  }
+}
+
+function detailFromFacts(facts: FactsRead, prev: ContextTimelineDetail | null): ContextTimelineDetail {
+  const base = prev === null
+    ? emptyDetail(facts.rev, facts.parts.head, facts.parts.series ?? facts.parts.requests)
+    : carriedDetail(prev, facts)
+  return mergeFactsInto(base, facts)
+}
+
+function withoutPart(detail: ContextTimelineDetail, part: FactPart): ContextTimelineDetail {
+  if (part === 'requests') return detail
+  const next: ContextTimelineDetail = { ...detail }
+  switch (part) {
+    case 'events':
+      next.events = []
+      break
+    case 'nodes':
+      next.nodes = []
+      next.droppedNodes = 0
+      next.archive = []
+      delete next.surfaceFloor
+      delete next.archiveFloor
+      break
+    case 'files':
+      delete next.fileOps
+      delete next.fileOpsFloor
+      break
+    case 'commands':
+      delete next.commands
+      delete next.commandsFloor
+      delete next.commandStats
+      break
+    case 'spans':
+      delete next.spans
+      break
+  }
+  return next
+}
+
+function mergeFactsInto(detail: ContextTimelineDetail, facts: FactsRead): ContextTimelineDetail {
+  const parts = facts.parts
+  const next: ContextTimelineDetail = {
+    ...detail,
+    ...(parts.requests === undefined ? {} : { requests: parts.requests }),
+    ...(parts.events === undefined ? {} : { events: parts.events }),
+    ...(parts.nodes === undefined
+      ? {}
+      : {
+        nodes: parts.nodes.nodes,
+        droppedNodes: parts.nodes.droppedNodes,
+        archive: parts.nodes.archive,
+        surfaceFloor: parts.nodes.surfaceFloor,
+        archiveFloor: parts.nodes.archiveFloor,
+      }),
+    ...(parts.files === undefined
+      ? {}
+      : {
+        fileOps: parts.files.fileOps,
+        fileOpsFloor: parts.files.fileOpsFloor,
+      }),
+    ...(parts.commands === undefined
+      ? {}
+      : {
+        commands: parts.commands.commands,
+        commandsFloor: parts.commands.commandsFloor,
+        commandStats: parts.commands.commandStats,
+      }),
+    ...(parts.spans === undefined ? {} : { spans: parts.spans }),
+  }
+  return next
+}
+
 export class DetailStore {
   private detail: ContextTimelineDetail | null = null
   private acceptedRev = -1
   private wantedRev = -1
   private targetRev = -1
   private lastHeadRev = -1
-  private generation = 0
+  private controller = new AbortController()
   private failed = false
-  private inFlight = false
+  private denied = false
+  private coreFlight: AbortSignal | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   private failures = 0
   private parked = false
@@ -66,14 +385,45 @@ export class DetailStore {
   private background = false
   private catchUp: ReturnType<typeof setTimeout> | null = null
   private catchUpTarget = -1
+  private factsUnavailable = false
+  private readonly wantedParts = new Map<FactPart, FactWindow>()
+  private readonly partRev = new Map<FactPart, number>()
+  private readonly partRetries = new Map<FactPart, ReturnType<typeof setTimeout>>()
+  private readonly partFailures = new Map<FactPart, number>()
+  private readonly inflightParts = new Set<FactPart>()
+  private readonly unavailableParts = new Set<FactPart>()
   private readonly listeners = new Set<() => void>()
   private snap: DetailSnap = EMPTY_SNAP
 
   constructor(
-    private readonly fetcher: (() => Promise<ContextTimelineDetail | null>) | undefined,
+    private readonly fetcher: StoreFetcher | undefined,
     private readonly baseDelay: number = DETAIL_DEBOUNCE_MS,
     private readonly eagerFirst: boolean = false,
+    private readonly onResize?: () => void,
+    private readonly scope?: AbortSignal | null,
   ) {}
+
+  private get facts(): FactsFetchers | undefined {
+    return this.fetcher !== undefined && typeof this.fetcher === 'object' ? this.fetcher : undefined
+  }
+
+  private get legacy(): CoreFetcher | undefined {
+    return typeof this.fetcher === 'function' ? this.fetcher : this.fetcher?.legacy
+  }
+
+  private get inFlight(): boolean {
+    return this.coreFlight !== null
+  }
+
+  readonly ensurePart = (part: FactPart, window: FactWindow = {}): void => {
+    if (this.facts === undefined || this.factsUnavailable) return
+    const prev = this.wantedParts.get(part)
+    const same = prev !== undefined && sameWindow(prev, window)
+    if (same && this.partRev.get(part) === this.acceptedRev) return
+    this.wantedParts.set(part, window)
+    if (prev !== undefined && !same) this.partRev.delete(part)
+    this.fetchWantedParts()
+  }
 
   readonly subscribe = (fn: () => void): (() => void) => {
     this.listeners.add(fn)
@@ -83,6 +433,7 @@ export class DetailStore {
         this.resetLedger()
         this.failures = 0
       }
+      this.fetchWantedParts()
     }
     return () => {
       this.listeners.delete(fn)
@@ -110,10 +461,7 @@ export class DetailStore {
     if (rev > this.lastHeadRev) this.lastHeadRev = rev
     if (rev > this.wantedRev) this.wantedRev = rev
     if (this.inFlight) return
-    if (this.timer !== null) {
-      clearTimeout(this.timer)
-      this.timer = null
-    }
+    this.clearTimer()
     this.parked = false
     if (this.detail === null || rev > this.acceptedRev) void this.fire()
   }
@@ -122,27 +470,59 @@ export class DetailStore {
     return this.bytes
   }
 
-  readonly retry = (): void => {
-    this.background = false
-    this.failures = 0
-    if (this.detail !== null) return
-    if (this.timer !== null) {
-      clearTimeout(this.timer)
-      this.timer = null
+  refresh(): void {
+    if (!this.active) {
+      this.release()
+      return
+    }
+    this.partRev.clear()
+    this.unavailableParts.clear()
+    this.clearPartRetries()
+    this.clearTimer()
+    if (this.detail !== null) {
+      this.failed = false
+      this.failures = 0
+      this.wantedRev = Math.max(this.wantedRev, this.acceptedRev)
     }
     if (!this.inFlight) void this.fire()
   }
 
+  readonly retry = (): void => {
+    this.background = false
+    this.failures = 0
+    if (this.detail !== null) {
+      this.clearPartRetries()
+      this.unavailableParts.clear()
+      this.fetchWantedParts()
+      return
+    }
+    this.clearTimer()
+    if (!this.inFlight) void this.fire()
+  }
+
   private resetLedger(): void {
+    this.clearTimer()
     this.clearCatchUp()
+    this.clearPartRetries()
     this.catchUpTarget = -1
-    this.generation++
+    this.controller.abort()
+    this.controller = new AbortController()
     this.acceptedRev = -1
     this.wantedRev = -1
     this.detail = null
     this.bytes = 0
     this.failed = false
-    this.snap = EMPTY_SNAP
+    this.partRev.clear()
+    this.unavailableParts.clear()
+    this.inflightParts.clear()
+  }
+
+  private deny(): void {
+    this.coreFlight = null
+    this.resetLedger()
+    this.denied = true
+    this.failed = true
+    this.emit()
   }
 
   get active(): boolean {
@@ -154,24 +534,25 @@ export class DetailStore {
   }
 
   release(): void {
-    this.clearCatchUp()
-    this.catchUpTarget = -1
-    if (this.timer !== null) {
-      clearTimeout(this.timer)
-      this.timer = null
-    }
+    this.coreFlight = null
     this.resetLedger()
     this.failures = 0
+    this.emit()
   }
 
   private park(): void {
     this.parked = true
     this.clearCatchUp()
+    this.clearPartRetries()
+    this.clearTimer()
+    this.emit()
+  }
+
+  private clearTimer(): void {
     if (this.timer !== null) {
       clearTimeout(this.timer)
       this.timer = null
     }
-    this.emit()
   }
 
   private clearCatchUp(): void {
@@ -182,7 +563,7 @@ export class DetailStore {
   }
 
   private schedule(): void {
-    if (this.parked || this.timer !== null) return
+    if (this.parked || this.timer !== null || this.scope === null || this.scope?.aborted === true) return
     if (this.eagerFirst && this.detail === null && !this.failed) {
       this.timer = setTimeout(() => {
         this.timer = null
@@ -198,26 +579,171 @@ export class DetailStore {
     this.emit()
   }
 
+  private fetchWantedParts(): void {
+    const facts = this.facts
+    if (facts === undefined || this.detail === null || this.acceptedRev < 0 || this.factsUnavailable) return
+    for (const [part, window] of this.wantedParts) {
+      if (this.unavailableParts.has(part) || this.inflightParts.has(part) || this.partRev.get(part) === this.acceptedRev) continue
+      void this.fetchPart(facts, part, window)
+    }
+  }
+
+  private disableFacts(): void {
+    this.factsUnavailable = true
+    this.wantedParts.clear()
+  }
+
+  private async legacyRead(signal: AbortSignal): Promise<ContextTimelineDetail | null> {
+    const legacy = this.legacy
+    return legacy === undefined ? null : legacy(signal)
+  }
+
+  private async fetchCore(signal: AbortSignal): Promise<{ detail: ContextTimelineDetail | null; disable: boolean }> {
+    const facts = this.facts
+    if (facts !== undefined && !this.factsUnavailable) {
+      let read: CoreRead | null = null
+      let threw = false
+      try {
+        read = await facts.core(signal)
+      } catch (error: unknown) {
+        if (signal.aborted || accessDenied(error)) throw error
+        threw = true
+        if (error instanceof RouteError && error.status === 404) {
+          return { detail: await this.legacyRead(signal), disable: true }
+        }
+      }
+      if (signal.aborted) return { detail: null, disable: false }
+      if (!threw) {
+        if (read === null) {
+          const detail = await this.legacyRead(signal)
+          return { detail, disable: detail === null }
+        }
+        if (!('parts' in read)) return { detail: read, disable: true }
+        if ('missing' in read && read.missing?.includes('series') === true) {
+          return { detail: await this.legacyRead(signal), disable: true }
+        }
+        return { detail: detailFromFacts(read, this.detail), disable: false }
+      }
+    }
+    return { detail: await this.legacyRead(signal), disable: false }
+  }
+
+  private async fetchPart(facts: FactsFetchers, part: FactPart, window: FactWindow): Promise<void> {
+    const signal = this.controller.signal
+    const rev = this.acceptedRev
+    this.inflightParts.add(part)
+    this.emit()
+    try {
+      const read = await facts.part(part, window, signal)
+      if (signal.aborted || this.acceptedRev !== rev) return
+      if (read === null) {
+        this.schedulePartRetry(part)
+        return
+      }
+      if (!('parts' in read)) {
+        this.unavailableParts.add(part)
+        this.dropPart(part)
+        return
+      }
+      if (read.rev !== rev) {
+        this.wantedRev = Math.max(this.wantedRev, read.rev)
+        this.schedule()
+        return
+      }
+      if (read.missing?.includes(part) === true) {
+        this.unavailableParts.add(part)
+        this.dropPart(part)
+        return
+      }
+      if (read.parts[part] === undefined) {
+        this.unavailableParts.add(part)
+        this.dropPart(part)
+        return
+      }
+      const merged = mergeFactsInto(this.detail as ContextTimelineDetail, read)
+      this.detail = merged
+      this.bytes = detailBytesOf(merged)
+      this.partRev.set(part, rev)
+      this.clearPartRetry(part)
+      this.onResize?.()
+    } catch (error) {
+      if (!signal.aborted) {
+        if (accessDenied(error)) this.deny()
+        else if (this.acceptedRev === rev) this.schedulePartRetry(part)
+      }
+    } finally {
+      if (!signal.aborted) {
+        this.inflightParts.delete(part)
+        if (this.acceptedRev !== rev) this.fetchWantedParts()
+        this.emit()
+      }
+    }
+  }
+
+  private dropPart(part: FactPart): void {
+    this.detail = withoutPart(this.detail as ContextTimelineDetail, part)
+    this.bytes = detailBytesOf(this.detail)
+  }
+
+  private schedulePartRetry(part: FactPart): void {
+    if (!this.active || this.partRetries.has(part)) return
+    const failures = (this.partFailures.get(part) ?? 0) + 1
+    this.partFailures.set(part, failures)
+    if (failures > PART_RETRY_LIMIT) {
+      this.dropPart(part)
+      return
+    }
+    const delay = PART_RETRY_MS * 2 ** (failures - 1)
+    this.partRetries.set(part, setTimeout(() => {
+      this.partRetries.delete(part)
+      this.fetchWantedParts()
+      this.emit()
+    }, delay))
+  }
+
+  private clearPartRetry(part: FactPart): void {
+    const timer = this.partRetries.get(part)
+    if (timer === undefined) return
+    clearTimeout(timer)
+    this.partRetries.delete(part)
+    this.partFailures.delete(part)
+  }
+
+  private clearPartRetries(): void {
+    for (const timer of this.partRetries.values()) clearTimeout(timer)
+    this.partRetries.clear()
+    this.partFailures.clear()
+  }
+
   private async fire(): Promise<void> {
-    if (this.inFlight) return
+    if (this.inFlight || this.scope === null || this.scope?.aborted === true) return
     if (this.fetcher === undefined) {
       this.failed = true
       this.emit()
       return
     }
-    this.inFlight = true
+    const signal = this.controller.signal
+    this.coreFlight = signal
     this.targetRev = this.wantedRev
     const background = this.background
-    const generation = this.generation
     this.emit()
     try {
-      const d = await this.fetcher()
-      if (generation !== this.generation) return
+      const read = await this.fetchCore(signal)
+      if (signal.aborted) return
+      if (read.disable) this.disableFacts()
+      const d = read.detail
       if (d !== null) {
+        this.denied = false
         if (d.rev >= this.acceptedRev || d.rev === this.targetRev) {
           this.detail = d
           this.bytes = detailBytesOf(d)
           this.acceptedRev = d.rev
+          this.onResize?.()
+          this.unavailableParts.clear()
+          this.partRev.clear()
+          this.clearPartRetries()
+          if (!seriesHasBreakdown(d.requests)) this.ensurePart('requests')
+          this.fetchWantedParts()
         }
         if (d.rev >= this.acceptedRev && d.rev < this.targetRev) {
           this.wantedRev = d.rev
@@ -241,31 +767,33 @@ export class DetailStore {
         this.failed = this.detail === null
         this.failures++
       }
-    } catch {
-      if (generation === this.generation) {
-        this.failed = this.detail === null
-        this.failures++
+    } catch (error) {
+      if (!signal.aborted) {
+        if (accessDenied(error)) this.deny()
+        else {
+          this.failed = this.detail === null
+          this.failures++
+        }
       }
     } finally {
-      this.inFlight = false
-      if (this.failed && background && this.listeners.size === 0) this.wantedRev = this.acceptedRev
-      if (this.wantedRev > this.acceptedRev && (this.listeners.size > 0 || !background)) this.schedule()
-      this.emit()
+      if (this.coreFlight === signal) {
+        this.coreFlight = null
+        if (this.failed && background && this.listeners.size === 0) this.wantedRev = this.acceptedRev
+        if (this.wantedRev > this.acceptedRev && (this.listeners.size > 0 || !background)) this.schedule()
+        this.emit()
+      }
     }
   }
 
   private emit(): void {
-    const pending = this.timer !== null || this.inFlight
-    const next: DetailSnap = { detail: this.detail, failed: this.failed, pending }
-    if (next.detail === this.snap.detail && next.failed === this.snap.failed && next.pending === this.snap.pending) return
+    const pending = this.timer !== null || this.inFlight || this.inflightParts.size > 0 || this.partRetries.size > 0
+    const next: DetailSnap = { detail: this.detail, failed: this.failed, pending, denied: this.denied }
+    if (next.detail === this.snap.detail && next.failed === this.snap.failed
+      && next.pending === this.snap.pending && next.denied === this.snap.denied) return
     this.snap = next
     for (const fn of this.listeners) fn()
   }
 }
-
-const DETAIL_STORES_MAX = 8
-
-const DETAIL_BYTES_MAX = 6 * 1024 * 1024
 
 export function detailBytesOf(detail: ContextTimelineDetail): number {
   return 2048
@@ -278,45 +806,53 @@ export function detailBytesOf(detail: ContextTimelineDetail): number {
     + (detail.spans?.length ?? 0) * 60
 }
 
-const DETAIL_STORE_ENTRIES_MAX = 64
+const stores = makeRetentionCache<string, DetailStore>('detailStores', {
+  sizeOf: store => store.byteSize,
+  weightOf: store => (store.hasPayload ? 1 : 0),
+  evictable: store => !store.active,
+  onEvict: (store) => { store.release() },
+})
 
-const stores = new Map<string, DetailStore>()
+let clientScope: AbortController | null = new AbortController()
+const scopeListeners = new Set<() => void>()
 
-function payloadHolders(): number {
-  let held = 0
-  for (const store of stores.values()) if (store.hasPayload) held++
-  return held
+export function clientScopeOf(): AbortSignal | null {
+  return clientScope?.signal ?? null
 }
 
-function payloadBytes(): number {
-  let bytes = 0
-  for (const store of stores.values()) bytes += store.byteSize
-  return bytes
+export function resetClientScope(connected: boolean): void {
+  const previous = clientScope
+  clientScope = connected ? new AbortController() : null
+  previous?.abort()
+  resetTimelineDetailStores()
+  for (const listener of scopeListeners) listener()
 }
+
+export function subscribeClientScope(listener: () => void): () => void {
+  scopeListeners.add(listener)
+  return () => { scopeListeners.delete(listener) }
+}
+
+export function useClientScope(): AbortSignal | null {
+  return useSyncExternalStore(subscribeClientScope, clientScopeOf)
+}
+
+subscribeInvalidations((event) => {
+  if (event.kind !== 'pricing') return
+  stores.forEach((store) => { store.refresh() })
+})
 
 export function detailStoreOf(sessionId: string): DetailStore {
   const known = stores.get(sessionId)
-  const store = known ?? new DetailStore(makeDetailFetcher(sessionId), DETAIL_DEBOUNCE_MS, true)
-  if (known !== undefined) stores.delete(sessionId)
+  if (known !== undefined) {
+    stores.trim({ protect: sessionId })
+    return known
+  }
+  stores.trim({ reserveWeight: 1 })
+  const facts = makeFactsFetchers(sessionId)
+  const resize = (): void => { stores.reweight(sessionId) }
+  const store = new DetailStore(facts, DETAIL_DEBOUNCE_MS, true, resize, clientScopeOf())
   stores.set(sessionId, store)
-  let excess = payloadHolders() - DETAIL_STORES_MAX + (store.hasPayload ? 0 : 1)
-  let bytes = payloadBytes()
-  for (const candidate of stores.values()) {
-    if (excess <= 0 && bytes <= DETAIL_BYTES_MAX) break
-    if (candidate === store || candidate.active || !candidate.hasPayload) continue
-    bytes -= candidate.byteSize
-    candidate.release()
-    excess--
-  }
-  if (stores.size > DETAIL_STORE_ENTRIES_MAX) {
-    for (const id of stores.keys()) {
-      if (stores.size <= DETAIL_STORE_ENTRIES_MAX) break
-      if (id === sessionId) continue
-      const candidate = stores.get(id)
-      if (candidate === undefined || candidate === store || candidate.active) continue
-      stores.delete(id)
-    }
-  }
   return store
 }
 
@@ -330,20 +866,33 @@ export interface TimelineSource {
   data: ContextTimeline | null
   detailState: DetailState
   retryDetail: () => void
+  ensurePart: (part: FactPart, window?: FactWindow) => void
 }
 
 const noopSubscribe = (): (() => void) => () => {}
 const noopRetry = (): void => {}
+const noopEnsurePart = (): void => {}
+
+const projectionScopes = new WeakMap<Record<string, unknown>, AbortSignal>()
+
+function headInScope(projected: Record<string, unknown> | null, scope: AbortSignal | null): ContextTimeline | null {
+  if (projected === null || scope === null) return null
+  const previousScope = projectionScopes.get(projected)
+  if (previousScope !== undefined && previousScope !== scope) return null
+  projectionScopes.set(projected, scope)
+  return timelineOf(projected)
+}
 
 export function useTimelineSource(props: SessionStandardProps): TimelineSource {
-  const head = projectionOf(props, 'contextTimeline', timelineOf)
+  const scope = useClientScope()
+  const head = headInScope(projectionOf(props, 'contextTimeline', asRecord), scope)
   const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
   const headRev = head !== null && typeof head.detailRev === 'number' ? head.detailRev : null
   const slim = headRev !== null
   const cold = head === null
   const store = useMemo(
-    () => (sessionId !== '' && (slim || cold) ? detailStoreOf(sessionId) : null),
-    [sessionId, slim, cold],
+    () => (scope !== null && sessionId !== '' && (slim || cold) ? detailStoreOf(sessionId) : null),
+    [scope, sessionId, slim, cold],
   )
   const snap = useSyncExternalStore(
     store !== null ? store.subscribe : noopSubscribe,
@@ -356,17 +905,25 @@ export function useTimelineSource(props: SessionStandardProps): TimelineSource {
   return useMemo<TimelineSource>(() => {
     const detail = snap.detail
     const retry = store !== null ? store.retry : noopRetry
-    if (head !== null && !slim) return { data: head, detailState: 'legacy', retryDetail: noopRetry }
+    const ensurePart = store !== null ? store.ensurePart : noopEnsurePart
+    if (snap.denied) return { data: null, detailState: 'failed', retryDetail: retry, ensurePart }
+    if (head !== null && !slim) {
+      noteCostPending(head.costRead)
+      return { data: head, detailState: 'legacy', retryDetail: noopRetry, ensurePart: noopEnsurePart }
+    }
     const base = head !== null ? head : detail !== null ? detail.head ?? null : null
     if (base === null) {
       const failed = store !== null && (snap.failed || detail !== null)
-      return { data: null, detailState: failed ? 'failed' : 'loading', retryDetail: retry }
+      return { data: null, detailState: failed ? 'failed' : 'loading', retryDetail: retry, ensurePart }
     }
     if (detail === null) {
-      return { data: base, detailState: snap.failed ? 'failed' : 'loading', retryDetail: retry }
+      noteCostPending(base.costRead)
+      return { data: base, detailState: snap.failed ? 'failed' : 'loading', retryDetail: retry, ensurePart }
     }
+    noteCostPending(detail.head?.costRead ?? base.costRead)
     const data: ContextTimeline = {
       ...base,
+      ...(detail.head?.costRead === undefined ? {} : { costRead: detail.head.costRead }),
       requests: detail.requests,
       events: detail.events,
       nodes: detail.nodes,
@@ -381,6 +938,6 @@ export function useTimelineSource(props: SessionStandardProps): TimelineSource {
       ...(detail.commandStats !== undefined ? { commandStats: detail.commandStats } : {}),
       ...(detail.spans !== undefined ? { spans: detail.spans } : {}),
     }
-    return { data, detailState: 'ready', retryDetail: retry }
+    return { data, detailState: 'ready', retryDetail: retry, ensurePart }
   }, [head, slim, store, snap])
 }

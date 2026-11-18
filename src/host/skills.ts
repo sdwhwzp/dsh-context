@@ -1,12 +1,10 @@
-import type { ColdReadGate } from './coldRead'
-/** The skill-catalog route: metadata behind the Insights page's skill card (description, origin bucket, on-disk path), joined by name
- * onto the activity ledger's tallies. The harness's `skills/list` Remote strips the origin, so the plugin reads the host-side registry
- * through the session — web compositions mount discovery on agent presets, so the global registry alone lists nothing. */
-
 import { asRecord } from './record'
+import { stringOf } from '../shared/decode'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SkillInfo } from '../shared/types'
-import { canReadAccountSession, type ConnectionHostFace, registerPostRoute } from './connection'
+import { AccountAccessUnavailableError, canReadAccountSession, isAccountRequest } from './connection'
+import { makeColdReadGate, type ColdReadGate } from './coldRead'
+import { failure, mountPostRoute, observeOf, reply, routeFailure } from './postRoute'
 
 export const SKILLS_ROUTE = '/api/dsh-context/skills'
 
@@ -16,8 +14,12 @@ interface SkillRegistryLike {
   list(options: { cwd?: string; scope?: unknown }): Promise<unknown>
 }
 
-function stringOf(value: unknown): string | undefined {
-  return typeof value === 'string' && value !== '' ? value : undefined
+export interface AgentsFace {
+  get?(id: string): unknown
+}
+
+export interface WorkingDirectoryFace {
+  ensure?(agent: unknown, signal: AbortSignal): Promise<unknown>
 }
 
 async function disposeOf(resource: unknown): Promise<void> {
@@ -45,60 +47,56 @@ function skillInfoOf(value: unknown): SkillInfo | null {
   }
 }
 
-/** The session's catalog view: its workspace and recorded preset off a sessionQuery observation; an unknown session leaves the request's
- * cwd as the only selector. */
+function liveAgentOf(ctx: Context, sessionId: string | undefined): unknown {
+  if (sessionId === undefined) return undefined
+  const agents = ctx.get('agents') as AgentsFace | undefined
+  try {
+    return typeof agents?.get === 'function' ? agents.get(sessionId) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function sessionViewOf(
-  ctx: Context, sessionId: string | undefined, signal: AbortSignal, coldReads: ColdReadGate,
+  ctx: Context, sessionId: string | undefined, live: unknown, signal: AbortSignal, coldReads: ColdReadGate,
 ): Promise<{ cwd?: string; agentPreset?: string } | null> {
   if (sessionId === undefined) return {}
+  let liveCwd: string | undefined
+  const directory = ctx.get('workingDirectory') as WorkingDirectoryFace | undefined
+  if (live != null && typeof directory?.ensure === 'function') {
+    liveCwd = stringOf(await directory.ensure(live, signal))
+  }
+  const observe = observeOf(ctx)
+  const fallback = liveCwd === undefined ? {} : { cwd: liveCwd }
+  if (observe === undefined) return fallback
   return await coldReads.admit(async () => {
-    const query = asRecord(ctx.get('sessionQuery'))
-    if (typeof query?.observeSession !== 'function') return {}
     let observation: unknown
     try {
-      observation = await (query.observeSession as (id: string) => Promise<unknown>).call(query, sessionId)
-    } catch {
-      return {}
-    }
-    try {
+      observation = await observe(sessionId, { projectionMode: 'all', signal })
       const obs = asRecord(observation)
+      const header = asRecord(obs?.header)
       const values = asRecord(asRecord(obs?.projections)?.values)
-      let cwd = stringOf(values?.workingDirectory) ?? stringOf(asRecord(obs?.header)?.cwd)
-      const agents = asRecord(ctx.get('agents'))
-      const directory = asRecord(ctx.get('workingDirectory'))
-      const live: unknown = typeof agents?.get === 'function' ? (agents.get as (id: string) => unknown).call(agents, sessionId) : undefined
-      if (live !== undefined && typeof directory?.ensure === 'function') {
-        const ensure = directory.ensure as (agent: unknown, signal: AbortSignal) => Promise<unknown>
-        cwd = stringOf(await ensure.call(directory, live, signal)) ?? cwd
-      }
-      const agentPreset = stringOf(values?.agentPreset)
+      const cwd = liveCwd ?? stringOf(values?.workingDirectory) ?? stringOf(header?.cwd)
+      const agentPreset = stringOf(values?.agentPreset) ?? stringOf(header?.agentPreset)
       return {
         ...(cwd === undefined ? {} : { cwd }),
         ...(agentPreset === undefined ? {} : { agentPreset }),
       }
+    } catch {
+      signal.throwIfAborted()
+      return fallback
     } finally {
       await disposeOf(observation)
     }
-  }) ?? null
+  }) ?? (liveCwd === undefined ? null : fallback)
 }
 
 async function resolveRegistry(
   ctx: Context,
-  sessionId: string | undefined,
+  live: unknown,
   agentPreset: string | undefined,
 ): Promise<{ registry: SkillRegistryLike; scope: unknown; lease: unknown } | null> {
   const presets = asRecord(ctx.get('agentPresets'))
-  let live: unknown
-  if (sessionId !== undefined) {
-    const agents = asRecord(ctx.get('agents'))
-    if (typeof agents?.get === 'function') {
-      try {
-        live = (agents.get as (id: string) => unknown).call(agents, sessionId)
-      } catch {
-        live = undefined
-      }
-    }
-  }
   if (live !== undefined && live !== null && typeof presets?.serviceFor === 'function') {
     const scoped = asRecord((presets.serviceFor as (agent: unknown, name: string) => unknown).call(presets, live, 'skills'))
     if (scoped !== null && typeof scoped.list === 'function') {
@@ -120,24 +118,27 @@ async function resolveRegistry(
   return { registry: registry as unknown as SkillRegistryLike, scope, lease }
 }
 
-/** Serve whenever `connection` composes; every harness face is re-proved per request, so a missing subsystem answers null. */
-export function watchSkillCatalog(ctx: Context, coldReads: ColdReadGate): void {
-  ctx.inject(['connection'], (c) => {
-
-    const handler = async (request: Request, principal?: unknown): Promise<Response> => {
+export function watchSkillCatalog(ctx: Context, coldReads: ColdReadGate = makeColdReadGate()): void {
+  mountPostRoute({
+    ctx,
+    deps: ['connection'],
+    path: SKILLS_ROUTE,
+    label: 'dsh-context: skills route',
+    handler: c => async (request: Request, principal): Promise<Response> => {
       let value: { skills: SkillInfo[] } | null = null
       let lease: unknown
       try {
         const body = asRecord(await request.json())
         const sessionId = stringOf(body?.sessionId)
         if (!await canReadAccountSession(c, principal, sessionId, request.signal)) {
-          return Response.json({ ok: false, error: { code: 'gateway/forbidden', message: 'session access denied' } }, { headers: { 'cache-control': 'no-store' } })
+          return failure('gateway/forbidden', 'session access denied')
         }
-        const view = await sessionViewOf(ctx, sessionId, request.signal, coldReads)
-        if (view === null) return Response.json({ ok: true, value: null }, { headers: { 'cache-control': 'no-store' } })
-        const accountScoped = principal !== undefined || c.get('requestPrincipal') !== undefined || c.get('principalAccess') !== undefined
+        const live = liveAgentOf(c, sessionId)
+        const view = await sessionViewOf(c, sessionId, live, request.signal, coldReads) ?? {}
+        const accountScoped = isAccountRequest(c, principal)
         const cwd = view.cwd ?? (accountScoped ? undefined : stringOf(body?.cwd))
-        const resolved = await resolveRegistry(ctx, sessionId, view.agentPreset)
+        if (accountScoped && cwd === undefined) return reply({ ok: true, value: null })
+        const resolved = await resolveRegistry(c, live, view.agentPreset)
         if (resolved !== null) {
           lease = resolved.lease
           const listed: unknown = await resolved.registry.list({
@@ -153,13 +154,12 @@ export function watchSkillCatalog(ctx: Context, coldReads: ColdReadGate): void {
           }
           value = { skills }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof AccountAccessUnavailableError) return routeFailure(error)
       } finally {
         await disposeOf(lease)
       }
-      return Response.json({ ok: true, value }, { headers: { 'cache-control': 'no-store' } })
-    }
-
-    registerPostRoute(c, c.get('connection') as ConnectionHostFace | undefined, SKILLS_ROUTE, handler, 'dsh-context: skills route')
+      return reply({ ok: true, value })
+    },
   })
 }

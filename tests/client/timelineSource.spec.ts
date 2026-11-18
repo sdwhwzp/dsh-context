@@ -1,6 +1,6 @@
 import { act, createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
-import { describe, test, vi, afterEach, beforeEach } from 'vitest'
+import { describe, test, vi, afterEach } from 'vitest'
 import {
   DetailStore,
   detailBytesOf,
@@ -10,6 +10,7 @@ import {
   resetTimelineDetailStores,
   useTimelineSource,
 } from '../../src/client/timelineSource'
+import { timelineOf } from '../../src/client/wire'
 import type { ContextTimeline, ContextTimelineDetail } from '../../src/shared/types'
 import { mount, text, until } from './helpers/kit'
 
@@ -18,6 +19,21 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   vi.useRealTimers()
+})
+
+test('timeline heads keep valid billed output parts and omit malformed tuples', () => {
+  const billedGenerated = { reasoning: 1, answers: 2, calls: 3, unclassified: 4 }
+  const wire = {
+    current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 0 },
+    requests: [], events: [], nodes: [], archive: [],
+    billedGenerated,
+  }
+  assert.equal(timelineOf(wire), wire)
+  assert.deepEqual(timelineOf({ current: null, billedGenerated })?.billedGenerated, billedGenerated)
+  for (const bad of [null, {}, { ...billedGenerated, reasoning: -1 }, { ...billedGenerated, answers: '2' },
+    { ...billedGenerated, calls: Number.NaN }, { ...billedGenerated, unclassified: Number.POSITIVE_INFINITY }]) {
+    assert.equal(timelineOf({ ...wire, billedGenerated: bad })?.billedGenerated, undefined)
+  }
 })
 
 function detail(rev: number, over: Record<string, unknown> = {}): ContextTimelineDetail {
@@ -490,109 +506,6 @@ describe('DetailStore', () => {
 
 })
 
-describe('detailStoreOf', () => {
-  beforeEach(() => { vi.useFakeTimers() })
-
-  test('the store map stays bounded while an ACTIVE store is never dropped', async () => {
-    stubDetailFetch(() => ({ body: { ok: true, value: detail(1) } }))
-    const held = detailStoreOf('held')
-    const off = held.subscribe(() => {})
-    for (let i = 0; i < 80; i++) await visitStore(`idle-${i}`)
-    assert.equal(detailStoreOf('held'), held, 'the active store keeps its identity (no forked ledger)')
-    off()
-    held.release()
-  })
-
-  test('an open beyond 64 active stores shares its ledger before and after subscribing', () => {
-    const offs = Array.from({ length: 64 }, (_, index) => detailStoreOf(`active-${index}`).subscribe(() => {}))
-    const next = detailStoreOf('next')
-    assert.equal(detailStoreOf('next'), next)
-    const off = next.subscribe(() => {})
-    assert.equal(detailStoreOf('next'), next)
-    off()
-    for (const unsubscribe of offs) unsubscribe()
-  })
-
-  test('one store per session, shared by every consumer; reset drops the cache', () => {
-    stubDetailFetch(() => ({ body: { ok: true, value: detail(1) } }))
-    const a = detailStoreOf('s1')
-    assert.equal(a, detailStoreOf('s1'), 'the session key wins, the first fetcher keeps serving')
-    assert.notEqual(a, detailStoreOf('s2'))
-    resetTimelineDetailStores()
-    assert.notEqual(detailStoreOf('s1'), a, 'a reset store is a fresh instance')
-  })
-
-  function countingFetch(): Map<string, number> {
-    const calls = new Map<string, number>()
-    vi.stubGlobal('fetch', async (_url: unknown, init?: { body?: string }) => {
-      if (init?.body === undefined) return { ok: false, status: 404, json: async () => null }
-      const id = (JSON.parse(init.body) as { sessionId: string }).sessionId
-      calls.set(id, (calls.get(id) ?? 0) + 1)
-      return { ok: true, status: 200, json: async () => ({ ok: true, value: detail(1) }) }
-    })
-    return calls
-  }
-
-  async function visitStore(id: string): Promise<DetailStore> {
-    const store = detailStoreOf(id)
-    const off = store.subscribe(() => {})
-    store.request(1)
-    await vi.advanceTimersByTimeAsync(1000)
-    assert.equal(store.hasPayload, true, `store ${id} never landed its read`)
-    off()
-    return store
-  }
-
-  test('the page cache bounds retained payloads; a demoted session reads again', async () => {
-    const calls = countingFetch()
-    const ids = Array.from({ length: 12 }, (_, i) => 'cap-' + i)
-    for (const id of ids) await visitStore(id)
-    assert.equal(detailStoreOf(ids[11]).hasPayload, true, 'the newest visit stays cached')
-    assert.equal(detailStoreOf(ids[0]).hasPayload, false, 'the oldest visit was demoted')
-    await visitStore(ids[11])
-    assert.equal(calls.get(ids[11]), 1, 'a cached re-open reads nothing')
-    await visitStore(ids[0])
-    assert.equal(calls.get(ids[0]), 2, 'a demoted re-open reads once more')
-  })
-
-  test('a mounted store is never demoted', async () => {
-    countingFetch()
-    const ids = Array.from({ length: 12 }, (_, i) => 'live-' + i)
-    const held = detailStoreOf(ids[0])
-    const off = held.subscribe(() => {})
-    held.request(1)
-    await vi.advanceTimersByTimeAsync(1000)
-    assert.equal(held.hasPayload, true, 'the mounted store never landed')
-    for (const id of ids.slice(1)) await visitStore(id)
-    assert.equal(held.active, true)
-    assert.equal(held.hasPayload, true, 'a mounted store keeps its payload')
-    off()
-  })
-
-  test('a burst of opens is trimmed back to the bound on the next open', async () => {
-    countingFetch()
-    const ids = Array.from({ length: 12 }, (_, i) => 'burst-' + i)
-    const offs: (() => void)[] = []
-    const created = ids.map((id) => {
-      const store = detailStoreOf(id)
-      offs.push(store.subscribe(() => {}))
-      store.request(1)
-      return store
-    })
-    await vi.advanceTimersByTimeAsync(1000)
-    for (const [i, store] of created.entries()) {
-      assert.equal(store.hasPayload, true, 'burst store ' + String(i) + ' never landed')
-    }
-    for (const off of offs) off()
-    await visitStore('burst-extra')
-    assert.equal(created[0].hasPayload, false, 'the oldest burst payload is released')
-    assert.equal(created[11].hasPayload, true, 'the newest burst payload survives')
-    await visitStore('burst-extra-2')
-    assert.equal(created[5].hasPayload, false)
-    assert.equal(created[11].hasPayload, true)
-  })
-})
-
 function SourceProbe(props: { sessionId: string; value?: unknown; useProjection?: (key: string) => unknown }): ReactElement {
   const useProjection = props.useProjection ?? ((key: string) => (key === 'contextTimeline' ? props.value : undefined))
   const source = useTimelineSource({
@@ -831,6 +744,32 @@ describe('useTimelineSource', () => {
     const m = await mount(h(SourceProbe, { sessionId: 's1', value: slimHead(1) }))
     await until(() => probeRead(m.container, 'state') === 'failed', 'absence never surfaced')
     await m.unmount()
+  })
+
+  test.each([401, 403])('HTTP %i clears the mounted head and detail', async (status) => {
+    vi.useFakeTimers()
+    const head = slimHead(1, { model: 'account-a' })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, value: { rev: 1, parts: { head, series: detail(1).requests } } }))
+      .mockResolvedValueOnce(new Response(null, { status }))
+    vi.stubGlobal('fetch', fetch)
+    const m = await mount(h(SourceProbe, { sessionId: 'shared-session-id', value: head }))
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(16) })
+      assert.equal(probeRead(m.container, 'steps'), '1')
+      const store = detailStoreOf('shared-session-id')
+      await act(async () => {
+        if (status === 401) store.refresh()
+        else store.ensurePart('events')
+      })
+      assert.equal(probeRead(m.container, 'state'), 'failed')
+      assert.equal(probeRead(m.container, 'model'), 'x')
+      assert.equal(probeRead(m.container, 'steps'), 'null')
+      assert.equal(store.getSnapshot().detail, null)
+      assert.equal(fetch.mock.calls.length, 2)
+    } finally {
+      await m.unmount()
+    }
   })
 })
 

@@ -84,6 +84,32 @@ describe('numOf', () => {
   })
 })
 
+describe('timelineOf — head tallies on the safe path', () => {
+  test('narrows tool/program tallies and command stats, dropping hostile members', () => {
+    const out = timelineOf({
+      current: { system: 1 },
+      requests: 'nope',
+      toolTally: { bash: 2, bad: 'x', '__proto__': 1, empty: -1 },
+      programTally: { ls: 3.9 },
+      commandStats: { runs: 3, failed: 'x', ms: 0, bg: 1 },
+    })
+    assert.deepEqual(out?.toolTally, { bash: 2, '__proto__': 0 })
+    assert.deepEqual(out?.programTally, { ls: 3 })
+    assert.deepEqual(out?.commandStats, { runs: 3, failed: 0, ms: 0, bg: 1 })
+    const longKey = 'y'.repeat(130)
+    const many: Record<string, number> = {}
+    for (let i = 0; i < 140; i++) many['k' + i] = i
+    const clamped = timelineOf({ current: { system: 1 }, requests: 'nope', toolTally: { [longKey]: 2, ...many } })
+    assert.equal(Object.keys(clamped?.toolTally ?? {}).length, 128)
+    assert.equal(clamped?.toolTally?.['y'.repeat(120)], 2)
+    assert.equal(Object.keys(clamped?.toolTally ?? {}).some(key => key.length > 120), false)
+    const empty = timelineOf({ current: { system: 1 }, requests: 'nope', toolTally: {}, programTally: null, commandStats: null })
+    assert.equal(empty?.toolTally, undefined)
+    assert.equal(empty?.programTally, undefined)
+    assert.equal(empty?.commandStats, undefined)
+  })
+})
+
 describe('timelineOf', () => {
   const current = { system: 1, tools: 2, user: 3, inject: 4, skill: 0, assistant: 5, assistantReasoning: 3, assistantAnswerTokens: 2, assistantCallTokens: 1, tool: 6, total: 7 }
 
@@ -970,24 +996,4 @@ describe('seedConversationViewVia — the pre-jump view preference', () => {
     assert.equal(globalThis.localStorage.getItem('dsh.conversation.session-5'), null)
     globalThis.localStorage.clear()
   })
-})
-
-
-test('billed generated figures survive sanitization and malformed tuples drop whole', () => {
-  const parts = { reasoning: 1, answers: 2, calls: 3, unclassified: 4 }
-  assert.deepEqual(timelineOf({ current: null, billedGenerated: parts })?.billedGenerated, parts)
-  for (const bad of [null, {}, { ...parts, reasoning: -1 }, { ...parts, answers: '2' }, { ...parts, calls: Number.NaN }, { ...parts, unclassified: Number.POSITIVE_INFINITY }]) {
-    assert.equal(timelineOf({ current: null, billedGenerated: bad })?.billedGenerated, undefined)
-  }
-})
-
-
-test('a complete timeline keeps valid billed figures reference stable and sanitizes malformed figures', () => {
-  const wire = {
-    current: { system: 0, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 0 },
-    requests: [], events: [], nodes: [], archive: [],
-    billedGenerated: { reasoning: 1, answers: 2, calls: 3, unclassified: 4 },
-  }
-  assert.equal(timelineOf(wire), wire)
-  assert.equal(timelineOf({ ...wire, billedGenerated: { ...wire.billedGenerated, calls: -1 } })?.billedGenerated, undefined)
 })

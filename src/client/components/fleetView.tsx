@@ -1,22 +1,24 @@
-import { createElement as h, useEffect, useLayoutEffect, useMemo, useRef, type ReactElement } from 'react'
+import { createElement as h, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactElement } from 'react'
 import type { AgentHeads } from '../agentHeads'
 import { agentSelfOf } from '../agentTree'
 import { displayCurrencyOf } from '../cost'
 import { mergeComms, mergeDelegations } from '../fleetDetail'
 import { attestedNamesOf, commsAgentsOf } from '../fleetAgents'
-import { useFleetDetails, useFleetModel } from '../fleetModel'
-import { teamOf } from '../fleetTeam'
+import { mergedDetailOf, useFleetDetails, useFleetModel } from '../fleetModel'
+import { teamOfProjection, teamWithSummaryRosterOf } from '../fleetTeam'
 import type { ClientCtx, SessionStandardProps } from '../services'
-import { CONTEXT_VIEW_ID, openChildAsideVia, openSessionVia, projectionOf, seedConversationViewVia, unsupportedOf } from '../services'
+import { CONTEXT_VIEW_ID, connectionGenerationStoreOf, openChildAsideVia, openSessionVia, seatKeyOf, seedConversationViewVia, unsupportedOf } from '../services'
 import { useFleetMemberFocus } from '../viewFocus'
 import { useContextSession } from '../sessionData'
 import type { ViewKit } from '../viewkit'
-import type { FleetDetail } from '../../shared/types'
+import type { FleetDetail, FleetMemberInfo } from '../../shared/types'
 import { makeAgentGraph } from './agentGraph'
 import { makeDetailNote } from './detailNote'
+import { LoadingLane } from './skeleton'
+import { IconChecklistOutlineRegular, IconSendOutlineRegular, IconWorkspaceTreeOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { makeRichText } from './richText'
 import { makeErrorBoundary } from './errorBoundary'
-import { MissionPulse } from './missionPulse'
+import { MissionPulse, PulseHeader } from './missionPulse'
 import { makeUpgradeGate } from './upgradeGate'
 import { useConversationSurface } from './useConversationSurface'
 
@@ -31,6 +33,7 @@ export function makeFleetView(
   const DetailNote = makeDetailNote(kit)
   const ErrorBoundary = makeErrorBoundary(t)
   const rich = makeRichText(kit)
+  const connection = connectionGenerationStoreOf(ctx)
 
   function FleetBody(props: SessionStandardProps): ReactElement {
     const sessionId = typeof props.sessionId === 'string' ? props.sessionId : undefined
@@ -46,9 +49,9 @@ export function makeFleetView(
     }, [sessionId])
     const self = data !== null ? agentSelfOf(data, pressure, breakdown, usage) : undefined
     const { forest, team: rowTeam, titles } = useFleetModel(ctx, heads, sessionId, self, data !== null, 120)
-    const teamDirect = projectionOf(props, 'agentTeam', teamOf)
-    const team = teamDirect ?? rowTeam
-    const details = useFleetDetails(undefined, { concurrency: 4, refreshDelayMs: 750, scopeKey: sessionId })
+    const teamDirect = teamOfProjection(props, sessionId)
+    const details = useFleetDetails(undefined, { scopeKey: sessionId })
+    const team = teamWithSummaryRosterOf(teamDirect ?? rowTeam, details.summary?.members)
     const focusMember = useFleetMemberFocus(sessionId)
     const byId = useMemo(
       () => new Map((forest?.nodes ?? []).map(node => [node.id, node])),
@@ -60,29 +63,43 @@ export function makeFleetView(
       [forest, team],
     )
     const detailStamp = detailNodes.map(node => `${node.id}@${node.updatedAt}`).join(',')
+    const rootNode = forest !== null ? forest.nodes[0] : undefined
+    const rootId = rootNode?.id ?? sessionId ?? ''
+    const rootStamp = rootNode?.updatedAt ?? 0
+    const priority = useMemo(() => {
+      const ids = new Set<string>()
+      if (focusMember !== null) ids.add(focusMember)
+      return ids
+    }, [focusMember])
+    const priorityStamp = [...priority].join(',')
     useEffect(() => {
-      for (const node of detailNodes) details.request(node.id, node.updatedAt)
-    }, [detailNodes, detailStamp])
+      if (rootId === '') return
+      details.requestFamily({ rootId, rootStamp, entries: detailNodes, priority })
+    }, [detailStamp, priorityStamp, rootId, rootStamp])
     const landedDetails = useMemo(() => {
       const map = new Map<string, FleetDetail>()
       for (const node of detailNodes) {
-        const history = details.historyLanded.get(node.id)?.detail
-        if (history !== undefined && history !== null) {
-          map.set(node.id, history)
-          continue
-        }
-        const preview = details.landed.get(node.id)?.detail
-        if (preview !== undefined && preview !== null) map.set(node.id, preview)
+        const detail = mergedDetailOf(details, node.id)
+        if (detail !== null) map.set(node.id, detail)
       }
       return map
     }, [detailNodes, details.landed, details.historyLanded])
+    const delegationSource = useMemo(() => {
+      const map = new Map<string, FleetDetail>()
+      for (const [id, fact] of details.facts) {
+        map.set(id, { messages: [], delegations: [...fact.delegations], truncated: false })
+      }
+      return map
+    }, [details.facts])
     const comms = useMemo(() => mergeComms(landedDetails), [landedDetails])
-    const delegations = useMemo(() => mergeDelegations(landedDetails), [landedDetails])
+    const delegations = useMemo(() => mergeDelegations(delegationSource), [delegationSource])
     const attestedNames = useMemo(() => attestedNamesOf(comms), [comms])
-    const leadDetail = leadId !== undefined ? landedDetails.get(leadId) ?? null : null
+    const leadDetail = leadId !== undefined ? mergedDetailOf(details, leadId) : null
+    const leadRoster: readonly FleetMemberInfo[] | undefined = leadDetail?.roster
+      ?? (leadId === undefined ? undefined : details.facts.get(leadId)?.roster)
     const agents = useMemo(
-      () => commsAgentsOf(forest?.nodes ?? [], team, leadDetail?.roster, attestedNames, t),
-      [attestedNames, forest, leadDetail, team, t],
+      () => commsAgentsOf(forest?.nodes ?? [], team, leadRoster, attestedNames, t),
+      [attestedNames, forest, leadRoster, team, t],
     )
     const open = (id: string): void => {
       const node = byId.get(id)
@@ -98,12 +115,54 @@ export function makeFleetView(
       seedConversationViewVia(id, CONTEXT_VIEW_ID)
       openSessionVia(ctx, id)
     }
+    if (data === null && source.detailState === 'failed') {
+      return (
+        <div className="lc-root" ref={rootRef}>
+          <DetailNote state="failed" onRetry={source.retryDetail} />
+        </div>
+      )
+    }
     if (data === null) {
       return (
         <div className="lc-root" ref={rootRef}>
-          {source.detailState === 'failed'
-            ? <DetailNote state="failed" onRetry={source.retryDetail} />
-            : <div className="lc-empty">{t('loading')}</div>}
+          <div className="lc-pulse" aria-busy="true">
+            <PulseHeader
+              agentCount={0}
+              running={null}
+              tasks={0}
+              messages={0}
+              pending
+              failed={0}
+              total={0}
+              selected={null}
+              t={t}
+            />
+            <div className="lc-pulse-main lc-pulse-main-graph">
+              <div className="lc-col-graph">
+                <div className="lc-card lc-deferred-skeleton lc-pulse-graph-skel" aria-hidden="true" />
+              </div>
+              <div className="lc-pulse-boards">
+                <div className="lc-card lc-pulse-timeline lc-pulse-board-skel">
+                  <div className="lc-card-title">
+                    <span className="lc-card-title-text"><IconWorkspaceTreeOutlineRegular size={14} />{t('fleet.pulse.timeline')}</span>
+                  </div>
+                  <LoadingLane />
+                </div>
+                <div className="lc-card lc-pulse-tasks lc-pulse-board-skel">
+                  <div className="lc-card-title">
+                    <span className="lc-card-title-text"><IconChecklistOutlineRegular size={14} />{t('fleet.pulse.work')}</span>
+                  </div>
+                  <LoadingLane />
+                </div>
+              </div>
+            </div>
+            <div className="lc-card lc-pulse-events lc-pulse-events-skel">
+              <div className="lc-card-title">
+                <span className="lc-card-title-text"><IconSendOutlineRegular size={14} />{t('fleet.pulse.events')}</span>
+              </div>
+              <LoadingLane />
+            </div>
+          </div>
         </div>
       )
     }
@@ -136,6 +195,7 @@ export function makeFleetView(
   }
 
   return function FleetView(props: SessionStandardProps): ReactElement {
-    return h(ErrorBoundary, null, h(FleetBody, props))
+    const generation = useSyncExternalStore(connection.subscribe, connection.getSnapshot)
+    return h(ErrorBoundary, null, generation === null ? null : h(FleetBody, { ...props, key: `${generation}:${seatKeyOf(props)}` }))
   }
 }

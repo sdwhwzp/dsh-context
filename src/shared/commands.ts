@@ -1,4 +1,5 @@
 import type { CommandRecord } from './types'
+import { asPlainObject, stringOf } from './decode'
 import { parseCallArgs } from './fileOps'
 
 export type CommandTool = 'bash' | 'pwsh' | 'run_code'
@@ -17,14 +18,9 @@ export interface CommandArgs {
   sandbox?: string
 }
 
-function stringOf(value: unknown): string | undefined {
-  return typeof value === 'string' && value !== '' ? value : undefined
-}
-
 export function commandArgsRecordOf(value: unknown): Record<string, unknown> | null {
   if (typeof value === 'string') return parseCallArgs(value)
-  if (value !== null && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
-  return null
+  return asPlainObject(value)
 }
 
 export function commandArgsOf(tool: string, raw: unknown, maxChars: number): (CommandArgs & { truncated?: true }) | null {
@@ -735,6 +731,16 @@ export function commandProgramOf(tool: string | undefined, raw: unknown): string
 
 function programOfText(text: string, dialect: CommandDialect, vars = new Map<string, string | null>()): string {
   return dialect === 'pwsh' ? pwshProgram(text, vars) : bashProgram(text, vars)
+}
+
+export function commandProgramsOf(tool: string | undefined, cmd: string): string[] {
+  const cmdTool = commandTool(tool)
+  if (cmdTool === null) return []
+  if (cmdTool === 'bash' || cmdTool === 'pwsh') {
+    const programs = programsOfCommand(cmd, cmdTool)
+    if (programs.length > 0) return programs
+  }
+  return [programOfCommand(cmdTool, cmd)]
 }
 
 export function programsOfCommand(cmd: string, dialect: CommandDialect = 'bash'): string[] {

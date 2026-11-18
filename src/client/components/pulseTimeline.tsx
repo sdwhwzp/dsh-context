@@ -24,6 +24,7 @@ import {
   PULSE_TRACK_PADDING,
   pulseLaneVisibility,
   pulseTaskBadgeOf,
+  pulseTaskLaneIdsOf,
   pulseTaskOf,
   pulseTasksByAgent,
   pulseTimelineItemsOf,
@@ -36,8 +37,10 @@ import { containHorizontalOverscroll } from '../overscroll'
 import { scrollToPos, settleReveal } from '../revealScroll'
 import type { ViewKit } from '../viewkit'
 import { rowWindowFor, useColumnWindow, type RowRange } from './useRowWindow'
+import { useScrollMetrics } from './useElementMetrics'
 import { ClearableInput } from './clearableInput'
 import { AgentAvatar, channelStyle } from './commsAgent'
+import { SkeletonRows } from './skeleton'
 
 interface PulseTimelineProps {
   lanes: PulseLaneInput[]
@@ -55,6 +58,7 @@ interface PulseTimelineProps {
   query: string
   currency: CostCurrency
   pending: boolean
+  totalRecords?: number | null
   agentOf: (party: string) => CommsAgent
   onSelectAgent: (id: string) => void
   onSelectEvent: (row: CommsRow) => void
@@ -89,24 +93,34 @@ export const PulseTimeline = memo(function PulseTimeline(props: PulseTimelinePro
   const [anchor, setAnchor] = useState<'first' | 'latest'>('first')
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
   const [taskFilterId, setTaskFilterId] = useState<string | null>(null)
+  const taskFiltered = taskFilterId !== null
   const [hoveredLane, setHoveredLane] = useState<string | null>(null)
   const [laneScopeState, setLaneScopeState] = useState<{ from: number; to: number } | null>(null)
   const laneHovered = (id: string): boolean => props.hoveredAgent === id || hoveredLane === id
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const labelRowsRef = useRef<HTMLDivElement | null>(null)
-  const laneView = useMemo(
-    () => pulseLaneVisibility(props.lanes, props.scopedRows, props.links, props.selectedAgent, props.query, showQuiet),
-    [props.lanes, props.links, props.query, props.scopedRows, props.selectedAgent, showQuiet],
-  )
-  const visibleIds = laneView.visible
-  const matchedIds = laneView.matched
   const timelineItems = useMemo(
     () => pulseTimelineItemsOf(props.rows, props.delegations),
     [props.rows, props.delegations],
   )
+  const tasksByAgent = useMemo(() => pulseTasksByAgent(props.team), [props.team])
+  const taskLanes = useMemo(
+    () => pulseTaskLaneIdsOf(timelineItems, tasksByAgent, taskFilterId),
+    [taskFilterId, tasksByAgent, timelineItems],
+  )
+  const laneView = useMemo(
+    () => pulseLaneVisibility(
+      props.lanes, props.scopedRows, props.links, props.selectedAgent, props.query, showQuiet || taskFiltered,
+    ),
+    [props.lanes, props.links, props.query, props.scopedRows, props.selectedAgent, showQuiet, taskFiltered],
+  )
+  const visibleIds = useMemo(
+    () => taskLanes === null ? laneView.visible : laneView.visible.filter(id => taskLanes.has(id)),
+    [laneView.visible, taskLanes],
+  )
+  const matchedIds = laneView.matched
   const laneIds = useMemo(() => new Set(visibleIds), [visibleIds])
   const laneRecords = useMemo(() => timelineItems.filter(item => laneIds.has(item.to)), [laneIds, timelineItems])
-  const tasksByAgent = useMemo(() => pulseTasksByAgent(props.team), [props.team])
   const taskAt = useMemo(() => {
     const map = new Map<string, FleetTeamTask>()
     for (const item of laneRecords) {
@@ -134,6 +148,7 @@ export const PulseTimeline = memo(function PulseTimeline(props: PulseTimelinePro
   const laneCount = layout.lanes.length
   const taskOffset = hasTaskLane ? PULSE_TASK_LANE_HEIGHT : 0
   const laneWrapped = laneCount > LANE_FULL_MAX
+  const scrollMetrics = useScrollMetrics(scrollerRef, laneWrapped)
   const laneScope = !laneWrapped
     ? { from: 0, to: laneCount - 1 }
     : (laneScopeState ?? { from: 0, to: Math.min(LANE_WINDOW_INIT, laneCount) - 1 })
@@ -143,18 +158,9 @@ export const PulseTimeline = memo(function PulseTimeline(props: PulseTimelinePro
   const laneBottomPad = Math.max(0, (laneCount - laneScope.to - 1) * PULSE_LANE_HEIGHT)
   useLayoutEffect(() => {
     if (!laneWrapped) return
-    const el = scrollerRef.current as HTMLDivElement
-    const sync = (): void => {
-      const next = laneWindowFor(el.scrollTop, el.clientHeight, laneCount, taskOffset) ?? { from: 0, to: laneCount - 1 }
-      setLaneScopeState(current => (current !== null && current.from === next.from && current.to === next.to ? current : next))
-    }
-    sync()
-    /* v8 ignore start */
-    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(sync) : null
-    observer?.observe(el)
-    return () => { observer?.disconnect() }
-    /* v8 ignore stop */
-  }, [laneCount, laneWrapped, taskOffset])
+    const next = laneWindowFor(scrollMetrics.scrollTop, scrollMetrics.height, laneCount, taskOffset) ?? { from: 0, to: laneCount - 1 }
+    setLaneScopeState(current => (current !== null && current.from === next.from && current.to === next.to ? current : next))
+  }, [laneWrapped, laneCount, taskOffset, scrollMetrics.height, scrollMetrics.scrollTop])
   const agentAt = useMemo(() => new Map(props.lanes.map(lane => [lane.agent.id, lane.agent])), [props.lanes])
   const statsAt = useMemo(() => {
     const map = new Map<string, PulseLaneStats>()
@@ -192,8 +198,8 @@ export const PulseTimeline = memo(function PulseTimeline(props: PulseTimelinePro
   }, [props.scopedRows])
   const searching = props.query.trim() !== ''
   const agentSelected = props.selectedAgent !== null
-  const hidden = searching || agentSelected ? 0 : props.lanes.length - visibleIds.length
-  const recordTotal = props.scopedRows.length + props.scopedDelegations.length
+  const hidden = searching || agentSelected || taskFiltered ? 0 : props.lanes.length - visibleIds.length
+  const recordTotal = props.totalRecords ?? (props.scopedRows.length + props.scopedDelegations.length)
   const shownRecords = laneItems.length
   useEffect(() => {
     const el = scrollerRef.current
@@ -205,10 +211,6 @@ export const PulseTimeline = memo(function PulseTimeline(props: PulseTimelinePro
     /* v8 ignore next */
     if (rows !== null) rows.style.transform = `translateY(${-ev.currentTarget.scrollTop}px)`
     const el = ev.currentTarget
-    const next = laneWrapped ? laneWindowFor(el.scrollTop, el.clientHeight, laneCount, taskOffset) : null
-    if (next !== null) {
-      setLaneScopeState(current => (current !== null && current.from === next.from && current.to === next.to ? current : next))
-    }
     const max = el.scrollWidth - el.clientWidth
     if (max <= 1) return
     if (el.scrollLeft <= 0) setAnchor('first')
@@ -222,11 +224,20 @@ export const PulseTimeline = memo(function PulseTimeline(props: PulseTimelinePro
     const adjusted = clampTop(el, start, start + height)
     if (adjusted !== undefined) scrollToPos(el, { top: adjusted })
   }
+  const alignedKeyRef = useRef<string | null>(null)
   useEffect(() => {
     const key = props.selectedEventKey ?? props.selectedDelegationKey
-    if (key === null) return
+    if (key === null) {
+      alignedKeyRef.current = null
+      return
+    }
     const index = laneItems.findIndex(item => item.key === key)
-    if (index < 0) return
+    if (index < 0) {
+      alignedKeyRef.current = null
+      return
+    }
+    if (alignedKeyRef.current === key) return
+    alignedKeyRef.current = key
     const el = scrollerRef.current as HTMLDivElement
     const lane = layout.lanes[visibleIds.indexOf(laneItems[index].to)]
     const start = lane.top + taskOffset
@@ -307,7 +318,7 @@ export const PulseTimeline = memo(function PulseTimeline(props: PulseTimelinePro
             onChange={props.onQuery}
           />
           <span className="lc-pulse-title-actions">
-            {!searching && !agentSelected && props.lanes.length > 8 && (showQuiet || hidden > 0) ? (
+            {!searching && !agentSelected && !taskFiltered && props.lanes.length > 8 && (showQuiet || hidden > 0) ? (
               <button type="button" className="lc-pulse-quiet" aria-pressed={showQuiet} onClick={() => { setShowQuiet(value => !value) }}>
                 {showQuiet ? t('fleet.pulse.hideQuiet') : t('fleet.pulse.showQuiet', { n: hidden })}
               </button>
@@ -580,13 +591,13 @@ export const PulseTimeline = memo(function PulseTimeline(props: PulseTimelinePro
           </div>
         </div>
       ) : null}
-      {visibleIds.length === 0 || laneItems.length === 0 ? (
+      {props.pending && shownRecords === 0 ? (
+        <div className="lc-pulse-timeline-loading" aria-hidden="true"><SkeletonRows rows={6} /></div>
+      ) : visibleIds.length === 0 || laneItems.length === 0 ? (
         <div className="lc-empty lc-pulse-timeline-empty">
           {searching && visibleIds.length === 0
             ? t('fleet.pulse.noLaneMatch')
-            : recordTotal === 0 && props.pending
-              ? t('fleet.comms.loading')
-              : recordTotal > 0 || agentSelected ? t('fleet.pulse.emptyTimeline') : t('fleet.comms.empty')}
+            : recordTotal > 0 || agentSelected ? t('fleet.pulse.emptyTimeline') : t('fleet.comms.empty')}
         </div>
       ) : null}
     </section>

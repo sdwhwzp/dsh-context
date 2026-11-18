@@ -1,151 +1,73 @@
 import assert from 'node:assert/strict'
-import { afterEach, describe, test, vi } from 'vitest'
-import {
-  clearAttachmentPaths,
-  makeAttachmentLocator,
-  makeAttachmentOpener,
-  pathOfValue,
-} from '../../src/client/attachmentSource'
+import { afterEach, test, vi } from 'vitest'
+import { makeAttachmentOpener } from '../../src/client/attachmentSource'
+import { resetClientScope } from '../../src/client/timelineSource'
 import type { AttachmentRef } from '../../src/shared/attachment'
 import { asClientCtx, TestClientCtx } from './helpers/harness'
 
-const FILE: AttachmentRef = { kind: 'file', attachmentId: 'sha256:f1', name: 'report.md', bytes: 47320 }
-const ALIAS = '/home/me/.dsh/attachments/v1/files/a3/a3f0/report.md'
+const FILE: AttachmentRef = { kind: 'file', attachmentId: 'sha256:shared', name: 'report.md' }
 
-interface Call {
-  url: string
-  body: unknown
+const SESSION = 'shared-session-id'
+
+function opener() {
+  const openResource = vi.fn()
+  const ctx = new TestClientCtx({ services: { sidebarRight: { openResource } } })
+  const open = makeAttachmentOpener(asClientCtx(ctx), SESSION, undefined)
+  assert.ok(open)
+  return { open, openResource }
 }
 
-function stubFetch(answer: (call: Call) => unknown): Call[] {
-  const calls: Call[] = []
-  vi.stubGlobal('fetch', async (url: string, init: { body?: string }) => {
-    const call: Call = { url, body: init.body === undefined ? undefined : JSON.parse(init.body) }
-    calls.push(call)
-    return answer(call)
-  })
-  return calls
-}
-
-function json(value: unknown, ok = true): { ok: boolean; json: () => Promise<unknown> } {
-  return { ok, json: () => Promise.resolve(value) }
+function reply(account: string): Response {
+  return Response.json({ ok: true, value: { path: `/synthetic/${account}/report.md` } })
 }
 
 afterEach(() => {
-  clearAttachmentPaths()
+  resetClientScope(true)
   vi.unstubAllGlobals()
-  vi.restoreAllMocks()
 })
 
-describe('pathOfValue', () => {
-  test('proves the envelope down to a non-empty string path', () => {
-    assert.equal(pathOfValue({ path: ALIAS }), ALIAS)
-    assert.equal(pathOfValue({ path: '' }), null)
-    assert.equal(pathOfValue({ path: 42 }), null)
-    assert.equal(pathOfValue({}), null)
-    assert.equal(pathOfValue(null), null)
-    assert.equal(pathOfValue('path'), null)
-  })
+test.each([401, 403])('HTTP %i prevents reopening the same attachment after revocation', async (status) => {
+  const fetch = vi.fn().mockResolvedValueOnce(reply('account-a')).mockResolvedValueOnce(new Response(null, { status }))
+  vi.stubGlobal('fetch', fetch)
+  const { open, openResource } = opener()
+  assert.equal(await open(FILE), true)
+  assert.equal(await open(FILE), false)
+  assert.equal(openResource.mock.calls.length, 1)
+  assert.deepEqual(fetch.mock.calls.map(([url, init]) => [url, JSON.parse(init.body)]), [
+    ['api/dsh-context/attachment', { sessionId: SESSION, attachmentId: FILE.attachmentId }],
+    ['api/dsh-context/attachment', { sessionId: SESSION, attachmentId: FILE.attachmentId }],
+  ])
 })
 
-describe('makeAttachmentLocator', () => {
-  test('no session means no locator; otherwise one read resolves the path and the next click reuses it', async () => {
-    assert.equal(makeAttachmentLocator(undefined), undefined)
-    assert.equal(makeAttachmentLocator(''), undefined)
-    const calls = stubFetch(() => json({ ok: true, value: { path: ALIAS } }))
-    const locate = makeAttachmentLocator('s1')!
-    assert.equal(await locate(FILE), ALIAS)
-    assert.equal(await locate(FILE), ALIAS)
-    assert.equal(calls.length, 1, 'the second read is served from the cache')
-    assert.equal(calls[0].url, 'api/dsh-context/attachment')
-    assert.deepEqual(calls[0].body, { sessionId: 's1', attachmentId: 'sha256:f1' })
-  })
-
-  test('every refusal resolves null, and none of them is cached', async () => {
-    const answers: ((call: Call) => unknown)[] = [
-      () => json({ ok: true, value: null }),
-      () => json({ ok: false, error: { code: 'x' } }),
-      () => json({ ok: true, value: { path: '' } }),
-      () => ({ ok: false, json: () => Promise.resolve({}) }),
-      () => ({ ok: true, json: () => Promise.reject(new Error('bad json')) }),
-      () => {
-        throw new Error('offline')
-      },
-      () => json('not-an-envelope'),
-    ]
-    for (const answer of answers) {
-      clearAttachmentPaths()
-      const calls = stubFetch(answer)
-      const locate = makeAttachmentLocator('s1')!
-      assert.equal(await locate(FILE), null)
-      assert.equal(await locate(FILE), null)
-      assert.equal(calls.length, 2, 'a failed resolution is retried, never cached')
-      vi.unstubAllGlobals()
-    }
-  })
-
-  test('the cache is bounded: the oldest path is dropped first', async () => {
-    const calls = stubFetch(call => json({ ok: true, value: { path: `${ALIAS}#${String((call.body as { attachmentId: string }).attachmentId)}` } }))
-    const locate = makeAttachmentLocator('s1')!
-    for (let i = 0; i < 33; i++) {
-      await locate({ kind: 'file', attachmentId: `sha256:f${String(i)}`, name: 'x.md' })
-    }
-    assert.equal(calls.length, 33)
-    await locate({ kind: 'file', attachmentId: 'sha256:f0', name: 'x.md' })
-    assert.equal(calls.length, 34)
-    await locate({ kind: 'file', attachmentId: 'sha256:f32', name: 'x.md' })
-    assert.equal(calls.length, 34)
-  })
+test('switching accounts cancels a preview and ignores a reply that still arrives', async () => {
+  let resolveOld!: (response: Response) => void
+  const oldReply = new Promise<Response>(resolve => { resolveOld = resolve })
+  const fetch = vi.fn().mockReturnValueOnce(oldReply).mockResolvedValueOnce(reply('account-b'))
+  vi.stubGlobal('fetch', fetch)
+  const { open, openResource } = opener()
+  const oldOpen = open(FILE)
+  resetClientScope(false)
+  assert.equal(fetch.mock.calls[0]?.[1].signal.aborted, true)
+  assert.equal(await open(FILE), false)
+  resetClientScope(true)
+  assert.equal(await open(FILE), true)
+  resolveOld(reply('account-a'))
+  assert.equal(await oldOpen, false)
+  assert.equal(fetch.mock.calls.length, 2)
+  assert.equal(openResource.mock.calls.length, 1)
+  assert.match(String(openResource.mock.calls[0]?.[0]), /account-b/)
 })
 
-describe('makeAttachmentOpener', () => {
-  test('without a session or a preview column there is no opener; otherwise a resolved path opens the session file address', async () => {
-    stubFetch(() => json({ ok: true, value: { path: ALIAS } }))
-    const bare = new TestClientCtx()
-    assert.equal(makeAttachmentOpener(asClientCtx(bare), undefined, undefined), undefined)
-    assert.equal(makeAttachmentOpener(asClientCtx(bare), '', undefined), undefined)
-    assert.equal(makeAttachmentOpener(asClientCtx(bare), 's1', undefined), undefined)
-    stubFetch(() => json({ ok: true, value: { path: ALIAS } }))
-    const opened: string[] = []
-    const ctx = new TestClientCtx({ services: { sidebarRight: { openResource: (address: string) => { opened.push(address) } } } })
-    const open = makeAttachmentOpener(asClientCtx(ctx), 's1', '/work/repo')!
-    assert.equal(await open(FILE), true)
-    assert.equal(opened.length, 1)
-    assert.ok(opened[0].startsWith('dsh-resource://file/session/s1/'), opened[0])
-    assert.ok(opened[0].endsWith('report.md'), opened[0])
-    assert.ok(opened[0].includes('/home/me/.dsh/attachments/v1/files/a3/a3f0/'), 'an absolute path outside the workspace stays absolute')
-  })
-
-  test('an unresolved path and a refused address both report false', async () => {
-    stubFetch(() => json({ ok: true, value: null }))
-    const refused: string[] = []
-    const ctx = new TestClientCtx({ services: { sidebarRight: { openResource: (address: string) => { refused.push(address) } } } })
-    const open = makeAttachmentOpener(asClientCtx(ctx), 's1', undefined)!
-    assert.equal(await open(FILE), false)
-    assert.deepEqual(refused, [], 'nothing to open, the column is never called')
-
-    clearAttachmentPaths()
-    vi.unstubAllGlobals()
-    stubFetch(() => json({ ok: true, value: { path: ALIAS } }))
-    const throwing = new TestClientCtx({
-      services: {
-        sidebarRight: {
-          openResource: () => {
-            throw new Error('no viewer claims it')
-          },
-        },
-      },
-    })
-    const openThrowing = makeAttachmentOpener(asClientCtx(throwing), 's1', undefined)!
-    assert.equal(await openThrowing(FILE), false)
-  })
-})
-
-test('identical bytes in another session resolve that session’s named path', async () => {
-  const calls = stubFetch(call => json({ ok: true, value: {
-    path: (call.body as { sessionId: string }).sessionId === 's1' ? '/a.md' : '/b.txt',
-  } }))
-  assert.equal(await makeAttachmentLocator('s1')!(FILE), '/a.md')
-  assert.equal(await makeAttachmentLocator('s2')!({ ...FILE, name: 'b.txt' }), '/b.txt')
-  assert.equal(calls.length, 2)
+test('revocation cancels an older preview that still has an authorized response', async () => {
+  let resolveOld!: (response: Response) => void
+  const oldReply = new Promise<Response>(resolve => { resolveOld = resolve })
+  const fetch = vi.fn().mockReturnValueOnce(oldReply).mockResolvedValueOnce(new Response(null, { status: 403 }))
+  vi.stubGlobal('fetch', fetch)
+  const { open, openResource } = opener()
+  const oldOpen = open(FILE)
+  assert.equal(await open(FILE), false)
+  assert.equal(fetch.mock.calls[0]?.[1].signal.aborted, true)
+  resolveOld(reply('account-a'))
+  assert.equal(await oldOpen, false)
+  assert.equal(openResource.mock.calls.length, 0)
 })

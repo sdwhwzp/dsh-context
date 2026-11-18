@@ -104,7 +104,7 @@ export interface FleetDelegation {
   seq: number
   time: number
   to: string
-  mode: 'one-shot' | 'continuable' | 'external'
+  mode: 'one-shot' | 'continuable' | 'external' | 'unknown'
   label?: string
 }
 
@@ -117,6 +117,43 @@ export interface FleetDetail {
   messages: FleetMessage[]
   messagesTotal?: number
   truncated: boolean
+}
+
+export interface FleetSummaryMember {
+  id: string
+  createdAt?: number
+  mode?: 'one-shot' | 'continuable' | 'external' | 'unknown'
+  label?: string
+  name?: string
+  description?: string
+  phase?: string
+}
+
+export interface FleetDetailCounts {
+  readAt: number
+  messagesTotal: number
+  delegationsCount: number
+}
+
+export interface FleetSummary {
+  rootId: string
+  rootCreatedAt?: number
+  detail: FleetDetail
+  members: FleetSummaryMember[]
+  familySize: number
+  counts: Record<string, FleetDetailCounts>
+}
+
+export interface FleetBatchRequest {
+  ids: string[]
+  mode: 'preview' | 'history'
+  rootId?: string
+}
+
+export interface FleetBatchValue {
+  rows: Record<string, FleetDetail>
+  missing: string[]
+  total: number
 }
 
 export type DefaultGranularity = 'step' | 'turn'
@@ -137,7 +174,9 @@ export type DefaultDurationCurve = 'show' | 'hide'
 
 export type OverviewAutoSteps = 'off' | '100' | '200' | '300'
 
-export type DefaultOverviewRange = 'today' | '7d' | '30d' | 'all'
+export const OVERVIEW_RANGE_PRESETS = ['today', '7d', '30d', 'all'] as const
+
+export type DefaultOverviewRange = typeof OVERVIEW_RANGE_PRESETS[number]
 
 export type FleetTab = 'show' | 'hide'
 
@@ -159,7 +198,6 @@ export interface PluginSettings {
 
 export type SettingsField = keyof PluginSettings
 
-/** Generated provider output allocated per message; unclassified content stays explicit. */
 export interface OutputTokenParts {
   reasoning: number
   answers: number
@@ -167,7 +205,15 @@ export interface OutputTokenParts {
   unclassified: number
 }
 
-export interface Snapshot {
+export interface SurfaceNodeWindow {
+  nodes: SurfaceNode[]
+  droppedNodes: number
+  archive: SurfaceNode[]
+  surfaceFloor?: number
+  archiveFloor?: number
+}
+
+export interface Snapshot extends SurfaceNodeWindow {
   ok: boolean
   unsupported?: {
     current: string
@@ -199,6 +245,8 @@ export interface Snapshot {
   billedGenerated?: OutputTokenParts
   /** Tool calls whose result is live (a `skill`-tool node keeps counting). Absent = 0. */
   toolCalls?: number
+  toolTally?: Record<string, number>
+  programTally?: Record<string, number>
   humanInputs?: number
   answers?: number
   lastUser?: string
@@ -208,31 +256,55 @@ export interface Snapshot {
   requests: RequestRecord[]
   events: ContextEventRecord[]
   cost?: SessionCostUsage
+  lifetime?: TimelineLifetime
   timing?: TimingTotals
   systems?: SystemPromptNode[]
-  nodes: SurfaceNode[]
-  droppedNodes: number
-  archive: SurfaceNode[]
-  surfaceFloor?: number
-  archiveFloor?: number
   fileOps?: FileOpRecord[]
   fileOpsFloor?: number
   commands?: CommandRecord[]
   commandsFloor?: number
   commandStats?: CommandStats
   spans?: TimingSpan[]
+  costRead?: SessionCostRead
 }
 
-export interface ContextTimelineDetail {
+export interface CostPriceRate {
+  hit: number
+  miss: number
+  write: number
+  out: number
+}
+
+export type CostConfidence = 'high' | 'medium' | 'low'
+
+export interface CostPriceFace {
+  provider: string
+  model: string
+  rate: CostPriceRate
+  via: string
+  confidence: CostConfidence
+  canonical?: string
+}
+
+export interface CostPriceMiss {
+  provider: string
+  model: string
+  reason: string
+  candidates?: number
+}
+
+export interface SessionCostRead {
+  usd: number | null
+  ready: boolean
+  faces?: CostPriceFace[]
+  misses?: CostPriceMiss[]
+}
+
+export interface ContextTimelineDetail extends SurfaceNodeWindow {
   rev: number
   head?: ContextTimeline
   requests: RequestRecord[]
   events: ContextEventRecord[]
-  nodes: SurfaceNode[]
-  droppedNodes: number
-  archive: SurfaceNode[]
-  surfaceFloor?: number
-  archiveFloor?: number
   fileOps?: FileOpRecord[]
   fileOpsFloor?: number
   commands?: CommandRecord[]
@@ -341,6 +413,14 @@ export interface CostBucketTotals {
   output: number
 }
 
+export interface TimelineLifetime {
+  usage?: CostBucketTotals
+  postSeed?: {
+    turns: number
+    timing?: TimingTotals
+  }
+}
+
 export interface ToolTimingTotals {
   calls: number
   ms: number
@@ -392,6 +472,7 @@ export interface SurfaceNode {
   err?: boolean
   skill?: string
   calls?: string[]
+  agent?: string
 }
 
 export interface SlimRequestRecord {
@@ -424,9 +505,11 @@ export interface ContextEventRecord {
   kind: 'compaction' | 'prune' | 'inject' | 'model' | 'mode'
   form?: string
   tokens?: number
+  grossTokens?: number
   count?: number
   sub?: string
   name?: string
+  agent?: string
   detail?: string
   from?: string
   to?: string
@@ -475,3 +558,176 @@ export interface PlatformBalance {
   isAvailable: boolean
   balances: PlatformBalanceEntry[]
 }
+
+export interface BackfillUnreadableSession {
+  id: string
+  reason: string
+}
+
+export interface BackfillCoverage {
+  complete: boolean
+  remaining: number
+  failed: number
+  running: boolean
+  total: number
+  covered: number
+  unsupported: number
+  unreadable: number
+  unreadableSessions?: BackfillUnreadableSession[]
+}
+
+export type OverviewPart = 'summary' | 'days' | 'page' | 'tally'
+
+export type OverviewCoverage = 'all' | 'active' | 'archived'
+
+export type OverviewSort = 'recent' | 'tokens' | 'context'
+
+export type OverviewTallyField = 'skills' | 'tools' | 'cmds'
+
+export type OverviewRange = DefaultOverviewRange | { start: number; end: number }
+
+export interface OverviewScope {
+  range?: OverviewRange
+  day?: string | null
+  calendar?: { from: string; to: string }
+  coverage?: OverviewCoverage
+  group?: string | null
+  query?: string
+}
+
+export interface OverviewPick {
+  field: OverviewTallyField
+  name: string
+}
+
+export interface OverviewRequest {
+  part: OverviewPart
+  revision?: string | null
+  scope?: OverviewScope
+  sort?: OverviewSort
+  page?: number
+  tally?: OverviewTallyField
+  pick?: OverviewPick | null
+}
+
+export interface OverviewPartTotal {
+  key: string
+  value: number
+}
+
+export interface OverviewTimingWindow {
+  calls: number
+  toolCalls: number
+  toolsMs: number
+  wallMs: number
+}
+
+export interface OverviewResolvedWindow {
+  start: number
+  end: number | null
+  from: string | null
+  to: string | null
+}
+
+export interface OverviewSummary {
+  sessions: number
+  sessionsTotal: number
+  sessionsArchived: number
+  archivedScoped: number
+  tokens: number
+  turns: number
+  costUsd: number | null
+  costSessions: number
+  usageSessions: number
+  cacheHit: string | null
+  tokenParts: OverviewPartTotal[] | null
+  timing: TimingTotals | null
+  windowTiming: OverviewTimingWindow
+  window?: OverviewResolvedWindow
+  coverage: BackfillCoverage
+}
+
+export interface OverviewDay {
+  key: string
+  tokens: number
+  sessions: number
+  costUsd: number | null
+}
+
+export interface OverviewPageRow {
+  id: string
+  title: string
+  cwd?: string
+  updatedAt: number
+  running: boolean
+  archived: boolean
+  group?: string
+  tokens: number
+  turns: number
+  steps?: number
+  parts: OverviewPartTotal[]
+  total: number
+  contextWindow?: number
+  maxOutputTokens?: number
+  model?: string
+  lastUser?: string
+  costUsd: number | null
+  createdDay?: string
+}
+
+export interface OverviewGroupCount {
+  key: string
+  count: number
+}
+
+export interface OverviewPage {
+  items: OverviewPageRow[]
+  index: number
+  count: number
+  total: number
+  scopeTotal: number
+  groups: OverviewGroupCount[]
+}
+
+export interface OverviewTallyStat {
+  name: string
+  n: number
+  sessions: number
+  last: number
+}
+
+export interface OverviewTally {
+  field: OverviewTallyField
+  stats: OverviewTallyStat[]
+}
+
+export interface OverviewUnchanged {
+  revision: string
+  unchanged: true
+}
+
+export interface OverviewSummaryValue {
+  revision: string
+  pricingReady: boolean
+  summary: OverviewSummary
+}
+
+export interface OverviewDaysValue {
+  revision: string
+  pricingReady: boolean
+  days: OverviewDay[]
+}
+
+export interface OverviewPageValue {
+  revision: string
+  pricingReady: boolean
+  page: OverviewPage
+}
+
+export interface OverviewTallyValue {
+  revision: string
+  pricingReady: boolean
+  tally: OverviewTally
+}
+
+export type OverviewValue = OverviewUnchanged | OverviewSummaryValue | OverviewDaysValue | OverviewPageValue | OverviewTallyValue

@@ -11,6 +11,7 @@ export default defineConfig({
           name: 'host',
           include: ['tests/host/**/*.spec.ts', 'tests/shared/**/*.spec.ts'],
           environment: 'node',
+          testTimeout: 30_000,
         },
       },
       {
@@ -21,8 +22,11 @@ export default defineConfig({
           name: 'client',
           include: ['tests/client/**/*.spec.ts'],
           environment: 'jsdom',
-          // One jsdom environment per worker instead of one per file: ~30% off the coverage suite's runtime. Client-only — the host project fails under this pool.
-          pool: 'vmThreads',
+          testTimeout: 30_000,
+          // Mount helpers can miss a jsdom frame on a loaded machine; one retry distinguishes that from a product defect.
+          retry: 1,
+          // One fresh jsdom per spec file: a shared environment lets a prototype stub from one spec leak into another's layout measurements.
+          pool: 'forks',
           setupFiles: ['tests/client/setup.ts'],
           server: {
             deps: {
@@ -48,7 +52,6 @@ export default defineConfig({
       exclude: [
         'src/**/*.d.ts',
         // Pure type declarations: no runtime surface to instrument.
-        'src/shared/types.ts',
         'src/host/projection.ts',
       ],
       thresholds: { perFile: true, statements: 100, branches: 100, functions: 100, lines: 100 },

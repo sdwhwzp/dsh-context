@@ -1,108 +1,34 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import type { Context } from '@deepseek-ai/cordis'
 import { FLEET_ROUTE, fleetDetailOfEvents, watchFleetChannel } from '../../src/host/fleet'
-import type { ColdReadGate } from '../../src/host/coldRead'
+import type { FleetBatchValue, FleetSummary } from '../../src/shared/types'
+import { connectionOf, fakeCtx, observing as observingOf, OPEN_GATE, postJson, SKIP_GATE } from './helpers/ctx'
+import type { FakeCtx, FakeRoute } from './helpers/ctx'
 
-type RouteFetch = (request: Request, principal?: unknown) => Promise<Response>
-
-interface CtxSpec {
-  principalAccess?: unknown
-  requestPrincipal?: unknown
-  connection?: unknown
-  sessionQuery?: unknown
-  sessionPersistence?: unknown
+const armed = (spec: Record<string, unknown> = {}): FakeCtx => {
+  const fake = fakeCtx({ connection: connectionOf(), ...spec })
+  watchFleetChannel(fake.ctx, OPEN_GATE)
+  return fake
 }
 
-function ctxOf(spec: CtxSpec): { ctx: Context; captured: { path?: string; fetch?: RouteFetch }; disposers: (() => void)[] } {
-  const captured: { path?: string; fetch?: RouteFetch } = {}
-  const disposers: (() => void)[] = []
-  const services = new Map<string, unknown>()
-  if ('principalAccess' in spec) services.set('principalAccess', spec.principalAccess)
-  if ('requestPrincipal' in spec) services.set('requestPrincipal', spec.requestPrincipal)
-  if ('connection' in spec) services.set('connection', spec.connection)
-  if ('sessionQuery' in spec) services.set('sessionQuery', spec.sessionQuery)
-  if ('sessionPersistence' in spec) services.set('sessionPersistence', spec.sessionPersistence)
-  const ctx = {
-    get: (name: string) => services.get(name),
-    effect(fn: () => unknown, _label?: string) {
-      const d = fn()
-      if (typeof d === 'function') disposers.push(d as () => void)
-      return () => {}
-    },
-    inject(deps: string[], cb: (c: unknown) => unknown) {
-      if (!deps.every(d => services.has(d))) return
-      const d = cb(ctx)
-      if (typeof d === 'function') disposers.push(d as () => void)
-    },
-  }
-  if (spec.connection !== undefined && spec.connection !== null) {
-    const conn = spec.connection as { fetch?: { register?: unknown } }
-    if (typeof conn.fetch?.register === 'function') {
-      conn.fetch.register = (route: { path: string; fetch: RouteFetch }) => {
-        captured.path = route.path
-        captured.fetch = route.fetch
-        return () => {}
-      }
-    }
-  }
-  return { ctx: ctx as unknown as Context, captured, disposers }
-}
+const call = (captured: FakeRoute, body: unknown, principal?: unknown): Promise<Record<string, unknown>> =>
+  postJson(captured, FLEET_ROUTE, body, principal)
 
-const OPEN_GATE: ColdReadGate = { admit: read => read() }
-const SKIP_GATE: ColdReadGate = { admit: () => Promise.resolve(undefined) }
-
-function armed(spec: CtxSpec = {}): { captured: { path?: string; fetch?: RouteFetch } } {
-  const { ctx, captured } = ctxOf({ connection: { fetch: { register: () => () => {} } }, ...spec })
-  watchFleetChannel(ctx, OPEN_GATE)
-  return { captured }
-}
-
-async function call(captured: { fetch?: RouteFetch }, body: unknown): Promise<Record<string, unknown>> {
-  const request = new Request(`http://dsh.test${FLEET_ROUTE}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  })
-  const response = await captured.fetch!(request)
-  return await response.json() as Record<string, unknown>
-}
-
-function observing(events: unknown, inheritedEventCount?: number): { observeSession(id: string, options: unknown): Promise<unknown>; wasDisposed(): boolean } {
-  let disposed = false
-  return {
-    wasDisposed: () => disposed,
-    observeSession: () => Promise.resolve({
-      events,
-      ...(inheritedEventCount !== undefined ? { inheritedEventCount } : {}),
-      get disposed() { return disposed },
-      [Symbol.dispose]() { disposed = true },
-    }),
-  }
-}
+const observing = (events: unknown, inheritedEventCount?: number): ReturnType<typeof observingOf> =>
+  observingOf(events, inheritedEventCount === undefined ? {} : { inheritedEventCount })
 
 describe('watchFleetChannel gating', () => {
   test('no route without the connection service or its fetch registry; a rejecting registry keeps it absent without throwing', () => {
     for (const spec of [{}, { connection: {} }, { connection: { fetch: {} } }]) {
-      const { ctx, captured } = ctxOf(spec)
+      const { ctx, captured } = fakeCtx(spec)
       watchFleetChannel(ctx, OPEN_GATE)
       assert.equal(captured.path, undefined, JSON.stringify(spec))
     }
     const { captured } = armed()
     assert.equal(captured.path, FLEET_ROUTE)
-    const ctx = {
-      get: (name: string) => name === 'connection'
-        ? {
-          fetch: {
-            register: () => {
-              throw new Error('registration rejected')
-            },
-          },
-        }
-        : undefined,
-      inject(_deps: string[], cb: (c: unknown) => unknown) { cb(ctx) },
-    }
-    assert.doesNotThrow(() => { watchFleetChannel(ctx as unknown as Context, OPEN_GATE) })
+    const rejecting = fakeCtx({ connection: { fetch: { register: () => { throw new Error('registration rejected') } } } })
+    assert.doesNotThrow(() => { watchFleetChannel(rejecting.ctx, OPEN_GATE) })
+    assert.equal(rejecting.captured.path, undefined)
   })
 
   test('bad bodies and missing session ids are typed failures', async () => {
@@ -119,12 +45,9 @@ describe('watchFleetChannel gating', () => {
     assert.deepEqual(await call(armed().captured, { sessionId: 's1' }), { ok: true, value: null })
     assert.deepEqual(await call(armed({ sessionQuery: {} }).captured, { sessionId: 's1' }), { ok: true, value: null })
     assert.deepEqual(await call(armed({ sessionQuery: observing(null) }).captured, { sessionId: 's1' }), { ok: true, value: null })
-    const { ctx, captured } = ctxOf({
-      connection: { fetch: { register: () => () => {} } },
-      sessionQuery: observing([]),
-    })
-    watchFleetChannel(ctx, SKIP_GATE)
-    assert.deepEqual(await call(captured, { sessionId: 's1' }), { ok: true, value: null })
+    const skipped = fakeCtx({ connection: connectionOf(), sessionQuery: observing([]) })
+    watchFleetChannel(skipped.ctx, SKIP_GATE)
+    assert.deepEqual(await call(skipped.captured, { sessionId: 's1' }), { ok: true, value: null })
   })
 
   test('events fold into the detail and the observation disposes', async () => {
@@ -223,7 +146,7 @@ describe('fleetDetailOfEvents — the descriptor', () => {
 })
 
 describe('fleetDetailOfEvents — durable delegations', () => {
-  test('accepts only versioned catalog and activated Team records, with catalog taking precedence', () => {
+  test('accepts every catalog version and activated Team records, with catalog taking precedence', () => {
     const detail = fleetDetailOfEvents([
       { type: 'subagent/catalog', seq: 4, time: 40, data: { version: 1, childId: 'unknown', childCreatedAt: 400, mode: 'unknown' } },
       { type: 'subagent/catalog', seq: 2, time: 20, data: { version: 0, childId: 'one', childCreatedAt: 200, mode: 'one-shot', label: 'Inspect' } },
@@ -233,28 +156,34 @@ describe('fleetDetailOfEvents — durable delegations', () => {
       { type: 'subagent/catalog', seq: 6, time: 60, data: { version: 0, childId: '', childCreatedAt: 600, mode: 'one-shot' } },
       { type: 'subagent/catalog', seq: 7, time: 70, data: { version: 0, childId: 'bad-time', childCreatedAt: 'no', mode: 'one-shot' } },
       { type: 'subagent/catalog', seq: 8, time: 80, data: null },
-      { type: 'subagent/catalog', seq: 9, time: 90, data: { version: 2, childId: 'bad-version', childCreatedAt: 900, mode: 'continuable', label: 'Wrong version' } },
       { type: 'subagent/catalog', seq: 10, time: 100, data: { version: 0, childId: 'missing-label', childCreatedAt: 1000, mode: 'continuable' } },
-      { type: 'team/member', seq: 11, time: 1100, data: { teamId: 'root', member: { id: 'mate', name: 'mate', description: 'Team duty', phase: 'provisioning' } } },
-      { type: 'team/member', seq: 12, time: 1200, data: { teamId: 'root', member: { id: 'mate', name: 'mate', description: 'Changed', phase: 'active' } } },
-      { type: 'team/member', seq: 13, time: 1300, data: { teamId: 'root', member: { id: 'failed', name: 'failed', description: 'Failed', phase: 'failed' } } },
-      { type: 'subagent/catalog', seq: 14, time: 1400, data: { version: 1, childId: 'mate', childCreatedAt: 1400, mode: 'continuable', label: 'Catalog wins' } },
-      { type: 'team/member', seq: 15, time: 1500, data: { teamId: 'root', member: { id: 'root', name: 'lead', description: 'Lead', phase: 'active' } } },
-      { type: 'team/member', seq: 16, time: 1600, data: { teamId: 'root', member: { id: '', name: 'bad', description: 'Bad', phase: 'active' } } },
-      { type: 'team/member', seq: 17, time: 1700, data: { teamId: 'root', member: { id: 'empty', name: 'empty', description: '', phase: 'active' } } },
-      { type: 'team/member', seq: 18, time: 1800, data: { teamId: 'root', member: { id: 'numeric', name: 'numeric', description: 42, phase: 'active' } } },
-      { type: 'subagent/catalog', seq: 19, time: 1900, data: { version: 0, childId: 'bare-one', childCreatedAt: 1900, mode: 'one-shot' } },
-      { type: 'subagent/catalog', seq: 20, time: 2000, data: { version: 2, childId: 'bare-external', childCreatedAt: 2000, mode: 'external' } },
+      { type: 'subagent/catalog', seq: 11, time: 110, data: { version: 3, childId: 'named', childCreatedAt: 1100, mode: 'continuable', label: 'Named duty', name: 'agent-1' } },
+      { type: 'subagent/catalog', seq: 12, time: 120, data: { version: 3, childId: 'named-external', childCreatedAt: 1200, mode: 'external', label: 'Named remote', name: 'agent-2' } },
+      { type: 'subagent/catalog', seq: 13, time: 130, data: { childId: 'bare', childCreatedAt: 1300, mode: 'one-shot' } },
+      { type: 'team/member', seq: 14, time: 1400, data: { teamId: 'root', member: { id: 'mate', name: 'mate', description: 'Team duty', phase: 'provisioning' } } },
+      { type: 'team/member', seq: 15, time: 1500, data: { teamId: 'root', member: { id: 'mate', name: 'mate', description: 'Changed', phase: 'active' } } },
+      { type: 'team/member', seq: 16, time: 1600, data: { teamId: 'root', member: { id: 'failed', name: 'failed', description: 'Failed', phase: 'failed' } } },
+      { type: 'subagent/catalog', seq: 17, time: 1700, data: { version: 1, childId: 'mate', childCreatedAt: 1400, mode: 'continuable', label: 'Catalog wins' } },
+      { type: 'team/member', seq: 18, time: 1800, data: { teamId: 'root', member: { id: 'root', name: 'lead', description: 'Lead', phase: 'active' } } },
+      { type: 'team/member', seq: 19, time: 1900, data: { teamId: 'root', member: { id: '', name: 'bad', description: 'Bad', phase: 'active' } } },
+      { type: 'team/member', seq: 20, time: 2000, data: { teamId: 'root', member: { id: 'empty', name: 'empty', description: '', phase: 'active' } } },
+      { type: 'team/member', seq: 21, time: 2100, data: { teamId: 'root', member: { id: 'numeric', name: 'numeric', description: 42, phase: 'active' } } },
+      { type: 'subagent/catalog', seq: 22, time: 2200, data: { version: 0, childId: 'bare-one', childCreatedAt: 2200, mode: 'one-shot' } },
+      { type: 'subagent/catalog', seq: 23, time: 2300, data: { version: 2, childId: 'bare-external', childCreatedAt: 2300, mode: 'external' } },
     ])
     assert.deepEqual(detail.delegations, [
       { seq: 1, time: 100, to: 'continuable', mode: 'continuable', label: 'Continue' },
       { seq: 2, time: 200, to: 'one', mode: 'one-shot', label: 'Inspect' },
       { seq: 3, time: 300, to: 'external', mode: 'external', label: 'Remote' },
-      { seq: 14, time: 1400, to: 'mate', mode: 'continuable', label: 'Catalog wins' },
-      { seq: 17, time: 1700, to: 'empty', mode: 'continuable' },
-      { seq: 18, time: 1800, to: 'numeric', mode: 'continuable' },
-      { seq: 19, time: 1900, to: 'bare-one', mode: 'one-shot' },
-      { seq: 20, time: 2000, to: 'bare-external', mode: 'external' },
+      { seq: 4, time: 400, to: 'unknown', mode: 'unknown' },
+      { seq: 11, time: 1100, to: 'named', mode: 'continuable', label: 'Named duty' },
+      { seq: 12, time: 1200, to: 'named-external', mode: 'external', label: 'Named remote' },
+      { seq: 13, time: 1300, to: 'bare', mode: 'one-shot' },
+      { seq: 17, time: 1400, to: 'mate', mode: 'continuable', label: 'Catalog wins' },
+      { seq: 20, time: 2000, to: 'empty', mode: 'continuable' },
+      { seq: 21, time: 2100, to: 'numeric', mode: 'continuable' },
+      { seq: 22, time: 2200, to: 'bare-one', mode: 'one-shot' },
+      { seq: 23, time: 2300, to: 'bare-external', mode: 'external' },
     ])
     assert.deepEqual(detail.messages, [])
   })
@@ -507,6 +436,113 @@ describe('fleetDetailOfEvents — inter-agent messages', () => {
 
 
 describe('authenticated session reads', () => {
+  test('Fleet filters batch rows, linked messages and cached counts as account grants change', async () => {
+    const catalog = (id: string, seq: number) => ({
+      type: 'subagent/catalog', seq, time: seq,
+      data: { childId: id, childCreatedAt: seq, mode: 'continuable', label: id },
+    })
+    const relay = (senderSessionId: string, text: string, seq: number) => ({
+      type: 'user/message', seq, time: seq,
+      data: { source: { kind: 'agent-message', senderSessionId }, content: [{ type: 'text', text }] },
+    })
+    const events: Record<string, unknown[]> = {
+      root: [
+        catalog('child', 1),
+        teamMemberEvent(2, { id: 'peer', name: 'worker', phase: 'active' }),
+        { type: 'user/message', seq: 3, time: 3, data: { content: [{ type: 'text', text: 'Own prompt' }] } },
+        { type: 'turn/end', seq: 4, time: 4, data: {} },
+        { type: 'user/message', seq: 5, time: 5, data: {
+          source: { kind: 'team-message', senderId: 'peer' }, content: [{ type: 'text', text: 'Team update' }],
+        } },
+        { type: 'user/message', seq: 6, time: 6, data: {
+          source: { kind: 'subagent-settled', senderSessionId: 'peer' }, content: [{ type: 'text', text: 'Completed' }],
+        } },
+        relay('', 'Unknown sender', 7),
+      ],
+      child: [relay('peer', 'Child update', 1)],
+    }
+    const principal = { id: 'account' }
+    const reads: string[] = []
+    let granted = new Set(['root', 'child', 'peer'])
+    const fake = armed({
+      principalAccess: {
+        resolve: async (_caller: unknown, subjects: { sessionIds: readonly string[] }) => ({
+          readableSessionIds: new Set(subjects.sessionIds.filter(id => granted.has(id))),
+        }),
+      },
+      sessionQuery: {
+        observeSession: async (id: string) => {
+          reads.push(id)
+          return { events: events[id] ?? [], source: 'stored', revision: id, header: { createdAt: 1 } }
+        },
+      },
+    })
+    const summary = () => call(fake.captured, { sessionId: 'root', summary: true }, principal)
+      .then(result => result.value as FleetSummary)
+    const batch = (rootId: string) => call(fake.captured, { batch: { rootId, ids: ['root', 'child', 'foreign'] } }, principal)
+    const initial = await summary()
+    assert.equal(initial.familySize, 3)
+    assert.equal(initial.detail.initialPrompt, 'Own prompt')
+    assert.deepEqual(initial.detail.messages.map(message => message.text), ['Completed', 'Team update'])
+    const fetched = (await batch('root')).value as FleetBatchValue
+    assert.deepEqual(Object.keys(fetched.rows), ['root', 'child'])
+    assert.deepEqual(fetched.missing, ['foreign'])
+    assert.equal((await summary()).counts.child.messagesTotal, 1)
+    granted = new Set(['root', 'child'])
+    const scoped = await summary()
+    assert.deepEqual(scoped.members.map(member => member.id), ['child'])
+    assert.deepEqual(scoped.detail.delegations?.map(delegation => delegation.to), ['child'])
+    assert.deepEqual(scoped.detail.messages, [])
+    assert.equal(scoped.familySize, 2)
+    assert.equal(scoped.counts.child, undefined)
+    await batch('root')
+    assert.equal((await summary()).counts.child.messagesTotal, 0)
+    const afterReads = reads.length
+    assert.equal((await batch('peer')).ok, false)
+    assert.equal(reads.length, afterReads)
+    assert.equal(reads.includes('foreign'), false)
+    fake.dispose()
+  })
+
+  test('a peer authorization outage fails the batch and releases its observation', async ({ onTestFinished }) => {
+    const query = observingMap({ child: [catalogEvent(1, 'peer')] })
+    const fake = armed({
+      principalAccess: {
+        resolve: async (_caller: unknown, { sessionIds }: { sessionIds: readonly string[] }) => {
+          if (sessionIds.includes('peer')) throw new Error('private provider cause')
+          return { readableSessionIds: new Set(sessionIds) }
+        },
+      },
+      sessionQuery: query,
+    })
+    onTestFinished(fake.dispose)
+    const result = await call(fake.captured, { batch: { ids: ['child'], rootId: 'root' } }, { id: 'account' })
+    assert.deepEqual(result, { ok: false, error: { code: 'dsh-context/access-unavailable', message: 'account access unavailable' } })
+    assert.equal(query.disposeCount(), 1)
+  })
+
+  test('batch counts for rows linked to more than 64 peers are never reused', async ({ onTestFinished }) => {
+    const query = observingMap({
+      root: [catalogEvent(1, 'child')],
+      child: Array.from({ length: 65 }, (_, index) => catalogEvent(index + 1, `peer-${index}`)),
+    })
+    const fake = armed({
+      principalAccess: {
+        resolve: async (_caller: unknown, { sessionIds }: { sessionIds: readonly string[] }) => ({
+          readableSessionIds: new Set(sessionIds),
+        }),
+      },
+      sessionQuery: query,
+    })
+    onTestFinished(fake.dispose)
+    const principal = { id: 'account' }
+    const summary = () => call(fake.captured, { sessionId: 'root', summary: true }, principal)
+    await summary()
+    const result = (await call(fake.captured, { batch: { ids: ['child'], rootId: 'root' } }, principal)).value as FleetBatchValue
+    assert.equal(result.rows.child.delegations?.length, 65)
+    assert.deepEqual(Object.keys(((await summary()).value as FleetSummary).counts), ['root'])
+  })
+
   test('rejects anonymous and foreign sessions before reading their contents', async () => {
     let reads = 0
     const principal = { source: 'dsh-passwords', id: '1' }
@@ -593,5 +629,351 @@ describe('a live fold prefix reset', () => {
     events = [relay(2, 'two')]
     const reset = await call(captured, { sessionId: 'l2' }) as { value: { messages: Array<{ text: string }> } }
     assert.deepEqual(reset.value.messages.map(m => m.text), ['two'])
+  })
+})
+
+const catalogEvent = (seq: number, childId: string, over: Record<string, unknown> = {}): unknown => ({
+  type: 'subagent/catalog', seq, time: seq, data: { version: 0, childId, childCreatedAt: seq, mode: 'one-shot', ...over },
+})
+
+const teamMemberEvent = (seq: number, member: Record<string, unknown>, teamId = 'root'): unknown => ({
+  type: 'team/member', seq, time: seq, data: { teamId, member },
+})
+
+function observingMap(byId: Record<string, unknown>, over: Record<string, unknown> = {}): {
+  observeSession(id: string): Promise<unknown>
+  disposeCount(): number
+} {
+  let disposed = 0
+  return {
+    observeSession: (id: string) => {
+      const events = byId[id]
+      if (events === undefined) return Promise.reject(new Error('missing ' + id))
+      if (events instanceof Error) return Promise.reject(events)
+      return Promise.resolve({ events, ...over, [Symbol.dispose]() { disposed += 1 } })
+    },
+    disposeCount: () => disposed,
+  }
+}
+
+describe('fleet summary', () => {
+  test('serves the root fold, the durable family facts, and the known root count', async () => {
+    const events = [
+      catalogEvent(1, 'kid-a', { label: 'Inspect', name: 'agent-1', mode: 'continuable' }),
+      catalogEvent(2, 'kid-b'),
+      teamMemberEvent(3, { id: 'mate', name: 'mate', description: 'Team duty', phase: 'active' }),
+      teamMemberEvent(4, { id: 'root', name: 'lead', description: 'Lead', phase: 'active' }),
+      teamMemberEvent(5, { id: 'bare-team', description: 42, phase: 'settled' }),
+      teamMemberEvent(6, { id: 'no-phase', name: 'x', phase: 42 }),
+      { type: 'user/message', seq: 5, time: 5, data: { source: { kind: 'agent-message', senderSessionId: 'lead' }, content: [{ type: 'text', text: 'status?' }] } },
+    ]
+    const query = observingMap({ root: events }, { source: 'stored', revision: 'r1', header: { createdAt: 1234 } })
+    const { captured } = armed({ sessionQuery: query })
+    const r = await call(captured, { sessionId: 'root', summary: true }) as {
+      value: {
+        rootId: string
+        rootCreatedAt: number
+        detail: { messages: unknown[]; messagesTotal?: number }
+        members: unknown[]
+        familySize: number
+        counts: Record<string, { readAt: number; messagesTotal: number; delegationsCount: number }>
+      }
+    }
+    assert.equal(r.value.rootId, 'root')
+    assert.equal(r.value.rootCreatedAt, 1234)
+    assert.equal(r.value.detail.messages.length, 1)
+    assert.deepEqual(r.value.members, [
+      { id: 'kid-a', createdAt: 1, name: 'agent-1', mode: 'continuable', label: 'Inspect' },
+      { id: 'kid-b', createdAt: 2, mode: 'one-shot' },
+      { id: 'mate', createdAt: 3, name: 'mate', mode: 'continuable', description: 'Team duty', phase: 'active' },
+      { id: 'bare-team', createdAt: 5, mode: 'continuable', phase: 'settled' },
+      { id: 'no-phase', createdAt: 6, name: 'x', mode: 'continuable' },
+    ])
+    assert.equal(r.value.familySize, 6)
+    assert.equal(r.value.counts.root?.messagesTotal, 1)
+    assert.equal(r.value.counts.root?.delegationsCount, 3)
+    assert.equal(r.value.counts['kid-a'], undefined, 'unobserved children stay unknown')
+    assert.equal(query.disposeCount(), 1)
+  })
+
+  test('merges catalog labels over team facts and drops hostile member rows', async () => {
+    const events = [
+      teamMemberEvent(1, { id: 'kid', name: 'from-team', description: 'duty', phase: 'active', provider: 'spawn', context: 'fresh' }),
+      catalogEvent(2, 'kid', { label: 'from-catalog', name: 'agent-x', mode: 'continuable' }),
+      teamMemberEvent(3, { id: '', name: 'bad' }),
+      teamMemberEvent(4, null as unknown as Record<string, unknown>),
+      { type: 'team/member', seq: 5, time: 5, data: null },
+    ]
+    const { captured } = armed({ sessionQuery: observingMap({ root: events }) })
+    const r = await call(captured, { sessionId: 'root', summary: true }) as { value: { members: unknown[] } }
+    assert.deepEqual(r.value.members, [
+      { id: 'kid', createdAt: 2, name: 'agent-x', mode: 'continuable', label: 'from-catalog', description: 'duty', phase: 'active' },
+    ])
+  })
+
+  test('orders same-creation members by id without depending on the fold order', async () => {
+    const sameTime = (seq: number, childId: string): unknown => ({
+      type: 'subagent/catalog', seq, time: 10, data: { version: 0, childId, childCreatedAt: 10, mode: 'one-shot' },
+    })
+    const { captured } = armed({ sessionQuery: observingMap({ root: [sameTime(1, 'zulu'), sameTime(2, 'alpha'), sameTime(3, 'mike')] }) })
+    const r = await call(captured, { sessionId: 'root', summary: true }) as { value: { members: Array<{ id: string }> } }
+    assert.deepEqual(r.value.members.map(member => member.id), ['alpha', 'mike', 'zulu'])
+  })
+
+  test('degrades to a typed null without a query, an event list, or an admitted cold read', async () => {
+    assert.deepEqual(await call(armed().captured, { sessionId: 's1', summary: true }), { ok: true, value: null })
+    assert.deepEqual(await call(armed({ sessionQuery: {} }).captured, { sessionId: 's1', summary: true }), { ok: true, value: null })
+    assert.deepEqual(await call(armed({ sessionQuery: observing(null) }).captured, { sessionId: 's1', summary: true }), { ok: true, value: null })
+    const skipped = fakeCtx({ connection: connectionOf(), sessionQuery: observing([]) })
+    watchFleetChannel(skipped.ctx, SKIP_GATE)
+    assert.deepEqual(await call(skipped.captured, { sessionId: 's1', summary: true }), { ok: true, value: null })
+  })
+
+  test('a summary flag that is not exactly true keeps the single detail shape', async () => {
+    const { captured } = armed({ sessionQuery: observing([{ type: 'user/message', seq: 1, time: 1, data: { content: [{ type: 'text', text: 'plain' }] } }]) })
+    const r = await call(captured, { sessionId: 's1', summary: 1 }) as { value: { initialPrompt?: string; members?: unknown } }
+    assert.equal(r.value.initialPrompt, 'plain')
+    assert.equal(r.value.members, undefined)
+  })
+
+  test('a rejecting observation is an internal failure in both error shapes', async () => {
+    const err = armed({ sessionQuery: { observeSession: () => Promise.reject(new Error('log unreadable')) } })
+    assert.equal(((await call(err.captured, { sessionId: 's1', summary: true })).error as { message: string }).message, 'log unreadable')
+    const raw = armed({ sessionQuery: { observeSession: () => Promise.reject('nope') } })
+    assert.equal(((await call(raw.captured, { sessionId: 's1', summary: true })).error as { message: string }).message, 'nope')
+  })
+
+  test('tolerates missing or hostile header and inherited-count facts', async () => {
+    const header: Record<string, unknown> = {}
+    const query = observingMap({
+      root: [catalogEvent(1, 'inherited'), catalogEvent(3, 'own')],
+    }, { header, inheritedEventCount: Number.NaN })
+    const { captured } = armed({ sessionQuery: query })
+    const first = await call(captured, { sessionId: 'root', summary: true }) as { value: { rootCreatedAt?: number; members: unknown[] } }
+    assert.equal(first.value.rootCreatedAt, undefined)
+    assert.equal(first.value.members.length, 2, 'a non-finite inherited count reads as zero')
+    header.createdAt = 'soon'
+    const second = await call(captured, { sessionId: 'root', summary: true }) as { value: { rootCreatedAt?: number } }
+    assert.equal(second.value.rootCreatedAt, undefined)
+    const negative = armed({ sessionQuery: observingMap({ root: [catalogEvent(1, 'a')] }, { inheritedEventCount: -2 }) })
+    const third = await call(negative.captured, { sessionId: 'root', summary: true }) as { value: { members: unknown[] } }
+    assert.equal(third.value.members.length, 1)
+    const inherited = armed({ sessionQuery: observingMap({ root: [catalogEvent(1, 'inherited'), catalogEvent(3, 'own')] }, { inheritedEventCount: 2 }) })
+    const fourth = await call(inherited.captured, { sessionId: 'root', summary: true }) as { value: { members: Array<{ id: string }> } }
+    assert.deepEqual(fourth.value.members.map(m => m.id), ['own'])
+  })
+
+  test('returns the per-child counts observed so far and rewrites them when the root lifecycle changes', async () => {
+    const header: { createdAt?: number } = { createdAt: 5 }
+    const query = observingMap({
+      root: [catalogEvent(1, 'kid-a'), catalogEvent(2, 'kid-b')],
+      'kid-a': [{ type: 'user/message', seq: 1, time: 1, data: { source: { kind: 'team-message', senderId: 'root', senderName: 'lead' }, content: [{ type: 'text', text: 'hello' }] } }],
+      'kid-b': [],
+    }, { header })
+    const { captured } = armed({ sessionQuery: query })
+    const root = await call(captured, { sessionId: 'root', summary: true }) as { value: { counts: Record<string, unknown> } }
+    assert.deepEqual(Object.keys(root.value.counts), ['root'])
+    const batch = await call(captured, { batch: { ids: ['kid-a', 'kid-b'], rootId: 'root' } }) as { value: { rows: Record<string, { messagesTotal?: number }>; total: number } }
+    assert.deepEqual(Object.keys(batch.value.rows).sort(), ['kid-a', 'kid-b'])
+    const grown = await call(captured, { sessionId: 'root', summary: true }) as { value: { counts: Record<string, { messagesTotal: number; delegationsCount: number }> } }
+    assert.deepEqual(Object.keys(grown.value.counts).sort(), ['kid-a', 'kid-b', 'root'])
+    assert.equal(grown.value.counts['kid-a']?.messagesTotal, 1)
+    assert.equal(grown.value.counts['kid-b']?.messagesTotal, 0)
+
+    header.createdAt = 6
+    const reset = await call(captured, { sessionId: 'root', summary: true }) as { value: { counts: Record<string, unknown>; rootCreatedAt?: number } }
+    assert.equal(reset.value.rootCreatedAt, 6)
+    assert.deepEqual(Object.keys(reset.value.counts), ['root'], 'a recreated root never inherits the old counts')
+
+    const mismatched = fakeCtx({
+      connection: connectionOf(),
+      sessionQuery: observingMap({ root: [catalogEvent(1, 'kid-a')], 'kid-a': [] }, { header: { createdAt: 6 } }),
+      sessions: { get: (id: string) => id === 'root' ? { header: { createdAt: 7 } } : undefined },
+    })
+    watchFleetChannel(mismatched.ctx, OPEN_GATE)
+    const adapted = await call(mismatched.captured, { sessionId: 'root', summary: true }) as { value: { counts: Record<string, unknown> } }
+    assert.deepEqual(Object.keys(adapted.value.counts), ['root'])
+    await call(mismatched.captured, { batch: { ids: ['kid-a'], rootId: 'root' } })
+    const afterMismatch = await call(mismatched.captured, { sessionId: 'root', summary: true }) as { value: { counts: Record<string, unknown> } }
+    assert.deepEqual(Object.keys(afterMismatch.value.counts), ['root'], 'a different live root identity blocks the update')
+
+    const throwing = fakeCtx({
+      connection: connectionOf(),
+      sessionQuery: observingMap({ root: [catalogEvent(1, 'kid-a')], 'kid-a': [] }),
+      sessions: { get: () => { throw new Error('gone') } },
+    })
+    watchFleetChannel(throwing.ctx, OPEN_GATE)
+    await call(throwing.captured, { sessionId: 'root', summary: true })
+    await call(throwing.captured, { batch: { ids: ['kid-a'], rootId: 'root' } })
+    const caught = await call(throwing.captured, { sessionId: 'root', summary: true }) as { value: { counts: Record<string, unknown> } }
+    assert.deepEqual(Object.keys(caught.value.counts).sort(), ['kid-a', 'root'], 'an unreadable live root keeps the buckets usable')
+  })
+
+  test('bounds the counts cache by roots and by children, evicting the oldest facts', async () => {
+    const eventsByRoot: Record<string, unknown> = {}
+    for (let i = 0; i < 9; i++) eventsByRoot[`root-${i}`] = [catalogEvent(1, `kid-${i}`)]
+    eventsByRoot['kid-0'] = []
+    const { captured } = armed({ sessionQuery: observingMap(eventsByRoot) })
+    for (let i = 0; i < 9; i++) await call(captured, { sessionId: `root-${i}`, summary: true })
+    await call(captured, { batch: { ids: ['kid-0'], rootId: 'root-0' } })
+    const evicted = await call(captured, { sessionId: 'root-0', summary: true }) as { value: { counts: Record<string, unknown> } }
+    assert.deepEqual(Object.keys(evicted.value.counts), ['root-0'], 'the oldest root bucket was dropped')
+
+    const wide = ['root', ...Array.from({ length: 1024 }, (_, i) => `kid-${i}`)]
+    const wideEvents: Record<string, unknown> = { root: wide.slice(1).map((id, i) => catalogEvent(i + 1, id)) }
+    for (const id of wide.slice(1)) wideEvents[id] = []
+    const wideCtx = armed({ sessionQuery: observingMap(wideEvents) })
+    await call(wideCtx.captured, { sessionId: 'root', summary: true })
+    for (let offset = 0; offset < 1024; offset += 16) {
+      const ids = wide.slice(1 + offset, 1 + offset + 16)
+      await call(wideCtx.captured, { batch: { ids, rootId: 'root' } })
+    }
+    const bounded = await call(wideCtx.captured, { sessionId: 'root', summary: true }) as { value: { counts: Record<string, unknown> } }
+    assert.equal(Object.keys(bounded.value.counts).length, 1024, 'the root plus the newest children stay within the bound')
+    assert.equal(bounded.value.counts['kid-0'], undefined, 'the oldest child count was evicted')
+    assert.ok(bounded.value.counts['kid-1023'] !== undefined)
+  })
+
+  test('a cached live fold extends its family facts without losing the summary shape', async () => {
+    const events: unknown[] = [catalogEvent(1, 'kid-a')]
+    let reads = 0
+    const query = { observeSession: () => { reads++; return Promise.resolve({ source: 'live', events, [Symbol.dispose]() {} }) } }
+    const { captured } = armed({ sessionQuery: query })
+    const first = await call(captured, { sessionId: 'live-root', summary: true }) as { value: { members: Array<{ id: string }> } }
+    assert.deepEqual(first.value.members.map(m => m.id), ['kid-a'])
+    events.push(catalogEvent(2, 'kid-b'))
+    const second = await call(captured, { sessionId: 'live-root', summary: true }) as { value: { members: Array<{ id: string }> } }
+    assert.deepEqual(second.value.members.map(m => m.id), ['kid-a', 'kid-b'])
+    assert.equal(reads, 2)
+  })
+})
+
+describe('fleet batch', () => {
+  test('folds each id, isolates per-id failures, dedupes, and caps the call', async () => {
+    const byId: Record<string, unknown> = {
+      a: [catalogEvent(1, 'kid')],
+      drop: new Error('unreadable'),
+      junk: 'not-events',
+      'ok-live': [],
+    }
+    for (let i = 0; i < 13; i++) byId[`ok-${i}`] = []
+    const query = observingMap(byId)
+    const { captured } = armed({ sessionQuery: query })
+    const ids: unknown[] = ['a', 'a', 42, '', 'drop', 'junk', ...Array.from({ length: 13 }, (_, i) => `ok-${i}`)]
+    const r = await call(captured, { batch: { ids, mode: 'preview' } }) as {
+      value: { rows: Record<string, unknown>; missing: string[]; total: number }
+    }
+    assert.equal(r.value.total, 16, 'the batch is capped at sixteen accepted ids')
+    assert.deepEqual(r.value.missing.sort(), ['drop', 'junk'])
+    assert.equal(Object.keys(r.value.rows).length, 14)
+    assert.deepEqual(Object.keys(r.value.rows).sort(), ['a', 'ok-0', 'ok-1', 'ok-10', 'ok-11', 'ok-12', 'ok-2', 'ok-3', 'ok-4', 'ok-5', 'ok-6', 'ok-7', 'ok-8', 'ok-9'])
+    assert.equal(query.disposeCount(), 15, 'every acquired observation is disposed, including the incomplete row')
+  })
+
+  test('serves complete history on request and the bounded excerpt otherwise', async () => {
+    const messages = Array.from({ length: 85 }, (_, i) => ({
+      type: 'user/message', seq: i + 1, time: i + 1,
+      data: { source: { kind: 'agent-message', senderSessionId: 'lead' }, content: [{ type: 'text', text: 'event ' + String(i) }] },
+    }))
+    const { captured } = armed({ sessionQuery: observingMap({ p: messages }) })
+    const preview = await call(captured, { batch: { ids: ['p'], mode: 'preview' } }) as { value: { rows: Record<string, { messages: unknown[]; messagesTotal?: number }> } }
+    assert.equal(preview.value.rows.p?.messages.length, 80)
+    assert.equal(preview.value.rows.p?.messagesTotal, 85)
+    const history = await call(captured, { batch: { ids: ['p'], mode: 'history' } }) as { value: { rows: Record<string, { messages: unknown[]; messagesTotal?: number }> } }
+    assert.equal(history.value.rows.p?.messages.length, 85)
+    assert.equal(history.value.rows.p?.messagesTotal, undefined)
+    const junkMode = await call(captured, { batch: { ids: ['p'], mode: 'full' } }) as { value: { rows: Record<string, { messages: unknown[] }> } }
+    assert.equal(junkMode.value.rows.p?.messages.length, 80)
+    const noRoot = await call(captured, { batch: { ids: ['p'], mode: 'preview', rootId: '', extra: 1 } }) as { value: { rows: Record<string, unknown> } }
+    assert.equal(Object.keys(noRoot.value.rows).length, 1)
+  })
+
+  test('answers a typed empty value without a query or an admitted cold read, and surfaces a gate rejection', async () => {
+    const empty = armed()
+    const noQuery = await call(empty.captured, { batch: { ids: ['a', 'b'] } }) as { value: { rows: Record<string, unknown>; missing: string[]; total: number } }
+    assert.deepEqual(noQuery.value, { rows: {}, missing: ['a', 'b'], total: 2 })
+    const skipped = fakeCtx({ connection: connectionOf(), sessionQuery: observingMap({ a: [] }) })
+    watchFleetChannel(skipped.ctx, SKIP_GATE)
+    const gateSkipped = await call(skipped.captured, { batch: { ids: ['a'] } }) as { value: { rows: Record<string, unknown>; missing: string[]; total: number } }
+    assert.deepEqual(gateSkipped.value, { rows: {}, missing: ['a'], total: 1 })
+    const rejected = fakeCtx({ connection: connectionOf(), sessionQuery: observingMap({ a: [] }) })
+    watchFleetChannel(rejected.ctx, { admit: () => Promise.reject(new Error('gate down')) })
+    const failure = await call(rejected.captured, { batch: { ids: ['a'] } })
+    assert.equal(failure.ok, false)
+    assert.equal((failure.error as { message: string }).message, 'gate down')
+    const raw = fakeCtx({ connection: connectionOf(), sessionQuery: observingMap({ a: [] }) })
+    watchFleetChannel(raw.ctx, { admit: () => Promise.reject('gate down') })
+    assert.equal(((await call(raw.captured, { batch: { ids: ['a'] } })).error as { message: string }).message, 'gate down')
+  })
+
+  test('a live batch observation extends its fold cache branch', async () => {
+    let events: unknown[] = [catalogEvent(1, 'kid')]
+    const query = { observeSession: () => Promise.resolve({ source: 'live', events, [Symbol.dispose]() {} }) }
+    const { captured } = armed({ sessionQuery: query })
+    const first = await call(captured, { batch: { ids: ['live'] } }) as { value: { rows: Record<string, { delegations?: unknown[] }> } }
+    assert.equal(first.value.rows.live?.delegations?.length, 1)
+    events = [...events, catalogEvent(2, 'kid-2')]
+    const second = await call(captured, { batch: { ids: ['live'] } }) as { value: { rows: Record<string, { delegations?: unknown[] }> } }
+    assert.equal(second.value.rows.live?.delegations?.length, 2)
+  })
+
+  test('rejects a malformed batch as a missing session id', async () => {
+    const { captured } = armed()
+    for (const body of [{ batch: null }, { batch: {} }, { batch: { ids: 'nope' } }, { batch: { ids: [] } }, { batch: { ids: [42, ''] } }]) {
+      const r = await call(captured, body)
+      assert.equal(r.ok, false, JSON.stringify(body))
+    }
+  })
+})
+
+describe('the fleet fold cache bounds', () => {
+  test('stays bounded by entries and by bytes while every stored field is measured', async () => {
+    const rich = [
+      { type: 'subagent/descriptor', seq: 1, time: 1, data: { mode: 'continuable', label: 'worker', provider: 'fork' } },
+      { type: 'user/message', seq: 2, time: 2, data: { content: [{ type: 'text', text: 'prompt' }] } },
+      { type: 'assistant/message', seq: 3, time: 3, data: { message: { content: [{ type: 'text', text: 'reply' }] } } },
+      { type: 'user/message', seq: 4, time: 4, data: { source: { kind: 'team-message', senderId: 'peer', senderName: 'peer' }, content: [{ type: 'text', text: 'Team message m from peer: hi' }] } },
+      { type: 'user/message', seq: 5, time: 5, data: { source: { kind: 'subagent-settled', summary: 'child done', senderSessionId: 'w' }, content: [{ type: 'text', text: 'child done. Its closing message:report. Structured result: {"ok":true}tail' }] } },
+      teamMemberEvent(6, { id: 'mate', name: 'mate', description: 'duty', phase: 'active' }),
+      catalogEvent(7, 'kid', { label: 'Inspect', name: 'agent-1' }),
+    ]
+    const byId: Record<string, unknown> = { rich, bare: [] }
+    for (let i = 0; i < 40; i++) byId[`s-${i}`] = []
+    byId.huge = [catalogEvent(1, 'kid', { label: 'x'.repeat(4 * 1024 * 1024 + 1) })]
+    const { captured } = armed({ sessionQuery: observingMap(byId, { source: 'stored', revision: 'r1' }) })
+    for (const id of ['rich', 'bare', ...Array.from({ length: 40 }, (_, i) => `s-${i}`)]) {
+      const r = await call(captured, { sessionId: id })
+      assert.equal(r.ok, true, id)
+    }
+    const huge = await call(captured, { sessionId: 'huge' })
+    assert.equal(huge.ok, true)
+    const again = await call(captured, { sessionId: 'huge' })
+    assert.equal(again.ok, true)
+    assert.equal(((again.value as { delegations?: Array<{ label?: string }> }).delegations?.[0]?.label?.length), 4 * 1024 * 1024 + 1)
+  })
+})
+
+describe('fleet fold cache idle sweep', () => {
+  test('drops the fold cache after inactivity and a later request still serves', async () => {
+    const relay = { type: 'user/message', seq: 1, time: 1, data: { source: { kind: 'agent-message', senderSessionId: 'lead' }, content: [{ type: 'text', text: 'one' }] } }
+    const keyed = {
+      sessionQuery: {
+        observeSession: () => Promise.resolve({ source: 'stored', revision: 'r-1', events: [relay] }),
+      },
+    }
+    const fake = fakeCtx({ connection: connectionOf(), ...keyed })
+    watchFleetChannel(fake.ctx, OPEN_GATE, { idleSweepMs: 10 })
+    const first = await postJson(fake.captured, FLEET_ROUTE, { sessionId: 's1', summary: true })
+    assert.equal(first.ok, true)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    const second = await postJson(fake.captured, FLEET_ROUTE, { sessionId: 's1', summary: true })
+    assert.equal(second.ok, true)
+    const third = await postJson(fake.captured, FLEET_ROUTE, { sessionId: 's1', summary: true })
+    assert.equal(third.ok, true)
+    fake.dispose()
+    assert.doesNotThrow(() => { fake.dispose() })
+    const untimed = fakeCtx({ connection: connectionOf() })
+    watchFleetChannel(untimed.ctx, OPEN_GATE, { idleSweepMs: 10 })
+    untimed.dispose()
   })
 })

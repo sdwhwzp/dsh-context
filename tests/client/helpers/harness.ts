@@ -56,7 +56,7 @@ export class TestLocale implements LocaleService {
   }
 
   bind(ns: string): (key: string, params?: Record<string, string | number>) => string {
-    return makeTranslate(this.active as 'en' | 'zh', this.namespaces.get(ns))
+    return makeTranslate(this.active, this.namespaces.get(ns))
   }
 
   getLocale(): { active: string } {
@@ -65,7 +65,7 @@ export class TestLocale implements LocaleService {
 }
 
 export interface TestClientCtxOptions {
-  locale?: 'en' | 'zh'
+  locale?: string
   services?: Record<string, unknown>
 }
 
@@ -150,6 +150,25 @@ export class TestClientCtx {
 
 export function asClientCtx(ctx: TestClientCtx): ClientCtx {
   return ctx as unknown as ClientCtx
+}
+
+export function makeTestGeneration(initialId: number | null) {
+  let snapshot = initialId === null ? undefined : { id: initialId }
+  const listeners = new Set<() => void>()
+  return {
+    face: {
+      getSnapshot: () => snapshot,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+    },
+    set(id: number | null): void {
+      snapshot = id === null ? undefined : { id }
+      for (const listener of listeners) listener()
+    },
+    get subscribers(): number { return listeners.size },
+  }
 }
 
 export class TestSessions {

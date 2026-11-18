@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { lruTrim } from './lru'
+import { registerRetentionCleanup, trimRetentionMap } from './retention'
 import { asRecord, type ClientCtx } from './services'
 import { SIDEBAR_CONTEXT_KIND } from './sidebar'
 
@@ -9,6 +9,7 @@ const focusListeners = new Set<() => void>()
 
 export function requestContextFocus(sessionId: string, seq: number): void {
   pendingFocus.set(sessionId, seq)
+  trimRetentionMap(pendingFocus, 'pendingFocus')
   for (const listener of focusListeners) listener()
 }
 
@@ -26,13 +27,11 @@ export function takeContextFocus(sessionId: string): number | null {
 
 const memberFocus = new Map<string, string>()
 
-const MEMBER_FOCUS_MAX = 8
-
 const memberListeners = new Set<() => void>()
 
 export function requestFleetMemberFocus(sessionId: string, memberId: string): void {
   memberFocus.set(sessionId, memberId)
-  lruTrim(memberFocus, MEMBER_FOCUS_MAX)
+  trimRetentionMap(memberFocus, 'memberFocus')
   for (const listener of memberListeners) listener()
 }
 
@@ -40,7 +39,7 @@ export function currentFleetMemberFocus(sessionId: string): string | null {
   return memberFocus.get(sessionId) ?? null
 }
 
-export function subscribeFleetMemberFocus(listener: () => void): () => void {
+function subscribeFleetMemberFocus(listener: () => void): () => void {
   memberListeners.add(listener)
   return () => { memberListeners.delete(listener) }
 }
@@ -55,6 +54,13 @@ export function useFleetMemberFocus(sessionId: string | undefined): string | nul
   }, [sessionId])
   return id
 }
+
+registerRetentionCleanup(() => {
+  pendingFocus.clear()
+  memberFocus.clear()
+  focusListeners.clear()
+  memberListeners.clear()
+})
 
 export function openContextSidebar(ctx: ClientCtx): boolean {
   try {

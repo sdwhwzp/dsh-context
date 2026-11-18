@@ -8,6 +8,7 @@ import { applyTimeline } from './fold'
 import { createTimelineState } from './foldState'
 import type { TimelineState } from './foldState'
 import { buildTimelineHead, buildTimelineView } from './foldWire'
+import { withCost, type CostSource } from './cost'
 
 const outputPartsSchema = z.object({
   reasoning: z.number().int().nonnegative(),
@@ -33,6 +34,7 @@ const surfaceNodeSchema = z.object({
   err: z.boolean().optional(),
   skill: z.string().optional(),
   calls: z.array(z.string()).optional(),
+  agent: z.string().optional(),
 }).strict()
 
 const systemPromptNodeSchema = z.object({
@@ -67,9 +69,11 @@ const contextEventSchema = z.object({
   kind: z.enum(['compaction', 'prune', 'inject', 'model', 'mode']),
   form: z.string().optional(),
   tokens: z.number().optional(),
+  grossTokens: z.number().optional(),
   count: z.number().optional(),
   sub: z.string().optional(),
   name: z.string().optional(),
+  agent: z.string().optional(),
   detail: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
@@ -225,6 +229,36 @@ const lastSchema = z.object({
   prompt: z.number().int().nonnegative().optional(),
 }).strict()
 
+const tallySchema = z.record(z.string(), z.number().int().nonnegative())
+
+const costFaceSchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+  rate: z.object({
+    hit: z.number(),
+    miss: z.number(),
+    write: z.number(),
+    out: z.number(),
+  }).strict(),
+  via: z.string(),
+  confidence: z.enum(['high', 'medium', 'low']),
+  canonical: z.string().optional(),
+}).strict()
+
+const costMissSchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+  reason: z.string(),
+  candidates: z.number().int().nonnegative().optional(),
+}).strict()
+
+const sessionCostReadSchema = z.object({
+  usd: z.number().nullable(),
+  ready: z.boolean(),
+  faces: z.array(costFaceSchema).optional(),
+  misses: z.array(costMissSchema).optional(),
+}).strict()
+
 export const contextTimelineSchema = z.object({
   ok: z.literal(true),
   unsupported: unsupportedSchema.optional(),
@@ -240,6 +274,8 @@ export const contextTimelineSchema = z.object({
   generatedCallTokens: z.number().int().nonnegative().optional(),
   billedGenerated: outputPartsSchema.optional(),
   toolCalls: z.number().int().nonnegative().optional(),
+  toolTally: tallySchema.optional(),
+  programTally: tallySchema.optional(),
   humanInputs: z.number().int().nonnegative().optional(),
   answers: z.number().int().nonnegative().optional(),
   lastUser: z.string().optional(),
@@ -249,6 +285,14 @@ export const contextTimelineSchema = z.object({
   requests: z.array(requestRecordSchema).optional(),
   events: z.array(contextEventSchema).optional(),
   cost: costUsageSchema.optional(),
+  lifetime: z.object({
+    usage: costBucketsSchema.optional(),
+    postSeed: z.object({
+      turns: z.number().int().nonnegative(),
+      timing: timingTotalsSchema.optional(),
+    }).strict().optional(),
+  }).strict().optional(),
+  costRead: sessionCostReadSchema.optional(),
   timing: timingTotalsSchema.optional(),
   systems: z.array(systemPromptNodeSchema).optional(),
   nodes: z.array(surfaceNodeSchema).optional(),
@@ -287,9 +331,25 @@ const timelineStateSchema = z.object({
   maxOutputTokens: z.number().positive().optional(),
   requests: z.array(requestRecordSchema),
   turnRuns: z.number().int().nonnegative().optional(),
+  totals: z.object({
+    turns: z.number().int().nonnegative(),
+    steps: z.number().int().nonnegative(),
+    injects: z.number().int().nonnegative(),
+    compactions: z.number().int().nonnegative(),
+    prunes: z.number().int().nonnegative(),
+    skills: z.record(z.string(), z.literal(true)),
+    lastTurn: z.number().optional(),
+  }).strict().optional(),
   events: z.array(contextEventSchema),
   archived: z.array(surfaceNodeSchema),
   cost: costUsageSchema.optional(),
+  billedUsage: costBucketsSchema.optional(),
+  postSeed: z.object({
+    seq: z.number().int().nonnegative(),
+    turns: z.number().int().nonnegative(),
+    lastTurn: z.number().optional(),
+    timing: timingTotalsSchema.optional(),
+  }).strict().optional(),
   generatedReasoning: z.number().int().nonnegative().optional(),
   generatedAnswerTokens: z.number().int().nonnegative().optional(),
   generatedCallTokens: z.number().int().nonnegative().optional(),
@@ -300,6 +360,7 @@ const timelineStateSchema = z.object({
   answers: z.number().int().nonnegative().optional(),
   lastUser: z.string().optional(),
   stepStart: z.object({
+    seq: z.number().int().nonnegative().optional(),
     time: z.number(),
     firstToken: z.number().optional(),
   }).strict().optional(),
@@ -308,7 +369,18 @@ const timelineStateSchema = z.object({
   stepRequestSeq: z.number().optional(),
   stepBeats: z.array(z.number()).optional(),
   stepBeatsFull: z.boolean().optional(),
-  callNames: z.record(z.string(), z.object({ name: z.string(), start: z.number(), argsRaw: z.string().optional() }).strict()),
+  callNames: z.record(z.string(), z.object({
+    name: z.string(),
+    start: z.number(),
+    seq: z.number().int().nonnegative().optional(),
+    argsRaw: z.string().optional(),
+    transport: z.literal(true).optional(),
+  }).strict()),
+  agents: z.record(z.string(), z.object({
+    catalogName: z.string().optional(),
+    memberName: z.string().optional(),
+    catalogLabel: z.string().optional(),
+  }).strict()).optional(),
   pendingShadowedSeqs: z.array(z.number()).optional(),
   pendingShadowEventSeq: z.number().optional(),
   detailRev: z.number().int().nonnegative().optional(),
@@ -321,15 +393,27 @@ const timelineStateSchema = z.object({
   spans: z.array(timingSpanSchema),
   stepSpans: z.array(timingSpanSchema).optional(),
   pendingCodeOps: z.record(z.string(), z.array(fileOpSchema)).optional(),
+  pendingCodeStarts: z.record(z.string(), z.object({
+    seq: z.number().int().nonnegative(),
+    time: z.number(),
+  }).strict()).optional(),
+  toolTally: tallySchema.optional(),
+  programTally: tallySchema.optional(),
+  commandCalls: z.array(z.string()).optional(),
+  commandCallsOverflow: z.boolean().optional(),
 }) as unknown as z.ZodType<TimelineState>
 
-export const TIMELINE_STATE_VERSION = 37
+export const TIMELINE_STATE_VERSION = 44
 
-export function createContextTimelineDefinition(config: Config, slim: () => boolean): WiredProjection<'contextTimeline', TimelineState> {
+export function createContextTimelineDefinition(
+  config: Config,
+  slim: () => boolean,
+  cost?: CostSource,
+): WiredProjection<'contextTimeline', TimelineState> {
   const bounds = resolveBounds(config)
   const headBounds: FoldBounds = { ...bounds, headOnly: true }
   const view = (state: TimelineState): ContextTimeline =>
-    slim() ? buildTimelineHead(state) : buildTimelineView(state, bounds)
+    withCost(cost, slim() ? buildTimelineHead(state) : buildTimelineView(state, bounds))
   const definition: WiredProjection<'contextTimeline', TimelineState> = {
     key: 'contextTimeline',
     stateSchema: timelineStateSchema,

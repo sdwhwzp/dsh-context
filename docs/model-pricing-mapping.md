@@ -1,6 +1,6 @@
 # Model pricing mapping
 
-When no authorized dsh-spend quote is available, cost is estimated from [models.dev](https://models.dev) list prices. This fallback is a reference, not a provider invoice. A billed pair is always `(provider, model)`; the resolver picks a listing in this order:
+The authorized dsh-spend ledger supplies billed usage where available. For estimates, the host caches the [models.dev](https://models.dev) catalogue for one hour and resolves each `(provider, model)` pair. The browser receives the resolved rates and totals.
 
 ```text
 (provider, model)

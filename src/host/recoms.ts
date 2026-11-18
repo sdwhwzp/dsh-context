@@ -1,8 +1,12 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { DEFAULT_RECOM, RECOM_DATA_MIRROR_URL, RECOM_DATA_URL, recomsOfPayload, type Recom } from '../shared/recoms'
-import { type ConnectionHostFace, registerPostRoute } from './connection'
+import { DEFAULT_RECOM, RECOM_DATA_MIRROR_URL, RECOM_DATA_URL, recomsOfPayload, type RecomsRead } from '../shared/recoms'
+import { mountPostRoute, reply } from './postRoute'
 
 export const RECOM_ROUTE = '/api/dsh-context/recom'
+
+export const RECOM_TTL_MS = 60 * 60 * 1000
+
+const RECOM_FAILURE_BACKOFF_MS = 30_000
 
 const FETCH_TIMEOUT_MS = 5_000
 
@@ -16,13 +20,7 @@ export function setRecomFetcher(next: RecomFetcher | null): void {
   fetcher = next ?? defaultFetcher
 }
 
-let rotation = 0
-
-export function resetRecomRotation(): void {
-  rotation = 0
-}
-
-export async function readRecom(): Promise<Recom> {
+export async function readRecoms(): Promise<RecomsRead> {
   for (const url of [RECOM_DATA_URL, RECOM_DATA_MIRROR_URL]) {
     try {
       const response = await fetcher(url, {
@@ -31,22 +29,44 @@ export async function readRecom(): Promise<Recom> {
       })
       if (!response.ok) continue
       const recoms = recomsOfPayload(await response.json())
-      if (recoms.length === 0) continue
-      const picked = recoms[rotation % recoms.length]
-      rotation++
-      return picked
+      if (recoms.length > 0) return { recoms, degraded: false }
     } catch {
     }
   }
-  return DEFAULT_RECOM
+  return { recoms: [DEFAULT_RECOM], degraded: true }
 }
 
-export function watchRecomChannel(ctx: Context): void {
-  ctx.inject(['connection'], (c) => {
-    const handler = async (): Promise<Response> => Response.json(
-      { ok: true, value: await readRecom() },
-      { headers: { 'cache-control': 'no-store' } },
-    )
-    registerPostRoute(c, c.get('connection') as ConnectionHostFace | undefined, RECOM_ROUTE, handler, 'dsh-context: recom route')
+export interface RecomChannelOptions {
+  ttlMs?: number
+  now?: () => number
+}
+
+export function watchRecomChannel(ctx: Context, options: RecomChannelOptions = {}): void {
+  const now = options.now ?? (() => Date.now())
+  const ttlMs = options.ttlMs ?? RECOM_TTL_MS
+  let slot: { read: RecomsRead; at: number } | null = null
+  let inflight: Promise<RecomsRead> | null = null
+  const load = async (): Promise<RecomsRead> => {
+    try {
+      const read = await readRecoms()
+      slot = { read, at: now() }
+      return read
+    } finally {
+      inflight = null
+    }
+  }
+  mountPostRoute({
+    ctx,
+    deps: ['connection'],
+    path: RECOM_ROUTE,
+    label: 'dsh-context: recom route',
+    handler: () => async (): Promise<Response> => {
+      if (slot !== null && now() - slot.at < (slot.read.degraded ? RECOM_FAILURE_BACKOFF_MS : ttlMs)) {
+        return reply({ ok: true, value: slot.read.recoms, degraded: slot.read.degraded })
+      }
+      inflight ??= load()
+      const read = await inflight
+      return reply({ ok: true, value: read.recoms, degraded: read.degraded })
+    },
   })
 }

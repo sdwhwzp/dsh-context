@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from 'react'
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { OVERVIEW_RANGE_PRESETS } from '../../shared/types'
 import { IconChevronDown } from '../primitives'
+import { seatKeyOf, seatOf } from '../services'
 import { ClearButton, clearOnEscape } from './clearableInput'
 import type { SettingsField, SettingsState } from '../settings'
 import type { ViewKit } from '../viewkit'
@@ -10,6 +12,10 @@ interface SettingsCardProps {
   set?: (field: SettingsField, value: string) => void
 }
 
+type SettingsSeat = (selector: (state: SettingsState) => SettingsState | undefined) => SettingsState | undefined
+
+const NO_SETTINGS: SettingsSeat = () => undefined
+
 interface PrefRowProps {
   label: string
   value: string
@@ -18,9 +24,37 @@ interface PrefRowProps {
   onPick: (id: string) => void
 }
 
+const MENU_ROW_HEIGHT = 34
+const MENU_CHROME = 12
+
+function roomAround(button: HTMLElement): { above: number; below: number } {
+  const rect = button.getBoundingClientRect()
+  let top = 0
+  let bottom = window.innerHeight
+  for (let node = button.parentElement; node !== null; node = node.parentElement) {
+    const overflowY = getComputedStyle(node).overflowY
+    if (overflowY !== 'auto' && overflowY !== 'scroll') continue
+    const scrollport = node.getBoundingClientRect()
+    top = scrollport.top
+    bottom = scrollport.bottom
+    break
+  }
+  return { above: rect.top - top - 4, below: bottom - rect.bottom - 4 }
+}
+
 function PrefRow(props: PrefRowProps): ReactElement {
   const [open, setOpen] = useState(false)
+  const [side, setSide] = useState<'bottom' | 'top'>('bottom')
   const active = props.options.find(o => o.id === props.value)?.label ?? props.value
+  const toggle = (event: ReactMouseEvent<HTMLButtonElement>): void => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    const room = roomAround(event.currentTarget)
+    setSide(room.below < props.options.length * MENU_ROW_HEIGHT + MENU_CHROME && room.above > room.below ? 'top' : 'bottom')
+    setOpen(true)
+  }
   return (
     <div className="lc-settings-row">
       <span className="lc-settings-label">{props.label}</span>
@@ -31,7 +65,7 @@ function PrefRow(props: PrefRowProps): ReactElement {
         selectedId={props.value}
         onSelect={(id) => { setOpen(false); props.onPick(id) }}
         align="end"
-        portal
+        side={side}
         anchor={(
           <button
             type="button"
@@ -39,7 +73,7 @@ function PrefRow(props: PrefRowProps): ReactElement {
             disabled={props.disabled}
             aria-haspopup="menu"
             aria-expanded={open}
-            onClick={() => { setOpen(v => !v) }}
+            onClick={toggle}
           >
             {active}
             <IconChevronDown />
@@ -157,12 +191,7 @@ function PreferenceRows(props: { t: Translate; state: SettingsState; set?: Setti
           label={t('settings.overviewRange')}
           value={state.overviewRange}
           disabled={disabled}
-          options={[
-            { id: 'today', label: t('ov.range.today') },
-            { id: '7d', label: t('ov.range.7d') },
-            { id: '30d', label: t('ov.range.30d') },
-            { id: 'all', label: t('ov.range.all') },
-          ]}
+          options={OVERVIEW_RANGE_PRESETS.map(id => ({ id, label: t('ov.range.' + id) }))}
           onPick={(id) => { set?.('defaultOverviewRange', id) }}
         />
         <PrefRow
@@ -260,7 +289,11 @@ function PreferenceRows(props: { t: Translate; state: SettingsState; set?: Setti
 export function makePluginConfigCard(kit: ViewKit): (props: SettingsCardProps) => ReactElement | null {
   const { t } = kit
   return function PluginConfigCard(props: SettingsCardProps): ReactElement | null {
-    const state = typeof props.useContextSettings === 'function' ? props.useContextSettings(s => s) : undefined
+    return <PluginConfigCardBody key={seatKeyOf(props)} {...props} />
+  }
+  function PluginConfigCardBody(props: SettingsCardProps): ReactElement | null {
+    const read = seatOf<SettingsSeat>(props.useContextSettings, NO_SETTINGS)
+    const state = read(s => s)
     if (state === undefined || state.status === 'unavailable') return null
     return (
       <div className="lc-settings-prefs">

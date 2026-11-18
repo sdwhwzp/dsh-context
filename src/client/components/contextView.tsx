@@ -1,18 +1,21 @@
-import { createElement as h, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import type { Category, ContextEventRecord, RequestRecord, SurfaceNode } from '../../shared/types'
+import { createElement as h, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement } from 'react'
+import type { Category, ContextEventRecord, RequestRecord, SurfaceNode, TimelineCounts } from '../../shared/types'
 import { TrendReserved } from './trendReserved'
 import { briefNodes, briefOf } from '../brief'
 import { headlineOf } from '../headline'
 import type { ContextViewProps } from '../services'
-import { conversationNodesOf, headersOf, imageLoaderOf, projectionOf, sessionAddressOf, unsupportedOf } from '../services'
+import { connectionGenerationStoreOf, conversationNodesOf, headersOf, imageLoaderOf, projectionOf, seatKeyOf, seatOf, sessionAddressOf, unsupportedOf } from '../services'
 import type { ClientCtx, ConversationNodeLike } from '../services'
 import { makeContentFetcher, makeHeaderFetcher, useHistoryFace } from '../historyPage'
+import { makeDeltaFetcher } from '../timelineSource'
+import { makeRetentionCache } from '../retention'
 import { useContextSession } from '../sessionData'
+import { COLD_TIMELINE } from '../coldTimeline'
 import { makeDetailNote } from './detailNote'
-import { canOpenPathsOf, openPathVia, openResourceVia, sessionSpendOf, workspaceOf } from '../services'
+import { SkeletonPlot } from './skeleton'
+import { canOpenPathsOf, openPathVia, openResourceVia, workspaceOf } from '../services'
 import { makeAttachmentOpener } from '../attachmentSource'
 import { activityOf, activityOfOps, locateStepOf, previewAddressOf, surfaceSeqOf } from '../fileActivity'
-import type { SessionSpend } from '../services'
 import type { FileEntry, FileOp } from '../fileActivity'
 import { commandsOf, programsOf, tallyOfCommands, viewsOf, surfaceSeqOf as commandSurfaceSeqOf } from '../commands'
 import type { Command } from '../commands'
@@ -27,42 +30,47 @@ import type { CatFocus } from './browser'
 import { makeAgentGraph } from './agentGraph'
 import { Donut } from './donut'
 import { makeCurrentComposition } from './currentComposition'
-import { makeEventList } from './events'
+import { EVENT_KINDS, makeEventList } from './events'
 import { makeFileCard } from './fileCard'
 import type { FileFilter } from './fileCard'
+import { makeCardSkeletons } from './cardSkeletons'
 import { makeCommandPanel } from './commandPanel'
 import { makeCommandPager } from '../commandPages'
 import { useCommandLog } from './useCommandLog'
+import { tallyEntriesOf } from '../tallySort'
 import { makePluginInfo } from './pluginInfo'
 import { makeRecomCard } from './recomCard'
 import { makeUpgradeGate } from './upgradeGate'
 import { makeRequestDetail } from './requestDetail'
-import { countsOfRecords, makeStatsContext, makeSubagentCost, toolTallyOf } from './statsContext'
+import { makeStatsContext, makeSubagentCost } from './statsContext'
 import type { StatsEventKind, StatsJump } from './statsContext'
 import { makeStatsTiming } from './statsTiming'
 import { makeStatsTokens } from './statsTokens'
 import { makeLegend, makeStackedBar } from './stackedBar'
-import { aggregateByTurn, attachMarkers, boundaryIndex, jumpTargetOf, makeTrendChart, turnStepsOf } from './trendChart'
+import { makeTrendChart } from './trendChart'
+import { aggregateByTurn, attachMarkers, boundaryIndex, jumpTargetOf, turnStepsOf } from './trendModel'
 import { makeTrendOverview } from './trendOverview'
 import { stepStampOf } from './browserHelpers'
-import { cachedByData } from './derivedCache'
-import { assemble } from '../assemble'
+import { assembleCached, cachedByData } from './derivedCache'
 import { useLazyMount } from './useLazyMount'
 import { useConversationSurface } from './useConversationSurface'
-import { trendBandsOf } from '../dna'
+import { dnaDeltaMaximaOf, trendBandsOf } from '../dna'
 import type { TrendBand } from '../dna'
 
 import { activateViewTab, openContextSidebar, subscribeContextFocus, takeContextFocus, useFleetMemberFocus } from '../viewFocus'
 import { revealInScrollParent } from '../revealScroll'
 import { makeErrorBoundary } from './errorBoundary'
+import { trimRetentionMap } from '../retention'
+import { remoteStateOf } from './useRemoteState'
+import { useSessionSpend } from './useSessionSpend'
 
 const viewScroll = new Map<string, number>()
 
-const EVENT_KINDS = ['inject', 'compaction', 'prune', 'model', 'mode'] as const
 const HOVER_DELAY_MS = 140
 const HOVER_LOCK_MS = 320
 const DNA_HOVER_DELAY = 220
 const DNA_LAZY_MIN = 512
+const NO_COUNTS: TimelineCounts = { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0, skills: 0 }
 function revealCard(root: HTMLElement | null, selector: string): void {
   /* v8 ignore start */
   const card = root?.querySelector(selector) ?? null
@@ -88,6 +96,10 @@ export function browserCapOf(cards: readonly { top: number; bottom: number }[]):
   return Number.isFinite(span) && span > 0 ? Math.ceil(span) : null
 }
 
+type TabInfoSeat = () => { tab?: { visible?: boolean }; sidebar?: { expanded?: boolean } }
+
+const NO_TAB_INFO: TabInfoSeat = () => ({ tab: { visible: true } })
+
 export function makeContextView(
   ctx: ClientCtx,
   kit: ViewKit,
@@ -112,13 +124,19 @@ export function makeContextView(
   const UpgradeGate = makeUpgradeGate(kit)
   const DetailNote = makeDetailNote(kit)
   const ContextBrowser = makeContextBrowser(kit, StackedBar, settings)
+  const Skeletons = makeCardSkeletons(kit)
   const AgentGraph = makeAgentGraph(ctx, kit, heads)
   const ErrorBoundary = makeErrorBoundary(t)
+  const connection = connectionGenerationStoreOf(ctx)
 
   function ContextViewBody(props: ContextViewProps): ReactElement {
     const sessionId = props.sessionId
+    const sessionKey = typeof sessionId === 'string' && sessionId !== '' ? sessionId : undefined
     const inSidebar = props.host === 'sidebar'
-    const { source, data, pressure, breakdown, usage } = useContextSession(props)
+    const { source, data: sessionData, pressure, breakdown, usage } = useContextSession(props)
+    const data = sessionData ?? COLD_TIMELINE
+    const spend = useSessionSpend(ctx, sessionData === null ? undefined : sessionKey, data.cost)
+    const ensurePart = source.ensurePart
     const headers = projectionOf(props, 'contextHeaders', headersOf)
     const [selectedSeq, setSelectedSeq] = useState<number | null>(null)
     const [hoveredSeq, setHoveredSeq] = useState<number | null>(null)
@@ -126,32 +144,28 @@ export function makeContextView(
     const [granularity, setGranularity] = useState<'step' | 'turn'>(() => settings.defaultGranularity())
     const [trendMode, setTrendMode] = useState<'total' | 'delta'>(() => settings.defaultTrendMode())
     const [dna, setDna] = useState(false)
-    const [adaptive, setAdaptive] = useState(false)
-    const [overview, setOverviewState] = useState(false)
-    const overviewSelections = useRef(new Map<string | undefined, boolean>())
-    const overviewSession = useRef(sessionId)
-    function setOverview(on: boolean): void {
-      overviewSelections.current.set(sessionId, on)
-      setOverviewState(on)
-    }
-    // The auto-overview threshold: the first time this session's retained log holds the configured number of steps,
-    // the trend switches to its ribbon face. Fired once per session for this view's lifetime, so a reader's toggle-off sticks.
+    const [adaptive, setAdaptive] = useState(trendMode === 'delta')
+    const [overview, setOverview] = useState(false)
+    const [overviewSelections] = useState(() => makeRetentionCache<string, { on: boolean; autoFired: boolean }>('trendSelections'))
+    const lastOverviewSession = useRef(sessionKey)
     const overviewAutoAt = overviewThresholdOf(settings.overviewAutoSteps())
-    const overviewAutoFired = useRef(new Set<string | undefined>())
     useLayoutEffect(() => {
-      if (overviewSession.current !== sessionId) {
-        overviewSession.current = sessionId
-        const selected = overviewSelections.current.get(sessionId) ?? false
-        setOverviewState(selected)
-        if (selected) { setDna(false); setAdaptive(false) }
+      if (sessionKey === undefined) return
+      const saved = overviewSelections.get(sessionKey)
+      const auto = overviewAutoAt !== null && saved?.autoFired !== true && data.requests.length >= overviewAutoAt
+      if (auto) overviewSelections.set(sessionKey, { on: true, autoFired: true })
+      if (auto || lastOverviewSession.current !== sessionKey) {
+        const on = auto || saved?.on === true
+        setOverview(on)
+        if (on) { setDna(false); setAdaptive(false) }
       }
-      if (data === null || overviewAutoAt === null || overviewAutoFired.current.has(sessionId)) return
-      if (data.requests.length < overviewAutoAt) return
-      overviewAutoFired.current.add(sessionId)
-      setOverview(true)
-      setDna(false)
-      setAdaptive(false)
-    }, [data, sessionId, overviewAutoAt])
+      lastOverviewSession.current = sessionKey
+    }, [data.requests.length, sessionKey, overviewAutoAt, overviewSelections])
+    const switchTrendMode = (mode: 'total' | 'delta'): void => {
+      if (mode === trendMode) return
+      setTrendMode(mode)
+      if (mode === 'delta' && !overview) setAdaptive(true)
+    }
     const [durationCurve, setDurationCurve] = useState(() => settings.defaultDurationCurve() === 'show')
     const [focusTurn, setFocusTurn] = useState<number | null>(null)
     const [focusSeq, setFocusSeq] = useState<number | null>(null)
@@ -245,6 +259,10 @@ export function makeContextView(
         : undefined),
       [ctx, sessionId, historyFace],
     )
+    const fetchDelta = useMemo(
+      () => (typeof sessionId === 'string' && sessionId !== '' ? makeDeltaFetcher(sessionId) : undefined),
+      [sessionId],
+    )
     const fetchOlderCommands = useMemo(
       () => (typeof sessionId === 'string' && sessionId !== '' ? makeCommandPager(sessionId) : undefined),
       [sessionId],
@@ -271,25 +289,46 @@ export function makeContextView(
     const [cmdsRef, cmdsMounted] = useLazyMount(commandFocus !== null || commandReveal > 0)
     const [browserRef, browserMounted] = useLazyMount()
 
+    useEffect(() => {
+      if (source.detailState !== 'ready') return
+      ensurePart('files')
+      const timer = setTimeout(() => { ensurePart('spans') }, 0)
+      return () => { clearTimeout(timer) }
+    }, [source.detailState, ensurePart])
+    useEffect(() => {
+      if (browserMounted) ensurePart('nodes')
+    }, [browserMounted, ensurePart])
+    useEffect(() => {
+      if (belowFoldMounted) ensurePart('events')
+    }, [belowFoldMounted, ensurePart])
+    useEffect(() => {
+      if (cmdsMounted) ensurePart('commands')
+    }, [cmdsMounted, ensurePart])
+    useEffect(() => {
+      if (dna || trendMode === 'delta') ensurePart('requests')
+    }, [dna, trendMode, ensurePart])
+
     const leftColRef = useRef<HTMLDivElement | null>(null)
     const [browserCap, setBrowserCap] = useState<number | null>(null)
-    const [capTick, setCapTick] = useState(0)
-    useEffect(() => {
+    const syncBrowserCap = useCallback((): void => {
       const col = leftColRef.current
       /* v8 ignore next 1 */
       if (col === null) return
       const next = browserCapOf([...col.children].map(el => el.getBoundingClientRect()))
       setBrowserCap(prev => (prev === next ? prev : next))
-    }, [data, capTick, sidebarVisible])
+    }, [])
+    useEffect(() => {
+      syncBrowserCap()
+    }, [syncBrowserCap, data, sidebarVisible])
     /* v8 ignore start */
     useEffect(() => {
       const col = leftColRef.current
       if (col === null || typeof ResizeObserver !== 'function') return
-      const observer = new ResizeObserver(() => { setCapTick(tick => tick + 1) })
+      const observer = new ResizeObserver(syncBrowserCap)
       observer.observe(col)
       for (const el of col.querySelectorAll(':scope > .lc-card')) observer.observe(el)
       return () => { observer.disconnect() }
-    }, [data, sidebarVisible])
+    }, [sidebarVisible, syncBrowserCap])
     /* v8 ignore stop */
     const onJump = useCallback((jump: StatsJump): void => {
       if (jump === 'turns' || jump === 'steps') {
@@ -317,7 +356,7 @@ export function makeContextView(
       if (!activateViewTab(t('tab.fleet'))) openContextSidebar(ctx)
     }, [t])
     const onToolPick = useCallback((tool: string): void => {
-      const inSkill = data?.nodes.some(n => n.tool === tool && n.cat === 'skill') === true
+      const inSkill = data.nodes.some(n => n.tool === tool && n.cat === 'skill')
       setCatFocus(inSkill ? { cat: 'skill' } : { cat: 'tool', query: tool })
       revealCard(rootRef.current, '.lc-col-browser')
     }, [data])
@@ -331,7 +370,7 @@ export function makeContextView(
     const focusMember = useFleetMemberFocus(typeof sessionId === 'string' ? sessionId : undefined)
 
     useLayoutEffect(() => {
-      if (typeof sessionId !== 'string' || sessionId === '' || data === null) return
+      if (typeof sessionId !== 'string' || sessionId === '') return
       if (restoredRef.current === sessionId) return
       restoredRef.current = sessionId
       /* v8 ignore next 3 */
@@ -349,12 +388,13 @@ export function makeContextView(
         const scroller = scrollerRef.current
         if (scroller === null) return
         viewScroll.set(sessionId, scroller.scrollTop)
+        trimRetentionMap(viewScroll, 'viewScroll')
       }
     }, [sessionId])
 
-    const requests = data ? data.requests : []
-    const events = data ? data.events : []
-    const counts = data?.counts ?? countsOfRecords(requests, events)
+    const requests = data.requests
+    const events = data.events
+    const counts = data.counts ?? NO_COUNTS
     const kindCounts: Record<string, number | undefined> = { inject: counts.injects, compaction: counts.compactions, prune: counts.prunes }
     const shownEvents = pickedKinds.length === EVENT_KINDS.length ? events : events.filter(e => pickedKinds.includes(e.kind))
     const displayRequests = useMemo(
@@ -362,22 +402,27 @@ export function makeContextView(
       [requests, granularity],
     )
     const stepsOf = useMemo(() => turnStepsOf(requests), [requests])
+    const remote = remoteStateOf(displayRequests.length, source.detailState, source.retryDetail)
     const opStampOf = useMemo(() => stepStampOf(requests), [requests])
     const markers = useMemo(() => attachMarkers(displayRequests, events), [displayRequests, events])
     /* v8 ignore next 1 */
-    const dnaAllowed = dna && data !== null && (!inSidebar || sidebarVisible)
+    const dnaAllowed = dna && (!inSidebar || sidebarVisible)
     const dnaEager = dnaAllowed && displayRequests.length <= DNA_LAZY_MIN
     const dnaCacheOwner = useMemo(() => ({ data, headers }), [data, headers])
     const dnaBands = useMemo(
       () => (dnaEager
-        ? cachedByData(dnaCacheOwner, `dna:${granularity}`, () => displayRequests.map(req => trendBandsOf(assemble(data, headers, req.seq))))
+        ? cachedByData(dnaCacheOwner, `dna:${granularity}`, () => displayRequests.map(req => trendBandsOf(assembleCached(data, headers, req.seq))))
         : null),
       [dnaEager, dnaCacheOwner, data, headers, displayRequests, granularity],
     )
     const dnaAt = useMemo(() => {
       if (!dnaAllowed || displayRequests.length <= DNA_LAZY_MIN) return null
-      return (seq: number): TrendBand[] => trendBandsOf(assemble(data, headers, seq))
+      return (seq: number): TrendBand[] => trendBandsOf(assembleCached(data, headers, seq))
     }, [dnaAllowed, data, headers, displayRequests.length])
+    const deltaMaxima = useMemo(() => {
+      if (!dnaAllowed || trendMode !== 'delta') return null
+      return cachedByData(dnaCacheOwner, `dnaDeltaMax:${granularity}`, () => dnaDeltaMaximaOf(data, headers, displayRequests))
+    }, [dnaAllowed, trendMode, dnaCacheOwner, data, headers, displayRequests, granularity])
     const revealBand = useCallback((seq: number, band: { key: string; cat: Category | 'system' | 'tools' }): void => {
       setNodeFocus({ step: seq, key: band.key, cat: band.cat })
     }, [])
@@ -414,7 +459,7 @@ export function makeContextView(
 
     const detailReady = source.detailState === 'ready' || source.detailState === 'legacy'
     useEffect(() => {
-      if (jumpSeq === null || data === null || !detailReady) return
+      if (jumpSeq === null || !detailReady) return
       setJumpSeq(null)
       const target = jumpTargetOf(aggregateByTurn(requests), jumpSeq)
       if (target === null) return
@@ -426,7 +471,7 @@ export function makeContextView(
       if (anchor !== null) revealInScrollParent(anchor)
     }, [jumpSeq, data, requests, detailReady])
 
-    const briefList = useMemo(() => (data ? cachedByData(data, 'briefList', () => briefNodes(data)) : []), [data])
+    const briefList = useMemo(() => cachedByData(data, 'briefList', () => briefNodes(data)), [data])
     const convNodes = conversationNodesOf(props)
     const bySeq = useMemo(() => {
       const m = new Map<number, ConversationNodeLike>()
@@ -457,67 +502,56 @@ export function makeContextView(
 
     const fileCacheOwner = useMemo(() => ({ data, bySeq }), [data, bySeq])
     const fileActivity = useMemo(
-      () => {
-        if (data === null) return activityOf(briefList, convOf, filesBefore)
-        return cachedByData(fileCacheOwner, `files:${String(filesBefore)}`, () => (
-          data.fileOps !== undefined
-            ? activityOfOps(data.fileOps, data.archive, filesBefore)
-            : activityOf(briefList, convOf, filesBefore)
-        ))
-      },
+      () => cachedByData(fileCacheOwner, `files:${String(filesBefore)}`, () => (
+        data.fileOps !== undefined
+          ? activityOfOps(data.fileOps, data.archive, filesBefore)
+          : activityOf(briefList, convOf, filesBefore)
+      )),
       [fileCacheOwner, data, briefList, convOf, filesBefore],
     )
     const ioTotals = useMemo(
       () => {
-        const totals = (data !== null && data.fileOps !== undefined
+        const totals = (data.fileOps !== undefined
           ? activityOfOps(data.fileOps, data.archive, null)
           : activityOf(briefList, convOf, null)).totals
         return { reads: totals.read.ops, writes: totals.write.ops, searches: totals.search.ops, images: totals.image.ops }
       },
       [data, briefList, convOf],
     )
-    const toolTally = useMemo(() => (data ? cachedByData(data, 'toolTally', () => toolTallyOf(data.nodes)) : []), [data])
+    const toolTally = useMemo(() => tallyEntriesOf(data.toolTally), [data.toolTally])
     const commandList = useMemo(() => {
-      if (data === null || data.commands === undefined) return []
+      if (data.commands === undefined) return []
       const records = data.commands
       return cachedByData(data, 'commands', () => commandsOf(records, data.archive))
     }, [data])
     const commandLog = useCommandLog(
       commandList,
-      data?.commandsFloor,
+      data.commandsFloor,
       source.detailState === 'legacy' ? undefined : fetchOlderCommands,
+      sessionKey,
     )
     const fullCommandList = commandLog.records
     const workspace = typeof ctx.get === 'function' ? workspaceOf(ctx, typeof sessionId === 'string' ? sessionId : undefined) : undefined
     const commandBoard = useMemo(() => {
-      if (fullCommandList.length === 0) return { runs: 0, top: [] as [string, number][] }
-      const stats = data?.commandStats ?? tallyOfCommands(fullCommandList)
-      const top = programsOf(viewsOf(fullCommandList, workspace)).map(p => [p.name, p.n] as [string, number])
-      return { runs: stats.runs, top }
+      const stats = data.commandStats ?? (fullCommandList.length > 0 ? tallyOfCommands(fullCommandList) : null)
+      const top = data.programTally !== undefined
+        ? tallyEntriesOf(data.programTally)
+        : programsOf(viewsOf(fullCommandList, workspace)).map(p => [p.name, p.n] as [string, number])
+      if (stats === null && top.length === 0) return { runs: 0, top: [] as [string, number][] }
+      return { runs: stats?.runs ?? 0, top }
     }, [fullCommandList, data, workspace])
-    const hasCommands = fullCommandList.length > 0
+    const hasCommands = fullCommandList.length > 0 || (data.commandStats?.runs ?? 0) > 0
     const [canOpenPaths, setCanOpenPaths] = useState(false)
     useEffect(() => {
       let live = true
       void canOpenPathsOf(ctx).then((can) => { if (live) setCanOpenPaths(can) })
       return () => { live = false }
     }, [ctx])
-    // The ledger's figure for this session, refreshed as the fold advances so
-    // a running session's cost keeps up. Null while it is unknown, which is
-    // also the steady state on a profile without dsh-spend.
-    const [spend, setSpend] = useState<SessionSpend | null>(null)
-    useEffect(() => {
-      if (typeof sessionId !== 'string' || sessionId === '') { setSpend(null); return }
-      let live = true
-      void sessionSpendOf(ctx, sessionId).then((value) => { if (live) setSpend(value) })
-      return () => { live = false }
-    }, [ctx, sessionId, data?.cost])
     const fileOpener = useMemo(
       () => (canOpenPaths ? openPathVia(ctx) : undefined),
       [canOpenPaths, ctx],
     )
     const previewOpener = useMemo(() => openResourceVia(ctx), [ctx])
-    const sessionKey = typeof sessionId === 'string' ? sessionId : undefined
     const previewFile = useMemo(
       () => previewOpener === undefined
         ? undefined
@@ -556,7 +590,6 @@ export function makeContextView(
     }, [activeReq, activeIdx, displayRequests])
 
     const nodeOfSeq = useMemo(() => {
-      if (data === null) return new Map<number, SurfaceNode>()
       return cachedByData(data, 'nodeOfSeq', () => {
         const m = new Map<number, SurfaceNode>()
         for (const n of data.nodes) m.set(n.seq, n)
@@ -587,22 +620,13 @@ export function makeContextView(
       revealCard(rootRef.current, '.lc-col-browser')
     }, [requests, nodeOfSeq])
 
-    if (!data) {
-      return (
-        <div className="lc-root" ref={rootRef}>
-          {source.detailState === 'failed'
-            ? <DetailNote state="failed" onRetry={source.retryDetail} />
-            : <div className="lc-empty">{t('loading')}</div>}
-        </div>
-      )
-    }
-
     const markerOf = (req: RequestRecord): ContextEventRecord | undefined => {
       const i = displayRequests.indexOf(req)
       /* v8 ignore next 1 */
       return i >= 0 ? markers[i] : undefined
     }
 
+    const spansReserved = source.detailState !== 'legacy' && source.detailState !== 'failed' && data.spans === undefined
     const head = headlineOf(data, pressure, breakdown)
 
     let activeTurn: number | null = hoverTurn
@@ -612,7 +636,7 @@ export function makeContextView(
 
     const trendHoverCat = hoverCat !== null && hoverCat !== 'free' ? hoverCat : null
 
-    const localeSvc = ctx.get('locale')
+    const localeSvc = typeof ctx.get === 'function' ? ctx.get('locale') : undefined
     const activeLocale = localeSvc !== undefined && typeof localeSvc.getLocale === 'function'
       ? localeSvc.getLocale().active
       : 'en'
@@ -686,6 +710,10 @@ export function makeContextView(
               title={t('trend.overviewTip')}
               onClick={() => {
                 const on = !overview
+                if (sessionKey !== undefined) {
+                  const saved = overviewSelections.get(sessionKey)
+                  overviewSelections.set(sessionKey, { on, autoFired: saved?.autoFired === true })
+                }
                 setOverview(on)
                 if (on) { setDna(false); setAdaptive(false) }
               }}
@@ -705,11 +733,11 @@ export function makeContextView(
             <div className="lc-gran" title={t('gran.modeHint')}>
               <button
                 className={'lc-gran-btn' + (trendMode === 'total' ? ' lc-gran-on' : '')}
-                onClick={() => { setTrendMode('total') }}
+                onClick={() => { switchTrendMode('total') }}
               >{t('gran.total')}</button>
               <button
                 className={'lc-gran-btn' + (trendMode === 'delta' ? ' lc-gran-on' : '')}
-                onClick={() => { setTrendMode('delta') }}
+                onClick={() => { switchTrendMode('delta') }}
               >{t('gran.delta')}</button>
             </div>
           </div>
@@ -718,7 +746,9 @@ export function makeContextView(
           ? (detailReady
             ? <TrendReserved catLabel={catLabel}><div className="lc-empty">{t('trend.empty')}</div></TrendReserved>
             : <TrendReserved catLabel={catLabel}>
-              <DetailNote state={source.detailState === 'failed' ? 'failed' : 'loading'} onRetry={source.retryDetail} />
+              {remote.kind === 'failed'
+                ? <DetailNote state="failed" onRetry={remote.retry} />
+                : <SkeletonPlot />}
             </TrendReserved>)
           : (
             <div>
@@ -746,6 +776,7 @@ export function makeContextView(
                     adaptive={adaptive}
                     dna={dnaBands}
                     dnaAt={dnaAt}
+                    deltaMaxima={deltaMaxima}
                     onPickBand={revealBand}
                     onPickTurn={(turn) => { setGranularity('turn'); setFocusTurn(turn) }}
                     onFocusTurnHandled={() => { setFocusTurn(null) }}
@@ -775,6 +806,7 @@ export function makeContextView(
         convNodes={convNodes}
         fetchContent={fetchContent}
         fetchHeader={fetchHeader}
+        fetchDelta={fetchDelta}
         previewSeq={hoveredSeq}
         pinSeq={pinnedReq !== null ? pinnedReq.seq : null}
         hoverKey={hoverCat}
@@ -790,7 +822,10 @@ export function makeContextView(
         onCatFocusHandled={clearCatFocus}
         dna={dna}
         onDnaChange={setDna}
+        delta={trendMode === 'delta'}
+        onDeltaChange={(on) => { switchTrendMode(on ? 'delta' : 'total') }}
         locale={activeLocale}
+        session={sessionKey}
       />
     )
 
@@ -801,7 +836,7 @@ export function makeContextView(
           <div className="lc-cols lc-head">
             <StatsContext counts={counts} humanInputs={data.humanInputs} answers={data.answers} toolCalls={data.toolCalls}
               files={ioTotals} tools={toolTally} commands={commandBoard}
-              cost={data.cost} spend={spend} locale={activeLocale} sessionId={typeof sessionId === 'string' ? sessionId : undefined}
+              cost={data.cost} costRead={data.costRead} spend={spend} locale={activeLocale} sessionId={sessionKey}
               onJump={onJump} onTeamClick={hasFamilyView ? onTeamClick : undefined}
               onToolPick={onToolPick}
               onToolMore={onToolMore}
@@ -810,7 +845,7 @@ export function makeContextView(
               onEventsClick={onEventsClick} />
             <div className="lc-col">
               <PluginInfo />
-              <RecomCard />
+              <RecomCard key={typeof sessionId === 'string' ? sessionId : undefined} />
             </div>
           </div>
         )}
@@ -819,7 +854,7 @@ export function makeContextView(
             billedGenerated={data.billedGenerated} generatedReasoning={data.generatedReasoning}
             generatedAnswerTokens={data.generatedAnswerTokens}
             generatedCallTokens={data.generatedCallTokens} />
-          <StatsTiming timing={data.timing ?? null} spans={data.spans} locale={activeLocale} />
+          <StatsTiming timing={data.timing ?? null} spans={data.spans} locale={activeLocale} reserve={spansReserved} />
         </div>
 
         <div className="lc-cols lc-cols-main">
@@ -828,7 +863,7 @@ export function makeContextView(
             ref={browserRef}
             className="lc-col lc-col-browser flex-1 min-w-[min(360px,100%)]"
             style={browserCap !== null ? { maxHeight: browserCap } : undefined}
-          >{browserMounted ? browserCard : <div className="lc-card lc-deferred-skeleton" style={{ height: '100%', minHeight: 320 }} aria-hidden="true" />}</div>
+          >{browserMounted ? browserCard : <Skeletons.Browser />}</div>
         </div>
 
         <div className="lc-cols" ref={belowFoldRef}>
@@ -869,8 +904,8 @@ export function makeContextView(
               filterFocus={filterFocus} onFilterFocusHandled={clearFilterFocus}
               state={source.detailState} onRetry={source.retryDetail} />
           </>) : (<>
-            <div className="lc-card lc-col flex-1 min-w-[min(360px,100%)] lc-deferred-skeleton" style={{ minHeight: 450 }} aria-hidden="true" />
-            <div className="lc-card lc-col flex-1 min-w-[min(360px,100%)] lc-deferred-skeleton" style={{ minHeight: 450 }} aria-hidden="true" />
+            <Skeletons.Events />
+            <Skeletons.Files />
           </>)}
         </div>
 
@@ -881,9 +916,7 @@ export function makeContextView(
               workspace={workspace} stampOf={opStampOf} onLocate={locateCommand} fetchContent={fetchContent}
               focusProgram={commandFocus} onFocusProgramHandled={clearCommandFocus}
               state={source.detailState} onRetry={source.retryDetail} />
-          ) : (
-            <div className="lc-card lc-col flex-1 min-w-[min(360px,100%)] lc-deferred-skeleton" style={{ minHeight: 320 }} aria-hidden="true" />
-          )}
+          ) : <Skeletons.Commands />}
         </div>
 
         {inSidebar ? (
@@ -904,19 +937,14 @@ export function makeContextView(
   }
 
   function ContextViewGate(props: ContextViewProps): ReactElement {
-    if (props.host === 'sidebar') {
-      const useTabInfo = (props as ContextViewProps & {
-        useTabInfo?: () => { tab?: { visible?: boolean }; sidebar?: { expanded?: boolean } }
-      }).useTabInfo
-      if (typeof useTabInfo === 'function') {
-        const info = useTabInfo()
-        if (info.tab?.visible !== true) return h('div', { className: 'lc-root' })
-      }
-    }
-    return h(ContextViewBody, props)
+    const generation = useSyncExternalStore(connection.subscribe, connection.getSnapshot)
+    const useTabInfo = (props as ContextViewProps & { useTabInfo?: TabInfoSeat }).useTabInfo
+    const info = seatOf(useTabInfo, NO_TAB_INFO)()
+    if (props.host === 'sidebar' && info.tab?.visible !== true) return h('div', { className: 'lc-root' })
+    return h(ContextViewBody, { ...props, key: generation })
   }
 
   return function ContextView(props: ContextViewProps): ReactElement {
-    return h(ErrorBoundary, null, h(ContextViewGate, props))
+    return h(ErrorBoundary, null, h(ContextViewGate, { ...props, key: seatKeyOf(props) }))
   }
 }

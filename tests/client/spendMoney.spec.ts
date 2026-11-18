@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict'
 import { afterEach, describe, test } from 'vitest'
-import { formatSpendCost, spendConvert, spendDisplayCurrency, spendSymbol } from '../../src/client/spendMoney'
+import { formatSpendCost, formatSpendTokens, spendConvert, spendDisplayCurrency, spendSymbol } from '../../src/client/spendMoney'
 
 const KEY = 'dsh-spend:currency'
 const RATES = { USD: 1, CNY: 7.13 }
@@ -84,4 +84,11 @@ describe('spendSymbol', () => {
     assert.equal(spendSymbol('USD'), '$')
     assert.equal(spendSymbol('EUR'), '$')
   })
+})
+
+test('token totals match the dashboard precision and suffixes', () => {
+  assert.equal(formatSpendTokens(83), '83')
+  assert.equal(formatSpendTokens(110_000), '110.0K')
+  assert.equal(formatSpendTokens(1_190_000), '1.19M')
+  assert.equal(formatSpendTokens(1_190_000_000), '1.19B')
 })

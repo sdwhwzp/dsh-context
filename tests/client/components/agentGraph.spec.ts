@@ -1,27 +1,17 @@
-import { act, createElement as h } from 'react'
+import { act, createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { makeAgentGraph } from '../../../src/client/components/agentGraph'
 import { DICT_EN } from '../../../src/client/i18n'
-import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
 import { LEAD_HUE, agentForestOf, familyHue, type AgentNode, type AgentSelfStats } from '../../../src/client/agentTree'
 import { TestClientCtx, asClientCtx } from '../helpers/harness'
-import { blur, click, flush, focus, hover, makeKit, mount, query, queryAll, text, unhover, until, wheel } from '../helpers/kit'
+import { blur, click, flush, focus, hover, makeKit, mount, query, queryAll, text, unhover, until, wheel, silenceWindowErrors, keydown, press } from '../helpers/kit'
+import { makeErrorBoundary } from '../../../src/client/components/errorBoundary'
+import { useEscapeClose } from '../../../src/client/components/escapeClose'
+
+describe('agentGraph', () => {
 
 const kit = makeKit()
-
-beforeEach(() => {
-  resetModelPrices()
-  setModelPricesLoader(() => new Promise(() => {}))
-})
-
-afterEach(() => {
-  resetModelPrices()
-})
-
-const PROVIDERS = {
-  deepseek: { models: { 'deepseek-v4-flash': { cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
-}
 
 function timeline(total: number, requests = 0): unknown {
   return {
@@ -387,30 +377,30 @@ describe('AgentGraph — the family tree', () => {
   })
 
   const COST_LEDGER = { 'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 500_000 } } } }
+  const COST_READ = { usd: 0.9, ready: true }
 
-  test('the headline prices the consumed tokens once the price book lands', async () => {
-    setModelPricesLoader(() => Promise.resolve(PROVIDERS))
+  test('the headline shows the host cost read; a non-ready read leaves the tokens alone', async () => {
     const rows = family() as {
       worker: { projectionValues: Record<string, unknown> }
     }
-    rows.worker.projectionValues.contextTimeline = { ...(timeline(800, 5) as Record<string, unknown>), cost: COST_LEDGER }
+    rows.worker.projectionValues.contextTimeline = { ...(timeline(800, 5) as Record<string, unknown>), cost: COST_LEDGER, costRead: COST_READ }
     const byId: Record<string, unknown> = {
       ...rows,
       cold: {
         parentId: 'root', origin: 'subagent', running: false, updatedAt: 4,
-        projectionValues: { contextTimeline: { ...(timeline(100, 0) as Record<string, unknown>), cost: COST_LEDGER } },
+        projectionValues: { contextTimeline: { ...(timeline(100, 0) as Record<string, unknown>), cost: COST_LEDGER, costRead: COST_READ } },
       },
     }
     const View = makeView(new FakeSessions(byId))
     const m = await mount(h(View, { sessionId: 'root', self: selfStats() }))
-    await until(() => text(query(m.container, '[data-agent="worker"]')).includes('$0.90'), 'worker cost estimate')
+    await until(() => text(query(m.container, '[data-agent="worker"]')).includes('$0.90'), 'worker cost read')
     assert.ok(text(query(m.container, '[data-agent="worker"]')).includes('150 · $0.90'))
     assert.ok(text(query(m.container, '[data-agent="cold"]')).includes('1.5M · $0.90'))
     await m.unmount()
 
     const ViewZh = makeView(new FakeSessions(byId), { locale: 'zh' })
     const mz = await mount(h(ViewZh, { sessionId: 'root', self: selfStats() }))
-    await until(() => text(query(mz.container, '[data-agent="worker"]')).includes('¥6.00'), 'zh cost estimate')
+    await until(() => text(query(mz.container, '[data-agent="worker"]')).includes('¥6.00'), 'zh cost read')
     assert.ok(text(mz.container).includes('Agent 网络'), 'the zh title')
     assert.ok(text(mz.container).includes('当前'), 'the zh self marker')
     assert.ok(text(mz.container).includes('4 个 Agent'), 'the zh kit localizes the chips')
@@ -425,6 +415,24 @@ describe('AgentGraph — the family tree', () => {
     const mb = await mount(h(makeAgentGraph(asClientCtx(bare), kit), { sessionId: 'root', self: selfStats() }))
     await until(() => text(query(mb.container, '[data-agent="worker"]')).includes('$0.90'), 'usd fallback')
     await mb.unmount()
+
+    const pending = family() as {
+      worker: { projectionValues: Record<string, unknown> }
+    }
+    pending.worker.projectionValues.contextTimeline = { ...(timeline(800, 5) as Record<string, unknown>), cost: COST_LEDGER, costRead: { usd: null, ready: false } }
+    const pendingById: Record<string, unknown> = {
+      ...pending,
+      cold: {
+        parentId: 'root', origin: 'subagent', running: false, updatedAt: 4,
+        projectionValues: { contextTimeline: { ...(timeline(100, 0) as Record<string, unknown>), cost: COST_LEDGER, costRead: { usd: null, ready: false } } },
+      },
+    }
+    const mp = await mount(h(makeView(new FakeSessions(pendingById)), { sessionId: 'root', self: selfStats() }))
+    await flush()
+    assert.ok(text(query(mp.container, '[data-agent="worker"]')).includes('150'), 'the token figure stays')
+    assert.ok(!text(query(mp.container, '[data-agent="worker"]')).includes('$'), 'a non-ready read hides the money figure')
+    assert.ok(text(query(mp.container, '[data-agent="cold"]')).includes('1.5M'))
+    await mp.unmount()
   })
 })
 
@@ -628,7 +636,7 @@ describe('AgentGraph — cold-relative composition fetch', () => {
     await remounted.unmount()
   })
 
-  test('a failing fetch degrades to the pressure-only fill and never retries', async () => {
+  test('a failing fetch degrades to the pressure-only fill and retries only when the family changes', async () => {
     const rpc = detailFetch({ reject: true })
     const { View, face } = makeFetchingView()
     const m = await mount(h(View, { sessionId: 'root', self: selfStats() }))
@@ -639,7 +647,7 @@ describe('AgentGraph — cold-relative composition fetch', () => {
       face.setState(family())
     })
     await flush()
-    assert.deepEqual(rpc.calls, ['api/dsh-context/detail:done'], 'the sticky failure never re-fetches')
+    assert.deepEqual(rpc.calls, ['api/dsh-context/detail:done', 'api/dsh-context/detail:done'], 'a rejected read is not cached so the next cold tick retries')
     await m.unmount()
   })
 
@@ -755,4 +763,165 @@ describe('AgentGraph — viewport windowing', () => {
       vi.unstubAllGlobals()
     }
   })
+})
+})
+
+describe('errorBoundary', () => {
+
+const kit = makeKit()
+const ErrorBoundary = makeErrorBoundary(kit.t)
+
+let consoleSpy: ReturnType<typeof vi.spyOn> | null = null
+let silenceErrors: (() => void) | null = null
+
+afterEach(() => {
+  consoleSpy?.mockRestore()
+  consoleSpy = null
+  silenceErrors?.()
+  silenceErrors = null
+})
+
+function silenceRenderErrors(): void {
+  consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  silenceErrors = silenceWindowErrors()
+}
+
+describe('ErrorBoundary', () => {
+  test('passes children through when nothing throws', async () => {
+    const m = await mount(h(ErrorBoundary, {}, h('div', { className: 'healthy' }, 'all good')))
+    assert.equal(text(m.container), 'all good')
+    await m.unmount()
+  })
+
+  test('a render error degrades to the error card; Retry resumes a healthy child', async () => {
+    silenceRenderErrors()
+    let shouldThrow = true
+    function Bomb() {
+      if (shouldThrow) throw new Error('kaboom')
+      return h('div', { className: 'healthy' }, 'recovered')
+    }
+    const m = await mount(h(ErrorBoundary, {}, h(Bomb, {})))
+    const card = query(m.container, '.lc-error')
+    assert.ok(text(card).includes('Failed to read context data:'))
+    assert.equal(query(card, '.lc-error-msg').textContent, 'kaboom')
+    const retry = query(card, '.lc-error-retry')
+    assert.equal(retry.textContent, 'Retry')
+    shouldThrow = false
+    await click(retry)
+    assert.equal(text(m.container), 'recovered')
+    await m.unmount()
+  })
+
+  test('a non-Error throw is stringified into the card', async () => {
+    silenceRenderErrors()
+    function Bomb(): never {
+      throw 'string failure'
+    }
+    const m = await mount(h(ErrorBoundary, {}, h(Bomb, {})))
+    assert.equal(query(m.container, '.lc-error-msg').textContent, 'string failure')
+    await m.unmount()
+  })
+})
+})
+
+describe('escapeClose', () => {
+
+function Overlay(props: { active: boolean; onClose: () => void; restore?: boolean }): ReactElement {
+  useEscapeClose(props.active, props.onClose, props.restore)
+  return h('div', { className: 'overlay' })
+}
+
+function field(tag: 'input' | 'textarea', marked: boolean, value: string): HTMLInputElement | HTMLTextAreaElement {
+  const el = document.createElement(tag)
+  if (marked) el.dataset.lcClearable = ''
+  el.value = value
+  document.body.append(el)
+  return el
+}
+
+describe('useEscapeClose', () => {
+  test('Escape yields to a marked field with typed content', async () => {
+    const closes: string[] = []
+    const m = await mount(h(Overlay, { active: true, onClose: () => closes.push('close') }))
+    const markedInput = field('input', true, 'x')
+    const filled = await press(markedInput, { key: 'Escape' })
+    assert.deepEqual(closes, [], 'the field keeps the key so it can clear itself')
+    assert.equal(filled.ev.defaultPrevented, false, 'the field handler owns preventDefault, not the overlay')
+    assert.equal(filled.reachedDocument, true)
+
+    markedInput.value = ''
+    const empty = await press(markedInput, { key: 'Escape' })
+    assert.deepEqual(closes, ['close'], 'an empty field lets the overlay close')
+    assert.equal(empty.reachedDocument, false, 'the overlay consumes the close it performs')
+
+    const plainInput = field('input', false, 'x')
+    await press(plainInput, { key: 'Escape' })
+    assert.equal(closes.length, 2, 'an unmarked field never withholds the overlay close')
+
+    const markedArea = field('textarea', true, 'x')
+    await press(markedArea, { key: 'Escape' })
+    assert.equal(closes.length, 2, 'a marked textarea with content keeps the key too')
+
+    markedInput.value = 'x'
+    const modified = await press(markedInput, { key: 'Escape', shiftKey: true })
+    assert.equal(closes.length, 2, 'a modified Escape is not the dismiss gesture')
+    assert.equal(modified.reachedDocument, true)
+
+    const composing = await press(markedInput, { key: 'Escape', isComposing: true })
+    assert.equal(closes.length, 2, 'composition keeps Escape with the IME')
+    assert.equal(composing.ev.defaultPrevented, false, 'the IME default action survives')
+    assert.equal(composing.reachedDocument, false, 'the overlay does not let the key leak to the harness')
+
+    await keydown('Escape')
+    assert.equal(closes.length, 3, 'a window-level Escape still closes')
+
+    markedInput.remove()
+    plainInput.remove()
+    markedArea.remove()
+    await m.unmount()
+  })
+
+  test('only the topmost open layer consumes Escape', async () => {
+    const closes: string[] = []
+    function Layers(props: { outer: boolean; inner: boolean }): ReactElement {
+      useEscapeClose(props.outer, () => closes.push('outer'))
+      useEscapeClose(props.inner, () => closes.push('inner'))
+      return h('div')
+    }
+    const m = await mount(h(Layers, { outer: true, inner: true }))
+    try {
+      await keydown('Escape')
+      assert.deepEqual(closes, ['inner'])
+      await m.update(h(Layers, { outer: true, inner: false }))
+      await keydown('Escape')
+      assert.deepEqual(closes, ['inner', 'outer'])
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  test('a layer restores the pre-open focus on close unless it opted out', async () => {
+    const trigger = document.createElement('button')
+    document.body.append(trigger)
+    trigger.focus()
+    const closes: string[] = []
+    const m = await mount(h(Overlay, { active: true, onClose: () => closes.push('close') }))
+    try {
+      await keydown('Escape')
+      assert.deepEqual(closes, ['close'])
+      await m.update(h(Overlay, { active: false, onClose: () => closes.push('close') }))
+      assert.equal(document.activeElement, trigger, 'the Escape close restores focus')
+
+      await m.update(h(Overlay, { active: true, onClose: () => closes.push('close'), restore: false }))
+      const other = field('input', false, '')
+      other.focus()
+      await m.update(h(Overlay, { active: false, onClose: () => closes.push('close'), restore: false }))
+      assert.equal(document.activeElement, other, 'an opted-out layer leaves focus alone')
+      other.remove()
+    } finally {
+      await m.unmount()
+      trigger.remove()
+    }
+  })
+})
 })

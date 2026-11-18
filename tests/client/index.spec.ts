@@ -1,10 +1,14 @@
-import type { ReactElement } from 'react'
+import { act, createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
-import { describe, test } from 'vitest'
-import { DICT_EN, DICT_ZH } from '../../src/client/i18n'
+import { describe, test, vi } from 'vitest'
+import { DICTS } from '../../src/client/i18n'
 import { modalStoreOf, type ModalStore } from '../../src/client/modalStore'
 import type { SettingsField, SettingsScopeLike, SettingsState } from '../../src/client/settings'
-import { TestClientCtx, TestSessions, asClientCtx } from './helpers/harness'
+import { TestClientCtx, TestSessions, asClientCtx, makeTestGeneration } from './helpers/harness'
+import { mount } from './helpers/kit'
+import { noteCostPending, resetCostRefresh } from '../../src/client/costRefresh'
+import { detailStoreOf, useTimelineSource } from '../../src/client/timelineSource'
+import { DETAIL_ROUTE, FLEET_ROUTE } from '../../src/client/apiRoutes'
 
 const { name, inject, apply } = (await import('../../src/client/index')) as unknown as {
   name: string
@@ -65,7 +69,7 @@ function scopeWith(snapshot: { status: string; value: unknown; writable: boolean
 }
 
 describe('client entry: identity and dictionaries', () => {
-  test('name and inject declare the plugin identity; apply registers the real zh/en dicts and dispose removes them', () => {
+  test('name and inject declare the plugin identity; apply registers all locale dictionaries and dispose removes them', () => {
     assert.equal(name, 'dsh-context')
     assert.deepEqual(inject, ['slots', 'locale'])
 
@@ -73,8 +77,7 @@ describe('client entry: identity and dictionaries', () => {
     applyTo(ctx)
     const dicts = ctx.locale.namespaces.get('dsh-context')
     assert.ok(dicts)
-    assert.equal(dicts.zh, DICT_ZH)
-    assert.equal(dicts.en, DICT_EN)
+    for (const [locale, dict] of Object.entries(DICTS)) assert.equal(dicts[locale], dict)
     assert.equal(ctx.locale.bind('dsh-context')('tab.context'), 'Context')
     ctx.dispose()
     assert.equal(ctx.locale.namespaces.has('dsh-context'), false)
@@ -151,6 +154,143 @@ describe('client entry: optional service seams', () => {
     assert.equal(ctx.slots.of('conversation.view').length, 2, 'the sessions seam never gates the mounts')
     ctx.dispose()
     assert.deepEqual(ctx.slots.of('conversation.view'), [])
+  })
+})
+
+describe('client entry: connection generation', () => {
+  test('a mounted timeline with the same session id drops old rows and ignores the old reply', async () => {
+    vi.useFakeTimers()
+    const generation = makeTestGeneration(1)
+    const ctx = new TestClientCtx({ services: { connection: { generation: generation.face } } })
+    const sessionId = 'shared-session-id'
+    const pushed = { ok: true, model: 'account-a', detailRev: 1 }
+    const reply = (model: string): Response => Response.json({
+      ok: true, value: { rev: 1, parts: {
+        head: { ok: true, model, detailRev: 1 },
+        series: [{ seq: 1, system: 2 }],
+      } },
+    })
+    let resolveOld!: (response: Response) => void
+    const oldReply = new Promise<Response>(resolve => { resolveOld = resolve })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(reply('account-a'))
+      .mockReturnValueOnce(oldReply)
+      .mockResolvedValueOnce(reply('account-b'))
+    function SessionRead(): ReactElement {
+      const { data } = useTimelineSource({ sessionId, useProjection: () => pushed })
+      return h('span', null, data === null ? 'empty' : `${data.model}:${data.requests.length}`)
+    }
+    vi.stubGlobal('fetch', fetch)
+    applyTo(ctx)
+    try {
+      const mounted = await mount(h(SessionRead))
+      try {
+        await act(async () => { await vi.advanceTimersByTimeAsync(16) })
+        assert.equal(mounted.container.textContent, 'account-a:1')
+        const oldStore = detailStoreOf(sessionId)
+        await act(async () => { oldStore.refresh() })
+        await act(async () => {
+          generation.set(null)
+          generation.set(null)
+        })
+        assert.equal(fetch.mock.calls[1]?.[1].signal.aborted, true)
+        assert.equal(mounted.container.textContent, 'empty')
+        assert.equal(oldStore.getSnapshot().detail, null)
+        await act(async () => { generation.set(2) })
+        assert.equal(mounted.container.textContent, 'empty')
+        await act(async () => { await vi.advanceTimersByTimeAsync(16) })
+        assert.equal(mounted.container.textContent, 'account-b:1')
+        await act(async () => { resolveOld(reply('late-account-a')) })
+        assert.equal(mounted.container.textContent, 'account-b:1')
+        assert.equal(oldStore.getSnapshot().detail, null)
+        assert.equal(fetch.mock.calls.length, 3)
+      } finally {
+        await mounted.unmount()
+      }
+    } finally {
+      ctx.dispose()
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
+    assert.equal(generation.subscribers, 0)
+  })
+
+  test('a mounted Fleet reloads the same family and discards the previous connection batch', async () => {
+    vi.useFakeTimers()
+    const generation = makeTestGeneration(1)
+    const snapshot = { byId: {
+      root: { updatedAt: 10 },
+      child: { origin: 'subagent', parentId: 'root', updatedAt: 8 },
+    } }
+    const ctx = new TestClientCtx({ services: {
+      connection: { generation: generation.face },
+      sessions: { list: { getSnapshot: () => snapshot, subscribe: () => () => {} } },
+    } })
+    const head = (model: string) => ({ ok: true, model, current: { system: 1, total: 1 } })
+    const oldHead = head('account-a')
+    const newHead = head('account-b')
+    const isOld = () => generation.face.getSnapshot()?.id === 1
+    const detail = (count: number) => ({
+      messages: Array.from({ length: count }, (_, index) => ({
+        seq: index + 1, time: index + 1, kind: 'relay', text: `message ${index + 1}`,
+      })),
+      truncated: false,
+    })
+    const reply = (value: unknown): Response => Response.json({ ok: true, value })
+    const batch = (count: number): Response => reply({ rows: { child: detail(count) } })
+    let resolveOld!: (response: Response) => void
+    const oldBatch = new Promise<Response>(resolve => { resolveOld = resolve })
+    let batchSignal: AbortSignal | null | undefined
+    const fetch = vi.fn((url: string, init: RequestInit) => {
+      if (url === DETAIL_ROUTE) return Promise.resolve(reply({ head: isOld() ? oldHead : newHead }))
+      const body = JSON.parse(String(init.body)) as { summary?: boolean; batch?: unknown }
+      if (url === FLEET_ROUTE && body.summary === true) {
+        return Promise.resolve(reply({ rootId: 'root', detail: detail(isOld() ? 1 : 2), familySize: 2 }))
+      }
+      if (url === FLEET_ROUTE && body.batch !== undefined) {
+        if (!isOld()) return Promise.resolve(batch(0))
+        batchSignal = init.signal
+        return oldBatch
+      }
+      throw new Error(`unexpected route ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    applyTo(ctx)
+    try {
+      const fleet = ctx.slots.of('conversation.view').find(entry => entry.registration.id === 'fleet')
+      assert.ok(fleet)
+      const mounted = await mount(fleet.component({
+        sessionId: 'root',
+        useProjection: (key: string) => key === 'contextTimeline' ? isOld() ? oldHead : newHead : undefined,
+      }) as ReactElement)
+      try {
+        const tick = () => act(async () => { await vi.advanceTimersByTimeAsync(1) })
+        const messages = () => mounted.container.querySelector('[data-pulse-stat="messages"]')?.textContent
+        await tick()
+        assert.equal(mounted.container.querySelectorAll('.lc-pulse-event').length, 1)
+        assert.equal(batchSignal?.aborted, false)
+
+        await act(async () => { generation.set(null) })
+        assert.equal(batchSignal?.aborted, true)
+        assert.equal(mounted.container.querySelector('.lc-pulse-event'), null)
+        await act(async () => { generation.set(2) })
+        await tick()
+        assert.equal(messages(), '2')
+        assert.equal(fetch.mock.calls.filter(([url]) => url === DETAIL_ROUTE).length, 2)
+
+        await act(async () => { resolveOld(batch(5)) })
+        assert.equal(messages(), '2')
+      } finally {
+        await mounted.unmount()
+      }
+    } finally {
+      resolveOld(batch(5))
+      await oldBatch
+      ctx.dispose()
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
+    assert.equal(generation.subscribers, 0)
   })
 })
 
@@ -445,5 +585,79 @@ describe('client entry: second-mount guard', () => {
     applyTo(hostile)
     assert.equal(hostile.slots.of('conversation.view').length, 2)
     hostile.dispose()
+  })
+})
+
+describe('client entry: cost refresh retries', () => {
+  test('a pending cost read refreshes the session list and the current projections', async () => {
+    const calls = { list: 0, projections: [] as string[] }
+    const ctx = new TestClientCtx({
+      services: {
+        sessions: {
+          refresh: () => { calls.list += 1; return Promise.resolve() },
+          getSnapshot: () => ({ current: 's1' }),
+          refreshProjections: (id: string) => { calls.projections.push(id); return Promise.resolve() },
+        },
+      },
+    })
+    applyTo(ctx)
+    vi.useFakeTimers()
+    try {
+      noteCostPending({ usd: null, ready: false })
+      await vi.advanceTimersByTimeAsync(1_500)
+      assert.deepEqual(calls, { list: 1, projections: ['s1'] })
+    } finally {
+      vi.useRealTimers()
+      resetCostRefresh()
+      ctx.dispose()
+    }
+  })
+
+  test('absent or failing session seams never throw from the retry', async () => {
+    const bare = new TestClientCtx()
+    applyTo(bare)
+    vi.useFakeTimers()
+    try {
+      noteCostPending({ usd: null, ready: false })
+      await vi.advanceTimersByTimeAsync(1_500)
+      assert.equal(vi.getTimerCount(), 0)
+    } finally {
+      vi.useRealTimers()
+      resetCostRefresh()
+      bare.dispose()
+    }
+    const throwing = new TestClientCtx({ services: { sessions: { refresh: () => { throw new Error('down') }, getSnapshot: () => null } } })
+    applyTo(throwing)
+    vi.useFakeTimers()
+    try {
+      noteCostPending({ usd: null, ready: false })
+      await vi.advanceTimersByTimeAsync(1_500)
+    } finally {
+      vi.useRealTimers()
+      resetCostRefresh()
+      throwing.dispose()
+    }
+    const noCurrent = new TestClientCtx({ services: { sessions: { refresh: () => Promise.resolve(), getSnapshot: () => ({ current: 7 }), refreshProjections: () => { throw new Error('must not run') } } } })
+    applyTo(noCurrent)
+    vi.useFakeTimers()
+    try {
+      noteCostPending({ usd: null, ready: false })
+      await vi.advanceTimersByTimeAsync(1_500)
+    } finally {
+      vi.useRealTimers()
+      resetCostRefresh()
+      noCurrent.dispose()
+    }
+    const rejecting = new TestClientCtx({ services: { sessions: { refresh: () => Promise.reject(new Error('down')), getSnapshot: () => ({ current: 's1' }), refreshProjections: () => Promise.reject(new Error('down')) } } })
+    applyTo(rejecting)
+    vi.useFakeTimers()
+    try {
+      noteCostPending({ usd: null, ready: false })
+      await vi.advanceTimersByTimeAsync(1_500)
+    } finally {
+      vi.useRealTimers()
+      resetCostRefresh()
+      rejecting.dispose()
+    }
   })
 })

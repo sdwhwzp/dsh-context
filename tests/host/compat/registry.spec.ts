@@ -3,20 +3,8 @@ import { describe, test } from 'vitest'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import { createContextActivityDefinition } from '../../../src/host/activity'
 import { createContextHeadersDefinition } from '../../../src/host/headers'
-import { createContextTimelineDefinition } from '../../../src/host/timeline'
-import {
-  assistantMessage,
-  compaction,
-  header,
-  planMode,
-  requestContext,
-  stepEnd,
-  stepStart,
-  systemMessage,
-  toolCall,
-  toolResult,
-  userMessage,
-} from '../helpers/events'
+import { createContextTimelineDefinition, TIMELINE_STATE_VERSION } from '../../../src/host/timeline'
+import { canonicalLog, assistantMessage } from '../helpers/events'
 import type { TimelineEvent } from '../../../src/host/fold'
 import type { TimelineState } from '../../../src/host/foldState'
 import type { HeadersState } from '../../../src/host/headers'
@@ -24,27 +12,6 @@ import type { ActivityState } from '../../../src/host/activity'
 import { RegistryDriver, RegistryViolationError } from './registryDriver'
 import type { Checkpoint, SessionLike } from './registryDriver'
 import { assertStatesPlainJson, driveTimeline } from '../helpers/projection'
-
-function canonicalLog(): TimelineEvent[] {
-  return [
-    header(1, {
-      tools: [{ name: 'bash', description: 'run a command' }],
-      model: 'deepseek-v4-flash',
-      provider: 'deepseek',
-    }),
-    systemMessage(2),
-    requestContext(3, { contextWindow: 128000 }),
-    stepStart(4),
-    userMessage(5, [{ type: 'text', text: 'hello there' }], { kind: 'user' }),
-    assistantMessage(6, { turn: 1, step: 0, usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 3 } }),
-    toolCall(7, { callId: 'c1', name: 'bash' }),
-    toolResult(8, { callId: 'c1', content: [{ type: 'text', text: 'ok' }] }),
-    stepEnd(9),
-    assistantMessage(10, { turn: 1, step: 1, usage: { inputTokens: 20, outputTokens: 8 } }),
-    compaction(11, 'summary', { shadowedTokenCount: 12, shadowedSeqs: [5] }),
-    planMode(12, { active: true }),
-  ]
-}
 
 function fullLog(): TimelineEvent[] {
   return [{ seq: 0, time: 0, type: 'session/created', data: {} } as unknown as TimelineEvent, ...canonicalLog()]
@@ -133,7 +100,7 @@ describe('registry contract — the semantics every supported line shares', () =
     assert.ok(rows !== undefined, 'checkpoint rows are losslessly JSON-serializable')
     for (const key of ['contextTimeline', 'contextHeaders']) {
       const row = rows[key] as { ver: number; seq: number }
-      assert.equal(row.ver, key === 'contextTimeline' ? 37 : 1)
+      assert.equal(row.ver, key === 'contextTimeline' ? TIMELINE_STATE_VERSION : 1)
       assert.equal(row.seq, 12)
     }
   })
@@ -183,10 +150,10 @@ describe('registry contract — the semantics every supported line shares', () =
     const timeline = restored.values.contextTimeline as { current: { total: number }; nodes: unknown[] }
     assert.ok(timeline.current.total > 0, 'the refold serves the wire view')
     const refolded = (driver.checkpoint(session).contextTimeline as { val: { requests: { seq: number; prompt?: number }[] } }).val
-    assert.deepEqual(refolded.requests.map(r => r.seq), [6, 10, 13, 14, 15], 'the refold re-tracks every step')
+    assert.deepEqual(refolded.requests.map(r => r.seq), [14, 15], 'the head row keeps only the last requests for its last-value')
     assert.deepEqual(
-      refolded.requests.filter(r => r.seq >= 13).map(r => r.prompt ?? null),
-      [151, null, 12],
+      refolded.requests.map(r => r.prompt ?? null),
+      [null, 12],
       'the persisted records keep the sanitized prompt figure (issue #44)',
     )
 

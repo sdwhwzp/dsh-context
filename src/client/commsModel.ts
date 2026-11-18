@@ -17,7 +17,7 @@ export interface CommsAgent {
   description?: string
 }
 
-export type CommsKindFilter = 'all' | 'message' | 'report'
+export type CommsKindFilter = 'all' | 'message' | 'report' | 'delegation'
 
 const PREVIEW_MAX = 600
 
@@ -84,7 +84,7 @@ export function initialsOf(name: string): string {
 
 const AVATAR_LINE_MAX = 3
 
-export interface AvatarLabel {
+interface AvatarLabel {
   lines: readonly string[]
   condensed: boolean
 }

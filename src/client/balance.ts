@@ -1,26 +1,13 @@
-/** DeepSeek platform balances read under the current login; no browser balance cache. */
-
 import type { PlatformBalance, PlatformBalanceEntry } from '../shared/types'
-import { asRecord } from './services'
 import { BALANCE_ROUTE } from './apiRoutes'
+import { postRouteQuietly } from './route'
+import { asRecord } from './wire'
 
-// The balance route of host/balance.ts — re-declared here (the client bundle
-// inlines every import, and the host module must never reach it). Same-origin
-// POST under the harness's authenticated `/api` fence.
-
-
-/** One platform amount ('110.00', or an already-numeric producer variant), or null. */
 function amountOf(value: unknown): number | null {
   const n = typeof value === 'string' ? Number(value) : value
   return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : null
 }
 
-/**
- * Narrow the delivered payload to a render-safe value (the same boundary
- * rigor as `timelineOf`): each entry's currency and amounts re-proved, an
- * entry failing the shape drops whole, and a payload with no valid entry is
- * no balance — the caller renders nothing rather than half a figure.
- */
 export function platformBalanceOf(value: unknown): PlatformBalance | null {
   const data = asRecord(value)
   if (data === null) return null
@@ -55,19 +42,6 @@ export function balanceEntryOf(
   return balance.balances.find(entry => entry.currency === want) ?? balance.balances[0]
 }
 
-/** Read a fresh authorized balance; cancellation or an unavailable route returns null. */
 export async function fetchPlatformBalance(signal?: AbortSignal): Promise<PlatformBalance | null> {
-  try {
-    const response = await fetch(BALANCE_ROUTE, {
-      method: 'POST',
-      signal,
-      headers: { 'content-type': 'application/json' },
-    })
-    if (!response.ok) return null
-    const r = asRecord(await response.json())
-    if (r === null || r.ok !== true || r.value === null || r.value === undefined) return null
-    return platformBalanceOf(r.value)
-  } catch {
-    return null
-  }
+  return postRouteQuietly(BALANCE_ROUTE, {}, platformBalanceOf, { signal })
 }

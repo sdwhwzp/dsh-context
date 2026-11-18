@@ -1,0 +1,785 @@
+import type { Context } from '@deepseek-ai/cordis'
+import { DAY_KEY_RE, dayKeyOf } from '../shared/days'
+import type {
+  BackfillCoverage,
+  BackfillUnreadableSession,
+  OverviewCoverage,
+  OverviewPage,
+  OverviewPart,
+  OverviewPick,
+  OverviewRange,
+  OverviewScope,
+  OverviewSort,
+  OverviewTallyField,
+  OverviewValue,
+} from '../shared/types'
+import { UNREADABLE_DETAIL_MAX, type BackfillHandle } from './backfill'
+import { AccountAccessUnavailableError, isAccountRequest, resolveAccountReads } from './connection'
+import { optionalNumOf } from './overviewDecode'
+import type { CostSource } from './cost'
+import type { CachedSnapshotFace, SessionQueryFace, SnapshotProjectionsFace } from './faces'
+import { createOverviewCache, identityKey, type CachedSession, type DurableIdentity, type OverviewCache } from './overviewCache'
+import {
+  buildRows,
+  buildSessions,
+  revisionOf,
+  rowsOf,
+  runningOf,
+  scanEntriesOf,
+  signaturesOf,
+  workspaceInventoryOf,
+  workspaceOf,
+  type HostRow,
+  type HostSession,
+  type RowFeed,
+  type WorkspaceState,
+} from './overviewCorpus'
+import {
+  daysOf,
+  groupCountsOf,
+  matches,
+  pageOf,
+  pageRowOf,
+  rowsForWindow,
+  sortOf,
+  summaryOf,
+  tallyStatsOf,
+  windowOf,
+  type Filters,
+} from './overviewAggregate'
+import { makeScanWindow, type ScanResult } from './overviewScan'
+import { asRecord } from './record'
+import { accountRevision, failure, mountPostRoute, readBody, reply, routeFailure } from './postRoute'
+
+export const OVERVIEW_ROUTE = '/api/dsh-context/overview'
+
+const MAX_QUERY_CHARS = 500
+
+const MAX_REVISION_CHARS = 200
+
+const SCAN_TTL_MS = 5_000
+
+const IDLE_MS = 20_000
+
+const INLINE_CAPTURE_MAX = 128
+
+const CAPTURE_DELAY_MS = 500
+
+const CAPTURE_BACKFILL_POLL_MS = 1_000
+
+const CAPTURE_MAX_WAIT_MS = 60_000
+
+const SERVED_KEYS_MAX = 128
+
+const PARTS = new Set<OverviewPart>(['summary', 'days', 'page', 'tally'])
+
+const COVERAGES = new Set<OverviewCoverage>(['all', 'active', 'archived'])
+
+const SORTS = new Set<OverviewSort>(['recent', 'tokens', 'context'])
+
+const TALLY_FIELDS = new Set<OverviewTallyField>(['skills', 'tools', 'cmds'])
+
+const RANGES = new Set<string>(['today', '7d', '30d', 'all'])
+
+interface CutoffSpan {
+  after: number
+  through: number
+}
+
+interface ServedPart {
+  revision: string
+  cutoff?: CutoffSpan
+}
+
+interface FeedState extends RowFeed {
+  served: Map<string, ServedPart>
+  rowsRevision: string
+}
+
+interface AccountRevisions {
+  stamp: string
+  coldKey: string
+  identities: ReadonlyMap<string, DurableIdentity | null>
+  expiresAt: number
+  served: Map<string, ServedPart>
+}
+
+type SupportedRange = OverviewRange | 'all'
+
+function rangeOf(value: unknown): SupportedRange {
+  if (typeof value === 'string' && RANGES.has(value)) return value as SupportedRange
+  const data = asRecord(value)
+  if (data !== null) {
+    const start = optionalNumOf(data.start)
+    const end = optionalNumOf(data.end)
+    if (start !== undefined && end !== undefined) return { start, end }
+  }
+  return '30d'
+}
+
+type ParsedScope = Omit<OverviewScope, 'range'> & { range: SupportedRange }
+
+function scopeOf(value: unknown): ParsedScope {
+  const data = asRecord(value)
+  const range = rangeOf(data?.range)
+  if (data === null) return { range }
+  const coverage = typeof data.coverage === 'string' && COVERAGES.has(data.coverage as OverviewCoverage)
+    ? data.coverage as OverviewCoverage
+    : undefined
+  const day = typeof data.day === 'string' && data.day !== '' ? data.day : undefined
+  const group = typeof data.group === 'string' && data.group !== '' ? data.group : undefined
+  const query = typeof data.query === 'string' && data.query !== '' ? data.query.slice(0, MAX_QUERY_CHARS) : undefined
+  const rawCalendar = asRecord(data.calendar)
+  const calendar = rawCalendar !== null && typeof rawCalendar.from === 'string' && DAY_KEY_RE.test(rawCalendar.from)
+    && typeof rawCalendar.to === 'string' && DAY_KEY_RE.test(rawCalendar.to)
+    ? { from: rawCalendar.from, to: rawCalendar.to }
+    : undefined
+  return {
+    range,
+    ...(calendar === undefined ? {} : { calendar }),
+    ...(coverage === undefined ? {} : { coverage }),
+    ...(day === undefined ? {} : { day }),
+    ...(group === undefined ? {} : { group }),
+    ...(query === undefined ? {} : { query }),
+  }
+}
+
+function pickOf(value: unknown): OverviewPick | null {
+  const data = asRecord(value)
+  if (data === null) return null
+  if (typeof data.field !== 'string' || !TALLY_FIELDS.has(data.field as OverviewTallyField)) return null
+  if (typeof data.name !== 'string' || data.name === '') return null
+  return { field: data.field as OverviewTallyField, name: data.name }
+}
+
+interface ParsedRequest {
+  part: OverviewPart
+  revision?: string
+  scope: ParsedScope
+  sort: OverviewSort
+  page: number
+  tally: OverviewTallyField
+  pick: OverviewPick | null
+}
+
+function requestOf(body: unknown): ParsedRequest | null {
+  const data = asRecord(body)
+  if (data === null) return null
+  if (typeof data.part !== 'string' || !PARTS.has(data.part as OverviewPart)) return null
+  const revision = typeof data.revision === 'string' && data.revision !== '' && data.revision.length <= MAX_REVISION_CHARS
+    ? data.revision
+    : undefined
+  const sort = typeof data.sort === 'string' && SORTS.has(data.sort as OverviewSort) ? data.sort as OverviewSort : 'recent'
+  const pageValue = optionalNumOf(data.page)
+  const tally = typeof data.tally === 'string' && TALLY_FIELDS.has(data.tally as OverviewTallyField)
+    ? data.tally as OverviewTallyField
+    : 'skills'
+  return {
+    part: data.part as OverviewPart,
+    ...(revision === undefined ? {} : { revision }),
+    scope: scopeOf(data.scope),
+    sort,
+    page: pageValue === undefined ? 0 : Math.max(0, Math.floor(pageValue)),
+    tally,
+    pick: pickOf(data.pick),
+  }
+}
+
+function filtersOf(parsed: ParsedRequest, now: number): Filters {
+  const scope = parsed.scope
+  const day = scope.day ?? null
+  return {
+    window: windowOf(scope.range, day, now, scope.calendar),
+    now,
+    day,
+    coverage: scope.coverage ?? 'all',
+    group: scope.group ?? null,
+    query: (scope.query ?? '').trim().toLowerCase(),
+    pick: parsed.pick,
+  }
+}
+
+interface FeedView {
+  allRows: HostRow[]
+  rows: HostRow[]
+  scoped: HostRow[]
+  workspace: WorkspaceState
+  coverage: BackfillCoverage
+  filters: Filters
+}
+
+function valueOf(parsed: ParsedRequest, revision: string, cost: CostSource, data: FeedView): OverviewValue {
+  const pricingReady = cost.ready()
+  if (parsed.part === 'summary') {
+    return {
+      revision,
+      pricingReady,
+      summary: summaryOf(data.allRows, data.rows, data.filters, cost, data.coverage),
+    }
+  }
+  if (parsed.part === 'days') {
+    return { revision, pricingReady, days: daysOf(data.allRows, data.filters.coverage, cost) }
+  }
+  if (parsed.part === 'tally') {
+    return { revision, pricingReady, tally: { field: parsed.tally, stats: tallyStatsOf(data.rows, data.filters, parsed.tally) } }
+  }
+  const sorted = sortOf(rowsForWindow(data.rows, data.filters.window), parsed.sort)
+  const paged = pageOf(sorted, parsed.page)
+  const page: OverviewPage = {
+    items: paged.items.map(row => pageRowOf(row, cost)),
+    index: paged.index,
+    count: paged.count,
+    total: sorted.length,
+    scopeTotal: data.scoped.length,
+    groups: groupCountsOf(data.scoped, data.workspace),
+  }
+  return { revision, pricingReady, page }
+}
+
+function viewOf(
+  rows: HostRow[], workspace: WorkspaceState, coverage: BackfillCoverage, filters: Filters,
+): FeedView {
+  return {
+    allRows: rows,
+    rows: rows.filter(row => matches(row, filters)),
+    scoped: rows.filter(row => matches(row, { ...filters, group: null, pick: null })),
+    workspace,
+    coverage,
+    filters,
+  }
+}
+
+export interface OverviewRouteOptions {
+  scanTtlMs?: number
+  servedKeysMax?: number
+  idleMs?: number
+  captureDelayMs?: number
+  capturePollMs?: number
+  yieldEvery?: number
+  yieldTo?: () => Promise<void>
+  cache?: OverviewCache
+  cachePath?: string
+}
+
+export interface OverviewHandle {
+  (): Promise<void>
+  warm(): Promise<void>
+}
+
+export function watchOverviewRoute(
+  ctx: Context,
+  cost: CostSource,
+  backfill: BackfillHandle,
+  options: OverviewRouteOptions = {},
+): OverviewHandle {
+  const scanTtlMs = options.scanTtlMs ?? SCAN_TTL_MS
+  const servedKeysMax = options.servedKeysMax ?? SERVED_KEYS_MAX
+  const idleMs = options.idleMs ?? IDLE_MS
+  const captureDelayMs = options.captureDelayMs ?? CAPTURE_DELAY_MS
+  const capturePollMs = options.capturePollMs ?? CAPTURE_BACKFILL_POLL_MS
+  const buildOptions = {
+    ...(options.yieldEvery === undefined ? {} : { yieldEvery: options.yieldEvery }),
+    ...(options.yieldTo === undefined ? {} : { yieldTo: options.yieldTo }),
+  }
+  const feed: FeedState = { revision: '', sessions: new Map(), rows: null, served: new Map(), rowsRevision: '' }
+  let accountRevisions: AccountRevisions | undefined
+  const scanWindow = makeScanWindow(scanTtlMs)
+  ctx.on('session/created', () => { scanWindow.reset() })
+  ctx.on('session/disposed', () => { scanWindow.reset() })
+  let materializeTail: Promise<void> = Promise.resolve()
+  let identities = new Map<string, DurableIdentity | null>()
+  let identitiesReady = false
+  let sessionsReady = false
+  let warm: Map<string, HostSession> | null = null
+  let foldEpoch = 0
+  let foldMarker = 0
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+  let disposed = false
+  let disposePromise: Promise<void> | null = null
+  let cache: OverviewCache | null = options.cache ?? null
+  let warmHandler: (() => Promise<void>) | null = null
+  const cacheOf = (): OverviewCache => {
+    cache ??= createOverviewCache(options.cachePath === undefined ? {} : { path: options.cachePath })
+    return cache
+  }
+  const releaseFeed = (): void => {
+    if (cache !== null) void cache.flush()
+    feed.sessions = new Map()
+    feed.rows = null
+    accountRevisions = undefined
+    warm = null
+    sessionsReady = false
+    scanWindow.reset()
+  }
+  const resetIdle = (): void => {
+    if (idleTimer !== null) clearTimeout(idleTimer)
+    idleTimer = null
+    if (disposed || idleMs <= 0) return
+    idleTimer = setTimeout(() => {
+      idleTimer = null
+      releaseFeed()
+    }, idleMs)
+    ;(idleTimer as { unref?: () => void }).unref?.()
+  }
+  const dispose = (): Promise<void> => {
+    if (disposePromise !== null) return disposePromise
+    disposed = true
+    accountRevisions = undefined
+    warmHandler = null
+    if (idleTimer !== null) {
+      clearTimeout(idleTimer)
+      idleTimer = null
+    }
+    disposePromise = (async () => {
+      if (cache !== null) await cache.dispose()
+    })()
+    return disposePromise
+  }
+  const withMaterializeLock = <T>(task: () => Promise<T>): Promise<T> => {
+    const run = materializeTail.then(task, task)
+    materializeTail = run.then(() => undefined, () => undefined)
+    return run
+  }
+  ctx.effect(() => dispose)
+  mountPostRoute({
+    ctx,
+    deps: ['connection', 'sessionQuery', 'sessions', 'sessionProjectionCache', 'sessionProjections'],
+    path: OVERVIEW_ROUTE,
+    label: 'dsh-context: overview route',
+    handler: (c) => {
+      const query = c.get('sessionQuery') as SessionQueryFace
+      const cacheFace = c.get('sessionProjectionCache') as CachedSnapshotFace
+      const projections = c.get('sessionProjections') as SnapshotProjectionsFace
+      const sessions = c.get('sessions') as { get?(id: string): unknown }
+      const listSessions = query.listSessions.bind(query)
+      const getSession = typeof sessions.get === 'function' ? sessions.get.bind(sessions) : undefined
+      const statOf = (): ((id: string) => Promise<unknown>) | undefined => {
+        const persistence = asRecord(c.get('sessionPersistence'))
+        if (persistence === null || typeof persistence.stat !== 'function') return undefined
+        return (persistence.stat as (id: string) => Promise<unknown>).bind(persistence)
+      }
+      const awaitScan = (): Promise<ScanResult> => scanWindow.read(async () => {
+        const listed: unknown = await listSessions()
+        const entries = scanEntriesOf(listed, getSession)
+        const coldIds = new Set<string>()
+        for (const entry of entries) {
+          if (!entry.live) coldIds.add(entry.id)
+        }
+        return { entries, coldIds, identitiesSynced: false }
+      }, () => backfill.version())
+
+      const syncIdentities = async (
+        coldIds: ReadonlySet<string>,
+        refresh: boolean,
+        persistentStat: (id: string) => Promise<unknown>,
+      ): Promise<Set<string>> => {
+        const dirty = new Set<string>()
+        if (!identitiesReady) {
+          const loaded = await cacheOf().load(coldIds)
+          identities = loaded.identities
+          identitiesReady = true
+          warm = loaded.sessions
+          for (const id of loaded.rebuild) dirty.add(id)
+        } else if (refresh) {
+          const refreshed = await cacheOf().refresh(coldIds, identities)
+          const next = new Map<string, DurableIdentity | null>()
+          for (const id of coldIds) {
+            const known = refreshed.identities.get(id)
+            if (known !== undefined) next.set(id, known)
+            else if (identities.has(id)) next.set(id, identities.get(id) ?? null)
+          }
+          identities = next
+          for (const id of refreshed.changed) dirty.add(id)
+        }
+        const missing: string[] = []
+        for (const id of coldIds) {
+          if (!identities.has(id)) missing.push(id)
+        }
+        if (missing.length > 0) {
+          if (missing.length <= INLINE_CAPTURE_MAX) {
+            const captured = await cacheOf().capture(missing, { stat: persistentStat })
+            for (const id of missing) {
+              identities.set(id, captured.get(id) ?? null)
+              dirty.add(id)
+            }
+          } else {
+            for (const id of missing) {
+              identities.set(id, null)
+              dirty.add(id)
+            }
+            captureInBackground(missing, coldIds, persistentStat)
+          }
+        }
+        return dirty
+      }
+
+      const loadColdSessions = async (coldIds: ReadonlySet<string>): Promise<Map<string, HostSession>> => {
+        if (warm !== null) {
+          const pending = warm
+          warm = null
+          return pending
+        }
+        if (!identitiesReady) return new Map()
+        const loaded = await cacheOf().load(coldIds, identities)
+        return loaded.sessions
+      }
+
+      const saveCache = async (
+        coldIds: ReadonlySet<string>,
+        prune = true,
+        changedIds: ReadonlySet<string> = coldIds,
+      ): Promise<boolean> => {
+        const records: CachedSession[] = []
+        for (const id of changedIds) {
+          const session = feed.sessions.get(id)
+          if (session === undefined) continue
+          records.push({ session, identity: identities.get(id) ?? null })
+        }
+        if (records.length === 0 && !prune) return true
+        return await cacheOf().save(records, prune ? coldIds : undefined)
+      }
+
+      let captureInflight = false
+      const captureInBackground = (
+        ids: readonly string[],
+        coldIds: ReadonlySet<string>,
+        persistentStat: (id: string) => Promise<unknown>,
+      ): void => {
+        /* v8 ignore next 1 */
+        if (captureInflight) return
+        captureInflight = true
+        const runCapture = (): void => {
+          void (async () => {
+            try {
+              const captured = await cacheOf().capture(ids, { stat: persistentStat })
+              for (const id of ids) identities.set(id, captured.get(id) ?? null)
+              if (!await saveCache(coldIds, false)) backfill.request()
+            } catch {
+            } finally {
+              captureInflight = false
+            }
+          })()
+        }
+        const startedAt = Date.now()
+        const waitForBackfill = (): void => {
+          const coverage = backfill.coverage()
+          if (disposed) return
+          if (coverage.running || !coverage.complete) {
+            /* v8 ignore next 1 */
+            if (Date.now() - startedAt < CAPTURE_MAX_WAIT_MS) {
+              const timer = setTimeout(waitForBackfill, capturePollMs)
+              ;(timer as { unref?: () => void }).unref?.()
+              return
+            }
+          }
+          runCapture()
+        }
+        setTimeout(waitForBackfill, captureDelayMs)
+      }
+
+      const materialize = async (parsed: ParsedRequest, scanned: ScanResult): Promise<OverviewValue> => {
+        const entries = scanned.entries
+        const coldIds = scanned.coldIds
+        const workspace = workspaceOf(workspaceInventoryOf(c))
+        const persistentStat = statOf()
+        const identityMode = persistentStat !== undefined
+        const dirty = identityMode
+          ? await syncIdentities(coldIds, !scanned.identitiesSynced, persistentStat)
+          : new Set<string>()
+        if (identityMode) scanned.identitiesSynced = true
+        const workerFolded: string[] = []
+        if (identityMode && typeof backfill.foldedSince === 'function') {
+          const folded = backfill.foldedSince(foldMarker)
+          foldMarker = folded.version
+          if (folded.ids === null) {
+            for (const id of coldIds) dirty.add(id)
+            workerFolded.push(...coldIds)
+          } else {
+            for (const id of folded.ids) {
+              if (coldIds.has(id)) dirty.add(id)
+            }
+          }
+          if (folded.workerIds !== null) workerFolded.push(...folded.workerIds)
+        }
+        if (dirty.size > 0) foldEpoch++
+        const backfillVersion = backfill.version()
+        const corpusRevision = signaturesOf(entries, entry => (identityMode
+          ? `C${identityKey(identities.get(entry.id))}`
+          : `C${backfillVersion}`))
+        const coverage = backfill.coverage()
+        const coverageKey = JSON.stringify(coverage)
+        const pricingKey = cost.ready() ? `ready${cost.version?.() ?? 0}` : 'cold'
+        const revision = revisionOf([corpusRevision, workspace.signature, coverageKey, pricingKey, `f${foldEpoch}`])
+        if (feed.revision !== revision) feed.served.clear()
+        const filters = filtersOf(parsed, Date.now())
+        const timeKey = windowKeyOf(parsed.part, filters)
+        const requestKey = requestKeyOf(parsed, timeKey)
+        if (dirty.size === 0 && feed.rowsRevision === revision && parsed.revision !== undefined
+          && servedOf(feed, requestKey, parsed.revision, filters.window.start)) {
+          return { revision: parsed.revision, unchanged: true }
+        }
+        let rows: HostRow[]
+        if (feed.rows !== null && feed.rowsRevision === revision && sessionsReady && dirty.size === 0) {
+          rows = feed.rows
+        } else {
+          const coldFeedLoad = !sessionsReady
+          if (!sessionsReady) {
+            const cachedSessions = await loadColdSessions(coldIds)
+            for (const [id, session] of cachedSessions) feed.sessions.set(id, session)
+            sessionsReady = true
+          }
+          for (const id of dirty) feed.sessions.delete(id)
+          const missing = workerFolded.filter(id => coldIds.has(id) && !feed.sessions.has(id))
+          if (missing.length > 0) {
+            const reloaded = await loadColdSessions(new Set(missing))
+            for (const [id, session] of reloaded) feed.sessions.set(id, session)
+          }
+          for (const entry of entries) {
+            if (entry.live) continue
+            const session = feed.sessions.get(entry.id)
+            if (session !== undefined) session.signature = entry.signature
+          }
+          const previousSessions = feed.sessions
+          const built = await buildRows(feed.sessions, { entries }, workspace, cacheFace, projections, c, buildOptions)
+          feed.sessions = built.reusableSessions
+          rows = built.rows
+          feed.rows = rows
+          feed.revision = revision
+          feed.rowsRevision = built.incomplete > 0 ? '' : revision
+          if (identityMode) {
+            const fullSave = coldFeedLoad || [...previousSessions.keys()].some(id => !built.reusableSessions.has(id))
+            if ((fullSave || dirty.size > 0 || built.rebuilt > 0)
+              && !await saveCache(coldIds, fullSave, fullSave ? coldIds : new Set([...dirty, ...built.rebuiltIds]))) {
+              backfill.request()
+            }
+          }
+        }
+        const cutoff = parsed.part !== 'days' && filters.window.rolling === true
+          ? cutoffSpanOf(rows, filters.window.start)
+          : undefined
+        const responseRevision = timeKey === '' ? revision : revisionOf([revision, requestKey, String(cutoff?.after ?? '')])
+        const value = valueOf(parsed, responseRevision, cost, viewOf(rows, workspace, coverage, filters))
+        rememberServed(feed, requestKey, { revision: responseRevision, ...(cutoff === undefined ? {} : { cutoff }) }, servedKeysMax)
+        return value
+      }
+
+      const materializeAccount = async (
+        parsed: ParsedRequest, principal: unknown, signal: AbortSignal,
+      ): Promise<Response> => {
+        if (principal == null) return failure('gateway/forbidden', 'overview access denied', 403)
+        const listed = await listSessions(signal)
+        if (!Array.isArray(listed)) return failure('gateway/internal', 'overview session inventory unavailable', 503)
+        const records = new Map<string, unknown>()
+        for (const record of listed) {
+          const id = asRecord(asRecord(record)?.header)?.id
+          if (typeof id === 'string' && id !== '') records.set(id, record)
+        }
+        const inventory = workspaceInventoryOf(c)
+        const workspaceIds = inventory.items.flatMap((item) => {
+          const id = asRecord(item)?.id
+          return typeof id === 'string' && id !== '' ? [id] : []
+        })
+        const caller = asRecord(principal)
+        const sessionIds = [...records.keys()].sort()
+        const readGrant = async (ids: readonly string[], groups: readonly string[]) => {
+          const grant = await resolveAccountReads(c, principal, { sessionIds: ids, workspaceIds: groups }, signal)
+          if (grant === null) throw new AccountAccessUnavailableError()
+          return grant
+        }
+        const grant = await readGrant(sessionIds, workspaceIds)
+        const grantedSessions = sessionIds.filter(id => grant.readableSessionIds.has(id))
+        const grantedWorkspaces = workspaceIds.filter(id => grant.readableWorkspaceIds?.has(id)).sort()
+        const scopeKey = accountRevision([caller?.source, caller?.id, caller?.role, grantedSessions, grantedWorkspaces])
+        const revalidate = async (): Promise<boolean> => {
+          const current = await readGrant(grantedSessions, grantedWorkspaces)
+          return grantedSessions.every(id => current.readableSessionIds.has(id))
+            && grantedWorkspaces.every(id => current.readableWorkspaceIds?.has(id))
+        }
+        const scopeChanged = () => failure('gateway/forbidden', 'overview access changed during read', 403)
+        const workspace = workspaceOf(inventory, { sessions: new Set(grantedSessions), workspaces: new Set(grantedWorkspaces) })
+        const entries = scanEntriesOf(grantedSessions.map(id => records.get(id)), getSession)
+        const coldIds = new Set(entries.filter(entry => !entry.live).map(entry => entry.id))
+        const stampOf = (): string => accountRevision([
+          scopeKey, workspace.titles, [...workspace.groups], [...workspace.archived],
+          backfill.version(), cost.ready(), cost.version?.(),
+          entries.map(entry => [
+            entry.facts, entry.live, asRecord(entry.session)?.seq, runningOf(c, entry.id), backfill.statusOf?.(entry.id),
+          ]),
+        ])
+        const stamp = stampOf()
+        const previous = accountRevisions
+        const unchangedOf = (): OverviewValue | undefined => {
+          if (previous === undefined || previous.stamp !== stamp) return undefined
+          const filters = filtersOf(parsed, Date.now())
+          if (previous.expiresAt <= filters.now || parsed.revision === undefined) return undefined
+          const key = accountRequestKeyOf(parsed, filters)
+          return servedOf(previous, key, parsed.revision, filters.window.start)
+            ? { revision: parsed.revision, unchanged: true }
+            : undefined
+        }
+        const held = unchangedOf()
+        if (held !== undefined && previous !== undefined) {
+          if (coldIds.size === 0) return reply({ ok: true, value: held })
+          const refreshed = await cacheOf().refresh(coldIds, previous.identities).catch(() => undefined)
+          if (!await revalidate()) return scopeChanged()
+          const unchanged = unchangedOf()
+          if (refreshed?.changed.size === 0 && refreshed.identities.size === coldIds.size
+            && previous === accountRevisions && stamp === stampOf() && unchanged !== undefined) {
+            return reply({ ok: true, value: unchanged })
+          }
+        }
+        const loaded = coldIds.size === 0 ? undefined : await cacheOf().load(coldIds).catch(() => undefined)
+        signal.throwIfAborted()
+        if (coldIds.size > 0 && !await revalidate()) return scopeChanged()
+        const cached = loaded?.sessions ?? new Map<string, HostSession>()
+        for (const entry of entries) {
+          const session = cached.get(entry.id)
+          if (session !== undefined) session.signature = entry.signature
+        }
+        const built = await buildSessions(cached, { entries }, cacheFace, projections, {
+          ...buildOptions, rebuild: loaded?.rebuild,
+        })
+        if (!await revalidate()) return scopeChanged()
+        const coverage: BackfillCoverage = {
+          complete: false,
+          remaining: 0,
+          failed: 0,
+          running: false,
+          total: entries.length,
+          covered: 0,
+          unsupported: 0,
+          unreadable: 0,
+        }
+        const unreadableSessions: BackfillUnreadableSession[] = []
+        for (const entry of entries) {
+          const status = backfill.statusOf?.(entry.id)
+          if (status?.running === true) coverage.running = true
+          const refusal = status?.refusal
+          if (refusal === undefined) {
+            if (built.reusableSessions.has(entry.id)) coverage.covered++
+            else coverage.remaining++
+            continue
+          }
+          built.sessions.delete(entry.id)
+          coverage[refusal.kind]++
+          if (refusal.kind === 'unreadable' && unreadableSessions.length < UNREADABLE_DETAIL_MAX) {
+            unreadableSessions.push({ id: entry.id, reason: refusal.reason })
+          }
+        }
+        coverage.complete = coverage.remaining === 0 && coverage.failed === 0
+        if (unreadableSessions.length > 0) coverage.unreadableSessions = unreadableSessions
+        const rows = rowsOf(built.sessions.values(), workspace, c, true)
+        const filters = filtersOf(parsed, Date.now())
+        const value = valueOf(parsed, '', cost, viewOf(rows, workspace, coverage, filters))
+        const revisionValue = filters.window.rolling === true && 'summary' in value
+          ? { ...value, summary: { ...value.summary, window: undefined } }
+          : value
+        const requestKey = accountRequestKeyOf(parsed, filters)
+        const revision = accountRevision([requestKey, scopeKey, revisionValue])
+        const known = loaded?.identities ?? new Map<string, DurableIdentity | null>()
+        const freshCold = [...coldIds].every(id => known.get(id) != null && cached.has(id))
+        const witnessedLive = entries.every(entry => !entry.live || optionalNumOf(asRecord(entry.session)?.seq) !== undefined)
+        if (!disposed && coverage.covered === coverage.total && freshCold && witnessedLive && stamp === stampOf()) {
+          const coldKey = accountRevision([...coldIds].map(id => identityKey(known.get(id))))
+          if (accountRevisions?.stamp !== stamp || accountRevisions.coldKey !== coldKey || accountRevisions.expiresAt <= filters.now) {
+            accountRevisions = { stamp, coldKey, identities: known, expiresAt: filters.now + scanTtlMs, served: new Map() }
+          }
+          const cutoff = parsed.part !== 'days' && filters.window.rolling === true
+            ? cutoffSpanOf(rows, filters.window.start)
+            : undefined
+          rememberServed(accountRevisions, requestKey, { revision, ...(cutoff === undefined ? {} : { cutoff }) }, servedKeysMax)
+        }
+        return reply({ ok: true, value: parsed.revision === revision ? { revision, unchanged: true } : { ...value, revision } })
+      }
+
+      const warmingRequest: ParsedRequest = {
+        part: 'summary', scope: { range: '30d' }, sort: 'recent', page: 0, tally: 'skills', pick: null,
+      }
+      let warmTail: Promise<void> | null = null
+      let warmAgain = false
+      const warmingAgain = (): boolean => warmAgain && !disposed
+      warmHandler = () => {
+        if (warmTail !== null) {
+          warmAgain = true
+          return warmTail
+        }
+        warmTail = (async () => {
+          do {
+            warmAgain = false
+            resetIdle()
+            const scanned = await awaitScan()
+            if (disposed) return
+            await withMaterializeLock(() => materialize(warmingRequest, scanned))
+          } while (warmingAgain())
+        })().catch(() => {}).finally(() => { warmTail = null })
+        return warmTail
+      }
+
+      return async (request: Request, principal): Promise<Response> => {
+        const read = await readBody(request)
+        if (!read.ok) return read.response
+        const parsed = requestOf(read.body)
+        if (parsed === null) return failure('dsh-context/bad-request', 'unknown overview part')
+        try {
+          if (isAccountRequest(c, principal)) {
+            resetIdle()
+            return await materializeAccount(parsed, principal, request.signal)
+          }
+          resetIdle()
+          const scanned = await awaitScan()
+          const value = await withMaterializeLock(() => materialize(parsed, scanned))
+          return reply({ ok: true, value })
+        } catch (err) {
+          return routeFailure(err)
+        }
+      }
+    },
+  })
+  return Object.assign(dispose, {
+    warm: (): Promise<void> => warmHandler?.() ?? Promise.resolve(),
+  })
+}
+
+function requestKeyOf(parsed: ParsedRequest, timeKey: string): string {
+  return JSON.stringify([
+    parsed.part, parsed.scope, parsed.sort, parsed.page, parsed.tally, parsed.pick, timeKey,
+  ])
+}
+
+function accountRequestKeyOf(parsed: ParsedRequest, filters: Filters): string {
+  const timeKey = parsed.part === 'summary' && filters.window.lifetime === true
+    ? JSON.stringify(dayKeyOf(filters.now))
+    : windowKeyOf(parsed.part, filters)
+  return requestKeyOf(parsed, timeKey)
+}
+
+function windowKeyOf(part: OverviewPart, { window, now }: Filters): string {
+  if (part === 'days' || window.end !== null || window.lifetime === true) return ''
+  return JSON.stringify([dayKeyOf(window.start), part === 'summary' ? dayKeyOf(now) : null])
+}
+
+function cutoffSpanOf(rows: readonly HostRow[], start: number): CutoffSpan {
+  let after = -Infinity
+  let through = Infinity
+  for (const { session } of rows) {
+    if (session.updatedAt < start) after = Math.max(after, session.updatedAt)
+    else through = Math.min(through, session.updatedAt)
+  }
+  return { after, through }
+}
+
+function servedOf(feed: Pick<FeedState, 'served'>, key: string, revision: string, start: number): boolean {
+  const served = feed.served.get(key)
+  return served?.revision === revision
+    && (served.cutoff === undefined || (served.cutoff.after < start && start <= served.cutoff.through))
+}
+
+function rememberServed(feed: Pick<FeedState, 'served'>, key: string, part: ServedPart, max: number): void {
+  feed.served.delete(key)
+  feed.served.set(key, part)
+  if (feed.served.size <= max) return
+  for (const key of feed.served.keys()) {
+    feed.served.delete(key)
+    return
+  }
+}

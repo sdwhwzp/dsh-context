@@ -1,5 +1,5 @@
 import type { CommandRecord, CommandStats, SurfaceNode } from '../shared/types'
-import { commandTool, programsOfCommand, programOfCommand, firstLineOf, hideableCdPrefix, shapeOfCmd } from '../shared/commands'
+import { commandProgramsOf, commandTool, programOfCommand, firstLineOf, hideableCdPrefix, shapeOfCmd } from '../shared/commands'
 import type { CommandShape } from '../shared/commands'
 
 export type Command = CommandRecord
@@ -43,7 +43,7 @@ export interface CommandView {
 }
 
 function viewOf(rec: CommandRecord, workspace: string | undefined): CommandView {
-  const programs = rec.tool === 'bash' || rec.tool === 'pwsh' ? programsOfCommand(rec.cmd ?? '', rec.tool) : []
+  const programs = commandProgramsOf(rec.tool, rec.cmd ?? '')
   const program = programs[0] ?? programOf(rec)
   const allPrograms = programs.length > 0 ? programs : [program]
   return { rec, program, programs: allPrograms, preview: previewOf(rec, workspace), shape: shapeOfCmd(rec.cmd ?? '') }
@@ -117,7 +117,7 @@ export function programOf(rec: CommandRecord): string {
   return tool === null ? rec.tool : programOfCommand(tool, rec.cmd ?? '')
 }
 
-export interface ProgramCount {
+interface ProgramCount {
   name: string
   n: number
   runs: number
@@ -145,7 +145,7 @@ export function programsOf(views: readonly CommandView[]): ProgramCount[] {
     .sort((a, b) => (b.n - a.n) || (a.name < b.name ? -1 : 1))
 }
 
-export interface CommandAttention {
+interface CommandAttention {
   slowest?: { cmd: string; ms: number }
   failing?: { program: string; count: number }
   repeats?: { cmd: string; count: number }
